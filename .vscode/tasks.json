@@ -9,11 +9,11 @@
             "osx": {
                 "environment": [
                     {
-                        "name": "CXX",
+                        "name": "CMAKE_CXX_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang++"
                     },
                     {
-                        "name": "CC",
+                        "name": "CMAKE_C_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang"
                     }
                 ]
@@ -27,11 +27,11 @@
             "osx": {
                 "environment": [
                     {
-                        "name": "CXX",
+                        "name": "CMAKE_CXX_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang++"
                     },
                     {
-                        "name": "CC",
+                        "name": "CMAKE_C_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang"
                     }
                 ]
@@ -51,11 +51,11 @@
             "osx": {
                 "environment": [
                     {
-                        "name": "CXX",
+                        "name": "CMAKE_CXX_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang++"
                     },
                     {
-                        "name": "CC",
+                        "name": "CMAKE_C_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang"
                     }
                 ]
@@ -69,11 +69,11 @@
             "osx": {
                 "environment": [
                     {
-                        "name": "CXX",
+                        "name": "CMAKE_CXX_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang++"
                     },
                     {
-                        "name": "CC",
+                        "name": "CMAKE_C_COMPILER",
                         "value": "$(brew --prefix llvm)/bin/clang"
                     }
                 ]

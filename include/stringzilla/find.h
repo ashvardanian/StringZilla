@@ -835,10 +835,11 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
  */
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx2")
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
@@ -1038,8 +1039,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, s
     return sz_rfind_byteset_serial(text, length, filter);
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_HASWELL
@@ -1052,10 +1054,11 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, s
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
@@ -1269,8 +1272,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
     return SZ_NULL_CHAR;
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_SKYLAKE
@@ -1286,12 +1290,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
  */
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
-#if !defined(_MSC_VER)
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#if defined(__clang__)
 #pragma clang attribute push(                                                                          \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
     apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_find_byteset_ice(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
@@ -1413,8 +1418,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
     return sz_rfind_byteset_serial(text, length, filter);
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_ICE
@@ -1425,10 +1431,11 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
  */
 #pragma region NEON Implementation
 #if SZ_USE_NEON
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+simd")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
 #endif
 
 SZ_INTERNAL sz_u64_t sz_vreinterpretq_u8_u4_(uint8x16_t vec) {
@@ -1646,8 +1653,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_by
     return sz_rfind_byteset_serial(h, h_length, set);
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_NEON
@@ -1658,10 +1666,11 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_by
  */
 #pragma region SVE Implementation
 #if SZ_USE_SVE
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
@@ -1788,8 +1797,9 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
     }
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_SVE

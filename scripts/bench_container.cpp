@@ -88,7 +88,7 @@ struct callable_for_associative_lookups {
     inline callable_for_associative_lookups(environment_t const &env) noexcept : env(env) {}
     void preprocess() {
         using key_type = typename container_type_::key_type;
-        for (std::string_view const &key : env.tokens) container[key_type(key)]++;
+        for (std::string_view const &key : env.tokens) container[to_str<key_type>(key)]++;
     }
 
     /** @brief Helper API to produce a delayed construction lambda. */
@@ -148,7 +148,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_umap);
     }
 #endif
-#if SZ_USE_NEON
+#if SZ_USE_NEON_AES
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
@@ -168,7 +168,7 @@ struct less_through_std_t {
     using is_transparent = void;
     template <typename first_type_, typename second_type_>
     inline bool operator()(first_type_ const &a, second_type_ const &b) const noexcept {
-        return std::less<std::string_view> {}(std::string_view(a), std::string_view(b));
+        return std::less<std::string_view> {}(to_str<std::string_view>(a), to_str<std::string_view>(b));
     }
 };
 
@@ -176,7 +176,7 @@ struct hash_through_std_t {
     using is_transparent = void;
     template <typename string_like_>
     inline std::size_t operator()(string_like_ const &str) const noexcept {
-        return std::hash<std::string_view> {}(std::string_view(str));
+        return std::hash<std::string_view> {}(to_str<std::string_view>(str));
     }
 };
 
@@ -184,7 +184,7 @@ struct equal_to_through_std_t {
     using is_transparent = void;
     template <typename first_type_, typename second_type_>
     inline bool operator()(first_type_ const &a, second_type_ const &b) const noexcept {
-        return std::equal_to<std::string_view> {}(std::string_view(a), std::string_view(b));
+        return std::equal_to<std::string_view> {}(to_str<std::string_view>(a), to_str<std::string_view>(b));
     }
 };
 

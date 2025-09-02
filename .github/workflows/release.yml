@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -54,7 +54,7 @@ jobs:
     needs: versioning
     steps:
       - name: Checkout the latest code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive
@@ -80,9 +80,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-24.04, macos-13, windows-2022]
-        python-version: ["36", "37", "38", "39", "310", "311", "312", "313"]
+        python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "main"
           submodules: recursive
@@ -101,6 +101,7 @@ jobs:
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           MACOSX_DEPLOYMENT_TARGET: "11.0"
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -113,7 +114,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "main"
           submodules: recursive
@@ -137,7 +138,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: pypi
-      url: https://pypi.org/p/simsimd
+      url: https://pypi.org/p/stringzilla
     permissions:
       id-token: write
 
@@ -168,7 +169,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "main"
           submodules: recursive
@@ -186,7 +187,7 @@ jobs:
   #   needs: versioning
   #   runs-on: ubuntu-24.04
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v5
   #       with:
   #         ref: 'main'
   #     - run: git submodule update --init --recursive
@@ -221,7 +222,7 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
@@ -292,7 +293,7 @@ jobs:
       matrix:
         arch: [x64, x86]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
@@ -316,28 +317,28 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release
-          tar -cvf "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_bare.dll" "./include/stringzilla/stringzilla.h"
+          tar -cvf "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_shared.dll" "./include/stringzilla/stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          file: "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
+          file: "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
           update_latest_release: true
 
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
-    runs-on: macos-13
+    runs-on: macos-14
     needs: versioning
     strategy:
       fail-fast: false
       matrix:
         arch: [arm64] # Only Apple Silicon for now
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
@@ -351,9 +352,9 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release        
-          zip -r stringzilla_bare_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_bare.dylib include/stringzilla/stringzilla.h
+          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1

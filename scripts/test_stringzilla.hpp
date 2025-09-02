@@ -53,6 +53,11 @@ inline std::mt19937 &global_random_generator() noexcept {
     return generator;
 }
 
+template <typename string_type_, typename other_string_type_>
+inline string_type_ to_str(other_string_type_ const &other) noexcept {
+    return string_type_(other.data(), other.size());
+}
+
 /**
  *  @brief  A uniform distribution of characters, with a given alphabet size.
  *          The alphabet size is the number of distinct characters in the distribution.
@@ -76,7 +81,7 @@ struct uniform_u8_distribution_t {
 };
 
 inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) noexcept {
-    uniform_u8_distribution_t distribution(0, cardinality - 1);
+    uniform_u8_distribution_t distribution(0, static_cast<char>(cardinality - 1));
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
 }
 

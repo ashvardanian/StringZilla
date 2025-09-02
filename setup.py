@@ -4,7 +4,6 @@ import platform
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
-import sysconfig
 import subprocess
 
 
@@ -42,7 +41,7 @@ class CudaBuildExtension(build_ext):
                 "-O3",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
-                "-arch=sm_80",  # Set appropriate compute capability
+                f"-arch=sm_90a",  # Default to Hopper
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
             ]
@@ -83,14 +82,14 @@ def get_compiler() -> str:
 
 def is_64bit_x86() -> bool:
     if using_cibuildwheel:
-        return "SZ_X86_64" in os.environ
+        return "SZ_IS_64BIT_X86_" in os.environ
     arch = platform.machine()
     return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
     if using_cibuildwheel:
-        return "SZ_ARM64" in os.environ
+        return "SZ_IS_64BIT_ARM_" in os.environ
     arch = platform.machine()
     return arch in ["arm64", "aarch64", "ARM64"]
 
@@ -133,6 +132,16 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
 
 def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
+    min_macos = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
+    
+    # Force single-architecture builds to prevent `universal2`
+    if is_64bit_arm():
+        current_arch_flags = ["-arch", "arm64"]
+    elif is_64bit_x86():
+        current_arch_flags = ["-arch", "x86_64"]
+    else:
+        current_arch_flags = []
+
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
@@ -140,27 +149,26 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         "-fcolor-diagnostics",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
         "-Wno-incompatible-function-pointer-types",
-        "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
-        "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
+        "-Wno-incompatible-pointer-types",  # like: passing argument 4 of 'sz_export_prefix_u32' from incompatible pointer type
+        "-Wno-discarded-qualifiers",  # like: passing argument 1 of 'free' discards 'const' qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
         # "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
-        "-mmacosx-version-min=11.0",  # minimum macOS version
+        f"-mmacosx-version-min={min_macos}",  # minimum macOS version (respect env if provided)
+        *current_arch_flags,  # force single architecture to prevent universal2 builds
     ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
+        *current_arch_flags,  # force single architecture to prevent universal2 builds
     ]
 
-    # Apple Clang doesn't support the `-march=native` argument,
-    # so we must pre-set the CPU generation. Technically the last Intel-based Apple
-    # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
-    # During Universal builds, however, even AVX header cause compilation errors.
-    is_building_x86 = is_64bit_x86() or "universal" in sysconfig.get_platform()
-    is_building_arm = is_64bit_arm() or "universal" in sysconfig.get_platform()
+    # We only support single-arch macOS wheels, but not the Universal builds:
+    # - x86_64: enable Haswell (AVX2) only
+    # - arm64: enable NEON only
     macros_args = [
-        ("SZ_USE_HASWELL", "1" if is_building_x86 else "0"),
+        ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
         ("SZ_USE_ICE", "0"),
-        ("SZ_USE_NEON", "1" if is_building_arm else "0"),
+        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -170,7 +178,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
 
 def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
-        "/std:c++17" if use_cpp else "/std:c99",  # use C++17 for StringZillas, C99 for StringZilla
+        "/std:c++17" if use_cpp else "/std:c11",  # use C++17 for StringZillas, C11 for StringZilla, as MSVC has no C99
         "/Wall",  # stick close to the C language standard, avoid compiler extensions
         "/O2",  # optimization level
     ]
@@ -287,11 +295,8 @@ setup(
         "Natural Language :: English",
         "Intended Audience :: Developers",
         "Intended Audience :: Information Technology",
-        "License :: OSI Approved :: Apache Software License",
         "Programming Language :: C++",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -308,6 +313,7 @@ setup(
         "Topic :: Text Processing :: General",
         "Topic :: Text Processing :: Indexing",
     ],
+    python_requires=">=3.8",
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,

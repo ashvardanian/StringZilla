@@ -123,7 +123,7 @@ SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
  *  @param start        Pointer to the start of the string.
  *  @param length       Number of bytes in the string, before the SZ_NULL character.
  *  @param space        Number of bytes allocated for the string (heap or stack), including the SZ_NULL character.
- *  @param is_external  Whether the string is allocated on the heap externally, or fits withing ::string instance.
+ *  @param is_external  Whether the string is allocated on the heap externally, or fits within ::string instance.
  */
 SZ_PUBLIC void sz_string_unpack( //
     sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external);

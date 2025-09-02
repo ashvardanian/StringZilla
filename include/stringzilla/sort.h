@@ -375,11 +375,13 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
         sz_ptr_t target_str = (sz_ptr_t)target_pgram;
         *target_pgram = 0;
         for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
-        target_str[pgram_capacity] = exported_length;
-#if defined(SZ_IS_64BIT_)
+        target_str[pgram_capacity] = (char)exported_length;
+#if !SZ_IS_BIG_ENDIAN_
+#if SZ_IS_64BIT_
         *target_pgram = sz_u64_bytes_reverse(*target_pgram);
 #else
         *target_pgram = sz_u32_bytes_reverse(*target_pgram);
+#endif
 #endif
         sz_assert_(                                                //
             (length <= start_character) == (*target_pgram == 0) && //
@@ -539,7 +541,11 @@ SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
 
         // If the identical pgrams are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each) {
@@ -671,9 +677,12 @@ SZ_INTERNAL void sz_pgrams_union_serial_(                                       
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#endif
 
 /**
  *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
@@ -857,7 +866,11 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        
 
         // If the identical pgrams are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
@@ -907,16 +920,22 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     return sz_success_k;
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_SKYLAKE
-#pragma endregion // Ice Lake Implementation
+#pragma endregion // Skylake Implementation
 
 #pragma region SVE Implementation
 #if SZ_USE_SVE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#endif
 
 /**
  *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
@@ -1092,7 +1111,11 @@ SZ_PUBLIC void sz_sequence_argsort_sve_next_pgrams_(
         while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; // byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; // No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
@@ -1132,8 +1155,11 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
     return sz_success_k;
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_SVE
 #pragma endregion // SVE Implementation
 

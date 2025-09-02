@@ -5,7 +5,7 @@ The goal is to provide a set of command-line utilities that:
 
 - ✅ that benefit the most from SIMD instructions, 
 - ✅ rely solely on core StringZilla functionality,
-- ✅ works the same on Linux, MacOS, and Windows.
+- ✅ works the same on Linux, macOS, and Windows.
 
 Other utilities are, of course, welcome to use StringZilla but may not be good candidates for this repository.
 To install, pull the Python package from PyPi:
@@ -17,7 +17,7 @@ pip install stringzilla
 Currently implemented:
 
 - `sz_wc`: 3x faster `wc` word count.
-- `sz_split`: 4x faster `splt` file splitting.
+- `sz_split`: 4x faster `split` file splitting.
 
 What other interfaces should be added?
 Levenshtein distances?

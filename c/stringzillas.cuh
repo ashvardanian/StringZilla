@@ -4,9 +4,17 @@
  *  @author     Ash Vardanian
  *  @date       March 23, 2025
  */
+
+#if !defined(FU_ENABLE_NUMA)
+#define FU_ENABLE_NUMA 0
+#endif
+
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
 #include <variant>        // For `std::variant`
+#include <cstring>        // For `std::memcpy`
+#include <string_view>    // For `std::string_view`
+#include <thread>         // For `std::thread::hardware_concurrency`
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
@@ -210,6 +218,28 @@ struct gpu_scope_t {
 };
 szs::cuda_executor_t &get_executor(gpu_scope_t &scope) noexcept { return scope.executor; }
 sz::gpu_specs_t get_specs(gpu_scope_t const &scope) noexcept { return scope.specs; }
+
+/** Cached default GPU context (device 0) to avoid repeated scheduling boilerplate */
+struct default_gpu_context_t {
+    sz::status_t status = sz::status_t::unknown_k;
+    szs::cuda_executor_t executor;
+    sz::gpu_specs_t specs;
+};
+
+inline default_gpu_context_t &default_gpu_context() {
+    static default_gpu_context_t ctx = [] {
+        default_gpu_context_t result;
+        auto specs_status = szs::gpu_specs_fetch(result.specs, 0);
+        if (specs_status.status != sz::status_t::success_k) {
+            result.status = specs_status.status;
+            return result;
+        }
+        auto exec_status = result.executor.try_scheduling(0);
+        result.status = exec_status.status;
+        return result;
+    }();
+    return ctx;
+}
 #endif
 
 struct device_scope_t {
@@ -253,9 +283,9 @@ struct levenshtein_backends_t {
 };
 
 template <typename texts_type_>
-sz_status_t sz_levenshtein_distances_for_(                                     //
-    sz_levenshtein_distances_t engine_punned, sz_device_scope_t device_punned, //
-    texts_type_ const &a_container, texts_type_ const &b_container,            //
+sz_status_t szs_levenshtein_distances_for_(                                      //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+    texts_type_ const &a_container, texts_type_ const &b_container,              //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
@@ -272,7 +302,8 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -284,7 +315,17 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            // Try ephemeral GPU on default scope (device 0)
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    sz::status_t status = engine_variant( //
+                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                    result = static_cast<sz_status_t>(status);
+                }
+            }
+            else { result = sz_device_code_mismatch_k; }
 #else
             result = sz_status_unknown_k; // GPU support is not enabled
 #endif // SZ_USE_CUDA
@@ -305,7 +346,7 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = sz_device_code_mismatch_k; }
         }
     };
 
@@ -333,9 +374,9 @@ struct levenshtein_utf8_backends_t {
 };
 
 template <typename texts_type_>
-sz_status_t sz_levenshtein_distances_utf8_for_(                                     //
-    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    texts_type_ const &a_container, texts_type_ const &b_container,                 //
+sz_status_t szs_levenshtein_distances_utf8_for_(                                      //
+    szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    texts_type_ const &a_container, texts_type_ const &b_container,                   //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
@@ -352,7 +393,8 @@ sz_status_t sz_levenshtein_distances_utf8_for_(                                 
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -375,7 +417,7 @@ sz_status_t sz_levenshtein_distances_utf8_for_(                                 
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = sz_device_code_mismatch_k; }
         }
     };
 
@@ -410,9 +452,9 @@ struct needleman_wunsch_backends_t {
 };
 
 template <typename texts_type_>
-sz_status_t sz_needleman_wunsch_scores_for_(                                     //
-    sz_needleman_wunsch_scores_t engine_punned, sz_device_scope_t device_punned, //
-    texts_type_ const &a_container, texts_type_ const &b_container,              //
+sz_status_t szs_needleman_wunsch_scores_for_(                                      //
+    szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
+    texts_type_ const &a_container, texts_type_ const &b_container,                //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
@@ -429,7 +471,8 @@ sz_status_t sz_needleman_wunsch_scores_for_(                                    
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -440,6 +483,15 @@ sz_status_t sz_needleman_wunsch_scores_for_(                                    
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    sz::status_t status = engine_variant( //
+                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                    result = static_cast<sz_status_t>(status);
+                }
             }
             else { result = sz_status_unknown_k; }
 #else
@@ -497,9 +549,9 @@ struct smith_waterman_backends_t {
 };
 
 template <typename texts_type_>
-sz_status_t sz_smith_waterman_scores_for_(                                     //
-    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
-    texts_type_ const &a_container, texts_type_ const &b_container,            //
+sz_status_t szs_smith_waterman_scores_for_(                                      //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+    texts_type_ const &a_container, texts_type_ const &b_container,              //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
@@ -516,7 +568,8 @@ sz_status_t sz_smith_waterman_scores_for_(                                     /
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -527,6 +580,25 @@ sz_status_t sz_smith_waterman_scores_for_(                                     /
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                sz::gpu_specs_t specs;
+                auto specs_status = szs::gpu_specs_fetch(specs, 0);
+                if (specs_status.status != sz::status_t::success_k) {
+                    result = static_cast<sz_status_t>(specs_status.status);
+                }
+                else {
+                    szs::cuda_executor_t executor;
+                    auto exec_status = executor.try_scheduling(0);
+                    if (exec_status.status != sz::status_t::success_k) {
+                        result = static_cast<sz_status_t>(exec_status.status);
+                    }
+                    else {
+                        sz::status_t status = engine_variant( //
+                            a_container, b_container, results_strided, executor, specs);
+                        result = static_cast<sz_status_t>(status);
+                    }
+                }
             }
             else { result = sz_status_unknown_k; }
 #else
@@ -594,10 +666,10 @@ struct fingerprints_backends_t {
 };
 
 template <typename texts_type_>
-sz_status_t sz_fingerprints_for_(                                     //
-    sz_fingerprints_t engine_punned, sz_device_scope_t device_punned, //
-    texts_type_ const &texts_container,                               //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                //
+sz_status_t szs_fingerprints_for_(                                      //
+    szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
+    texts_type_ const &texts_container,                                 //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
@@ -647,13 +719,22 @@ sz_status_t sz_fingerprints_for_(                                     //
         auto const min_counts_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
 
-        // CPU fallback hashers can only work with CPU-compatible device scopes
+        // GPU fallback hashers can work with GPU scope, or default scope via an ephemeral GPU executor
         if (std::holds_alternative<gpu_scope_t>(device->variants)) {
             auto &device_scope = std::get<gpu_scope_t>(device->variants);
             sz::status_t status = fallback_hashers(                //
                 texts_container, min_hashes_rows, min_counts_rows, //
                 get_executor(device_scope), get_specs(device_scope));
             result = static_cast<sz_status_t>(status);
+        }
+        else if (std::holds_alternative<default_scope_t>(device->variants)) {
+            auto &ctx = default_gpu_context();
+            if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+            else {
+                sz::status_t status = fallback_hashers( //
+                    texts_container, min_hashes_rows, min_counts_rows, ctx.executor, ctx.specs);
+                result = static_cast<sz_status_t>(status);
+            }
         }
         else { result = sz_status_unknown_k; }
     };
@@ -690,6 +771,22 @@ sz_status_t sz_fingerprints_for_(                                     //
                         get_executor(device_scope), get_specs(device_scope));
                     result = static_cast<sz_status_t>(status);
                     if (result != sz_success_k) break;
+                }
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
+                        auto &engine_variant = unrolled_hashers[i];
+                        sz::status_t status = engine_variant(                                             //
+                            texts_container,                                                              //
+                            min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                            min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                            ctx.executor, ctx.specs);
+                        result = static_cast<sz_status_t>(status);
+                        if (result != sz_success_k) break;
+                    }
                 }
             }
             else { result = sz_status_unknown_k; }
@@ -744,12 +841,26 @@ SZ_DYNAMIC int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_DYNAMIC int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 
 SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
-    sz_capability_t cpu_capabilities = sz_capabilities_implementation_();
+    // Preserve the static capabilities
+    static sz_capability_t static_caps = sz_caps_none_k;
+    if (static_caps == sz_caps_none_k) {
+        sz_capability_t cpu_caps = sz_capabilities_implementation_();
 #if SZ_USE_CUDA
-    return static_cast<sz_capability_t>(cpu_capabilities | sz_caps_ckh_k);
+        sz_capability_t gpu_caps = sz_caps_none_k;
+        sz::gpu_specs_t first_gpu_specs;
+        auto specs_status = static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs));
+        if (specs_status == sz::status_t::missing_gpu_k) { return cpu_caps; }        // No GPUs available
+        else if (specs_status != sz::status_t::success_k) { return sz_caps_none_k; } // Some bug
+        gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_cuda_k);
+        if (first_gpu_specs.sm_code >= 30) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_kepler_k);
+        if (first_gpu_specs.sm_code >= 90) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_hopper_k);
+        static_caps = static_cast<sz_capability_t>(cpu_caps | gpu_caps);
 #else
-    return cpu_capabilities;
+        static_caps = cpu_caps;
 #endif // SZ_USE_CUDA
+    }
+
+    return static_caps;
 }
 
 SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
@@ -767,18 +878,22 @@ SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *a
 
 #pragma region Device Scopes
 
-SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
     auto *scope = new device_scope_t {default_scope_t {}};
     if (!scope) return sz_bad_alloc_k;
-    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
     return sz_success_k;
 }
 
-SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
-    sz_assert_(cpu_cores > 0 && "CPU cores must be greater than zero");
-    sz_assert_(cpu_cores > 1 && "For a single-threaded execution, use the default scope");
+
+    // If cpu_cores is 0, use all available cores
+    if (cpu_cores == 0) cpu_cores = std::thread::hardware_concurrency();
+
+    // If cpu_cores is 1, redirect to default scope
+    if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned);
 
     sz::cpu_specs_t specs;
     auto executor = std::make_unique<fu::basic_pool_t>();
@@ -787,11 +902,11 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_de
     auto *scope =
         new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
     if (!scope) return sz_bad_alloc_k;
-    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
     return sz_success_k;
 }
 
-SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
 #if SZ_USE_CUDA
@@ -805,7 +920,7 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
     auto *scope =
         new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
     if (!scope) return sz_bad_alloc_k;
-    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
     return sz_success_k;
 #else
     sz_unused_(gpu_device);
@@ -814,10 +929,10 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_device_scope_get_cpu_cores(sz_device_scope_t scope_punned, sz_size_t *cpu_cores) {
+SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_punned, sz_size_t *cpu_cores) {
     if (scope_punned == nullptr || cpu_cores == nullptr) return sz_status_unknown_k;
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
-    
+
     if (std::holds_alternative<cpu_scope_t>(scope->variants)) {
         auto &cpu_scope = std::get<cpu_scope_t>(scope->variants);
         if (cpu_scope.executor_ptr) {
@@ -825,13 +940,18 @@ SZ_DYNAMIC sz_status_t sz_device_scope_get_cpu_cores(sz_device_scope_t scope_pun
             return sz_success_k;
         }
     }
-    
+    // Default scope is single-threaded
+    else if (std::holds_alternative<default_scope_t>(scope->variants)) {
+        *cpu_cores = 1;
+        return sz_success_k;
+    }
+
     return sz_status_unknown_k;
 }
 
-SZ_DYNAMIC sz_status_t sz_device_scope_get_gpu_device(sz_device_scope_t scope_punned, sz_size_t *gpu_device) {
+SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_punned, sz_size_t *gpu_device) {
     if (scope_punned == nullptr || gpu_device == nullptr) return sz_status_unknown_k;
-    
+
 #if SZ_USE_CUDA
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
@@ -843,24 +963,66 @@ SZ_DYNAMIC sz_status_t sz_device_scope_get_gpu_device(sz_device_scope_t scope_pu
     sz_unused_(scope_punned);
     sz_unused_(gpu_device);
 #endif
-    
+
     return sz_status_unknown_k;
 }
 
-SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope_punned) {
+SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope_punned) {
     if (scope_punned == nullptr) return;
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     delete scope;
 }
 
+SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned,
+                                                         sz_capability_t *capabilities) {
+
+    if (scope_punned == nullptr || capabilities == nullptr) return sz_status_unknown_k;
+    sz_capability_t system_caps = szs_capabilities();
+
+#if SZ_USE_CUDA
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+    if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
+        // For GPU scope, intersect system capabilities with CUDA capabilities
+        *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cuda_k);
+        return sz_success_k;
+    }
+#endif
+
+    // For default and CPU scopes, intersect system capabilities with CPU capabilities
+    *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cpus_k);
+    return sz_success_k;
+}
+
 #pragma endregion Device Scopes
+
+#pragma region Unified Allocator
+
+SZ_DYNAMIC void *szs_unified_alloc(sz_size_t size_bytes) {
+#if SZ_USE_CUDA
+    return szs::unified_alloc_t {}.allocate(size_bytes);
+#else
+    return std::malloc(size_bytes);
+#endif
+}
+
+SZ_DYNAMIC void szs_unified_free(void *ptr, sz_size_t size_bytes) {
+    if (!ptr) return;
+#if SZ_USE_CUDA
+    szs::unified_alloc_t {}.deallocate(static_cast<char *>(ptr), size_bytes);
+#else
+    sz_unused_(size_bytes);
+    std::free(ptr);
+#endif
+}
+
+#pragma endregion Unified Allocator
 
 #pragma region Levenshtein Distances
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                                              //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                                             //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
-    sz_levenshtein_distances_t *engine_punned) {
+    szs_levenshtein_distances_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -878,7 +1040,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
     else if (can_use_ice) {
@@ -887,7 +1049,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_ICE
@@ -900,7 +1062,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
     else if (can_use_cuda) {
@@ -909,7 +1071,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_CUDA
@@ -922,7 +1084,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_kepler_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
     else if (can_use_kepler) {
@@ -931,7 +1093,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_kepler_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_KEPLER
@@ -944,7 +1106,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
     else if (can_use_hopper) {
@@ -953,7 +1115,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_HOPPER
@@ -964,7 +1126,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
     else {
@@ -973,51 +1135,51 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return sz_success_k;
     }
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_sequence(                      //
-    sz_levenshtein_distances_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                            //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_sequence(                       //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                              //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
-    return sz_levenshtein_distances_for_(                       //
+    return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u32tape(                       //
-    sz_levenshtein_distances_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,            //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                        //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
-    return sz_levenshtein_distances_for_(                       //
+    return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u64tape(                       //
-    sz_levenshtein_distances_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,            //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                        //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
-    return sz_levenshtein_distances_for_(                       //
+    return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC void sz_levenshtein_distances_free(sz_levenshtein_distances_t engine_punned) {
+SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     delete engine;
@@ -1027,10 +1189,10 @@ SZ_DYNAMIC void sz_levenshtein_distances_free(sz_levenshtein_distances_t engine_
 
 #pragma region Levenshtein UTF8 Distances
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                                         //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                                        //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
-    sz_levenshtein_distances_utf8_t *engine_punned) {
+    szs_levenshtein_distances_utf8_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1048,7 +1210,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                      
             levenshtein_utf8_backends_t(std::in_place_type_t<szs::levenshtein_utf8_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_ICE
@@ -1060,7 +1222,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                      
             levenshtein_utf8_backends_t(std::in_place_type_t<szs::levenshtein_utf8_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
         return sz_success_k;
     }
     else {
@@ -1069,53 +1231,53 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                      
             std::in_place_type_t<szs::affine_levenshtein_utf8_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
+        *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
         return sz_success_k;
     }
 
     return sz_status_unknown_k; // No supported backends available
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_sequence(                      //
-    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                                 //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_sequence(                       //
+    szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                                   //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
-    return sz_levenshtein_distances_utf8_for_(                  //
+    return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u32tape(                       //
-    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                 //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                        //
+    szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                   //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
-    return sz_levenshtein_distances_utf8_for_(                  //
+    return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u64tape(                       //
-    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                 //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                        //
+    szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                   //
     sz_size_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
-    return sz_levenshtein_distances_utf8_for_(                  //
+    return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC void sz_levenshtein_distances_utf8_free(sz_levenshtein_distances_utf8_t engine_punned) {
+SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<levenshtein_utf8_backends_t *>(engine_punned);
     delete engine;
@@ -1125,18 +1287,19 @@ SZ_DYNAMIC void sz_levenshtein_distances_utf8_free(sz_levenshtein_distances_utf8
 
 #pragma region Needleman Wunsch
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       //
     sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
-    sz_needleman_wunsch_scores_t *engine_punned) {
+    szs_needleman_wunsch_scores_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // If the gap opening and extension costs are identical we can use less memory
     auto const can_use_linear_costs = open == extend;
-    auto const substitution_costs = *reinterpret_cast<szs::error_costs_256x256_t const *>(subs);
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
+    auto substitution_costs = szs::error_costs_256x256_t {};
+    std::memcpy((void *)&substitution_costs, (void const *)subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
@@ -1146,7 +1309,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_ICE
@@ -1159,7 +1322,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
     else if (can_use_cuda) {
@@ -1168,7 +1331,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             std::in_place_type_t<szs::affine_needleman_wunsch_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_CUDA
@@ -1181,7 +1344,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
     else if (can_use_hopper) {
@@ -1190,7 +1353,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             std::in_place_type_t<szs::affine_needleman_wunsch_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_HOPPER
@@ -1201,7 +1364,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
     else {
@@ -1210,51 +1373,51 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
             std::in_place_type_t<szs::affine_needleman_wunsch_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
 }
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_sequence(                      //
-    sz_needleman_wunsch_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                              //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_sequence(                       //
+    szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                                //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
-    return sz_needleman_wunsch_scores_for_(                     //
+    return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u32tape(                       //
-    sz_needleman_wunsch_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                        //
+    szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
-    return sz_needleman_wunsch_scores_for_(                     //
+    return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u64tape(                       //
-    sz_needleman_wunsch_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                        //
+    szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
-    return sz_needleman_wunsch_scores_for_(                     //
+    return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC void sz_needleman_wunsch_scores_free(sz_needleman_wunsch_scores_t engine_punned) {
+SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<needleman_wunsch_backends_t *>(engine_punned);
     delete engine;
@@ -1264,18 +1427,19 @@ SZ_DYNAMIC void sz_needleman_wunsch_scores_free(sz_needleman_wunsch_scores_t eng
 
 #pragma region Smith Waterman
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         //
     sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
-    sz_smith_waterman_scores_t *engine_punned) {
+    szs_smith_waterman_scores_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // If the gap opening and extension costs are identical we can use less memory
     auto const can_use_linear_costs = open == extend;
-    auto const substitution_costs = *reinterpret_cast<szs::error_costs_256x256_t const *>(subs);
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
+    auto substitution_costs = szs::error_costs_256x256_t {};
+    std::memcpy((void *)&substitution_costs, (void const *)subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
@@ -1285,7 +1449,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_ICE
@@ -1298,7 +1462,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
     else if (can_use_cuda) {
@@ -1307,7 +1471,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_CUDA
@@ -1320,7 +1484,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
     else if (can_use_hopper) {
@@ -1329,7 +1493,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_HOPPER
@@ -1340,7 +1504,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
     else {
@@ -1349,51 +1513,51 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
-        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
         return sz_success_k;
     }
 }
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_sequence(                      //
-    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                            //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(                       //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                              //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
-    return sz_smith_waterman_scores_for_(                       //
+    return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u32tape(                       //
-    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,            //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                        //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
-    return sz_smith_waterman_scores_for_(                       //
+    return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u64tape(                       //
-    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,            //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                        //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
     sz_ssize_t *results, sz_size_t results_stride) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
-    return sz_smith_waterman_scores_for_(                       //
+    return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
         results, results_stride);
 }
 
-SZ_DYNAMIC void sz_smith_waterman_scores_free(sz_smith_waterman_scores_t engine_punned) {
+SZ_DYNAMIC void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
     delete engine;
@@ -1403,11 +1567,11 @@ SZ_DYNAMIC void sz_smith_waterman_scores_free(sz_smith_waterman_scores_t engine_
 
 #pragma region Fingerprints
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
+SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
     sz_size_t dimensions, sz_size_t alphabet_size,                    //
     sz_size_t const *window_widths, sz_size_t window_widths_count,    //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
-    sz_fingerprints_t *engine_punned) {
+    szs_fingerprints_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1445,7 +1609,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
         if (!engine) return sz_bad_alloc_k;
         engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_HASWELL
@@ -1470,7 +1634,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
         if (!engine) return sz_bad_alloc_k;
         engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_SKYLAKE
@@ -1495,7 +1659,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
         if (!engine) return sz_bad_alloc_k;
         engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
         return sz_success_k;
     }
     else if (can_use_cuda) {
@@ -1512,7 +1676,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
         if (!engine) return sz_bad_alloc_k;
 
         engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
         return sz_success_k;
     }
 #endif // SZ_USE_CUDA
@@ -1536,7 +1700,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
         if (!engine) return sz_bad_alloc_k;
         engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
         return sz_success_k;
     }
 
@@ -1553,50 +1717,50 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
     if (!engine) return sz_bad_alloc_k;
 
     engine->dimensions = dimensions;
-    *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+    *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
     return sz_success_k;
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_sequence(                      //
-    sz_fingerprints_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *texts,                                       //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                //
+SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(                       //
+    szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *texts,                                         //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_as_cpp_container_t {texts};
-    return sz_fingerprints_for_(                       //
+    return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_u32tape(                       //
-    sz_fingerprints_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *texts,                               //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                //
+SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(                        //
+    szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *texts,                                 //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_u32tape_as_cpp_container_t {texts};
-    return sz_fingerprints_for_(                       //
+    return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_u64tape(                       //
-    sz_fingerprints_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *texts,                               //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                //
+SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(                        //
+    szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *texts,                                 //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_u64tape_as_cpp_container_t {texts};
-    return sz_fingerprints_for_(                       //
+    return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine_punned) {
+SZ_DYNAMIC void szs_fingerprints_free(szs_fingerprints_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<fingerprints_backends_t *>(engine_punned);
     delete engine;
@@ -1606,51 +1770,51 @@ SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine_punned) {
 
 #pragma region Fingerprints UTF8
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_init(                     //
+SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_init(                    //
     sz_size_t dimensions, sz_size_t alphabet_size,                    //
     sz_size_t const *window_widths, sz_size_t window_widths_count,    //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
-    sz_fingerprints_utf8_t *engine_punned) {
+    szs_fingerprints_utf8_t *engine_punned) {
 
-    return sz_fingerprints_init( //
+    return szs_fingerprints_init( //
         dimensions, alphabet_size, window_widths, window_widths_count, alloc, capabilities, engine_punned);
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_sequence(                      //
-    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_t const *texts,                                            //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_sequence(                       //
+    szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_t const *texts,                                              //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
-    return sz_fingerprints_sequence(         //
+    return szs_fingerprints_sequence(        //
         engine_punned, device_punned, texts, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u32tape(                       //
-    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *texts,                                    //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u32tape(                        //
+    szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *texts,                                      //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
-    return sz_fingerprints_u32tape(          //
+    return szs_fingerprints_u32tape(         //
         engine_punned, device_punned, texts, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u64tape(                       //
-    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *texts,                                    //
-    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u64tape(                        //
+    szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *texts,                                      //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
-    return sz_fingerprints_u64tape(          //
+    return szs_fingerprints_u64tape(         //
         engine_punned, device_punned, texts, //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride);
 }
 
-SZ_DYNAMIC void sz_fingerprints_utf8_free(sz_fingerprints_utf8_t engine_punned) {
-    return sz_fingerprints_free(engine_punned);
+SZ_DYNAMIC void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_punned) {
+    return szs_fingerprints_free(engine_punned);
 }
 
 #pragma endregion Fingerprints UTF8

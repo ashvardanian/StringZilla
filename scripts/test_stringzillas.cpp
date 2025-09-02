@@ -1,5 +1,5 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
+ *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
  *  @file    test_stringzillas.cpp
@@ -19,7 +19,6 @@
 #define SZ_USE_NEON 0
 #define SZ_USE_SVE 0
 */
-#define SZ_USE_OPENMP 1
 #define SZ_USE_CUDA 0
 #define SZ_USE_KEPLER 0
 #define SZ_USE_HOPPER 0

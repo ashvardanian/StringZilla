@@ -305,6 +305,8 @@ void bench_fill(environment_t const &env) {
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
+#endif
+#if SZ_USE_NEON_AES
     bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon> {env, o})
         .log(zeros, random);
 #endif

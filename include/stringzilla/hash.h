@@ -229,6 +229,8 @@ SZ_PUBLIC void sz_hash_state_stream_serial(sz_hash_state_t *state, sz_cptr_t tex
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state);
 
+#if SZ_USE_HASWELL
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
 
@@ -246,6 +248,10 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state);
+
+#endif
+
+#if SZ_USE_SKYLAKE
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
@@ -265,6 +271,10 @@ SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t te
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state);
 
+#endif
+
+#if SZ_USE_ICE
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_ice(sz_cptr_t text, sz_size_t length);
 
@@ -283,8 +293,16 @@ SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state);
 
+#endif
+
+#if SZ_USE_NEON
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_NEON_AES
 
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
@@ -300,6 +318,41 @@ SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text,
 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_neon(sz_hash_state_t const *state);
+
+#endif
+
+#if SZ_USE_SVE
+
+/** @copydoc sz_bytesum */
+SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_SVE2
+
+/** @copydoc sz_bytesum */
+SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_SVE2_AES
+
+/** @copydoc sz_hash */
+SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_stream */
+SZ_PUBLIC void sz_hash_state_stream_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_fold */
+SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve2(sz_hash_state_t const *state);
+
+#endif
 
 #pragma endregion // Core API
 
@@ -644,12 +697,17 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data1_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length);
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         return sz_hash_minimal_finalize_serial_(&state, length);
@@ -660,14 +718,20 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
         data1_vec.u64s[1] = *(sz_u64_t const *)(start + 24);
         data2_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data2_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length);
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         sz_hash_minimal_update_serial_(&state, data2_vec);
@@ -679,6 +743,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
@@ -687,8 +752,14 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         data2_vec.u64s[1] = *(sz_u64_t const *)(start + 40);
         data3_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data3_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length);
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         sz_hash_minimal_update_serial_(&state, data2_vec);
@@ -701,6 +772,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
 
+#if SZ_USE_MISALIGNED_LOADS
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.u64s[0] = *(sz_u64_t const *)(start + state.ins_length);
             state.ins.u64s[1] = *(sz_u64_t const *)(start + state.ins_length + 8);
@@ -712,6 +784,13 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
             state.ins.u64s[7] = *(sz_u64_t const *)(start + state.ins_length + 56);
             sz_hash_state_update_serial_(&state);
         }
+#else
+        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+            for (sz_size_t i = 0; i < 64; ++i) state.ins.u8s[i] = start[state.ins_length + i];
+            sz_hash_state_update_serial_(&state);
+        }
+#endif
+
         if (state.ins_length < length) {
             for (sz_size_t i = 0; i != 8; ++i) state.ins.u64s[i] = 0;
             for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
@@ -801,10 +880,11 @@ SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t n
  */
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2,aes"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx2", "aes")
-#pragma clang attribute push(__attribute__((target("avx2,aes"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
@@ -934,61 +1014,76 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
     __m128i seed_vec = _mm_set1_epi64x(seed);
 
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
-    // ! we must use `_mm_storeu_si128` stores to update the state.
-    _mm_storeu_si128(&state->key.xmm, seed_vec);
+    // ! we must use `_mm_storeu_si128` stores to update the state. Moreover, accessing `state.xmms[i]`
+    // ! fools the compiler into preferring aligned operations over out misaligned ones.
+    _mm_storeu_si128((__m128i *)&state->key.u8s[0], seed_vec);
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
     for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128(&state->aes.xmms[i], _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2))));
+        _mm_storeu_si128((__m128i *)&state->aes.u8s[i * sizeof(__m128i)],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2))));
     for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128(&state->sum.xmms[i],
-                         _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8))));
+        _mm_storeu_si128((__m128i *)&state->sum.u8s[i * sizeof(__m128i)],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
-    _mm_storeu_si128(&state->ins.xmms[0], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[1], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[2], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[3], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)], _mm_setzero_si128());
     state->ins_length = 0;
 }
 
 SZ_INTERNAL void sz_hash_state_update_haswell_(sz_hash_state_t *state) {
     __m128i const shuffle_mask = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     _mm_storeu_si128( //
-        &state->aes.xmms[0],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[0]), _mm_lddqu_si128(&state->ins.xmms[0])));
+        (__m128i *)&state->aes.u8s[0 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[0 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[0], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[0]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[0])));
+        (__m128i *)&state->sum.u8s[0 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[0 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[1],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[1]), _mm_lddqu_si128(&state->ins.xmms[1])));
+        (__m128i *)&state->aes.u8s[1 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[1 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[1], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[1]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[1])));
+        (__m128i *)&state->sum.u8s[1 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[1 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[2],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[2]), _mm_lddqu_si128(&state->ins.xmms[2])));
+        (__m128i *)&state->aes.u8s[2 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[2 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[2], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[2]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[2])));
+        (__m128i *)&state->sum.u8s[2 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[2 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[3],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[3]), _mm_lddqu_si128(&state->ins.xmms[3])));
+        (__m128i *)&state->aes.u8s[3 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[3 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[3], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[3]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[3])));
+        (__m128i *)&state->sum.u8s[3 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[3 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)])));
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_haswell_(sz_hash_state_t const *state) {
     // Mix the length into the key
-    __m128i key_with_length = _mm_add_epi64(_mm_lddqu_si128(&state->key.xmm), _mm_set_epi64x(0, state->ins_length));
+    __m128i key_with_length =
+        _mm_add_epi64(_mm_lddqu_si128((__m128i *)&state->key.u8s[0]), _mm_set_epi64x(0, state->ins_length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[0]), _mm_lddqu_si128(&state->aes.xmms[0]));
-    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[1]), _mm_lddqu_si128(&state->aes.xmms[1]));
-    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[2]), _mm_lddqu_si128(&state->aes.xmms[2]));
-    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[3]), _mm_lddqu_si128(&state->aes.xmms[3]));
+    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[0 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[0 * sizeof(__m128i)]));
+    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[1 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[1 * sizeof(__m128i)]));
+    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[2 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[2 * sizeof(__m128i)]));
+    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[3 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[3 * sizeof(__m128i)]));
     // Combine the mixed registers
     __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
     __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
@@ -1022,7 +1117,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data0_vec.xmm = _mm_lddqu_si128((__m128i const *)(start));
         data1_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length);
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         return sz_hash_minimal_finalize_haswell_(&state, length);
@@ -1037,7 +1132,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data1_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + 16));
         data2_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length);
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data2_vec.xmm);
@@ -1054,7 +1149,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data2_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + 32));
         data3_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length);
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data2_vec.xmm);
@@ -1092,10 +1187,14 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
     while (length) {
         // Append to the internal buffer until it's full
         if (state->ins_length % 64 == 0 && length >= 64) {
-            _mm_storeu_si128(&state->ins.xmms[0], _mm_lddqu_si128((__m128i const *)(text + 0)));
-            _mm_storeu_si128(&state->ins.xmms[1], _mm_lddqu_si128((__m128i const *)(text + 16)));
-            _mm_storeu_si128(&state->ins.xmms[2], _mm_lddqu_si128((__m128i const *)(text + 32)));
-            _mm_storeu_si128(&state->ins.xmms[3], _mm_lddqu_si128((__m128i const *)(text + 48)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 0)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 16)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 32)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 48)));
             sz_hash_state_update_haswell_(state);
             state->ins_length += 64;
             text += 64;
@@ -1115,7 +1214,8 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
             if (will_fill_block) {
                 sz_hash_state_update_haswell_(state);
                 // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
-                for (int i = 0; i < 4; ++i) _mm_storeu_si128(&state->ins.xmms[i], _mm_setzero_si128());
+                for (int i = 0; i < 4; ++i)
+                    _mm_storeu_si128((__m128i *)&state->ins.u8s[i * sizeof(__m128i)], _mm_setzero_si128());
             }
         }
     }
@@ -1251,8 +1351,9 @@ SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t 
     }
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_HASWELL
@@ -1265,10 +1366,11 @@ SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t 
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,aes"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "aes")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,aes"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
@@ -1376,7 +1478,7 @@ SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed)
     __m512i seed_vec = _mm512_set1_epi64(seed);
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
     // ! we must use `_mm_storeu_si128` stores to update the state.
-    _mm_storeu_si128(&state->key.xmm, _mm512_castsi512_si128(seed_vec));
+    _mm_storeu_si128((__m128i *)&state->key.u8s[0], _mm512_castsi512_si128(seed_vec));
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
@@ -1495,8 +1597,9 @@ SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t 
     sz_fill_random_haswell(text, length, nonce);
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_SKYLAKE
@@ -1510,13 +1613,14 @@ SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t 
  */
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
-#if !defined(_MSC_VER)
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2", \
-                   "aes", "vaes")
+#if defined(__clang__)
 #pragma clang attribute push(                                                                                  \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes"))), \
     apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2", \
+                   "aes", "vaes")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_ice(sz_cptr_t text, sz_size_t length) {
@@ -1875,8 +1979,9 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_ice_(sz_hash_minimal_x4_t_ *state, __
     state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, shuffle_mask), blocks);
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_ICE
@@ -1887,10 +1992,11 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_ice_(sz_hash_minimal_x4_t_ *state, __
  */
 #pragma region NEON Implementation
 #if SZ_USE_NEON
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd+crypto")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto"))), apply_to = function)
+#pragma GCC target("arch=armv8.2-a+simd")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
@@ -1910,6 +2016,23 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     while (length--) sum += *(sz_u8_t const *)text++; // Same as the scalar version
     return sum;
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_NEON
+#pragma endregion // NEON Implementation
+
+#pragma region NEON AES Implementation
+#if SZ_USE_NEON_AES
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+aes"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+simd+crypto+aes")
+#endif
 
 /**
  *  @brief  Emulates the Intel's AES-NI `AESENC` instruction on Arm NEON.
@@ -2108,7 +2231,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data0_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 0));
         data1_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         return sz_hash_minimal_finalize_neon_(&state, length);
@@ -2123,7 +2246,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data1_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 16));
         data2_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
@@ -2140,7 +2263,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data2_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 32));
         data3_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
@@ -2268,22 +2391,24 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_NEON
-#pragma endregion // NEON Implementation
+#pragma endregion // NEON AES Implementation
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
  */
 #pragma region SVE Implementation
 #if SZ_USE_SVE
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
@@ -2299,8 +2424,9 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_SVE
@@ -2314,12 +2440,13 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
  *
  *  @see https://stackoverflow.com/a/73218637/2766161
  */
-#pragma region SVE Implementation
+#pragma region SVE2 Implementation
 #if SZ_USE_SVE2
-#if !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
+#pragma GCC target("arch=armv8.2-a+sve+sve2")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
@@ -2346,6 +2473,23 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 
     return sum;
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_SVE
+#pragma endregion // SVE2 Implementation
+
+#pragma region SVE2 AES Implementation
+#if SZ_USE_SVE2_AES
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
+#endif
 
 /**
  *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
@@ -2477,12 +2621,13 @@ SZ_PUBLIC void sz_hash_sve2_upto16x16_(char texts[16][16], sz_size_t length[16],
 }
 #endif
 
-#if !defined(_MSC_VER)
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif            // SZ_USE_SVE2
-#pragma endregion // SVE Implementation
+#pragma endregion // SVE2 Implementation
 
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
@@ -2515,9 +2660,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_hash_skylake(text, length, seed);
 #elif SZ_USE_HASWELL
     return sz_hash_haswell(text, length, seed);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     return sz_hash_sve2(text, length, seed);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     return sz_hash_neon(text, length, seed);
 #else
     return sz_hash_serial(text, length, seed);
@@ -2531,9 +2676,9 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
     sz_fill_random_skylake(text, length, nonce);
 #elif SZ_USE_HASWELL
     sz_fill_random_haswell(text, length, nonce);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_fill_random_sve2(text, length, nonce);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_fill_random_neon(text, length, nonce);
 #else
     sz_fill_random_serial(text, length, nonce);
@@ -2547,9 +2692,9 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_skylake(state, seed);
 #elif SZ_USE_HASWELL
     sz_hash_state_init_haswell(state, seed);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_hash_state_init_sve2(state, seed);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_hash_state_init_neon(state, seed);
 #else
     sz_hash_state_init_serial(state, seed);
@@ -2563,9 +2708,9 @@ SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_
     sz_hash_state_stream_skylake(state, text, length);
 #elif SZ_USE_HASWELL
     sz_hash_state_stream_haswell(state, text, length);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_hash_state_stream_sve2(state, text, length);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_hash_state_stream_neon(state, text, length);
 #else
     sz_hash_state_stream_serial(state, text, length);
@@ -2579,9 +2724,9 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
     return sz_hash_state_fold_skylake(state);
 #elif SZ_USE_HASWELL
     return sz_hash_state_fold_haswell(state);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     return sz_hash_state_fold_sve2(state);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     return sz_hash_state_fold_neon(state);
 #else
     return sz_hash_state_fold_serial(state);

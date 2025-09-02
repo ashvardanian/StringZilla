@@ -5,8 +5,9 @@
 //  Created by Ash Vardanian on 18/1/24.
 //
 
-@testable import StringZilla
 import XCTest
+
+@testable import StringZilla
 
 class StringZillaTests: XCTestCase {
     var testString: String!
@@ -47,13 +48,6 @@ class StringZillaTests: XCTestCase {
         let index = testString.findLast(characterNotFrom: "aeiou")!
         XCTAssertEqual(testString.distance(from: testString.startIndex, to: index), 38)
         XCTAssertEqual(testString[index...], "👋")
-    }
-
-    func testLevenshteinDistance() {
-        let otherString = "Hello, world!"
-        let distance = try? testString.levenshteinDistance(from: otherString)
-        XCTAssertNotNil(distance)
-        XCTAssertEqual(distance, 29)
     }
 
     func testFindLastCharacterNotFromSetNoMatch() {

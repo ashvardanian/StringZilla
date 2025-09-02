@@ -127,7 +127,7 @@ def log_similarity_operation(
                         )
                     progress_bar.update(1)
 
-                except Exception as e:
+                except Exception:
                     # Skip failed operations but continue
                     continue
 
@@ -257,7 +257,7 @@ def benchmark_edit_distances(string_pairs: List[Tuple[str, str]], timeout_second
     try:
         gpu_scope = szs.DeviceScope(gpu_device=0)
         benchmark_stringzillas_batch("stringzillas.LevenshteinDistances(GPU)", szs.LevenshteinDistances, gpu_scope)
-    except:
+    except Exception:
         pass  # GPU may not be available
 
     # StringZillas UTF-8 Levenshtein distances (batch)
@@ -267,7 +267,7 @@ def benchmark_edit_distances(string_pairs: List[Tuple[str, str]], timeout_second
         benchmark_stringzillas_batch(
             "stringzillas.LevenshteinDistancesUTF8(GPU)", szs.LevenshteinDistancesUTF8, gpu_scope
         )
-    except:
+    except Exception:
         pass  # GPU may not be available
 
 

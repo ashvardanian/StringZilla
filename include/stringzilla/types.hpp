@@ -107,7 +107,7 @@
 #if defined(__NVCC__)
 #define SZ_HAS_CONCEPTS_ 0
 #elif defined(__cpp_concepts)
-#define SZ_HAS_CONCEPTS_ 1
+#define SZ_HAS_CONCEPTS_ 0 // TODO: Fix concepts compilation with GCC
 #else
 #define SZ_HAS_CONCEPTS_ 0
 #endif
@@ -115,6 +115,7 @@
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
 #endif
 
@@ -154,6 +155,8 @@ enum class status_t : int {
     overflow_risk_k = sz_overflow_risk_k,
     unexpected_dimensions_k = sz_unexpected_dimensions_k,
     missing_gpu_k = sz_missing_gpu_k,
+    device_code_mismatch_k = sz_device_code_mismatch_k,
+    device_memory_mismatch_k = sz_device_memory_mismatch_k,
     unknown_k = sz_status_unknown_k,
 };
 
@@ -740,42 +743,6 @@ struct is_same_type {
     static constexpr bool value = false;
 };
 
-struct gpu_specs_t {
-    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
-    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
-    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
-    size_t streaming_multiprocessors = 108;        // ? On A100
-    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
-    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
-    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
-    size_t max_blocks_per_multiprocessor = 0;
-
-    inline size_t shared_memory_per_multiprocessor() const noexcept {
-        return shared_memory_bytes / streaming_multiprocessors;
-    }
-
-    inline static size_t cores_per_multiprocessor(int major, int minor) noexcept {
-        typedef struct {
-            size_t sm;
-            size_t cores;
-        } generation_to_core_count;
-        generation_to_core_count generations_to_core_counts[] = {
-            {(7 << 4) + 0, 64},  // Compute Capability 7.0 (V100)
-            {(7 << 4) + 5, 64},  // Compute Capability 7.5 (RTX 2080 Ti)
-            {(8 << 4) + 0, 64},  // Compute Capability 8.0 (A100)
-            {(8 << 4) + 6, 128}, // Compute Capability 8.6 (RTX 3090)
-            {(9 << 4) + 0, 128}, // Compute Capability 9.0 (H100)
-            {0, 0}};
-
-        // Create a numeric code: for SM 3.5, SM = (3 << 4 + 5) = 0x35.
-        size_t sm = ((major << 4) + minor);
-        size_t index = 0;
-        for (; generations_to_core_counts[index].sm != 0; ++index)
-            if (generations_to_core_counts[index].sm == sm) return generations_to_core_counts[index].cores;
-        return generations_to_core_counts[index - 1].cores;
-    }
-};
-
 struct cpu_specs_t {
     size_t l1_bytes = 32 * 1024;       // ? typically around 32 KB
     size_t l2_bytes = 256 * 1024;      // ? typically around 256 KB
@@ -785,6 +752,98 @@ struct cpu_specs_t {
     size_t sockets = 1;                // ? at least 1 socket
 
     size_t cores_total() const noexcept { return cores_per_socket * sockets; }
+};
+
+/**
+ *  @brief Specifications of a typical NVIDIA GPU, such as A100 or H100.
+ *  @sa pack_sm_code, cores_per_multiprocessor helpers.
+ *  @note We recommend compiling the code for the 90a compute capability, the newest with specialized optimizations.
+ */
+struct gpu_specs_t {
+    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
+    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
+    size_t streaming_multiprocessors = 108;        // ? On A100
+    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
+    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
+    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
+    size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
+    size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
+
+    inline size_t shared_memory_per_multiprocessor() const noexcept {
+        return shared_memory_bytes / streaming_multiprocessors;
+    }
+
+    /**
+     *  @brief Converts a compute capability (major, minor) to a single numeric code.
+     *
+     *  - 7.0, 7.2 is Volta, like V100                  - maps to 70, 72
+     *  - 7.5 is Turing, like RTX 2080 Ti               - maps to 75
+     *  - 8.0, 8.6, 8.7 is Ampere, like A100, RTX 3090  - maps to 80, 86, 87
+     *  - 8.9 is Ada Lovelace, like RTX 4090            - maps to 89
+     *  - 9.0 is Hopper, like H100                      - maps to 90
+     *  - 12.0, 12.1 is Blackwell, like B200            - maps to 120, 121
+     */
+    inline static size_t pack_sm_code(int major, int minor) noexcept { return static_cast<size_t>((major * 10) + minor); }
+
+    /**
+     *  @brief Looks up hardware specs for a given compute capability (major, minor).
+     *  @param[in] sm The compute capability code obtained from `pack_sm_code(major, minor)`.
+     *  @sa Used to populate the `cuda_cores` property.
+     */
+    inline static size_t cores_per_multiprocessor(size_t sm) noexcept {
+        typedef struct {
+            size_t sm;
+            size_t cores;
+        } generation_to_core_count;
+        generation_to_core_count generations_to_core_counts[] = {
+            // Kepler architecture (2012-2014)
+            {pack_sm_code(3, 0), 192}, // Capability 3.0 (GK104 - GTX 680, GTX 770)
+            {pack_sm_code(3, 5), 192}, // Capability 3.5 (GK110 - GTX 780 Ti, GTX Titan, Tesla K20/K40)
+            {pack_sm_code(3, 7), 192}, // Capability 3.7 (GK210 - Tesla K80)
+
+            // Maxwell architecture (2014-2016)
+            {pack_sm_code(5, 0), 128}, // Capability 5.0 (GM107/GM108 - GTX 750/750 Ti, GTX 850M/860M)
+            {pack_sm_code(5, 2), 128}, // Capability 5.2 (GM200/GM204/GM206 - GTX 980/970, Titan X)
+            {pack_sm_code(5, 3), 128}, // Capability 5.3 (GM20B - Jetson TX1, Tegra X1)
+
+            // Pascal architecture (2016-2018)
+            {pack_sm_code(6, 0), 64},  // Capability 6.0 (GP100 - Tesla P100) - HPC focused, different SM design
+            {pack_sm_code(6, 1), 128}, // Capability 6.1 (GP102/GP104/GP106/GP107 - GTX 1080/1070/1060/1050, Titan X/Xp)
+            {pack_sm_code(6, 2), 128}, // Capability 6.2 (GP10B - Jetson TX2, Tegra X2)
+
+            // Volta architecture (2017-2018)
+            {pack_sm_code(7, 0), 64}, // Capability 7.0 (GV100 - Tesla V100, Titan V) - Tensor Core architecture
+            {pack_sm_code(7, 2), 64}, // Capability 7.2 (GV11B - Jetson AGX Xavier, Tegra Xavier)
+
+            // Turing architecture (2018-2020)
+            {pack_sm_code(7, 5), 64}, // Capability 7.5 (TU102/TU104/TU106/TU116/TU117 - RTX 20xx, GTX 16xx)
+
+            // Ampere architecture (2020-2022)
+            {pack_sm_code(8, 0), 64},  // Capability 8.0 (GA100 - A100) - HPC focused
+            {pack_sm_code(8, 6), 128}, // Capability 8.6 (GA102/GA104/GA106/GA107 - RTX 3090/3080/3070/3060)
+            {pack_sm_code(8, 7), 128}, // Capability 8.7 (GA10B - Jetson AGX Orin, Tegra Orin)
+
+            // Ada Lovelace architecture (2022-2023)
+            {pack_sm_code(8, 9), 128}, // Capability 8.9 (AD102/AD103/AD104/AD106/AD107 - RTX 40xx)
+
+            // Hopper architecture (2022-2024)
+            {pack_sm_code(9, 0), 128}, // Capability 9.0 (GH100 - H100, H200)
+
+            // Blackwell architecture (2024+)
+            {pack_sm_code(12, 0), 128}, // Capability 12.0 (GB100 - B100)
+            {pack_sm_code(12, 1), 128}, // Capability 12.1 (GB200 - B200)
+
+            {0, 0}};
+
+        size_t index = 0;
+        for (; generations_to_core_counts[index].sm != 0; ++index)
+            if (generations_to_core_counts[index].sm == sm) return generations_to_core_counts[index].cores;
+
+        // If exact match not found, return the most recent known architecture's core count
+        // This provides forward compatibility for newer architectures
+        return (index > 0) ? generations_to_core_counts[index - 1].cores : 128;
+    }
 };
 
 /**

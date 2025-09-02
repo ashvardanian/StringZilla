@@ -1310,9 +1310,12 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_> {
  */
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2,fma"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx2", "fma")
-#pragma clang attribute push(__attribute__((target("avx2,fma"))), apply_to = function)
+#endif
 
 SZ_INLINE __m256d _mm256_floor_magic_pd(__m256d x) noexcept {
     // Magic number rounding approach for fast floor
@@ -1345,7 +1348,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
     using min_counts_span_t = span<min_count_t, dimensions_k>;
 
     static constexpr unsigned hashes_per_ymm_k = sizeof(sz_u256_vec_t) / sizeof(rolling_state_t);
-    static constexpr bool has_incomplete_tail_group_k = dimensions_k % hashes_per_ymm_k;
+    static constexpr bool has_incomplete_tail_group_k = (dimensions_k % hashes_per_ymm_k) != 0;
     static constexpr size_t aligned_dimensions_k =
         has_incomplete_tail_group_k ? (dimensions_k / hashes_per_ymm_k + 1) * hashes_per_ymm_k : (dimensions_k);
     static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_ymm_k;
@@ -1620,8 +1623,11 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
     }
 };
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif // SZ_USE_HASWELL
 
 #pragma endregion Haswell Implementation
@@ -1633,10 +1639,13 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512dq", "avx512bw", "bmi", "bmi2")
+#if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512dq,avx512bw,bmi,bmi2"))), \
                              apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512dq", "avx512bw", "bmi", "bmi2")
+#endif
 
 /**
  *  @brief Alternative to `_mm512_roundscale_pd` and `std::floor`.
@@ -1674,7 +1683,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_> {
     using min_counts_span_t = span<min_count_t, dimensions_k>;
 
     static constexpr unsigned hashes_per_zmm_k = sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
-    static constexpr bool has_incomplete_tail_group_k = dimensions_k % hashes_per_zmm_k;
+    static constexpr bool has_incomplete_tail_group_k = (dimensions_k % hashes_per_zmm_k) != 0;
     static constexpr size_t aligned_dimensions_k =
         has_incomplete_tail_group_k ? (dimensions_k / hashes_per_zmm_k + 1) * hashes_per_zmm_k : (dimensions_k);
     static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_zmm_k;
@@ -1953,8 +1962,11 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_> {
     }
 };
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif // SZ_USE_SKYLAKE
 
 #pragma endregion Skylake Implementation

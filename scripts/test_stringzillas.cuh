@@ -1,5 +1,5 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
+ *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
  *  @file    test_stringzillas.cuh
@@ -32,8 +32,9 @@ int log_environment() {
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses OpenMP: %s \n", SZ_USE_OPENMP ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
+    std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
+    std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
 
 #if SZ_USE_CUDA
     cudaError_t cuda_error = cudaFree(0); // Force context initialization

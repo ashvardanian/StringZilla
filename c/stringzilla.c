@@ -4,20 +4,6 @@
  *  @author     Ash Vardanian
  *  @date       January 16, 2024
  */
-#if SZ_AVOID_LIBC
-// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
-#ifdef _MSC_VER
-typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
-extern __declspec(dllimport) int rand(void);
-extern __declspec(dllimport) void free(void *start);
-extern __declspec(dllimport) void *malloc(size_t length);
-#else
-typedef __SIZE_TYPE__ size_t; // For GCC/Clang
-extern int rand(void);
-extern void free(void *start);
-extern void *malloc(size_t length);
-#endif
-#endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
@@ -32,6 +18,21 @@ extern void *malloc(size_t length);
 #endif
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
+
+#if SZ_AVOID_LIBC
+// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
+#ifdef _MSC_VER
+typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
+extern __declspec(dllimport) int rand(void);
+extern __declspec(dllimport) void free(void *start);
+extern __declspec(dllimport) void *malloc(size_t length);
+#else
+typedef __SIZE_TYPE__ size_t; // For GCC/Clang
+extern int rand(void);
+extern void free(void *start);
+extern void *malloc(size_t length);
+#endif
+#endif
 
 #if defined(SZ_IS_WINDOWS_)
 #include <windows.h> // `DllMain`
@@ -72,13 +73,8 @@ __declspec(align(64)) static sz_implementations_t sz_dispatch_table;
 __attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
 #endif
 
-/**
- *  @brief  Initializes a global static "virtual table" of supported backends
- *          Run it just once to avoiding unnecessary `if`-s.
- */
-SZ_DYNAMIC void sz_dispatch_table_init(void) {
+static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;
-    sz_capability_t caps = sz_capabilities();
     sz_unused_(caps); //< Unused when compiling on pre-SIMD machines.
 
     impl->equal = sz_equal_serial;
@@ -186,11 +182,6 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->lookup = sz_lookup_neon;
 
         impl->bytesum = sz_bytesum_neon;
-        impl->hash = sz_hash_neon;
-        impl->hash_state_init = sz_hash_state_init_neon;
-        impl->hash_state_stream = sz_hash_state_stream_neon;
-        impl->hash_state_fold = sz_hash_state_fold_neon;
-        impl->fill_random = sz_fill_random_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
@@ -201,14 +192,63 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     }
 #endif
 
+#if SZ_USE_NEON_AES
+    if (caps & sz_cap_neon_aes_k) {
+        impl->hash = sz_hash_neon;
+        impl->hash_state_init = sz_hash_state_init_neon;
+        impl->hash_state_stream = sz_hash_state_stream_neon;
+        impl->hash_state_fold = sz_hash_state_fold_neon;
+        impl->fill_random = sz_fill_random_neon;
+    }
+#endif
+
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
+        impl->equal = sz_equal_sve;
+        impl->order = sz_order_sve;
+
+        impl->copy = sz_copy_sve;
+        impl->move = sz_move_sve;
+        impl->fill = sz_fill_sve;
+
+        impl->find = sz_find_sve;
+        // TODO: impl->rfind = sz_rfind_sve;
+        impl->find_byte = sz_find_byte_sve;
+        impl->rfind_byte = sz_rfind_byte_sve;
+
+        impl->bytesum = sz_bytesum_sve;
+
         impl->sequence_argsort = sz_sequence_argsort_sve;
         impl->sequence_intersect = sz_sequence_intersect_sve;
         impl->pgrams_sort = sz_pgrams_sort_sve;
     }
 #endif
+
+#if SZ_USE_SVE2
+    if (caps & sz_cap_sve2_k) { impl->bytesum = sz_bytesum_sve2; }
+#endif
+
+#if SZ_USE_SVE2_AES
+    if (caps & sz_cap_sve2_aes_k) {
+        impl->hash = sz_hash_sve2;
+        impl->hash_state_init = sz_hash_state_init_sve2;
+        impl->hash_state_stream = sz_hash_state_stream_sve2;
+        impl->hash_state_fold = sz_hash_state_fold_sve2;
+        impl->fill_random = sz_fill_random_sve2;
+    }
+#endif
 }
+
+/**
+ *  @brief  Initializes a global static "virtual table" of supported backends
+ *          Run it just once to avoiding unnecessary `if`-s.
+ */
+SZ_DYNAMIC void sz_dispatch_table_init(void) {
+    sz_capability_t caps = sz_capabilities();
+    sz_dispatch_table_update_implementation_(caps);
+}
+
+SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_dispatch_table_update_implementation_(caps); }
 
 #if defined(_MSC_VER)
 /*
@@ -217,7 +257,11 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
  *  alphabetically (exclusive). The Microsoft C++ compiler puts C++ initialisation code in .CRT$XCU, so avoid that
  *  section: https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170
  */
+#if defined(_WIN64)
 #pragma comment(linker, "/INCLUDE:sz_dispatch_table_init_")
+#else
+#pragma comment(linker, "/INCLUDE:_sz_dispatch_table_init_")
+#endif
 #pragma section(".CRT$XCS", read)
 __declspec(allocate(".CRT$XCS")) void (*sz_dispatch_table_init_)() = sz_dispatch_table_init;
 
@@ -351,7 +395,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
 // how `__cdecl` functions are decorated in MSVC: https://stackoverflow.com/questions/62753691)
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memchr")
 #else
 #pragma comment(linker, "/export:_memchr")
@@ -365,7 +409,7 @@ SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memcpy")
 #else
 #pragma comment(linker, "/export:_memcpy")
@@ -379,7 +423,7 @@ SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memmove")
 #else
 #pragma comment(linker, "/export:_memmove")
@@ -393,7 +437,7 @@ SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memset")
 #else
 #pragma comment(linker, "/export:_memset")

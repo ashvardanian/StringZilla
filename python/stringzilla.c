@@ -46,6 +46,10 @@ typedef SSIZE_T ssize_t;
 #define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
+// Undefine _POSIX_C_SOURCE to avoid redefinition warning with Python headers
+#ifdef _POSIX_C_SOURCE
+#undef _POSIX_C_SOURCE
+#endif
 #include <Python.h> // Core CPython interfaces
 
 #include <errno.h>  // `errno`
@@ -328,6 +332,31 @@ void permute(sz_string_view_t *array, sz_sorted_idx_t *order, sz_size_t length) 
 }
 
 /**
+ *  @brief  Helper function to check if a Python object represents a mutable buffer.
+ *          Returns sz_true_k if the object is mutable (can be written to), sz_false_k if immutable.
+ *          Sets a Python exception if immutable.
+ */
+SZ_INTERNAL sz_bool_t sz_py_is_mutable(PyObject *object) {
+    if (PyUnicode_Check(object)) {
+        PyErr_SetString(PyExc_TypeError, "str objects are immutable (use bytearray instead)");
+        return sz_false_k;
+    }
+    else if (PyBytes_Check(object)) {
+        PyErr_SetString(PyExc_TypeError, "bytes objects are immutable (use bytearray instead)");
+        return sz_false_k;
+    }
+    else if (PyMemoryView_Check(object)) {
+        Py_buffer *view = PyMemoryView_GET_BUFFER(object);
+        if (view->readonly) {
+            PyErr_SetString(PyExc_TypeError, "memoryview is read-only");
+            return sz_false_k;
+        }
+    }
+    // Everything else is optimistically considered mutable
+    return sz_true_k;
+}
+
+/**
  *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
  *          On failure, sets a Python exception and returns 0.
  */
@@ -479,11 +508,13 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
         *data = strs->data.u64_tape.data;
         *offsets = strs->data.u64_tape.offsets;
         *count = strs->data.u64_tape.count;
+        return sz_true_k;
     }
     else if (strs->layout == STRS_U64_TAPE_VIEW) {
         *data = strs->data.u64_tape_view.data;
         *offsets = strs->data.u64_tape_view.offsets;
         *count = strs->data.u64_tape_view.count;
+        return sz_true_k;
     }
     else { return sz_false_k; }
 }
@@ -750,6 +781,7 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     case STRS_FRAGMENTED: old_allocator = strs->data.fragmented.allocator; break;
     case STRS_U32_TAPE_VIEW:
     case STRS_U64_TAPE_VIEW:
+    default:
         // Views don't own memory, use default allocator for comparison
         sz_memory_allocator_init_default(&old_allocator);
         break;
@@ -1199,6 +1231,202 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t
 
     sz_u64_t result = sz_hash(text.start, text.length, seed);
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
+}
+
+static char const doc_fill_random[] = //
+    "Fill a string-like buffer in place with pseudo-random bytes.\n"
+    "\n"
+    "Args:\n"
+    "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"
+    "  nonce (int, optional): Seed/nonce ensuring reproducible output for the same inputs (default 0).\n"
+    "  alphabet (str or bytes, optional): If provided, remaps random bytes to characters from the alphabet.\n"
+    "  start (int, optional): Starting index (default 0).\n"
+    "  end (int, optional): Ending index (default len(buffer)).\n"
+    "Returns:\n"
+    "  None: Mutates the buffer slice in place.";
+
+static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 3) {
+        PyErr_SetString(PyExc_TypeError, "fill_random() expects 1 to 4 positional arguments");
+        return NULL;
+    }
+
+    PyObject *buffer_obj = is_member ? self : args[0];
+    PyObject *nonce_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+    PyObject *start_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
+    PyObject *end_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
+    PyObject *alphabet_obj = NULL;
+
+    // Optional keyword arguments
+    if (args_names_tuple) {
+        Py_ssize_t kw_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < kw_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "nonce") == 0 && !nonce_obj) nonce_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "alphabet") == 0 && !alphabet_obj)
+                alphabet_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj)
+                start_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj)
+                end_obj = value;
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Parse start/end
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
+    }
+    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
+    }
+
+    // Parse nonce
+    sz_u64_t nonce = 0;
+    if (nonce_obj) {
+        if (!PyLong_Check(nonce_obj)) {
+            PyErr_SetString(PyExc_TypeError, "nonce must be an integer");
+            return NULL;
+        }
+        nonce = PyLong_AsUnsignedLongLong(nonce_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    // Parse alphabet
+    sz_string_view_t alphabet;
+    if (alphabet_obj) {
+        if (!sz_py_export_string_like(alphabet_obj, &alphabet.start, &alphabet.length)) {
+            wrap_current_exception("alphabet must be string-like");
+            return NULL;
+        }
+        if (alphabet.length == 0) {
+            PyErr_SetString(PyExc_ValueError, "alphabet must not be empty");
+            return NULL;
+        }
+    }
+
+    // Export buffer and clamp range
+    sz_string_view_t buf;
+    if (!sz_py_export_string_like(buffer_obj, &buf.start, &buf.length)) {
+        wrap_current_exception("First argument must be string-like");
+        return NULL;
+    }
+
+    if (sz_py_is_mutable(buffer_obj) == sz_false_k) return NULL;
+
+    if (start < 0 || (end != PY_SSIZE_T_MAX && end < 0)) {
+        PyErr_SetString(PyExc_ValueError, "start/end must be non-negative");
+        return NULL;
+    }
+
+    if ((sz_size_t)start > buf.length) {
+        Py_RETURN_NONE; // nothing to do
+    }
+
+    buf.start += start;
+    buf.length -= start;
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < buf.length) { buf.length = (sz_size_t)(end - start); }
+
+    sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+    if (alphabet_obj) {
+        SZ_ALIGN64 char look_up_table[256];
+        for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
+        sz_lookup((sz_ptr_t)buf.start, buf.length, (sz_cptr_t)buf.start, look_up_table);
+    }
+    Py_RETURN_NONE;
+}
+
+static char const doc_random[] = //
+    "random(length, *, nonce=0, alphabet=None) -> bytes\n\n"
+    "Generate a new random byte string, optionally remapped to a given alphabet.\n"
+    "If alphabet is provided, each byte is mapped to alphabet[b % len(alphabet)].";
+
+static PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
+    (void)self;
+    if (positional_args_count < 1 || positional_args_count > 2) {
+        PyErr_SetString(PyExc_TypeError, "random() expects 1 or 2 positional arguments");
+        return NULL;
+    }
+    PyObject *length_obj = args[0];
+    PyObject *nonce_obj = positional_args_count > 1 ? args[1] : NULL;
+    PyObject *alphabet_obj = NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t kw_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < kw_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "nonce") == 0 && !nonce_obj) nonce_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "alphabet") == 0 && !alphabet_obj)
+                alphabet_obj = value;
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    if (!PyLong_Check(length_obj)) {
+        PyErr_SetString(PyExc_TypeError, "length must be an integer");
+        return NULL;
+    }
+    Py_ssize_t signed_length = PyLong_AsSsize_t(length_obj);
+    if (signed_length == -1 && PyErr_Occurred()) return NULL;
+    if (signed_length < 0) {
+        PyErr_SetString(PyExc_ValueError, "length must be non-negative");
+        return NULL;
+    }
+    sz_size_t length = (sz_size_t)signed_length;
+
+    sz_u64_t nonce = 0;
+    if (nonce_obj) {
+        if (!PyLong_Check(nonce_obj)) {
+            PyErr_SetString(PyExc_TypeError, "nonce must be an integer");
+            return NULL;
+        }
+        nonce = PyLong_AsUnsignedLongLong(nonce_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    PyObject *bytes_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)length);
+    if (!bytes_obj) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate random bytes");
+        return NULL;
+    }
+    if (length > 0) {
+        sz_ptr_t buffer = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
+        sz_fill_random(buffer, length, nonce);
+    }
+
+    if (!alphabet_obj || length == 0) return bytes_obj;
+
+    sz_string_view_t alphabet;
+    if (!sz_py_export_string_like(alphabet_obj, &alphabet.start, &alphabet.length)) {
+        Py_DECREF(bytes_obj);
+        wrap_current_exception("alphabet must be string-like");
+        return NULL;
+    }
+    if (alphabet.length == 0) {
+        Py_DECREF(bytes_obj);
+        PyErr_SetString(PyExc_ValueError, "alphabet must not be empty");
+        return NULL;
+    }
+
+    SZ_ALIGN64 char look_up_table[256];
+    for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
+    sz_ptr_t buf_ptr = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
+    sz_lookup(buf_ptr, length, buf_ptr, look_up_table);
+    return bytes_obj;
 }
 
 static char const doc_like_bytesum[] = //
@@ -2755,6 +2983,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t
 
     // Perform the translation using the look-up table
     if (is_inplace) {
+        if (sz_py_is_mutable(str_obj) == sz_false_k) return NULL;
         sz_lookup(str.start, str.length, str.start, look_up_table);
         Py_RETURN_NONE;
     }
@@ -3474,8 +3703,8 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
     {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
     {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
     {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
 
     // Bidirectional operations
     {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
@@ -3504,6 +3733,10 @@ static PyMethodDef Str_methods[] = {
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
+
+    // In-place transforms
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     {NULL, NULL, 0, NULL} // Sentinel
 };
@@ -4129,29 +4362,30 @@ static PyObject *Strs_get_layout(Strs *self, void *Py_UNUSED(closure)) {
     switch (self->layout) {
     case STRS_U32_TAPE_VIEW:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
-                 self->data.u32_tape_view.count, self->data.u32_tape_view.data, self->data.u32_tape_view.offsets,
-                 self->data.u32_tape_view.parent);
+                 self->data.u32_tape_view.count, (void *)self->data.u32_tape_view.data,
+                 (void *)self->data.u32_tape_view.offsets, (void *)self->data.u32_tape_view.parent);
         break;
 
     case STRS_U64_TAPE_VIEW:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
-                 self->data.u64_tape_view.count, self->data.u64_tape_view.data, self->data.u64_tape_view.offsets,
-                 self->data.u64_tape_view.parent);
+                 self->data.u64_tape_view.count, (void *)self->data.u64_tape_view.data,
+                 (void *)self->data.u64_tape_view.offsets, (void *)self->data.u64_tape_view.parent);
         break;
 
     case STRS_U32_TAPE:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE, count=%zu, data=%p, offsets=%p]",
-                 self->data.u32_tape.count, self->data.u32_tape.data, self->data.u32_tape.offsets);
+                 self->data.u32_tape.count, (void *)self->data.u32_tape.data, (void *)self->data.u32_tape.offsets);
         break;
 
     case STRS_U64_TAPE:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE, count=%zu, data=%p, offsets=%p]",
-                 self->data.u64_tape.count, self->data.u64_tape.data, self->data.u64_tape.offsets);
+                 self->data.u64_tape.count, (void *)self->data.u64_tape.data, (void *)self->data.u64_tape.offsets);
         break;
 
     case STRS_FRAGMENTED:
         snprintf(buffer, sizeof(buffer), "Strs[layout=FRAGMENTED, count=%zu, spans=%p, parent=%p]",
-                 self->data.fragmented.count, self->data.fragmented.spans, self->data.fragmented.parent);
+                 self->data.fragmented.count, (void *)self->data.fragmented.spans,
+                 (void *)self->data.fragmented.parent);
         break;
 
     default: snprintf(buffer, sizeof(buffer), "Strs[layout=UNKNOWN(%d)]", self->layout); break;
@@ -4347,15 +4581,15 @@ static PyObject *Strs_str(Strs *self) {
         sz_cptr_t cstr_start = NULL;
         sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        
+
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
         if (sz_runes_valid(cstr_start, cstr_length)) {
             // Valid UTF-8: format as '...' with escaped quotes
-            total_bytes += 2; // Opening and closing quotes
+            total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
-            
+
             // Count the number of single quotes that need escaping
             sz_cptr_t scan_ptr = cstr_start;
             sz_size_t scan_length = cstr_length;
@@ -4367,11 +4601,12 @@ static PyObject *Strs_str(Strs *self) {
                 scan_length -= next_quote - scan_ptr + 1;
                 scan_ptr = next_quote + 1;
             }
-        } else {
+        }
+        else {
             // Invalid UTF-8: format as b'\x...'
-            total_bytes += 3; // "b'" prefix
+            total_bytes += 3;               // "b'" prefix
             total_bytes += cstr_length * 4; // Each byte becomes \xNN (4 chars)
-            total_bytes += 1; // Closing quote
+            total_bytes += 1;               // Closing quote
         }
     }
 
@@ -4947,19 +5182,6 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
         // Grow data buffer if needed (doubling strategy)
         while (total_bytes + item_length > data_capacity) {
             sz_size_t new_capacity = data_capacity * 2;
-            if (new_capacity < data_capacity) { // Overflow check
-                new_capacity = SIZE_MAX;
-                if (total_bytes + item_length > new_capacity) {
-                    Py_DECREF(item);
-                    allocator.free(data_buffer, data_capacity, allocator.handle);
-                    allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
-                                   allocator.handle);
-                    Py_DECREF(iterator);
-                    PyErr_SetString(PyExc_MemoryError, "String data too large");
-                    return -1;
-                }
-            }
-
             sz_ptr_t new_buffer = (sz_ptr_t)allocator.allocate(new_capacity, allocator.handle);
             if (!new_buffer) {
                 Py_DECREF(item);
@@ -5252,6 +5474,88 @@ static PyTypeObject StrsType = {
 
 #pragma endregion
 
+static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t *result) {
+    if (!caps_obj) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple or list of strings");
+        return -1;
+    }
+    PyObject *seq = PySequence_Fast(caps_obj, "capabilities must be a tuple or list of strings");
+    if (!seq) return -1;
+
+    sz_capability_t requested_caps = 0;
+    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    PyObject **items = PySequence_Fast_ITEMS(seq);
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = items[i];
+        if (!PyUnicode_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be strings");
+            Py_DECREF(seq);
+            return -1;
+        }
+        char const *cap_str = PyUnicode_AsUTF8(item);
+        if (!cap_str) {
+            Py_DECREF(seq);
+            return -1;
+        }
+        sz_capability_t flag = sz_capability_from_string_implementation_(cap_str);
+        if (flag == sz_caps_none_k) {
+            PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
+            Py_DECREF(seq);
+            return -1;
+        }
+        requested_caps |= flag;
+    }
+    Py_DECREF(seq);
+
+    // Intersect with hardware capabilities for safety
+    *result = requested_caps & sz_capabilities();
+    if (*result == 0) { *result = sz_cap_serial_k; }
+    return 0;
+}
+
+static char const doc_reset_capabilities[] = //
+    "reset_capabilities(names) -> None\n\n"
+    "Sets the active SIMD/backend capabilities for this module and updates the\n"
+    "runtime dispatch table. The provided names are intersected with hardware\n"
+    "capabilities; if the result is empty, falls back to 'serial'.\n\n"
+    "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.";
+
+static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
+    PyObject *caps_obj = NULL;
+    if (!PyArg_ParseTuple(args, "O", &caps_obj)) return NULL;
+
+    sz_capability_t caps = 0;
+    if (parse_and_intersect_capabilities(caps_obj, &caps) != 0) return NULL;
+
+    // Update the dispatch table
+    sz_dispatch_table_update(caps);
+
+    // Recompute and set module-level capability exports
+    sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
+    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+    PyObject *caps_tuple = PyTuple_New(cap_count);
+    if (!caps_tuple) return NULL;
+    for (sz_size_t i = 0; i < cap_count; i++) {
+        PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
+        if (!cap_str) {
+            Py_DECREF(caps_tuple);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(caps_tuple, i, cap_str);
+    }
+    if (PyObject_SetAttrString(self, "__capabilities__", caps_tuple) != 0) {
+        Py_DECREF(caps_tuple);
+        return NULL;
+    }
+    Py_DECREF(caps_tuple);
+
+    sz_cptr_t caps_str = sz_capabilities_to_string(caps);
+    if (PyObject_SetAttrString(self, "__capabilities_str__", PyUnicode_FromString(caps_str)) != 0) { return NULL; }
+
+    Py_RETURN_NONE;
+}
+
 static void stringzilla_cleanup(PyObject *m) {
     if (temporary_memory.start) free(temporary_memory.start);
     temporary_memory.start = NULL;
@@ -5265,7 +5569,6 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
     {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
     {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
     {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
     {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
@@ -5297,9 +5600,18 @@ static PyMethodDef stringzilla_methods[] = {
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
+    // In-place transforms
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+
+    // Module-level functionality
+    {"random", (PyCFunction)module_random, SZ_METHOD_FLAGS, doc_random},
+    {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
 
     {NULL, NULL, 0, NULL}};
 

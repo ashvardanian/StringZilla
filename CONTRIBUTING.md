@@ -19,14 +19,19 @@ The project is split into the following parts:
 
 - `include/stringzilla/stringzilla.h` - single-header C implementation.
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
+- `include/stringzillas/*` - parallel CPU/GPU header-only backends.
+- `c/*` - C sources for dynamic dispatch and parallel backends.
+- `rust/*` - Rust crate sources.
 - `python/*` - Python bindings.
+- `swift/*` - Swift package sources and tests.
 - `javascript/*` - JavaScript bindings.
 - `scripts/*` - Scripts for benchmarking and testing.
+- `cli/*` - SIMD-accelerated CLI utilities.
 
 For minimal test coverage, check the following scripts:
 
-- `scripts/test.cpp` - tests C++ API (not underlying C) against STL.
-- `scripts/test.py` - tests Python API against native strings.
+- `scripts/test_stringzilla.cpp` - tests C++ API (not underlying C) against STL.
+- `scripts/test_stringzilla.py` - tests Python API against native strings.
 - `scripts/test.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -48,7 +53,7 @@ The role of Python benchmarks is less to provide absolute number, but to compare
 ## Benchmarking Datasets
 
 It's not always easy to find good datasets for benchmarking strings workloads.
-I use several ASCII and UTF8 international datasets, all of them mirrored on the HuggingFace dataset hub, in the [StringKilla](https://huggingface.co/datasets/ashvardanian/StringKilla) repository.
+I use several ASCII and UTF-8 international datasets, all of them mirrored on the HuggingFace dataset hub, in the [StringKilla](https://huggingface.co/datasets/ashvardanian/StringKilla) repository.
 You can download them using the following commands:
 
 ```sh
@@ -121,7 +126,7 @@ sudo apt-get install g++-12 gcc-12      # You may already have a newer version o
 sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
 ```
 
-On MacOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
+On macOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
 Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
 
 ```bash
@@ -131,6 +136,25 @@ cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 \
     -D CMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++" \
     -B build_release
 cmake --build build_release --config Release
+```
+
+On Windows you can build with either MSVC (Visual Studio) or MinGW (GCC).
+Pick one.
+For MSVC (Developer Prompt):
+
+```bat
+cmake -B build_release -G "Visual Studio 17 2022" -A x64 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
+cmake --build build_release --config Release
+build_release\\Release\\stringzilla_test_cpp20.exe
+```
+
+For MinGW (MSYS2):
+
+```bash
+pacman -S --needed --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make
+cmake -G "MinGW Makefiles" -B build_release -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
+cmake --build build_release --config Release
+./build_release/stringzilla_test_cpp20.exe
 ```
 
 ### Testing
@@ -276,7 +300,7 @@ Docker is the goto-choice for that.
 
 #### Alpine
 
-Alpine is one of the most popular Linux distributions for containers, due to it's size.
+Alpine is one of the most popular Linux distributions for containers, due to its size.
 The base image is only ~3 MB, and it's based on musl libc, which is different from glibc.
 
 ```bash
@@ -429,6 +453,16 @@ SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-iso
 SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
 ```
 
+To clean up code before pushing:
+
+```bash
+uv pip install ruff mypy bandit flake8
+uv run --no-project ruff check scripts/test_stringzilla.py --fix
+uv run --no-project mypy scripts/test_stringzilla.py --ignore-missing-imports
+uv run --no-project bandit scripts/test_stringzilla.py -s B101
+uv run --no-project flake8 scripts/test_stringzilla.py --max-line-length=120
+```
+
 ### Testing
 
 For testing we use PyTest, which may not be installed on your system.
@@ -459,7 +493,7 @@ cibuildwheel --platform linux --archs x86_64    # 64-bit x86, the most common on
 cibuildwheel --platform linux --archs aarch64   # 64-bit Arm for mobile devices, Apple M-series, and AWS Graviton
 cibuildwheel --platform linux --archs i686      # 32-bit Linux
 cibuildwheel --platform linux --archs s390x     # emulating big-endian IBM Z
-cibuildwheel --platform macos                   # works only on MacOS
+cibuildwheel --platform macos                   # works only on macOS
 cibuildwheel --platform windows                 # works only on Windows
 ```
 
@@ -469,7 +503,13 @@ You may need root privileges for multi-architecture builds:
 sudo $(which cibuildwheel) --platform linux
 ```
 
-On Windows and MacOS, to avoid frequent path resolution issues, you may want to use:
+To avoid QEMU issues on SVE and some other uncommon instructions, you can inform the PyTest suite, that it's running in an emulated environment:
+
+```bash
+SZ_IS_QEMU_=1 sudo $(which cibuildwheel) --platform linux
+```
+
+On Windows and macOS, to avoid frequent path resolution issues, you may want to use:
 
 ```bash
 python -m cibuildwheel --platform windows
@@ -503,46 +543,25 @@ npm ci && npm test
 swift build && swift test
 ```
 
-To format, consider using [SwiftFormat](https://github.com/nicklockwood/SwiftFormat):
-
-```bash
-brew install swiftformat
-swiftformat .
-```
-
-Running Swift on Linux requires a couple of extra steps, as the Swift compiler is not available in the default repositories.
-Please get the most recent Swift tarball from the [official website](https://www.swift.org/install/).
-At the time of writing, for 64-bit Arm CPU running Ubuntu 22.04, the following commands would work:
-
-```bash
-wget https://download.swift.org/swift-5.9.2-release/ubuntu2204-aarch64/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
-tar xzf swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
-sudo mv swift-5.9.2-RELEASE-ubuntu22.04-aarch64 /usr/share/swift
-echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
-source ~/.bashrc
-```
-
-You can check the available images on [`swift.org/download` page](https://www.swift.org/download/#releases).
-For x86 CPUs, the following commands would work:
-
-```bash
-wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
-tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
-sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /usr/share/swift
-echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
-source ~/.bashrc
-```
-
+Running Swift on Linux requires a couple of extra steps - [`swift.org/install` page](https://www.swift.org/install).
 Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
 
 ```bash
-sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release --enable-test-discovery"
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release"
+```
+
+To format the code on Linux:
+
+```bash
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "swift format . -i -r --configuration .swift-format"
 ```
 
 ## Contributing in Rust
 
 ```bash
 cargo test
+cargo test --features cpus
+cargo test --features cuda
 ```
 
 If you need to isolate a failing test:

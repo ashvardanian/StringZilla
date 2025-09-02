@@ -79,8 +79,12 @@
  *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
  *          64-bit on most platforms where pointers are 64-bit.
  *          32-bit on platforms where pointers are 32-bit.
+ *
+ *  @note   Do not use `defined(SZ_IS_64BIT_X86_)` or `defined(SZ_IS_64BIT_ARM_)` here — those indicate
+ *          the CPU family, not pointer width. Rely on compiler/OS macros only.
  */
-#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
+#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || \
+    defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
 #define SZ_IS_64BIT_ (1)
 #else
 #define SZ_IS_64BIT_ (0)
@@ -95,10 +99,15 @@
  *  For that CMake provides the `TestBigEndian` and `CMAKE_<LANG>_BYTE_ORDER` (from 3.20 onwards).
  *  In Python one can check `sys.byteorder == 'big'` in the `setup.py` script and pass the appropriate macro.
  *  https://stackoverflow.com/a/27054190
+ *
+ *  Modern compilers typically define __BYTE_ORDER__ and __ORDER_BIG_ENDIAN__.
+ *  Fall back to legacy macros and known arch tags when unavailable.
  */
 #if !defined(SZ_IS_BIG_ENDIAN_)
-#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
-    defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
+#if (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)) ||                                           \
+    (defined(__BYTE_ORDER) && (__BYTE_ORDER == __BIG_ENDIAN)) || defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN) ||    \
+    defined(BIG_ENDIAN) || defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || \
+    defined(__MIBSEB) || defined(__MIBSEB__) || defined(__s390x__) || defined(__s390__)
 #define SZ_IS_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
 #else
 #define SZ_IS_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
@@ -256,11 +265,19 @@
 #endif
 #endif
 
-#if !defined(SZ_USE_OPENMP)
-#ifdef _OPENMP
-#define SZ_USE_OPENMP (1)
+#if !defined(SZ_USE_NEON_AES)
+#ifdef __ARM_FEATURE_AES
+#define SZ_USE_NEON_AES (1)
 #else
-#define SZ_USE_OPENMP (0)
+#define SZ_USE_NEON_AES (0)
+#endif
+#endif
+
+#if !defined(SZ_USE_SVE2_AES)
+#ifdef __ARM_FEATURE_SVE2_AES
+#define SZ_USE_SVE2_AES (1)
+#else
+#define SZ_USE_SVE2_AES (0)
 #endif
 #endif
 
@@ -461,12 +478,17 @@ typedef enum sz_status_t {
     sz_invalid_utf8_k = -12,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -13,
-    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
+    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
+     */
     sz_overflow_risk_k = -14,
     /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
     sz_unexpected_dimensions_k = -15,
     /** GPU support is missing in the library. */
     sz_missing_gpu_k = -16,
+    /** Backend-device mismatch: e.g., GPU kernel with CPU/default executor or vice versa. */
+    sz_device_code_mismatch_k = -17,
+    /** Device memory mismatch: e.g., GPU kernel requires unified/device-accessible memory. */
+    sz_device_memory_mismatch_k = -18,
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;
@@ -477,7 +499,7 @@ typedef enum sz_status_t {
  */
 typedef enum sz_capability_t {
     sz_cap_serial_k = 1,        ///< Serial (non-SIMD) capability
-    sz_cap_parallel_k = 1 << 2, ///< Multi-threading via OpenMP capability
+    sz_cap_parallel_k = 1 << 2, ///< Multi-threading via Fork Union or other OpenMP-like engines
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
 
     sz_cap_haswell_k = 1 << 5, ///< x86 AVX2 capability with FMA and F16C extensions
@@ -494,12 +516,18 @@ typedef enum sz_capability_t {
     sz_cap_kepler_k = 1 << 21, ///< CUDA capability with support with in-warp register shuffles
     sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
 
-    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with OpenMP
+    sz_caps_none_k = 0,
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with Fork Union
     sz_caps_si_k = sz_cap_serial_k | sz_cap_ice_k,                      ///< Serial code with Ice Lake
-    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with OpenMP and Ice Lake
-    sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with OpenMP and SVE
+    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with Fork Union and Ice Lake
+    sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
+
+    // Aggregates for different StringZillas builds
+    sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
+                     sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
+    sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
 
@@ -645,7 +673,8 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
  *  @param[in] buffer Buffer to use for allocations.
  *  @param[in] length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM page) is recommended.
  *
- *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be modified.
+ *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be
+ * modified.
  */
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
@@ -860,37 +889,37 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *
     sz_rune_length_t ch_length;
 
     // TODO: This can be made entirely branchless using 32-bit SWAR.
-    if (leading_byte < 0x80) {
+    if (leading_byte < 0x80U) {
         // Single-byte rune (0xxxxxxx)
         ch = leading_byte;
         ch_length = sz_utf8_rune_1byte_k;
     }
-    else if ((leading_byte & 0xE0) == 0xC0) {
+    else if ((leading_byte & 0xE0U) == 0xC0U) {
         // Two-byte rune (110xxxxx 10xxxxxx)
-        ch = (leading_byte & 0x1F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x1FU) << 6;
+        ch |= (*current++ & 0x3FU);
         ch_length = sz_utf8_rune_2bytes_k;
     }
-    else if ((leading_byte & 0xF0) == 0xE0) {
+    else if ((leading_byte & 0xF0U) == 0xE0U) {
         // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x0F) << 12;
-        ch |= (*current++ & 0x3F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x0FU) << 12;
+        ch |= (*current++ & 0x3FU) << 6;
+        ch |= (*current++ & 0x3FU);
         ch_length = sz_utf8_rune_3bytes_k;
     }
-    else if ((leading_byte & 0xF8) == 0xF0) {
+    else if ((leading_byte & 0xF8U) == 0xF0U) {
         // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x07) << 18;
-        ch |= (*current++ & 0x3F) << 12;
-        ch |= (*current++ & 0x3F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x07U) << 18;
+        ch |= (*current++ & 0x3FU) << 12;
+        ch |= (*current++ & 0x3FU) << 6;
+        ch |= (*current++ & 0x3FU);
         // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
-        if (ch > 0x10FFFF) { ch = 0, ch_length = sz_utf8_invalid_k; }
+        if (ch > 0x10FFFFU) { ch = 0U, ch_length = sz_utf8_invalid_k; }
         else { ch_length = sz_utf8_rune_4bytes_k; }
     }
     else {
         // Invalid UTF8 rune.
-        ch = 0;
+        ch = 0U;
         ch_length = sz_utf8_invalid_k;
     }
     *code = ch;
@@ -984,8 +1013,12 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #define sz_unused_(x) ((void)(x))
 
 /** @brief Helper-macro casting a variable to another type of the same size. */
-#if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
+#if !defined(_MSC_VER) && defined(__has_builtin)
+#if __has_builtin(__builtin_bit_cast)
 #define sz_bitcast_(type, value) __builtin_bit_cast(type, (value))
+#else
+#define sz_bitcast_(type, value) (*((type *)&(value)))
+#endif
 #else
 #define sz_bitcast_(type, value) (*((type *)&(value)))
 #endif
@@ -1191,22 +1224,29 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
  *  Alternatively, the BZHI instruction can be used to clear the bits above N.
  */
 #if SZ_USE_SKYLAKE || SZ_USE_ICE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
-SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, n); }
-SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
-SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
-SZ_INTERNAL __mmask64 sz_u64_mask_until_(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
+#endif
+SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
+SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
+SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n); }
+SZ_INTERNAL __mmask64 sz_u64_mask_until_(sz_size_t n) {
+    return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, (unsigned char)n);
+}
 SZ_INTERNAL __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
 SZ_INTERNAL __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
 SZ_INTERNAL __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
 SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
     return n < 64 ? sz_u64_mask_until_(n) : 0xFFFFFFFFFFFFFFFFull;
 }
-#if !defined(_MSC_VER)
-#pragma GCC pop_options
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif
 #endif
 
@@ -1231,20 +1271,20 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     // TODO: Remove branches.
     // Normalize negative indices
-    if (start < 0) start += length;
-    if (end < 0) end += length;
+    if (start < 0) start += (sz_ssize_t)length;
+    if (end < 0) end += (sz_ssize_t)length;
 
     // Clamp indices to a valid range
     if (start < 0) start = 0;
     if (end < 0) end = 0;
-    if (start > (sz_ssize_t)length) start = length;
-    if (end > (sz_ssize_t)length) end = length;
+    if (start > (sz_ssize_t)length) start = (sz_ssize_t)length;
+    if (end > (sz_ssize_t)length) end = (sz_ssize_t)length;
 
     // Ensure start <= end
     if (start > end) start = end;
 
-    *normalized_offset = start;
-    *normalized_length = end - start;
+    *normalized_offset = (sz_size_t)(start);
+    *normalized_length = (sz_size_t)(end - start);
 }
 
 /**
@@ -1253,13 +1293,14 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
-    sz_size_t leading_zeros = sz_u64_clz(x);
-    return 63 - leading_zeros;
+    int leading_zeros = sz_u64_clz(x);
+    return (sz_size_t)(63 - leading_zeros);
 }
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
- *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including 0.
+ *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including
+ * 0.
  *  @see https://stackoverflow.com/a/10143264
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
@@ -1295,7 +1336,8 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
     return x;
 }
 
-/** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result;
@@ -1314,7 +1356,8 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #endif
 }
 
-/** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result;
@@ -1335,7 +1378,8 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #endif
 }
 
-/** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result;
@@ -1417,8 +1461,9 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
     alloc->free = (sz_memory_free_t)sz_memory_free_fixed_;
     alloc->handle = buffer;
-    *(sz_size_t *)buffer = length;
-    *((sz_ptr_t)buffer + sizeof(sz_size_t)) = sizeof(sz_size_t) * 2; // The capacity and consumption so far
+    sz_size_t *ptr = (sz_size_t *)buffer;
+    ptr[0] = length;
+    ptr[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
 SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {

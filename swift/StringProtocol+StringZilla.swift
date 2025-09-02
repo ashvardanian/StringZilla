@@ -27,7 +27,7 @@ import StringZillaC
 private protocol SingleByte {}
 
 extension UInt8: SingleByte {}
-extension Int8: SingleByte {} // This would match `CChar` as well.
+extension Int8: SingleByte {}  // This would match `CChar` as well.
 
 @usableFromInline
 enum StringZillaError: Error {
@@ -84,7 +84,9 @@ extension String: StringZillaViewable {
     }
 
     @_transparent
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         utf8.index(utf8.startIndex, offsetBy: bytePointer - startPointer)
     }
 }
@@ -102,9 +104,10 @@ extension Substring.UTF8View: StringZillaViewable {
             let cLength = sz_size_t(bufferPointer.count)
             let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
             return try body(cString, cLength)
-        } ?? {
-            throw StringZillaError.contiguousStorageUnavailable
-        }()
+        }
+            ?? {
+                throw StringZillaError.contiguousStorageUnavailable
+            }()
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -113,7 +116,9 @@ extension Substring.UTF8View: StringZillaViewable {
     ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
     @_transparent
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
@@ -130,9 +135,10 @@ extension String.UTF8View: StringZillaViewable {
             let cLength = sz_size_t(bufferPointer.count)
             let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
             return try body(cString, cLength)
-        } ?? {
-            throw StringZillaError.contiguousStorageUnavailable
-        }()
+        }
+            ?? {
+                throw StringZillaError.contiguousStorageUnavailable
+            }()
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -140,18 +146,20 @@ extension String.UTF8View: StringZillaViewable {
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
     ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
-public extension StringZillaViewable {
+extension StringZillaViewable {
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(substring needle: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(substring needle: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
@@ -168,7 +176,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(substring needle: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(substring needle: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
@@ -185,7 +193,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -202,7 +210,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -219,7 +227,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -236,7 +244,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -246,40 +254,5 @@ public extension StringZillaViewable {
             }
         }
         return result
-    }
-
-    func levenshteinDistance<S: StringZillaViewable>(
-        from other: S,
-        bound: UInt? = nil
-    ) throws -> UInt {
-        // Prepare a local variable for the result.
-        var computedResult: sz_size_t = 0
-
-        // Swift has a ridiculous issue with casting unsigned 64-bit to unsigned 64-bit
-        // values which results in "Fatal error: Not enough bits to represent the passed value".
-        // Let's just copy the bytes: https://stackoverflow.com/a/68650250/2766161
-        let effectiveBound: sz_size_t = bound.map { sz_size_t($0) } ?? sz_size_max_()
-        let status = try withStringZillaScope { hPointer, hLength in
-            try other.withStringZillaScope { nPointer, nLength in
-                // Pass a mutable pointer for the result.
-                sz_levenshtein_distance(
-                    hPointer,
-                    hLength,
-                    nPointer,
-                    nLength,
-                    effectiveBound,
-                    nil, // default allocator
-                    &computedResult // out-parameter for the computed distance
-                )
-            }
-        }
-
-        // Check the returned status code.
-        guard status == sz_success_k else {
-            // Map the status code to an appropriate Swift error.
-            throw StringZillaError.memoryAllocationFailed
-        }
-
-        return UInt(computedResult)
     }
 }

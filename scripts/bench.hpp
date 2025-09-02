@@ -165,6 +165,7 @@ struct repeat_up_to {
     };
 
     inline repeat_up_to(double max_seconds) : max_seconds(max_seconds) {}
+    inline repeat_up_to(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
     inline iterator begin() { return {max_seconds, passed_seconds}; }
     inline end_sentinel end() const noexcept { return {}; }
     inline double seconds() const noexcept { return passed_seconds; }
@@ -481,7 +482,7 @@ inline void log_failure(                                              //
 
     std::fprintf(file, "Dataset path: %s\n", env.path.c_str());
     std::fprintf(file, "Tokenization mode: %d\n", env.tokenization);
-    std::fprintf(file, "Seed: %zu\n", env.seed);
+    std::fprintf(file, "Seed: %zu\n", static_cast<std::size_t>(env.seed));
     if (token_index) std::fprintf(file, "Token index: %zu\n", *token_index);
     std::fprintf(file, "Expected: %zu\n", expected_check_value);
     std::fprintf(file, "Actual: %zu\n", actual_check_value);
@@ -693,7 +694,7 @@ bench_result_t bench_nullary(  //
         result.profiled_seconds = running_seconds;
         result.profiled_calls += 1;
         result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[cpu_cycles_at_end - cpu_cycles_at_start] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
     }
 
     return result;
@@ -764,7 +765,7 @@ bench_result_t bench_unary(    //
         result.profiled_inputs += call_result.inputs_processed;
         result.profiled_calls += 1;
         result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[cpu_cycles_at_end - cpu_cycles_at_start] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
     });
     result.profiled_seconds = first_call_duration;
     if (first_call_duration >= env.benchmark_seconds) return result;
@@ -792,10 +793,10 @@ bench_result_t bench_unary(    //
 
         result.profiled_seconds = running_seconds;
         result.profiled_cpu_cycles += t4 - t0;
-        result.cpu_cycles_histogram[t1 - t0] += 1;
-        result.cpu_cycles_histogram[t2 - t1] += 1;
-        result.cpu_cycles_histogram[t3 - t2] += 1;
-        result.cpu_cycles_histogram[t4 - t3] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(t1 - t0)] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(t2 - t1)] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(t3 - t2)] += 1;
+        result.cpu_cycles_histogram[static_cast<double>(t4 - t3)] += 1;
     }
 
     result.profiled_seconds += first_call_duration;

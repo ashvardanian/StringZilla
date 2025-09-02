@@ -93,6 +93,19 @@ struct unified_alloc {
 
 using unified_alloc_t = unified_alloc<char>;
 
+/** @brief Returns `true` if the pointer refers to device-accessible memory (Device or Managed/Unified). */
+inline bool is_device_accessible_memory(void const *ptr) noexcept {
+    if (!ptr) return true;
+    cudaPointerAttributes attr;
+    cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
+    if (err != cudaSuccess) return false;
+#if defined(CUDART_VERSION) && (CUDART_VERSION >= 10000) // Modern CUDA: use `type`
+    return attr.type == cudaMemoryTypeDevice || attr.type == cudaMemoryTypeManaged;
+#else // Legacy CUDA: `memoryType` and `isManaged`
+    return attr.memoryType == cudaMemoryTypeDevice || attr.isManaged;
+#endif
+}
+
 struct cuda_status_t {
     status_t status = status_t::success_k;
     cudaError_t cuda_error = cudaSuccess;
@@ -104,7 +117,15 @@ struct cuda_status_t {
 inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
     cudaDeviceProp prop;
     cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device_id);
-    if (cuda_error != cudaSuccess) return {status_t::unknown_k, cuda_error};
+
+    // Distinguish between "no GPU available" vs other CUDA errors for clearer handling upstream.
+    if (cuda_error != cudaSuccess) {
+        status_t status = status_t::unknown_k;
+        if (cuda_error == cudaErrorNoDevice) status = status_t::missing_gpu_k;
+        if (cuda_error == cudaErrorInvalidDevice) status = status_t::missing_gpu_k;
+        if (cuda_error == cudaErrorInsufficientDriver) status = status_t::missing_gpu_k;
+        return {status, cuda_error};
+    }
 
     // Set the GPU specs
     specs.streaming_multiprocessors = prop.multiProcessorCount;
@@ -114,7 +135,8 @@ inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noex
 
     // Infer other global settings, that CUDA doesn't expose directly
     specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
-    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(prop.major, prop.minor) * specs.streaming_multiprocessors;
+    specs.sm_code = gpu_specs_t::pack_sm_code(prop.major, prop.minor);
+    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(specs.sm_code) * specs.streaming_multiprocessors;
 
     // Scheduling-related constants
     specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
@@ -143,6 +165,7 @@ class cuda_executor_t {
 
     explicit operator bool() const noexcept { return device_id_ >= 0; }
     inline cudaStream_t stream() const noexcept { return stream_; }
+    inline int device_id() const noexcept { return device_id_; }
 };
 
 /**

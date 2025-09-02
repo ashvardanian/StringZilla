@@ -21,7 +21,20 @@ include = ["/rust/**", "/c/**", "/include/**", "/build.rs"]
 
 [lib]
 name = "stringzilla"
-path = "rust/stringzilla.rs"
+path = "rust/lib.rs"
+
+[features]
+default = []
+cpus = [
+    "allocator-api2",
+    "stringtape",
+] # Multi-threaded CPU backend (StringZillas)
+cuda = ["cpus"] # CUDA GPU backend (includes multi-threaded CPU backend)
+rocm = ["cpus"] # ROCm GPU backend (includes multi-threaded CPU backend)
+
+[dependencies]
+allocator-api2 = { version = "0.3.0", optional = true }
+stringtape = { version = "0.4.0", optional = true }
 
 [build-dependencies]
-cc = "1.2.31"
+cc = "1.2.33"

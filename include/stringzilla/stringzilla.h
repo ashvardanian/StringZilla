@@ -25,12 +25,12 @@
  *  - `stringzilla.h` - umbrella header for the core C API.
  *  - `stringzilla.hpp` - umbrella header for the core C++ API.
  *
- *  It also provides many higher-level parallel algorithms, mostly implemented in C++ with OpenMP and CUDA, also exposed
- *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringCuZilla libraries:
+ *  It also provides many higher-level parallel algorithms, implemented in C++ with Fork Union and CUDA, also exposed
+ *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringZillas libraries:
  *
  *  - `similarities.{hpp,cuh}` - similarity measures, like Levenshtein, Needleman-Wunsch, & Smith-Waterman scores.
- *  - `features.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
- *  - `fingerprints.{hpp,cuh}` - Aho-Corasick multi-pattern search.
+ *  - `fingerprints.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
+ *  - `find_many.{hpp,cuh}` - Aho-Corasick multi-pattern search.
  *
  *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
  *  template functions to simplify specialized overloads and reusing the state between invocations.
@@ -58,8 +58,9 @@
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
  *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
  *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
- *  - `SZ_USE_CUDA=?` -
- *  - `SZ_USE_OPENMP=?` -
+ *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on Nvidia GPUs.
+ *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on Nvidia GPUs.
+ *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on Nvidia GPUs.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
@@ -138,6 +139,46 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
     return count;
 }
 
+SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
+    if (!a || !b) return sz_false_k;
+    for (; *a && *b; a++, b++)
+        if (*a != *b) return sz_false_k;
+    return *b == '\0' ? sz_true_k : sz_false_k;
+}
+
+/**
+ *  @brief Internal helper to map a capability name to its flag.
+ *  @param[in] name Capability name, e.g. "serial", "neon", "sve2_aes".
+ *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
+ */
+SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const *name) {
+
+    // CPU + execution model
+    if (sz_equal_null_terminated_serial(name, "serial") == sz_true_k) return sz_cap_serial_k;
+    if (sz_equal_null_terminated_serial(name, "parallel") == sz_true_k) return sz_cap_parallel_k;
+    // x86
+    if (sz_equal_null_terminated_serial(name, "haswell") == sz_true_k) return sz_cap_haswell_k;
+    if (sz_equal_null_terminated_serial(name, "skylake") == sz_true_k) return sz_cap_skylake_k;
+    if (sz_equal_null_terminated_serial(name, "ice") == sz_true_k) return sz_cap_ice_k;
+    // Arm
+    if (sz_equal_null_terminated_serial(name, "neon") == sz_true_k) return sz_cap_neon_k;
+    if (sz_equal_null_terminated_serial(name, "sve") == sz_true_k) return sz_cap_sve_k;
+    if (sz_equal_null_terminated_serial(name, "sve2") == sz_true_k) return sz_cap_sve2_k;
+    if (sz_equal_null_terminated_serial(name, "neon_aes") == sz_true_k ||
+        sz_equal_null_terminated_serial(name, "neon+aes") == sz_true_k)
+        return sz_cap_neon_aes_k;
+    if (sz_equal_null_terminated_serial(name, "sve2_aes") == sz_true_k ||
+        sz_equal_null_terminated_serial(name, "sve2+aes") == sz_true_k)
+        return sz_cap_sve2_aes_k;
+    // GPU
+    if (sz_equal_null_terminated_serial(name, "cuda") == sz_true_k) return sz_cap_cuda_k;
+    if (sz_equal_null_terminated_serial(name, "kepler") == sz_true_k) return sz_cap_kepler_k;
+    if (sz_equal_null_terminated_serial(name, "hopper") == sz_true_k) return sz_cap_hopper_k;
+    // Any
+    if (sz_equal_null_terminated_serial(name, "any") == sz_true_k) return sz_cap_any_k;
+    return sz_caps_none_k;
+}
+
 /**
  *  @brief Internal helper function to convert SIMD capabilities to a string.
  *  @sa    sz_capabilities_to_string, sz_capabilities
@@ -172,29 +213,49 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
 
 #if SZ_IS_64BIT_ARM_
 
+/*  Compiling the next section one may get: selected processor does not support system register name 'id_aa64zfr0_el1'.
+ *  Suppressing assembler errors is very complicated, so when dealing with older ARM CPUs it's simpler to compile this
+ *  function targeting newer ones.
+ */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.5-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.5-a+sve")
+#endif
+
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
 #if defined(SZ_IS_APPLE_)
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
+    uint32_t supports_neon_aes = 0;
     size_t size = sizeof(supports_neon);
     if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neon_aes, &size, NULL, 0) != 0) supports_neon_aes = 0;
 
-    return (sz_capability_t)(               //
-        (sz_cap_neon_k * (supports_neon)) | //
+    return (sz_capability_t)(                       //
+        (sz_cap_neon_k * (supports_neon)) |         //
+        (sz_cap_neon_aes_k * (supports_neon_aes)) | //
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_LINUX_)
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
+    unsigned supports_neon = 0, supports_neon_aes = 0, supports_sve = 0, supports_sve2 = 0, supports_sve2_aes = 0;
+    sz_unused_(id_aa64isar0_el1);
+    sz_unused_(id_aa64isar1_el1);
+    sz_unused_(id_aa64pfr0_el1);
+    sz_unused_(id_aa64zfr0_el1);
 
+#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEON_AES || SZ_USE_SVE2_AES
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
@@ -204,8 +265,20 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     // Now let's unpack the status flags from ID_AA64PFR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+#endif // SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2
+
+    // AdvSIMD, bits [23:20] of ID_AA64PFR0_EL1 can be used to check for `fp16` support
+    //  - 0b0000: integers, single, double precision arithmetic
+    //  - 0b0001: includes support for half-precision floating-point arithmetic
+    //  - 0b1111: NEON is not supported?!
+    // That's a really weird way to encode lack of NEON support, but it's important to
+    // check in case we are running on R-profile CPUs.
+    supports_neon = ((id_aa64pfr0_el1 >> 20) & 0xF) != 0xF;
+    supports_neon_aes = ((id_aa64isar0_el1 >> 4) & 0xF) >= 1;
+
+#if SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES
     // SVE, bits [35:32] of ID_AA64PFR0_EL1
-    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
+    supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
     // Now let's unpack the status flags from ID_AA64ZFR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-Register-0?lang=en
     if (supports_sve) __asm__ __volatile__("mrs %0, ID_AA64ZFR0_EL1" : "=r"(id_aa64zfr0_el1));
@@ -214,13 +287,16 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     //  - 0b0001: SVE2 is implemented
     //  - 0b0010: SVE2.1 is implemented
     // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
-    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
-    unsigned supports_neon = 1; // NEON is always supported
+    supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
+    supports_sve2_aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
+#endif // SZ_USE_SVE || SZ_USE_SVE2
 
-    return (sz_capability_t)(               //
-        (sz_cap_neon_k * (supports_neon)) | //
-        (sz_cap_sve_k * (supports_sve)) |   //
-        (sz_cap_sve2_k * (supports_sve2)) | //
+    return (sz_capability_t)(                       //
+        (sz_cap_neon_k * (supports_neon)) |         //
+        (sz_cap_neon_aes_k * (supports_neon_aes)) | //
+        (sz_cap_sve_k * (supports_sve)) |           //
+        (sz_cap_sve2_k * (supports_sve2)) |         //
+        (sz_cap_sve2_aes_k * (supports_sve2_aes)) | //
         (sz_cap_serial_k));
 
 #else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
@@ -228,11 +304,17 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
 #endif
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+
 #endif // SZ_IS_64BIT_ARM_
 
 #if SZ_IS_64BIT_X86_
 
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
@@ -242,26 +324,49 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
         struct separate_t {
             unsigned eax, ebx, ecx, edx;
         } named;
-    } info7;
+    } info1, info7;
 
 #if defined(_MSC_VER)
+    __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
 #else
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
+        : "a"(1), "c"(0));
     __asm__ __volatile__( //
         "cpuid"
         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
         : "a"(7), "c"(0));
 #endif
 
-    // Check for AVX2 (Function ID 7, EBX register), you can take the relevant flags from the LLVM implementation:
+    // Gate AVX/AVX-512 on OS-enabled extended state (XGETBV)
+    unsigned has_osxsave = (info1.named.ecx & (1u << 27)) != 0; // OSXSAVE
+    unsigned has_avx = (info1.named.ecx & (1u << 28)) != 0;     // AVX
+
+    unsigned long long xcr0 = 0;
+    if (has_osxsave) {
+#if defined(_MSC_VER)
+        xcr0 = _xgetbv(0);
+#else
+        unsigned eax, edx;
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xd0" : "=a"(eax), "=d"(edx) : "c"(0)); // xgetbv
+        xcr0 = ((unsigned long long)edx << 32) | eax;
+#endif
+    }
+
+    unsigned os_avx_enabled = has_osxsave && has_avx && ((xcr0 & 0x6u) == 0x6u); // XMM+YMM
+    unsigned os_avx512_enabled = os_avx_enabled && ((xcr0 & 0xE0u) == 0xE0u);    // OPMASK+ZMM
+
+    // Check for AVX2/AVX-512 (Function ID 7), masked by OS state
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
-    unsigned supports_avx2 = (info7.named.ebx & 0x00000020) != 0;
-    unsigned supports_avx512f = (info7.named.ebx & 0x00010000) != 0;
-    unsigned supports_avx512bw = (info7.named.ebx & 0x40000000) != 0;
-    unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
-    unsigned supports_avx512vbmi = (info7.named.ecx & 0x00000002) != 0;
-    unsigned supports_avx512vbmi2 = (info7.named.ecx & 0x00000040) != 0;
-    unsigned supports_vaes = (info7.named.ecx & 0x00000200) != 0;
+    unsigned supports_avx2 = os_avx_enabled && ((info7.named.ebx & 0x00000020u) != 0);
+    unsigned supports_avx512f = os_avx512_enabled && ((info7.named.ebx & 0x00010000u) != 0);
+    unsigned supports_avx512bw = os_avx512_enabled && ((info7.named.ebx & 0x40000000u) != 0);
+    unsigned supports_avx512vl = os_avx512_enabled && ((info7.named.ebx & 0x80000000u) != 0);
+    unsigned supports_avx512vbmi = os_avx512_enabled && ((info7.named.ecx & 0x00000002u) != 0);
+    unsigned supports_avx512vbmi2 = os_avx512_enabled && ((info7.named.ecx & 0x00000040u) != 0);
+    unsigned supports_vaes = os_avx512_enabled && ((info7.named.ecx & 0x00000200u) != 0);
 
     return (sz_capability_t)(                                                                                //
         (sz_cap_haswell_k * supports_avx2) |                                                                 //
@@ -279,7 +384,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
  */
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_(void) {
 #if SZ_IS_64BIT_X86_
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
@@ -289,7 +394,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_(void) {
 #endif
 }
 
-#if defined(SZ_DYNAMIC_DISPATCH)
+#if SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC int sz_dynamic_dispatch(void);
 SZ_DYNAMIC int sz_version_major(void);
@@ -297,6 +402,7 @@ SZ_DYNAMIC int sz_version_minor(void);
 SZ_DYNAMIC int sz_version_patch(void);
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
+SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
 
 #else
 
@@ -308,6 +414,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities(void) { return sz_capabilities_impleme
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
+SZ_PUBLIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
 
 #endif
 
