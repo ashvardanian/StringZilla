@@ -93,7 +93,7 @@
         "-enable-pretty-printing",
         "set print frame-arguments all",
         "set print asm-demangle on"
-      ],
+      ]
     },
     {
       "name": "Current C++ Benchmark",
@@ -182,7 +182,7 @@
         }
       ],
       "stopAtEntry": false,
-      "preLaunchTask": "Build Benchmarks: Debug",
+      "preLaunchTask": "Build Benchmarks: Debug"
     },
     {
       "name": "Current Python File",
@@ -199,20 +199,14 @@
       "program": "${file}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": [
-        "./leipzig1M.txt"
-      ],
+      "args": ["./leipzig1M.txt"]
     },
     {
       "name": "Current PyTest File",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": [
-        "${file}",
-        "-s",
-        "-x"
-      ],
+      "args": ["${file}", "-s", "-x"],
       "console": "integratedTerminal",
       "justMyCode": false
     }
