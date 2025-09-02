@@ -990,9 +990,11 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 
 #pragma region Helper Functions
 
+#if !defined(_MSC_VER)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC visibility push(hidden)
+#endif
 
 /*
  **********************************************************************************************************************
@@ -1246,6 +1248,7 @@ SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
 #pragma GCC pop_options
 #endif
 #endif
+#endif
 
 /**
  *  @brief  Byte-level equality comparison between two 64-bit integers.
@@ -1417,7 +1420,9 @@ SZ_INTERNAL void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *h
     sz_unused_(start && length && handle);
 }
 
+#if !defined(_MSC_VER)
 #pragma GCC visibility pop
+#endif
 #pragma endregion
 
 #pragma region Serial Implementation
@@ -1490,7 +1495,9 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #pragma endregion
 
 #ifdef __cplusplus
+#if !defined(_MSC_VER)
 #pragma GCC diagnostic pop
+#endif
 }
 #endif // __cplusplus
 

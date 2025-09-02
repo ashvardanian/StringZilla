@@ -311,13 +311,17 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+#if !defined(_MSC_VER)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
     sz_cptr_t const end = text;
     for (text += length; text != end;)
         if (sz_byteset_contains(set, *(text -= 1))) return text;
     return SZ_NULL_CHAR;
+#if !defined(_MSC_VER)
 #pragma GCC diagnostic pop
+#endif
 }
 
 /*  Find the first occurrence of a @b single-character needle in an arbitrary length haystack.
