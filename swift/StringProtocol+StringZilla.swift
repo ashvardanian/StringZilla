@@ -154,6 +154,15 @@ extension String.UTF8View: StringZillaViewable {
 }
 
 extension StringZillaViewable {
+    /// Computes a 64-bit hash of the string content using StringZilla's fast hash algorithm.
+    /// - Parameter seed: Optional seed value for the hash function (default: 0).
+    /// - Returns: A 64-bit unsigned integer hash value.
+    public func hash(seed: UInt64 = 0) -> UInt64 {
+        return withStringZillaScope { pointer, length in
+            sz_hash(pointer, length, seed)
+        }
+    }
+
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -254,5 +263,56 @@ extension StringZillaViewable {
             }
         }
         return result
+    }
+}
+
+/// A progressive hasher for computing StringZilla hashes incrementally.
+/// Use this class when you need to hash data that arrives in chunks or when building up a hash over time.
+public class StringZillaHasher {
+    private var state: sz_hash_state_t
+    private var isInitialized: Bool = false
+
+    /// Creates a new hasher with the specified seed.
+    /// - Parameter seed: The seed value for the hash function (default: 0).
+    public init(seed: UInt64 = 0) {
+        state = sz_hash_state_t()
+        sz_hash_state_init(&state, seed)
+        isInitialized = true
+    }
+
+    deinit {
+        // StringZilla hash state doesn't require explicit cleanup
+    }
+
+    /// Updates the hash state with additional string content.
+    /// - Parameter content: The string content to add to the hash.
+    /// - Returns: Self for method chaining.
+    @discardableResult
+    public func update<S: StringZillaViewable>(_ content: S) -> StringZillaHasher {
+        precondition(isInitialized, "Hasher has been finalized and cannot be updated")
+
+        content.withStringZillaScope { pointer, length in
+            sz_hash_state_stream(&state, pointer, length)
+        }
+        return self
+    }
+
+    /// Finalizes the hash computation and returns the result.
+    /// - Returns: The computed 64-bit hash value.
+    /// - Note: After calling this method, the hasher cannot be used for further updates.
+    public func finalize() -> UInt64 {
+        precondition(isInitialized, "Hasher has already been finalized")
+
+        let result = sz_hash_state_fold(&state)
+        isInitialized = false
+        return result
+    }
+
+    /// Resets the hasher to its initial state with the same seed.
+    /// - Parameter seed: Optional new seed value (if nil, uses the original seed).
+    public func reset(seed: UInt64? = nil) {
+        let newSeed = seed ?? 0  // Default to 0 if no seed provided
+        sz_hash_state_init(&state, newSeed)
+        isInitialized = true
     }
 }
