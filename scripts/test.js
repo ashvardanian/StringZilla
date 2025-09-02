@@ -214,3 +214,171 @@ test("Zero-Copy Performance Test", () => {
     const byteResult = stringzilla.findByte(largeHaystack, 97); // 'a'
     assert.strictEqual(byteResult, 0n);
 });
+
+test("Edge Cases - Empty Buffers", () => {
+    const haystack = Buffer.from("hello world");
+    const empty = Buffer.alloc(0);
+
+    // Finding empty in non-empty should return 0
+    assert.strictEqual(stringzilla.find(haystack, empty), 0n);
+    assert.strictEqual(stringzilla.findLast(haystack, empty), BigInt(haystack.length));
+
+    // Finding non-empty in empty should return -1
+    assert.strictEqual(stringzilla.find(empty, haystack), -1n);
+    assert.strictEqual(stringzilla.findLast(empty, haystack), -1n);
+
+    // Empty in empty
+    assert.strictEqual(stringzilla.find(empty, empty), 0n);
+    assert.strictEqual(stringzilla.count(empty, empty), 0n);
+});
+
+test("Find Byte - Boundary Values", () => {
+    const buffer = Buffer.from([0, 127, 128, 255]);
+
+    // Test boundary byte values
+    assert.strictEqual(stringzilla.findByte(buffer, 0), 0n);
+    assert.strictEqual(stringzilla.findByte(buffer, 127), 1n);
+    assert.strictEqual(stringzilla.findByte(buffer, 128), 2n);
+    assert.strictEqual(stringzilla.findByte(buffer, 255), 3n);
+
+    // Test not found
+    assert.strictEqual(stringzilla.findByte(buffer, 1), -1n);
+});
+
+test("UTF-8 Multi-byte Character Handling", () => {
+    const haystack = Buffer.from("Hello 世界 World");
+    const needle = Buffer.from("世界");
+
+    // Should work at byte level, not character level
+    const result = stringzilla.find(haystack, needle);
+    assert(result > 0n);
+
+    // Test with emoji
+    const emojiBuffer = Buffer.from("Hello 👋 World");
+    const emoji = Buffer.from("👋");
+    assert(stringzilla.find(emojiBuffer, emoji) > 0n);
+});
+
+test("Pattern at Buffer Boundaries", () => {
+    const haystack = Buffer.from("abcdefghijk");
+
+    // Pattern at start
+    assert.strictEqual(stringzilla.find(haystack, Buffer.from("abc")), 0n);
+
+    // Pattern at end
+    assert.strictEqual(stringzilla.find(haystack, Buffer.from("ijk")), 8n);
+    assert.strictEqual(stringzilla.findLast(haystack, Buffer.from("ijk")), 8n);
+
+    // Pattern spans entire buffer
+    assert.strictEqual(stringzilla.find(haystack, haystack), 0n);
+});
+
+test("Repeated Patterns", () => {
+    const haystack = Buffer.from("aaaaaaaaaa");
+    const needle = Buffer.from("aa");
+
+    // Test first and last occurrence
+    assert.strictEqual(stringzilla.find(haystack, needle), 0n);
+    assert.strictEqual(stringzilla.findLast(haystack, needle), 8n);
+
+    // Count with and without overlap
+    assert.strictEqual(stringzilla.count(haystack, needle, false), 5n);
+    assert.strictEqual(stringzilla.count(haystack, needle, true), 9n);
+});
+
+test("Find Byte From - Edge Cases", () => {
+    const haystack = Buffer.from("1234567890");
+
+    // Empty charset
+    const emptyCharset = Buffer.alloc(0);
+    assert.strictEqual(stringzilla.findByteFrom(haystack, emptyCharset), -1n);
+
+    // Charset with all possible bytes
+    const allBytes = Buffer.alloc(256);
+    for (let i = 0; i < 256; i++) allBytes[i] = i;
+    assert.strictEqual(stringzilla.findByteFrom(haystack, allBytes), 0n);
+
+    // Charset with duplicates
+    const duplicates = Buffer.from("1111");
+    assert.strictEqual(stringzilla.findByteFrom(haystack, duplicates), 0n);
+});
+
+test("Binary Data Handling", () => {
+    // Test with null bytes and binary data
+    const binaryData = Buffer.from([0x00, 0x01, 0x02, 0x00, 0x03, 0x00]);
+    const nullByte = Buffer.from([0x00]);
+
+    assert.strictEqual(stringzilla.find(binaryData, nullByte), 0n);
+    assert.strictEqual(stringzilla.findLast(binaryData, nullByte), 5n);
+    assert.strictEqual(stringzilla.count(binaryData, nullByte), 3n);
+
+    // Test hash consistency with binary data
+    const hash1 = stringzilla.hash(binaryData);
+    const hash2 = stringzilla.hash(binaryData);
+    assert.strictEqual(hash1, hash2);
+});
+
+test("Large Buffer Operations", () => {
+    const size = 100000; // 100KB (smaller than 1MB for faster tests)
+    const largeBuffer = Buffer.alloc(size);
+
+    // Fill with pattern
+    for (let i = 0; i < size; i++) {
+        largeBuffer[i] = i % 256;
+    }
+
+    // Test operations on large buffer
+    const pattern = Buffer.from([0, 1, 2, 3]);
+    assert(stringzilla.count(largeBuffer, pattern) > 0n);
+
+    // Test hash performance
+    const start = Date.now();
+    const hash = stringzilla.hash(largeBuffer);
+    const duration = Date.now() - start;
+    assert(duration < 100); // Should be fast
+    assert(typeof hash === "bigint");
+});
+
+test("Hasher - Incremental vs Single Shot", () => {
+    const data = Buffer.from("a".repeat(1000));
+
+    // Single shot
+    const hashSingle = stringzilla.hash(data);
+
+    // Progressive hashing with different chunk sizes should be consistent
+    const hasher1 = new stringzilla.Hasher();
+    hasher1.update(data.subarray(0, 100));
+    hasher1.update(data.subarray(100, 500));
+    hasher1.update(data.subarray(500));
+    const hashProgressive1 = hasher1.digest();
+
+    const hasher2 = new stringzilla.Hasher();
+    hasher2.update(data.subarray(0, 300));
+    hasher2.update(data.subarray(300));
+    const hashProgressive2 = hasher2.digest();
+
+    // Progressive hashing with same data should be consistent
+    assert.strictEqual(hashProgressive1, hashProgressive2);
+
+    // Test that single-shot and progressive produce valid hashes
+    assert.strictEqual(typeof hashSingle, "bigint");
+    assert.strictEqual(typeof hashProgressive1, "bigint");
+    assert(hashSingle > 0n);
+    assert(hashProgressive1 > 0n);
+});
+
+test("Compare - Special Cases", () => {
+    // Different lengths
+    assert(stringzilla.compare(Buffer.from("a"), Buffer.from("aa")) < 0);
+    assert(stringzilla.compare(Buffer.from("aa"), Buffer.from("a")) > 0);
+
+    // Empty buffers
+    assert.strictEqual(stringzilla.compare(Buffer.alloc(0), Buffer.alloc(0)), 0);
+    assert(stringzilla.compare(Buffer.alloc(0), Buffer.from("a")) < 0);
+    assert(stringzilla.compare(Buffer.from("a"), Buffer.alloc(0)) > 0);
+
+    // Binary data comparison
+    const binary1 = Buffer.from([0x00, 0x01, 0x02]);
+    const binary2 = Buffer.from([0x00, 0x01, 0x03]);
+    assert(stringzilla.compare(binary1, binary2) < 0);
+});
