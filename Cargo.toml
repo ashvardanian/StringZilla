@@ -1,8 +1,8 @@
 [package]
 name = "stringzilla"
-version = "3.8.4"
+version = "3.11.3"
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
-description = "Faster SIMD-accelerated string search, sorting, fingerprints, and edit distances"
+description = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 edition = "2021"
 license = "Apache-2.0"
 publish = true
@@ -23,5 +23,18 @@ include = ["/rust/**", "/c/**", "/include/**", "/build.rs"]
 name = "stringzilla"
 path = "rust/lib.rs"
 
+[features]
+default = []
+cpus = [
+    "allocator-api2",
+    "stringtape",
+] # Multi-threaded CPU backend (StringZillas)
+cuda = ["cpus"] # CUDA GPU backend (includes multi-threaded CPU backend)
+rocm = ["cpus"] # ROCm GPU backend (includes multi-threaded CPU backend)
+
+[dependencies]
+allocator-api2 = { version = "0.3.0", optional = true }
+stringtape = { version = "0.4.0", optional = true }
+
 [build-dependencies]
-cc = "1.0"
+cc = "1.2.33"

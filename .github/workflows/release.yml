@@ -18,33 +18,46 @@ permissions:
 
 jobs:
   versioning:
-    name: Semantic Release
-    runs-on: ubuntu-22.04
+    name: Update Version
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Run TinySemVer
+        uses: ashvardanian/tinysemver@v2.1.1
         with:
-          node-version: 20
-      - name: Set up Cargo
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - run: npm install --ignore-scripts --save-dev --prefix ./package-ci @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx --prefix ./package-ci semantic-release
+          verbose: "true"
+          version-file: "VERSION"
+          update-version-in: |
+            Cargo.toml:^version = "(\d+\.\d+\.\d+)"
+            Cargo.lock:name = "stringzilla"\nversion = "(\d+\.\d+\.\d+)"
+            package.json:"version": "(\d+\.\d+\.\d+)"
+            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+          update-major-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+          update-minor-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+          update-patch-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+          dry-run: "false"
+          push: "true"
+          create-release: "true"
+          github-token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
   rebase:
     name: Rebase Dev. Branch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/main'
     needs: versioning
     steps:
       - name: Checkout the latest code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Perform rebase
         run: |
@@ -60,59 +73,293 @@ jobs:
           unprotect_reviews: True
           force: True
 
-  build_wheels:
-    name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
+  build_wheels_stringzilla:
+    name: Build StringZilla ${{ matrix.python-version }} for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: versioning
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["36", "37", "38", "39", "310", "311", "312"]
+        os: [ubuntu-24.04, macos-13, windows-2022]
+        python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "main"
+          submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.2.0
         with:
           python-version: 3.x
       - name: Setup QEMU
-        if: matrix.os == 'ubuntu-latest' # We only need QEMU for Linux builds
+        if: matrix.os == 'ubuntu-24.04' # We only need QEMU for Linux builds
         uses: docker/setup-qemu-action@v3
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          SZ_TARGET: stringzilla
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-stringzilla-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  publish_python:
-    name: Publish Python
-    needs: build_wheels
-    runs-on: ubuntu-20.04
+  build_wheels_stringzillas_cpus:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: versioning
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-13, windows-2022]
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Setup QEMU
+        if: matrix.os == 'ubuntu-24.04' # We only need QEMU for Linux builds
+        uses: docker/setup-qemu-action@v3
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          SZ_TARGET: stringzillas-cpus
+          # Limit to 64-bit architectures only
+          CIBW_ARCHS_LINUX: x86_64 aarch64
+          CIBW_ARCHS_MACOS: x86_64 arm64
+          CIBW_ARCHS_WINDOWS: AMD64 ARM64
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzillas-cpus-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_wheels_stringzillas_cuda:
+    name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: versioning
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]  # Linux only
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      # Install CUDA Toolkit
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.26
+        with:
+          cuda: "12.9.1"
+          method: "network"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          SZ_TARGET: stringzillas-cuda
+          # Limit to 64-bit architectures only
+          CIBW_ARCHS_LINUX: x86_64 aarch64
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzillas-cuda-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_sdist_stringzilla:
+    name: Build StringZilla Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzilla
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist-stringzilla
+          path: dist/*.tar.gz
+          retention-days: 1
+
+  build_sdist_stringzillas_cpus:
+    name: Build StringZillas-CPUs Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist-stringzillas-cpus
+          path: dist/*.tar.gz
+          retention-days: 1
+
+  build_sdist_stringzillas_cuda:
+    name: Build StringZillas-CUDA Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzillas-cuda
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist-stringzillas-cuda
+          path: dist/*.tar.gz
+          retention-days: 1
+
+  publish_pypi_stringzilla:
+    name: Publish StringZilla to PyPI
+    needs: [build_wheels_stringzilla, build_sdist_stringzilla]
+    runs-on: ubuntu-24.04
     environment:
-      name: pypi
+      name: pypi-stringzilla
       url: https://pypi.org/p/stringzilla
     permissions:
       id-token: write
 
     steps:
-      - name: Download artifacts
+      - name: Download wheels
         uses: actions/download-artifact@v4
         with:
-          # unpacks all CIBW artifacts into dist/
-          pattern: cibw-*
+          # unpacks all StringZilla wheel artifacts into dist/
+          pattern: cibw-wheels-stringzilla-*
           path: dist
           merge-multiple: true
 
-      - name: Publish to PyPi
+      - name: Download source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist-stringzilla
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true
+          print-hash: true
+
+  publish_pypi_stringzillas_cpus:
+    name: Publish StringZillas-CPUs to PyPI
+    needs: [build_wheels_stringzillas_cpus, build_sdist_stringzillas_cpus]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi-stringzillas-cpus
+      url: https://pypi.org/p/stringzillas-cpus
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          # unpacks all StringZillas-CPUs wheel artifacts into dist/
+          pattern: cibw-wheels-stringzillas-cpus-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist-stringzillas-cpus
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true
+          print-hash: true
+
+  publish_pypi_stringzillas_cuda:
+    name: Publish StringZillas-CUDA to PyPI
+    needs: [build_wheels_stringzillas_cuda, build_sdist_stringzillas_cuda]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi-stringzillas-cuda
+      url: https://pypi.org/p/stringzillas-cuda
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          # unpacks all StringZillas-CUDA wheel artifacts into dist/
+          pattern: cibw-wheels-stringzillas-cuda-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist-stringzillas-cuda
+          path: dist
+
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
@@ -124,10 +371,10 @@ jobs:
     runs-on: ubuntu-22.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -140,9 +387,9 @@ jobs:
   # publish_javascript:
   #   name: Publish JavaScript
   #   needs: versioning
-  #   runs-on: ubuntu-latest
+  #   runs-on: ubuntu-24.04
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v5
   #       with:
   #         ref: 'main'
   #     - run: git submodule update --init --recursive
@@ -177,10 +424,11 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
+          submodules: recursive
 
       - name: Get version
         id: set_version
@@ -212,15 +460,15 @@ jobs:
 
           cmake --build build_release --config Release
 
-          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
-          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
-          touch "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
-          mkdir "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
-          cp include/stringzilla/stringzilla.h "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
-          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          dpkg-deb --build "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
+          touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
+          mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
+          cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
+          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
       - name: Upload library
         uses: xresloader/upload-to-github-release@v1
@@ -247,11 +495,11 @@ jobs:
       matrix:
         arch: [x64, x86]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v1.13
@@ -271,32 +519,32 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release
-          tar -cvf "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzillite.dll" "./include/stringzilla/stringzilla.h"
+          tar -cvf "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_shared.dll" "./include/stringzilla/stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          file: "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
+          file: "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
           update_latest_release: true
 
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
-    runs-on: macos-12
+    runs-on: macos-14
     needs: versioning
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x86_64]
+        arch: [arm64] # Only Apple Silicon for now
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
 
       - name: Get version
         id: set_version
@@ -306,9 +554,9 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release        
-          zip -r stringzillite_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
+          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1

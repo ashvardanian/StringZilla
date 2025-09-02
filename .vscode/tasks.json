@@ -1,41 +1,83 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Build with GCC: Debug",
-            "command": "./.github/workflows/build_tools.sh Debug GCC",
-            "type": "shell",
-            "problemMatcher": [
-                "$gcc"
-            ]
-        },
-        {
-            "label": "Build with GCC: Release",
-            "command": "./.github/workflows/build_tools.sh Release GCC",
-            "type": "shell",
-            "problemMatcher": [
-                "$gcc"
-            ]
-        },
-        {
-            "label": "Build with LLVM: Debug",
-            "command": "./.github/workflows/build_tools.sh Debug LLVM",
-            "type": "shell"
-        },
-        {
-            "label": "Build with LLVM: Release",
-            "command": "./.github/workflows/build_tools.sh Release LLVM",
-            "type": "shell"
-        },
-        {
-            "label": "Build with MSVC: Debug",
-            "command": "./.github/workflows/build_tools.sh Debug MSVC",
-            "type": "shell"
-        },
-        {
-            "label": "Build with MSVC: Release",
-            "command": "./.github/workflows/build_tools.sh Release MSVC",
-            "type": "shell"
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Test: Debug C++",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzilla_test_cpp20",
+      "args": [],
+      "type": "shell",
+      "osx": {
+        "environment": [
+          {
+            "name": "CMAKE_CXX_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang++"
+          },
+          {
+            "name": "CMAKE_C_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang"
+          }
+        ]
+      }
+    },
+    {
+      "label": "Build Test: Debug Parallel C++",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzillas_test_cpp20",
+      "args": [],
+      "type": "shell",
+      "osx": {
+        "environment": [
+          {
+            "name": "CMAKE_CXX_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang++"
+          },
+          {
+            "name": "CMAKE_C_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang"
+          }
+        ]
+      }
+    },
+    {
+      "label": "Build Test: Debug CUDA",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzillas_test_cu20",
+      "args": [],
+      "type": "shell"
+    },
+    {
+      "label": "Build Benchmarks: Debug",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_debug && cmake --build build_debug --config Debug",
+      "args": [],
+      "type": "shell",
+      "osx": {
+        "environment": [
+          {
+            "name": "CMAKE_CXX_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang++"
+          },
+          {
+            "name": "CMAKE_C_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang"
+          }
+        ]
+      }
+    },
+    {
+      "label": "Build Benchmarks: Release",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release && cmake --build build_release --config Release",
+      "args": [],
+      "type": "shell",
+      "osx": {
+        "environment": [
+          {
+            "name": "CMAKE_CXX_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang++"
+          },
+          {
+            "name": "CMAKE_C_COMPILER",
+            "value": "$(brew --prefix llvm)/bin/clang"
+          }
+        ]
+      }
+    }
+  ]
 }

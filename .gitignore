@@ -2,6 +2,7 @@
 build/
 build_debug/
 build_release/
+build_relwithdebinfo/
 build_artifacts*
 
 # Yes, everyone loves keeping this file in the history.
@@ -29,8 +30,20 @@ CMakeFiles
 .venv/*
 node_modules/
 .vs/
+*.tar.gz
 
 # Recommended datasets
+utf8.txt
 leipzig1M.txt
 enwik9.txt
 xlsum.csv
+acgt_100.txt
+acgt_100k.txt
+acgt_10k.txt
+acgt_10m.txt
+acgt_1k.txt
+acgt_1m.txt
+
+# StringZilla-specific log files
+/failed_sz_*
+/.cache/

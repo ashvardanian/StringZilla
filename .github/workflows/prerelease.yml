@@ -10,7 +10,7 @@ env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
   PYTHON_VERSION: 3.11
-  SWIFT_VERSION: 5.9
+  SWIFT_VERSION: 6.0
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -18,6 +18,32 @@ permissions:
   contents: read
 
 jobs:
+  versioning:
+    name: Update Version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run TinySemVer
+        uses: ashvardanian/tinysemver@v2.1.1
+        with:
+          verbose: "true"
+          version-file: "VERSION"
+          update-version-in: |
+            Cargo.toml:^version = "(\d+\.\d+\.\d+)"
+            package.json:"version": "(\d+\.\d+\.\d+)"
+            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+          update-major-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+          update-minor-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+          update-patch-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+          dry-run: "true"
+
   test_ubuntu_gcc:
     name: Ubuntu (GCC 12)
     runs-on: ubuntu-22.04
@@ -26,7 +52,9 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
@@ -34,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake build-essential libjemalloc-dev libomp-dev gcc-12 g++-12
+          sudo apt install -y cmake build-essential gcc-12 g++-12
 
       - name: Build C/C++
         run: |
@@ -61,11 +89,21 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+        env:
+          DATASET_PATH: ./README.md
+        # Don't overload GitHub with our benchmarks.
+        # The results in such an unstable environment will be meaningless anyway.
+        if: 0
+
+      - name: Test Parallel Algorithms on Real World Data
+        run: |
+          build_artifacts/stringzillas_bench_similarities_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
+          build_artifacts/stringzillas_bench_fingerprints_cpp20 ${DATASET_PATH} # for multi-needle search in many strings
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -74,7 +112,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -82,8 +120,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+      - name: Log CPU and Python capabilities (StringZilla)
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== StringZilla capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          PY
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # JavaScript
       # - name: Set up Node.js
@@ -108,7 +160,9 @@ jobs:
       CXX: clang++-16
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
@@ -145,11 +199,10 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -158,7 +211,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -166,8 +219,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+      - name: Log CPU and Python capabilities (StringZilla)
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== StringZilla capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          PY
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Test Rust
@@ -179,22 +246,180 @@ jobs:
         # Swift
         # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
       # - name: Set up Swift ${{ env.SWIFT_VERSION }}
-      #   uses: swift-actions/setup-swift@v1
+      #   uses: swift-actions/setup-swift@v2.3.0
       #   with:
       #     swift-version: ${{ env.SWIFT_VERSION }}
       # - name: Build Swift
       #   run: swift build -c release --static-swift-stdlib
       # - name: Test Swift
-      #   run: swift test -c release --enable-test-discovery
+      #   run: swift test -c release
+
+  test_ubuntu_cpus:
+    name: Ubuntu (StringZillas-CPUs)
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-12
+      CXX: g++-12
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+        # C/C++
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential gcc-12 g++-12
+
+      - name: Build C/C++
+        run: |
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+            echo "Compilation failed. Here are the logs:"
+            cat build_artifacts/logs.txt
+            echo "The original compilation commands:"
+            cat build_artifacts/compile_commands.json
+            echo "CPU Features:"
+            lscpu
+            echo "GCC Version:"
+            gcc-12 --version
+            echo "G++ Version:"
+            g++-12 --version
+            exit 1
+          }
+      - name: Test C++
+        run: build_artifacts/stringzilla_test_cpp20
+
+        # Python StringZillas-CPUs
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Python StringZillas-CPUs
+        run: |
+          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
+          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
+          SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
+      - name: Log CPU and Python capabilities
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== Python capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          import stringzillas as szs
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("stringzillas.__capabilities__:", szs.__capabilities__)
+          PY
+      - name: Test Python StringZillas-CPUs
+        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
+
+  test_ubuntu_cuda:
+    name: Ubuntu (StringZillas-CUDA)
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-12
+      CXX: g++-12
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+        # Install CUDA Toolkit
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.26
+        with:
+          cuda: "12.9.1"
+          method: "network"
+
+        # C/C++
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential gcc-12 g++-12
+
+      - name: Build C/C++ with CUDA
+        run: |
+          # Note: Using Release build type instead of RelWithDebInfo
+          # Optimized debugging not supported in CUDA and results in PTXAS fatal errors
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config Release > build_artifacts/logs.txt 2>&1 || {
+            echo "Compilation failed. Here are the logs:"
+            cat build_artifacts/logs.txt
+            echo "The original compilation commands:"
+            cat build_artifacts/compile_commands.json
+            echo "CPU Features:"
+            lscpu
+            echo "CUDA Version:"
+            nvcc --version
+            echo "GCC Version:"
+            gcc-12 --version
+            echo "G++ Version:"
+            g++-12 --version
+            exit 1
+          }
+      - name: Test C++
+        run: build_artifacts/stringzilla_test_cpp20
+
+        # Python StringZillas-CUDA
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Python StringZillas-CUDA
+        run: |
+          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
+          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
+          SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
+      - name: Log CPU/GPU and Python capabilities
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== nvcc/nvidia-smi ===="
+          nvcc --version || true
+          nvidia-smi || true
+          echo "==== Python capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          import stringzillas as szs
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("stringzillas.__capabilities__:", szs.__capabilities__)
+          PY
+      - name: Test Python StringZillas-CUDA
+        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
   # Temporary workaround to run Swift tests on Linux
   # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
   test_ubuntu_swift:
     name: Swift on Linux
     runs-on: ubuntu-22.04
-    container: swift:5.9
+    container: swift:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
       - name: Test Swift
         run: swift test
 
@@ -218,7 +443,9 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
         # C/C++
         # We need to install the cross-compilation toolchain for ARM64 and ARMHF
@@ -230,7 +457,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
-        
+
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
@@ -247,24 +474,26 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
 
         # We can't run the produced builds, but we can make sure they exist
-      - name: Test artifacts presense
+      - name: Test artifacts presence
         run: |
-          test -e build_artifacts/libstringzillite.so
+          test -e build_artifacts/libstringzilla_bare.so
           test -e build_artifacts/libstringzilla_shared.so
           test -e build_artifacts/stringzilla_test_cpp20
 
   test_macos:
     name: MacOS
-    runs-on: macos-12
+    runs-on: macos-14
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
         # C/C++
       - name: Install dependencies
         run: |
           brew update
-          brew install cmake
+          brew reinstall cmake
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
@@ -277,11 +506,10 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp17
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -290,7 +518,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -298,12 +526,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v1
+        uses: swift-actions/setup-swift@v2.3.0
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
       - name: Build Swift
@@ -320,9 +550,11 @@ jobs:
 
   test_windows:
     name: Windows
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build C/C++
@@ -348,11 +580,10 @@ jobs:
         run: .\build_artifacts\stringzilla_test_cpp20.exe
       - name: Test on Real World Data
         run: |
-          .\build_artifacts\stringzilla_bench_search.exe ${DATASET_PATH}     # for substring search
-          .\build_artifacts\stringzilla_bench_token.exe ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          .\build_artifacts\stringzilla_bench_similarity.exe ${DATASET_PATH} # for edit distances and alignment scores
-          .\build_artifacts\stringzilla_bench_sort.exe ${DATASET_PATH}       # for sorting arrays of strings
-          .\build_artifacts\stringzilla_bench_container.exe ${DATASET_PATH}  # for STL containers with string keys
+          .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
+          .\build_artifacts\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          .\build_artifacts\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
+          .\build_artifacts\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -361,7 +592,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -370,16 +601,26 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
   test_alpine:
     name: Alpine Linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
-      - uses: actions/checkout@v3
+      - name: Install Git for checkout
+        run: |
+          apk add --no-cache git openssh ca-certificates
+          git --version
+      - name: Log Alpine and Git versions
+        run: |
+          echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
+          git --version || echo "git not installed"
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
         # C/C++
       - name: Build C/C++
@@ -401,7 +642,7 @@ jobs:
           pip install --break-system-packages pytest pytest-repeat
           pip install --break-system-packages .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
         # Rust
       - name: Test Rust
@@ -413,32 +654,29 @@ jobs:
   build_wheels:
     name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    needs:
-      [
-        test_ubuntu_gcc,
-        test_ubuntu_clang,
-        test_macos,
-        test_windows,
-        test_alpine,
-      ]
+    needs: [test_ubuntu_gcc, test_ubuntu_clang, test_macos, test_windows]
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["36", "37", "38", "39", "310", "311", "312"]
+        os: [ubuntu-24.04, macos-13, windows-2022]
+        python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: 3.x
 
         # We only need QEMU for Linux builds
       - name: Setup QEMU
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         uses: docker/setup-qemu-action@v3
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
