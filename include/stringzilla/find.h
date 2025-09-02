@@ -439,16 +439,29 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     for (; h + 9 <= h_end; h += 8) {
+#if !SZ_IS_BIG_ENDIAN_
         h_even_vec.u64 = *(sz_u64_t *)h;
         h_odd_vec.u64 = (h_even_vec.u64 >> 8) | ((sz_u64_t)h[8] << 56);
+#else
+        h_even_vec.u64 = *(sz_u64_t *)h;
+        h_odd_vec.u64 = (h_even_vec.u64 << 8) | ((sz_u64_t)h[8] >> 56);
+#endif
         matches_even_vec = sz_u64_each_2byte_equal_(h_even_vec, n_vec);
         matches_odd_vec = sz_u64_each_2byte_equal_(h_odd_vec, n_vec);
 
+#if !SZ_IS_BIG_ENDIAN_
         matches_even_vec.u64 >>= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
         }
+#else
+        matches_even_vec.u64 <<= 8;
+        if (matches_even_vec.u64 + matches_odd_vec.u64) {
+            sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
+            return h + sz_u64_clz(match_indicators) / 8;
+        }
+#endif
     }
 
     for (; h + 2 <= h_end; ++h)
@@ -498,21 +511,36 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
     for (; h + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= h_end; h += sizeof(sz_u64_t)) {
         h_page_current = *(sz_u64_t *)h;
         h_page_next = *(sz_u32_t *)(h + 8);
+#if !SZ_IS_BIG_ENDIAN_
         h0_vec.u64 = (h_page_current);
         h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
         h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
         h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
+#else
+        h0_vec.u64 = (h_page_current);
+        h1_vec.u64 = (h_page_current << 8) | (h_page_next >> 24);
+        h2_vec.u64 = (h_page_current << 16) | (h_page_next >> 16);
+        h3_vec.u64 = (h_page_current << 24) | (h_page_next >> 8);
+#endif
         matches0_vec = sz_u64_each_4byte_equal_(h0_vec, n_vec);
         matches1_vec = sz_u64_each_4byte_equal_(h1_vec, n_vec);
         matches2_vec = sz_u64_each_4byte_equal_(h2_vec, n_vec);
         matches3_vec = sz_u64_each_4byte_equal_(h3_vec, n_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64) {
+#if !SZ_IS_BIG_ENDIAN_
             matches0_vec.u64 >>= 24;
             matches1_vec.u64 >>= 16;
             matches2_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
+#else
+            matches0_vec.u64 <<= 24;
+            matches1_vec.u64 <<= 16;
+            matches2_vec.u64 <<= 8;
+            sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
+            return h + sz_u64_clz(match_indicators) / 8;
+#endif
         }
     }
 
@@ -567,10 +595,17 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
         h_page_current = *(sz_u64_t *)h;
         h_page_next = *(sz_u16_t *)(h + 8);
         h0_vec.u64 = (h_page_current);
+#if !SZ_IS_BIG_ENDIAN_
         h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
         h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
         h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
         h4_vec.u64 = (h_page_current >> 32) | (h_page_next << 32);
+#else
+        h1_vec.u64 = (h_page_current << 8) | (h_page_next >> 8);
+        h2_vec.u64 = (h_page_current << 16) | (h_page_next >> 16);
+        h3_vec.u64 = (h_page_current << 24) | (h_page_next >> 24);
+        h4_vec.u64 = (h_page_current << 32) | (h_page_next >> 32);
+#endif
         matches0_vec = sz_u64_each_3byte_equal_(h0_vec, n_vec);
         matches1_vec = sz_u64_each_3byte_equal_(h1_vec, n_vec);
         matches2_vec = sz_u64_each_3byte_equal_(h2_vec, n_vec);
@@ -578,6 +613,7 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
         matches4_vec = sz_u64_each_3byte_equal_(h4_vec, n_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64) {
+#if !SZ_IS_BIG_ENDIAN_
             matches0_vec.u64 >>= 16;
             matches1_vec.u64 >>= 8;
             matches3_vec.u64 <<= 8;
@@ -585,6 +621,15 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
             sz_u64_t match_indicators =
                 matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
+#else
+            matches0_vec.u64 <<= 16;
+            matches1_vec.u64 <<= 8;
+            matches3_vec.u64 >>= 8;
+            matches4_vec.u64 >>= 16;
+            sz_u64_t match_indicators =
+                matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
+            return h + sz_u64_clz(match_indicators) / 8;
+#endif
         }
     }
 
@@ -768,17 +813,8 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
 
-#if SZ_IS_BIG_ENDIAN_
     sz_find_t backends[] = {
-        sz_find_1byte_serial_,
-        sz_find_horspool_upto_256bytes_serial_,
-        sz_find_horspool_over_256bytes_serial_,
-    };
-
-    return backends[(n_length > 1) + (n_length > 256)](h, h_length, n, n_length);
-#else
-    sz_find_t backends[] = {
-        // For very short strings brute-force SWAR makes sense.
+        // For very short strings brute-force SWAR makes sense - now optimized for both endianness!
         sz_find_1byte_serial_,
         sz_find_2byte_serial_,
         sz_find_3byte_serial_,
@@ -797,7 +833,6 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 4) +
         // For longer needles - use skip tables.
         (n_length > 8) + (n_length > 256)](h, h_length, n, n_length);
-#endif
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
