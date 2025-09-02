@@ -157,7 +157,7 @@ jobs:
     needs: versioning
     strategy:
       matrix:
-        os: [ubuntu-24.04]  # Linux only
+        os: [ubuntu-24.04] # Linux only
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
       - uses: actions/checkout@v5
@@ -383,25 +383,32 @@ jobs:
         with:
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # Let's not publish the JavaScript package for now
-  # publish_javascript:
-  #   name: Publish JavaScript
-  #   needs: versioning
-  #   runs-on: ubuntu-24.04
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #       with:
-  #         ref: 'main'
-  #     - run: git submodule update --init --recursive
-  #     - uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 18
-  #     - run: npm install
-  #     - run: npm ci
-  #     - run: npm test
-  #     - uses: JS-DevTools/npm-publish@v2
-  #       with:
-  #         token: ${{ secrets.NPM_TOKEN }}
+  # JavaScript
+  publish_javascript:
+    name: Publish JavaScript
+    needs: versioning
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: "main"
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Clean install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Publish to NPM
+        uses: JS-DevTools/npm-publish@v3
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
 
   create_linux_deb_package:
     name: Create Debian Package for ${{ matrix.arch }}

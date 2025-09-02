@@ -138,12 +138,12 @@ jobs:
         run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # JavaScript
-      # - name: Set up Node.js
-      #   uses: actions/setup-node
-      #   with:
-      #     node-version: 18
-      # - name: Build and test JavaScript
-      #   run: npm ci && npm test
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build and test JavaScript
+        run: npm ci && npm test
 
       # Rust
       - name: Test Rust
