@@ -903,6 +903,31 @@ void test_stl_compatibility_for_updates() {
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
+    // Test C++23 resize and overwrite functionality
+    assert_scoped(str s("hello"),
+                  s.resize_and_overwrite(10,
+                                         [](char *p, std::size_t count) noexcept {
+                                             std::memset(p, 'X', count);
+                                             return count;
+                                         }),
+                  s.size() == 10 && s == "XXXXXXXXXX");
+
+    assert_scoped(str s("test"),
+                  s.resize_and_overwrite(8,
+                                         [](char *p, std::size_t) noexcept {
+                                             std::strcpy(p, "ABCDE");
+                                             return 5;
+                                         }),
+                  s.size() == 5 && s == "ABCDE");
+
+    assert_scoped(str s("orig"),
+                  s.try_resize_and_overwrite(6,
+                                             [](char *p, std::size_t count) noexcept {
+                                                 std::strcpy(p, "works!");
+                                                 return count;
+                                             }),
+                  s.size() == 6 && s == "works!");
+
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
     if (SZ_IS_64BIT_) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);

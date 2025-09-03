@@ -2815,6 +2815,52 @@ class basic_string {
         return true;
     }
 
+    /**
+     *  @brief Resizes the string to a specified number of characters without initializing new elements.
+     *         The provided callback is called to overwrite the contents of the resized string.
+     *  @param[in] count The new size of the string.
+     *  @param[in] operation A callback that receives a pointer and the new size, and returns the actual new size.
+     *  @return `true` if the resizing was successful, `false` otherwise.
+     *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
+     */
+    template <typename operation_type_>
+    bool try_resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
+        if (count > max_size()) return false;
+
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_external;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+
+        // Allocate more space if needed, without initializing
+        if (count >= string_space) {
+            if (_with_alloc([&](sz_alloc_type &alloc) {
+                    return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
+                                                                                                  : sz_bad_alloc_k;
+                }) != status_t::success_k)
+                return false;
+            sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+        }
+
+        // Call the user's operation to populate the buffer
+        // The operation receives a mutable pointer to the data and the requested count
+        size_type actual_count = operation(reinterpret_cast<char_type *>(string_start), count);
+
+        // Clamp the actual count to the requested count for safety
+        if (actual_count > count) actual_count = count;
+
+        // Update the string length appropriately
+        if (actual_count > string_length) {
+            string_start[actual_count] = '\0';
+            // ! Knowing the layout of the string, we can perform this operation safely,
+            // ! even if its located on stack.
+            string_.external.length += actual_count - string_length;
+        }
+        else { sz_string_erase(&string_, actual_count, SZ_SIZE_MAX); }
+
+        return true;
+    }
 #pragma endregion
 
 #pragma region STL Interfaces
@@ -2830,6 +2876,22 @@ class basic_string {
     void resize(size_type count, value_type character = '\0') noexcept(false) {
         if (count > max_size()) throw std::length_error("sz::basic_string::resize");
         if (!try_resize(count, character)) throw std::bad_alloc();
+    }
+
+    /**
+     *  @brief Resizes the string to a specified number of characters without initializing new elements.
+     *         The provided callback is called to overwrite the contents of the resized string.
+     *  @param[in] count The new size of the string.
+     *  @param[in] operation A callback that receives a pointer and the new size, and returns the actual new size.
+     *  @throw `std::length_error` if the string is too long.
+     *  @throw `std::bad_alloc` if the allocation fails.
+     *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
+
+     */
+    template <typename operation_type_>
+    void resize_and_overwrite(size_type count, operation_type_ operation) noexcept(false) {
+        if (count > max_size()) throw std::length_error("sz::basic_string::resize_and_overwrite");
+        if (!try_resize_and_overwrite(count, operation)) throw std::bad_alloc();
     }
 
     /**
