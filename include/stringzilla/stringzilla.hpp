@@ -1382,6 +1382,8 @@ class basic_string_slice {
      */
     void remove_suffix(size_type n) noexcept { assert(n <= size()), length_ -= n; }
 
+#if !SZ_AVOID_STL
+
     /**  @brief Added for STL compatibility. */
     string_slice substr() const noexcept { return *this; }
 
@@ -1416,6 +1418,8 @@ class basic_string_slice {
         sz_copy((sz_ptr_t)destination, start_ + n, count);
         return count;
     }
+
+#endif // !SZ_AVOID_STL
 
 #pragma endregion
 
@@ -1957,7 +1961,7 @@ class basic_string_slice {
  *      * `sat`, `sub`, and element access has non-const overloads returning references to mutable objects.
  *
  *  Functions defined for `basic_string`, but not present in `basic_string_slice`:
- *      * `replace`, `insert`, `erase`, `append`, `push_back`, `pop_back`, `resize`, `shrink_to_fit`... from STL,
+ *      * `replace`, `insert`, `erase`, `append`, `push_back`, `pop_back`, `resize`
  *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
  *      * `translate` - character mapping,
@@ -2177,8 +2181,6 @@ class basic_string {
 
 #endif
 
-#endif
-
     template <typename first_type, typename second_type>
     explicit basic_string(concatenation<first_type, second_type> const &expression) noexcept(false) {
         raise(_with_alloc([&](sz_alloc_type &alloc) {
@@ -2194,6 +2196,8 @@ class basic_string {
         if (!try_assign(expression)) throw std::bad_alloc();
         return *this;
     }
+
+#endif // !SZ_AVOID_STL
 
 #pragma endregion
 
@@ -2229,6 +2233,8 @@ class basic_string {
     pointer c_str() noexcept { return string_.internal.start; }
     const_pointer c_str() const noexcept { return string_.internal.start; }
 
+#if !SZ_AVOID_STL
+
     reference at(size_type pos) noexcept(false) {
         if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
         return string_.internal.start[pos];
@@ -2237,6 +2243,8 @@ class basic_string {
         if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
         return string_.internal.start[pos];
     }
+
+#endif // !SZ_AVOID_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
     size_type size() const noexcept { return view().size(); }
@@ -2869,6 +2877,25 @@ class basic_string {
     void clear() noexcept { sz_string_erase(&string_, 0, SZ_SIZE_MAX); }
 
     /**
+     *  @brief Erases @b (in-place) the given range of characters.
+     *  @return Iterator pointing following the erased character, or end() if no such character exists.
+     */
+    iterator erase(const_iterator first, const_iterator last) noexcept {
+        auto start = begin();
+        auto offset = first - start;
+        sz_string_erase(&string_, offset, last - first);
+        return start + offset;
+    }
+
+    /**
+     *  @brief Erases @b (in-place) the one character at a given postion.
+     *  @return Iterator pointing following the erased character, or end() if no such character exists.
+     */
+    iterator erase(const_iterator pos) noexcept { return erase(pos, pos + 1); }
+
+#if !SZ_AVOID_STL
+
+    /**
      *  @brief Resizes the string to match @p count, filling the new space with the given @p character.
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
@@ -3033,23 +3060,6 @@ class basic_string {
         sz_string_erase(&string_, pos, count);
         return *this;
     }
-
-    /**
-     *  @brief Erases @b (in-place) the given range of characters.
-     *  @return Iterator pointing following the erased character, or end() if no such character exists.
-     */
-    iterator erase(const_iterator first, const_iterator last) noexcept {
-        auto start = begin();
-        auto offset = first - start;
-        sz_string_erase(&string_, offset, last - first);
-        return start + offset;
-    }
-
-    /**
-     *  @brief Erases @b (in-place) the one character at a given postion.
-     *  @return Iterator pointing following the erased character, or end() if no such character exists.
-     */
-    iterator erase(const_iterator pos) noexcept { return erase(pos, pos + 1); }
 
     /**
      *  @brief Replaces @b (in-place) a range of characters with a given string.
@@ -3346,6 +3356,7 @@ class basic_string {
         return basic_string {concatenation<string_view, string_view> {view(), string_view(other)}};
     }
 
+#endif
 #pragma endregion
 #pragma endregion
 
