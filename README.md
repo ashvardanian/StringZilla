@@ -314,17 +314,17 @@ Both layers are designed to be extremely portable:
 Not all features are available across all bindings.
 Consider contributing, if you need a feature that's not yet implemented.
 
-|                                | Maturity | C 99  | C++ 11 | Python | Rust  |  JS   | Swift |
-| :----------------------------- | :------: | :---: | :----: | :----: | :---: | :---: | :---: |
-| Substring Search               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
-| Character Set Search           |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
-| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ⚪   |   ⚪   |
-| Streaming Hashes               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅    |   ❌    |   ⚪   |   ❌   |   ❌   |
-| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ❌   |   ⚪   |
-|                                |          |       |        |        |       |       |       |  |
-| Parallel Similarity Scoring    |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ⚪   |   ✅   |
-| Parallel Rolling Fingerprints  |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ✅   |   ⚪   |
+|                                | Maturity |   C   |  C++  | Python | Rust  |  JS   | Swift |
+| :----------------------------- | :------: | :---: | :---: | :----: | :---: | :---: | :---: |
+| Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
+| Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
+| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
+| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |
+| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |
+|                                |          |       |       |        |       |       |       |  |
+| Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
+| Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -336,12 +336,20 @@ Consider contributing, if you need a feature that's not yet implemented.
 ## Quick Start: Python 🐍
 
 Python bindings are available on PyPI for Python 3.8+, and can be installed with `pip`.
+
+```bash
+pip install stringzilla         # for serial algorithms
+pip install stringzillas-cpus   # for parallel multi-CPU backends
+pip install stringzillas-cuda   # for parallel Nvidia GPU backend
+```
+
 You can immediately check the installed version and the used hardware capabilities with following commands:
 
 ```bash
-pip install stringzilla
 python -c "import stringzilla; print(stringzilla.__version__)"
-python -c "import stringzilla; print(stringzilla.__capabilities__)"
+python -c "import stringzillas; print(stringzillas.__version__)"
+python -c "import stringzilla; print(stringzilla.__capabilities__)"     # for serial algorithms
+python -c "import stringzillas; print(stringzillas.__capabilities__)"   # for parallel algorithms
 ```
 
 ### Basic Usage
@@ -492,40 +500,65 @@ offset: int = sz.find("haystack", "needle", start=0, end=sys.maxsize)
 count: int = sz.count("haystack", "needle", start=0, end=sys.maxsize, allowoverlap=False)
 ```
 
-### Edit Distances
+### Similarity Scores
+
+StringZilla exposes high-performance, batch-oriented similarity via the `stringzillas` module. 
+Use `DeviceScope` to pick hardware and optionally limit capabilities per engine.
 
 ```py
-assert sz.levenshtein_distance("apple", "aple") == 1 # skip one ASCII character
-assert sz.levenshtein_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one rune
-assert sz.levenshtein_distance_unicode("αβγδ", "αγδ") == 1 # one unicode rune
+import stringzilla as sz
+import stringzillas as szs
+
+cpu_scope = szs.DeviceScope(cpu_cores=4)    # force CPU-only
+gpu_scope = szs.DeviceScope(gpu_device=0)   # pick GPU 0 if available
+
+strings_a = sz.Strs(["kitten", "flaw"])
+strings_b = sz.Strs(["sitting", "lawn"])
+
+engine = szs.LevenshteinDistances(
+    match=0, mismatch=2,        # costs don't have to be 1
+    open=3, extend=1,           # may be different in Bio
+    capabilities=("serial",)    # avoid SIMD 🤭
+)
+distances = engine(strings_a, strings_b, device=cpu_scope)
+assert int(distances[0]) == 3 and int(distances[1]) == 2
+```
+
+Note, that this computes byte-level distances.
+For UTF-8 codepoints, use a different engine class:
+
+```py
+strings_a = sz.Strs(["café", "αβγδ"])
+strings_b = sz.Strs(["cafe", "αγδ"])
+engine = szs.LevenshteinDistancesUTF8(capabilities=("serial",))
+distances = engine(strings_a, strings_b, device=cpu_scope)
+assert int(distances[0]) == 1 and int(distances[1]) == 1
+```
+
+For alignment scoring provide a 256×256 substitution matrix using NumPy:
+
+```py
+import numpy as np
+import stringzilla as sz
+import stringzillas as szs
+
+substitution_matrix = np.zeros((256, 256), dtype=np.int8)
+substitution_matrix.fill(-1)                # mismatch score
+np.fill_diagonal(substitution_matrix, 0)    # match score
+
+engine = szs.NeedlemanWunsch(substitution_matrix=substitution_matrix, open=1, extend=1)
+scores = engine(strings_a, strings_b, device=cpu_scope)
 ```
 
 Several Python libraries provide edit distance computation.
-Most of them are implemented in C, but are not always as fast as StringZilla.
-Taking a 1'000 long proteins around 10'000 characters long, computing just a 100 distances:
+Most are implemented in C but may be slower than StringZilla on large inputs.
+For proteins ~10k chars, 100 pairs:
 
 - [JellyFish](https://github.com/jamesturk/jellyfish): 62.3s
 - [EditDistance](https://github.com/roy-ht/editdistance): 32.9s
 - StringZilla: __0.8s__
 
-Moreover, you can pass custom substitution matrices to compute the Needleman-Wunsch alignment scores.
-That task is very common in bioinformatics and computational biology.
-It's natively supported in BioPython, and its BLOSUM matrices can be converted to StringZilla's format.
-Alternatively, you can construct an arbitrary 256 by 256 cost matrix using NumPy.
-Depending on arguments, the result may be equal to the negative Levenshtein distance.
-
-```py
-import numpy as np
-import stringzilla as sz
-
-costs = np.zeros((256, 256), dtype=np.int8)
-costs.fill(-1)
-np.fill_diagonal(costs, 0)
-
-assert sz.alignment_score("first", "second", substitution_matrix=costs, gap_score=-1) == -sz.levenshtein_distance(a, b)
-```
-
-Using the same proteins as for Levenshtein distance benchmarks:
+Using the same proteins for Needleman–Wunsch alignment scores:
 
 - [BioPython](https://github.com/biopython/biopython): 25.8s
 - StringZilla: __7.8s__
@@ -559,14 +592,44 @@ for packed_row, packed_row_aminoacid in enumerate(aligner.substitution_matrix.al
 glutathione = "ECG" # Need to rebuild human tissue?
 thyrotropin_releasing_hormone = "QHP" # Or to regulate your metabolism?
 
-assert sz.alignment_score(
-    glutathione,
-    thyrotropin_releasing_hormone, 
-    substitution_matrix=subs_reconstructed, 
-    gap_score=1) == aligner.score(glutathione, thyrotropin_releasing_hormone) # Equal to 6
+import stringzillas as szs
+engine = szs.NeedlemanWunsch(substitution_matrix=subs_reconstructed, open=1, extend=1)
+score = int(engine(sz.Strs([glutathione]), sz.Strs([thyrotropin_releasing_hormone]))[0])
+assert score == aligner.score(glutathione, thyrotropin_releasing_hormone) # Equal to 6
 ```
 
 </details>
+
+### Rolling Fingerprints
+
+MinHashing is a common technique for Information Retrieval, producing compact representations of large documents.
+For $D$ hash-functions and a text of length $L$, in the worst case it involves computing $O(D \cdot L)$ hashes.
+
+```py
+import numpy as np
+import stringzilla as sz
+import stringzillas as szs
+
+texts = sz.Strs([
+    "quick brown fox jumps over the lazy dog",
+    "quick brown fox jumped over a very lazy dog",
+])
+
+cpu = szs.DeviceScope(cpu_cores=4)
+ndim = 1024
+window_widths = np.array([4, 6, 8, 10], dtype=np.uint64)
+engine = szs.Fingerprints(
+    ndim=ndim,
+    window_widths=window_widths,    # optional
+    alphabet_size=256,              # default for byte strings
+    capabilities=("serial",),       # defaults to all, can also pass a `DeviceScope`
+)
+
+hashes, counts = engine(texts, device=cpu)
+assert hashes.shape == (len(texts), ndim)
+assert counts.shape == (len(texts), ndim)
+assert hashes.dtype == np.uint32 and counts.dtype == np.uint32
+```
 
 ### Serialization
 
@@ -588,11 +651,22 @@ A `Str` is easy to cast to [PyArrow](https://arrow.apache.org/docs/python/arrays
 
 ```py
 from pyarrow import foreign_buffer
-from stringzilla import Str
+from stringzilla import Strs
 
-original = "hello"
-view = Str(original)
-arrow = foreign_buffer(view.address, view.nbytes, view)
+strs = Strs(["alpha", "beta", "gamma"])
+arrow = foreign_buffer(strs.address, strs.nbytes, strs)
+```
+
+And only slightly harder to convert in reverse direction:
+
+```py
+arr = pa.Array.from_buffers(
+    pa.large_string() if strs.offsets_are_large else pa.string(),
+    len(strs),
+    [None,
+     pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs),
+     pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)],
+)
 ```
 
 That means you can convert `Str` to `pyarrow.Buffer` and `Strs` to `pyarrow.Array` without extra copies.
@@ -759,6 +833,128 @@ auto b = "some string"_sv; // sz::string_view
 ```
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
+
+### Similarity Scores
+
+StringZilla exposes high-performance, batch-oriented similarity via the `stringzillas/stringzillas.h` header. 
+Use `szs_device_scope_t` to pick hardware and optionally limit capabilities per engine.
+
+```cpp
+#include <stringzillas/stringzillas.h>
+
+szs_device_scope_t device = NULL;
+szs_device_scope_init_default(&device);
+
+szs_levenshtein_distances_t engine = NULL;
+szs_levenshtein_distances_init(0, 1, 1, 1, /*alloc*/ NULL, /*caps*/ sz_cap_serial_k, &engine);
+
+sz_sequence_u32tape_t strings_a {data_a, offsets_a, count}; // or `sz_sequence_u64tape_t` for large inputs
+sz_sequence_u32tape_t strings_b {data_b, offsets_b, count}; // or `sz_sequence_t` to pass generic containers
+
+sz_size_t distances[count];
+szs_levenshtein_distances_u32tape(engine, device, &strings_a, &strings_b, distances, sizeof(distances[0]));
+
+szs_levenshtein_distances_free(engine);
+szs_device_scope_free(device);
+```
+
+To target a different device, use the appropriate `szs_device_scope_init_{cpu_cores,gpu_device}` function.
+When dealing with GPU backends, make sure to use the "unified memory" allocators exposed as `szs_unified_{alloc,free}`.
+Similar stable C ABIs are exposed for other workloads as well.
+
+- UTF‑8: `szs_levenshtein_distances_utf8_{sequence,u32tape,u64tape}`
+- Needleman–Wunsch: `szs_needleman_wunsch_scores_{sequence,u32tape,u64tape}`
+- Smith-Waterman: `szs_smith_waterman_scores_{sequence,u32tape,u64tape}`
+
+Moreover, in C++ codebases one can tap into the raw templates implementing that functionality, customizing them with custom executors, SIMD plugins, etc.
+For that include `stringzillas/similarities.hpp` for C++ and `stringzillas/similarities.hpp` for CUDA.
+
+```cpp
+#include <stringzillas/similarities.hpp>
+#include <stringzilla/types.hpp>       // tape of strings
+#include <fork_union.hpp>              // optional thread pool
+
+namespace sz = ashvardanian::stringzilla;
+namespace szs = ashvardanian::stringzillas;
+
+// Pack strings into an Arrow-like tape
+std::vector<std::string> left = {"kitten", "flaw"};
+std::vector<std::string> right = {"sitting", "lawn"};
+sz::arrow_strings_tape<char, sz::size_t, std::allocator<char>> tape_a, tape_b;
+auto _ = tape_a.try_assign(left.begin(), left.end());
+auto _ = tape_b.try_assign(right.begin(), right.end());
+
+// Run on the current thread
+using levenshtein_t = szs::levenshtein_distances<char, szs::linear_gap_costs_t, std::allocator<char>, sz_cap_serial_k>;
+levenshtein_t engine {szs::uniform_substitution_costs_t{0,1}, szs::linear_gap_costs_t{1}};
+std::size_t distances[2];
+auto _ = engine(tape_a, tape_b, distances);
+
+// Or run in parallel with a pool
+fork_union::basic_pool_t pool;
+auto _ = pool.try_spawn(std::thread::hardware_concurrency());
+auto _ = engine(tape_a, tape_b, distances, pool);
+```
+
+All of the potentially-failing StringZillas interfaces return error codes, and none raise C++ exceptions.
+Parallelism is enabled at both collection-level and within individual pairs of large inputs.
+
+### Rolling Fingerprints
+
+StringZilla exposes parallel fingerprinting (Min‑Hashes or Count‑Min‑Sketches) via the `stringzillas/stringzillas.h` header. 
+Use `szs_device_scope_t` to pick hardware and optionally limit capabilities per engine.
+
+```c
+#include <stringzillas/stringzillas.h>
+
+szs_device_scope_t device = NULL;
+szs_device_scope_init_default(&device);
+
+szs_fingerprints_t engine = NULL;
+sz_size_t const dims = 1024; sz_size_t const window_widths[] = {4, 6, 8, 10};
+szs_fingerprints_init(dims, /*alphabet*/ 256, window_widths, 4, /*alloc*/ NULL, /*caps*/ sz_cap_serial_k, &engine);
+
+sz_sequence_u32tape_t texts = {data, offsets, count};
+sz_u32_t *min_hashes = (sz_u32_t*)szs_unified_alloc(count * dims * sizeof(*min_hashes));
+sz_u32_t *min_counts = (sz_u32_t*)szs_unified_alloc(count * dims * sizeof(*min_counts));
+szs_fingerprints_u32tape(engine, device, &texts,
+    min_hashes, dims * sizeof(*min_hashes),     // support strided matrices
+    min_counts, dims * sizeof(*min_counts));    // for both output arguments
+
+szs_fingerprints_free(engine);
+szs_device_scope_free(device);
+```
+
+Moreover, in C++ codebases one can tap into the raw templates implementing that functionality, customizing them with custom executors, SIMD plugins, etc.
+For that include `stringzillas/fingerprints.hpp` for C++ and `stringzillas/fingerprints.hpp` for CUDA.
+
+```cpp
+#include <stringzillas/fingerprints.hpp>
+#include <stringzilla/types.hpp>       // tape of strings
+#include <fork_union.hpp>              // optional thread pool
+
+namespace sz = ashvardanian::stringzilla;
+namespace szs = ashvardanian::stringzillas;
+
+// Pack strings into an Arrow-like tape
+std::vector<std::string> docs = {"alpha beta", "alpha betta"};
+sz::arrow_strings_tape<char, sz::size_t, std::allocator<char>> tape;
+auto _ = tape.try_assign(docs.begin(), docs.end());
+
+// Run on the current thread with a Rabin–Karp family hasher
+constexpr std::size_t dimensions_k = 256;
+using fingerprinter_t = szs::floating_rolling_hashers<sz_cap_serial_k, dimensions_k>;
+fingerprinter_t engine;
+auto _ = engine.try_extend(/*window*/ 7, /*dims*/ 256);
+std::array<sz_u32_t, 256> row{};
+std::vector<decltype(row)> hashes(docs.size()), counts(docs.size());
+auto _ = engine(tape, hashes, counts);
+
+// Or run in parallel with a pool
+fork_union::basic_pool_t pool;
+auto _ = pool.try_spawn(std::thread::hardware_concurrency());
+auto _ = engine(tape, hashes, counts, pool);
+```
 
 ### Memory Ownership and Small String Optimization
 
@@ -1241,11 +1437,20 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 ## Quick Start: Rust 🦀
 
 StringZilla is available as a Rust crate, with documentation available on [docs.rs/stringzilla](https://docs.rs/stringzilla).
+You can immediately check the installed version and the used hardware capabilities with following commands:
+
+```bash
+cargo add stringzilla
+cargo run --example version
+```
+
 To use the latest crate release in your project, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-stringzilla = ">=3"
+stringzilla = ">=3"                                     # for serial algorithms
+stringzilla = { version = ">=3", features = ["cpus"] }  # for parallel multi-CPU backends
+stringzilla = { version = ">=3", features = ["cuda"] }  # for parallel Nvidia GPU backend
 ```
 
 Or if you want to use the latest pre-release version from the repository:
@@ -1309,7 +1514,88 @@ sz::hamming_distance_utf8("αβγδ", "αγγδ") // 1
 sz::levenshtein_distance_utf8("façade", "facade") // 1
 ```
 
-[memchr-benchmarks]: https://github.com/ashvardanian/memchr_vs_stringzilla
+[memchr-benchmarks]: https://github.com/ashvardanian/StringWa.rs
+
+### Similarity Scores
+
+StringZilla exposes high-performance, batch-oriented similarity via the `szs` module.
+Use `DeviceScope` to pick hardware and optionally limit capabilities per engine.
+
+```rust
+use stringzilla::szs; // re-exported as `szs`
+
+let cpu_scope = szs::DeviceScope::cpu_cores(4).unwrap();    // force CPU-only
+let gpu_scope = szs::DeviceScope::gpu_device(0).unwrap();   // pick GPU 0 if available
+let strings_a = vec!["kitten", "flaw"];
+let strings_b = vec!["sitting", "lawn"];
+
+let engine = szs::LevenshteinDistances::new(
+    &cpu_scope,
+    0,  // match cost
+    2,  // mismatch cost - costs don't have to be 1
+    3,  // open cost - may be different in Bio
+    1,  // extend cost
+).unwrap();
+let distances = engine.compute(&cpu_scope, &strings_a, &strings_b).unwrap();
+assert_eq!(distances[0], 3);
+assert_eq!(distances[1], 2);
+```
+
+Note, that this computes byte-level distances.
+For UTF-8 codepoints, use a different engine class:
+
+```rust
+let strings_a = vec!["café", "αβγδ"];
+let strings_b = vec!["cafe", "αγδ"];
+let engine = szs::LevenshteinDistancesUtf8::new(&cpu_scope, 0, 1, 1, 1).unwrap();
+let distances = engine.compute(&cpu_scope, &strings_a, &strings_b).unwrap();
+assert_eq!(distances, vec![1, 1]);
+```
+
+Similarly, for variable substitution costs, also pass in a a weights matrix:
+
+```rust
+let mut substitution_matrix = [-1i8; 256 * 256];
+for i in 0..256 { substitution_matrix[i * 256 + i] = 0; }
+let engine = szs::NeedlemanWunschScores::new(&cpu_scope, &substitution_matrix, -3, -1).unwrap();
+let scores = engine.compute(&cpu_scope, &strings_a, &strings_b).unwrap();
+```
+
+Or for local alignment scores:
+
+```rust
+let engine = szs::SmithWatermanScores::new(&cpu_scope, &substitution_matrix, -3, -1).unwrap();
+let local_scores = engine.compute(&cpu_scope, &strings_a, &strings_b).unwrap();
+```
+
+### Rolling Fingerprints
+
+MinHashing is a common technique for Information Retrieval, producing compact representations of large documents.
+For $D$ hash-functions and a text of length $L$, in the worst case it involves computing $O(D \cdot L)$ hashes.
+
+```rust
+use stringzilla::szs;
+
+let texts = vec![
+    "quick brown fox jumps over the lazy dog",
+    "quick brown fox jumped over a very lazy dog",
+];
+let cpu = szs::DeviceScope::cpu_cores(4).unwrap();
+let ndim = 1024;
+let window_widths = vec![4u64, 6, 8, 10];
+
+let engine = szs::Fingerprints::new(
+    ndim,           // number of hash functions & dimensions
+    &window_widths, // optional predefined window widths
+    256,            // default alphabet size for byte strings
+    &cpu            // device scope
+).unwrap();
+
+let (hashes, counts) = engine.compute(&cpu, &texts).unwrap();
+assert_eq!(hashes.len(), texts.len() * ndim);
+assert_eq!(counts.len(), texts.len() * ndim);
+```
+
 ## Quick Start: JavaScript 🟨
 
 Install the Node.js package and use zero-copy `Buffer` APIs.
