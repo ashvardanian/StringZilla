@@ -1310,6 +1310,47 @@ sz::levenshtein_distance_utf8("façade", "facade") // 1
 ```
 
 [memchr-benchmarks]: https://github.com/ashvardanian/memchr_vs_stringzilla
+## Quick Start: JavaScript 🟨
+
+Install the Node.js package and use zero-copy `Buffer` APIs.
+
+```bash
+npm install stringzilla
+```
+
+```js
+import sz from 'stringzilla';
+
+const haystack = Buffer.from('Hello, world!');
+const needle = Buffer.from('world');
+
+// Substring search (BigInt offsets)
+const firstIndex = sz.find(haystack, needle);      // 7n
+const lastIndex = sz.findLast(haystack, needle);   // 7n
+
+// Character / charset search
+const firstOIndex = sz.findByte(haystack, 'o'.charCodeAt(0));                 // 4n
+const firstVowelIndex = sz.findByteFrom(haystack, Buffer.from('aeiou'));      // 1n
+const lastVowelIndex = sz.findLastByteFrom(haystack, Buffer.from('aeiou'));   // 8n
+
+// Counting (optionally overlapping)
+const lCount = sz.count(haystack, Buffer.from('l'));                // 3n
+const llOverlapCount = sz.count(haystack, Buffer.from('ll'), true); // 1n
+
+// Hashing
+const hash = sz.hash(haystack, 0); // 64-bit BigInt
+const hasher = new sz.Hasher(0);
+hasher.stream(Buffer.from('Hello, '));
+hasher.stream(Buffer.from('world!'));
+const streamingHash = hasher.fold();
+
+// Equality/ordering utilities
+const isEqual = sz.equal(Buffer.from('a'), Buffer.from('a'));
+const order = sz.compare(Buffer.from('a'), Buffer.from('b')); // -1, 0, or 1
+
+// Other helpers
+const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
+```
 
 ## Quick Start: Swift 🍏
 
