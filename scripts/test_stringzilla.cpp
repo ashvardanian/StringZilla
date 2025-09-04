@@ -790,9 +790,6 @@ void test_stl_compatibility_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
 
-    // Corner case behaviors for long strings
-    assert(str(258, '0').find(str(256, '1')) == str::npos);
-
     // clang-format off
     // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6)
     assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_first_of("\xC6\xC7") == 9);  // sets
@@ -953,6 +950,9 @@ void test_stl_compatibility_for_updates() {
     assert(str({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
     assert(str(str("hello"), 2) == "llo");             // Construct from another string suffix
     assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
+
+    // Corner case constructors and search behaviors for long strings
+    assert(str(258, '0').find(str(256, '1')) == str::npos);
 
     // Assignments.
     assert_scoped(str s = "obsolete", s = "hello", s == "hello");

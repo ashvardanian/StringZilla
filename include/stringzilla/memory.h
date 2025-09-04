@@ -502,7 +502,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
-        sz_assert(head_length == 0 && "The head length should be zero after the head copy.");
+        sz_assert_(head_length == 0 && "The head length should be zero after the head copy.");
         sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
@@ -519,7 +519,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
                                    _mm256_lddqu_si256((__m256i const *)(source + body_length - 32)));
             }
             if (body_length) {
-                sz_assert(body_length == 32 && "The only remaining body length should be 32 bytes.");
+                sz_assert_(body_length == 32 && "The only remaining body length should be 32 bytes.");
                 _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
                 target += 32, source += 32, body_length -= 32;
             }
@@ -536,7 +536,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
         if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
         if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
-        sz_assert(tail_length == 0 && "The tail length should be zero after the tail copy.");
+        sz_assert_(tail_length == 0 && "The tail length should be zero after the tail copy.");
     }
 }
 

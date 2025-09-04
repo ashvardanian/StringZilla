@@ -2141,16 +2141,16 @@ class basic_string {
         init(string_view(list.begin(), list.size()));
     }
 
-    operator string_view() const noexcept { return view(); }
-    string_view view() const noexcept {
+    operator string_view() const noexcept sz_lifetime_bound_ { return view(); }
+    string_view view() const noexcept sz_lifetime_bound_ {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_string_range(&string_, &string_start, &string_length);
         return {string_start, string_length};
     }
 
-    operator string_span() noexcept { return span(); }
-    string_span span() noexcept {
+    operator string_span() noexcept sz_lifetime_bound_ { return span(); }
+    string_span span() noexcept sz_lifetime_bound_ {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_string_range(&string_, &string_start, &string_length);
@@ -2903,157 +2903,6 @@ class basic_string {
     void clear() noexcept { sz_string_erase(&string_, 0, SZ_SIZE_MAX); }
 
     /**
-     *  @brief  Resizes the string to the given size, filling the new space with the given character,
-     *          or NULL-character if nothing is provided.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    void resize(size_type count, value_type character = '\0') noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::basic_string::resize");
-        if (!try_resize(count, character)) throw std::bad_alloc();
-    }
-
-    /**
-     *  @brief  Reclaims the unused memory, if any.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    void shrink_to_fit() noexcept(false) {
-        if (!try_shrink_to_fit()) throw std::bad_alloc();
-    }
-
-    /**
-     *  @brief  Informs the string object of a planned change in size, so that it pre-allocate once.
-     *  @throw  `std::length_error` if the string is too long.
-     */
-    void reserve(size_type capacity) noexcept(false) {
-        if (capacity > max_size()) throw std::length_error("sz::basic_string::reserve");
-        if (!try_reserve(capacity)) throw std::bad_alloc();
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given offset.
-     *  @throw  `std::out_of_range` if `offset > size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, repeats, &alloc); }))
-            throw std::bad_alloc();
-
-        sz_fill(data() + offset, repeats, character);
-        return *this;
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
-     *  @throw  `std::out_of_range` if `offset > size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    basic_string &insert(size_type offset, string_view other) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, other.size(), &alloc); }))
-            throw std::bad_alloc();
-
-        sz_copy(data() + offset, other.data(), other.size());
-        return *this;
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
-     *  @throw  `std::out_of_range` if `offset > size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    basic_string &insert(size_type offset, const_pointer start, size_type length) noexcept(false) {
-        return insert(offset, string_view(start, length));
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a slice of another string at the given offset.
-     *  @throw  `std::out_of_range` if `offset > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    basic_string &insert(size_type offset, string_view other, size_type other_index,
-                         size_type count = npos) noexcept(false) {
-        return insert(offset, other.substr(other_index, count));
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) one ::character at the given iterator position.
-     *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    iterator insert(const_iterator it, char_type character) noexcept(false) sz_lifetime_bound_ {
-        auto pos = range_length(cbegin(), it);
-        insert(pos, string_view(&character, 1));
-        return begin() + pos;
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given iterator position.
-     *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) sz_lifetime_bound_ {
-        auto pos = range_length(cbegin(), it);
-        insert(pos, repeats, character);
-        return begin() + pos;
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) a range at the given iterator position.
-     *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    template <typename input_iterator>
-    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound_ {
-
-        auto pos = range_length(cbegin(), it);
-        if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
-
-        auto added_length = range_length(first, last);
-        if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
-
-        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, pos, added_length, &alloc); }))
-            throw std::bad_alloc();
-
-        iterator result = begin() + pos;
-        for (iterator output = result; first != last; ++first, ++output) *output = *first;
-        return result;
-    }
-
-    /**
-     *  @brief  Inserts ( @b in-place ) an initializer list of characters.
-     *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
-     */
-    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) sz_lifetime_bound_ {
-        return insert(it, list.begin(), list.end());
-    }
-
-    /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
-     *  @throws `std::out_of_range` if `pos > size()`.
-     *  @see    `try_erase_slice` for a cleaner exception-less alternative.
-     */
-    basic_string &erase(size_type pos = 0, size_type count = npos) noexcept(false) {
-        if (!count || empty()) return *this;
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::erase");
-        sz_string_erase(&string_, pos, count);
-        return *this;
-    }
-
-    /**
      *  @brief  Erases ( @b in-place ) the given range of characters.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
@@ -3065,7 +2914,7 @@ class basic_string {
     }
 
     /**
-     *  @brief Erases @b (in-place) the one character at a given postion.
+     *  @brief Erases @b (in-place) the one character at a given position.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator pos) noexcept sz_lifetime_bound_ { return erase(pos, pos + 1); }
@@ -3174,7 +3023,7 @@ class basic_string {
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, char_type character) noexcept(false) {
+    iterator insert(const_iterator it, char_type character) noexcept(false) sz_lifetime_bound_ {
         auto pos = range_length(cbegin(), it);
         insert(pos, string_view(&character, 1));
         return begin() + pos;
@@ -3186,7 +3035,7 @@ class basic_string {
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) {
+    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) sz_lifetime_bound_ {
         auto pos = range_length(cbegin(), it);
         insert(pos, repeats, character);
         return begin() + pos;
@@ -3199,7 +3048,7 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     template <typename input_iterator>
-    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) {
+    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound_ {
 
         auto pos = range_length(cbegin(), it);
         if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
@@ -3222,7 +3071,7 @@ class basic_string {
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) {
+    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) sz_lifetime_bound_ {
         return insert(it, list.begin(), list.end());
     }
 
