@@ -112,4 +112,11 @@ export default {
      *  @returns {bigint} Sum of all byte values
      */
     byteSum: compiled.byteSum,
+
+    /**
+     * Returns a comma-separated string of backend capabilities, e.g. "serial,haswell".
+     * Use this to inspect which SIMD/GPU backends are active.
+     * @returns {string}
+     */
+    capabilities: compiled.capabilities,
 };

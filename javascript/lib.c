@@ -507,9 +507,16 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor compareDesc = {"compare", 0, compareAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
+
+    // Export the `capabilities` string for debugging
+    napi_value caps_str_value;
+    const char *caps_cstr = (const char *)sz_capabilities_to_string(sz_capabilities());
+    napi_create_string_utf8(env, caps_cstr, NAPI_AUTO_LENGTH, &caps_str_value);
+    napi_property_descriptor capabilitiesDesc = {"capabilities", 0, 0, 0, 0, caps_str_value, napi_default, 0};
+
     napi_property_descriptor properties[] = {
-        findDesc,  findLastDesc, findByteDesc, findLastByteDesc, findByteFromDesc, findLastByteFromDesc,
-        countDesc, hashDesc,     equalDesc,    compareDesc,      byteSumDesc,      hasherDesc,
+        findDesc, findLastDesc, findByteDesc, findLastByteDesc, findByteFromDesc, findLastByteFromDesc, countDesc,
+        hashDesc, equalDesc,    compareDesc,  byteSumDesc,      hasherDesc,       capabilitiesDesc,
     };
 
     // Define the properties on the `exports` object
