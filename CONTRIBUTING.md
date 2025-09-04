@@ -597,6 +597,43 @@ cargo package --list --allow-dirty
 
 If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
 
+## Contributing in GoLang
+
+First, precompile the C library:
+
+```bash
+cmake -D STRINGZILLA_BUILD_SHARED=1 -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=0 -B build_golang
+cmake --build build_golang
+```
+
+Then, navigate to the GoLang module root directory and run the tests from there:
+
+```bash
+cd golang
+CGO_CFLAGS="-I$(pwd)/../include" \
+CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
+LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
+go test
+```
+
+To benchmark:
+
+```bash
+cd golang
+CGO_CFLAGS="-I$(pwd)/../include" \
+CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
+LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
+go run ../scripts/bench.go --input ../leipzig1M.txt
+```
+
+Alternatively:
+
+```bash
+export GO111MODULE="off"
+go run scripts/test.go
+go run scripts/bench.go
+```
+
 ## General Recommendations
 
 ### Operations Not Worth Optimizing

@@ -157,6 +157,8 @@
     "ngram",
     "ngrams",
     "NOARGS",
+    "nocallback",
+    "noescape",
     "noexcept",
     "NOMINMAX",
     "nothrow",

@@ -502,6 +502,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
+        sz_assert(head_length == 0 && "The head length should be zero after the head copy.");
         sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
@@ -511,12 +512,19 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         }
         // When the buffer is huge, we can traverse it in 2 directions.
         else {
-            for (; body_length >= 64; target += 32, source += 32, body_length -= 64) {
+            size_t tails_bytes_skipped = 0;
+            for (; body_length >= 64; target += 32, source += 32, body_length -= 64, tails_bytes_skipped += 32) {
                 _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
                 _mm256_store_si256((__m256i *)(target + body_length - 32),
                                    _mm256_lddqu_si256((__m256i const *)(source + body_length - 32)));
             }
-            if (body_length) _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+            if (body_length) {
+                sz_assert(body_length == 32 && "The only remaining body length should be 32 bytes.");
+                _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+                target += 32, source += 32, body_length -= 32;
+            }
+            target += tails_bytes_skipped;
+            source += tails_bytes_skipped;
         }
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
@@ -528,6 +536,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
         if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
         if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
+        sz_assert(tail_length == 0 && "The tail length should be zero after the tail copy.");
     }
 }
 

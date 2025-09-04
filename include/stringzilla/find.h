@@ -660,8 +660,7 @@ SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
     sz_u8_t const *n = (sz_u8_t const *)n_chars;
     {
         sz_u64_vec_t n_length_vec;
-        n_length_vec.u64 = n_length;
-        n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
+        n_length_vec.u64 = ((sz_u8_t)(n_length - 1)) * 0x0101010101010101ull; // broadcast
         for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
         for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n[i]] = (sz_u8_t)(n_length - i - 1);
     }
@@ -710,8 +709,7 @@ SZ_INTERNAL sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
     sz_u8_t const *n = (sz_u8_t const *)n_chars;
     {
         sz_u64_vec_t n_length_vec;
-        n_length_vec.u64 = n_length;
-        n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
+        n_length_vec.u64 = ((sz_u8_t)(n_length - 1)) * 0x0101010101010101ull; // broadcast
         for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
         for (sz_size_t i = 0; i + 1 < n_length; ++i)
             bad_shift_table.jumps[n[n_length - i - 1]] = (sz_u8_t)(n_length - i - 1);
