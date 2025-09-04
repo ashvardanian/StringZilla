@@ -2009,7 +2009,7 @@ class basic_string {
         raise(_with_alloc([&](sz_alloc_type &alloc) {
             return (start = sz_string_init_length(&string_, length, &alloc)) ? sz_success_k : sz_bad_alloc_k;
         }));
-        sz_fill(start, length, *(sz_u8_t *)&value);
+        sz_fill(start, length, sz_bitcast_(sz_u8_t, value));
     }
 
     void init(string_view other) noexcept(false) {
@@ -3227,7 +3227,7 @@ class basic_string {
      */
     basic_string &assign(size_type repeats, char_type character) noexcept(false) {
         resize(repeats, character);
-        sz_fill(data(), repeats, *(sz_u8_t *)&character);
+        sz_fill(data(), repeats, sz_bitcast_(sz_u8_t, character));
         return *this;
     }
 
