@@ -903,6 +903,7 @@ void test_stl_compatibility_for_updates() {
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
+#if SZ_IS_CPP23_ && defined(__cpp_lib_string_resize_and_overwrite)
     // Test C++23 resize and overwrite functionality
     assert_scoped(str s("hello"),
                   s.resize_and_overwrite(10,
@@ -927,6 +928,7 @@ void test_stl_compatibility_for_updates() {
                                                  return count;
                                              }),
                   s.size() == 6 && s == "works!");
+#endif
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
