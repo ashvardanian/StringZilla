@@ -558,10 +558,20 @@ sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "
 
 ## Contributing in Rust
 
+StringZilla's Rust crate supports both `std` and `no_std` builds.
+Other options include:
+
+- `std` (default): enables standard library support.
+- `cpus`: multi‑threaded CPU backend (implies `std`).
+- `cuda`: CUDA backend (implies `cpus` and `std`).
+- `rocm`: ROCm backend (implies `cpus` and `std`).
+
 ```bash
-cargo test
-cargo test --features cpus
-cargo test --features cuda
+cargo test --no-default-features                # verify `no_std` build
+cargo test --no-default-features --features std # only test with `std`
+cargo test                                      # default tests with `std`
+cargo test --features cpus                      # for parallel multi-CPU backends
+cargo test --features cuda                      # for parallel Nvidia GPU backend
 ```
 
 If you need to isolate a failing test:

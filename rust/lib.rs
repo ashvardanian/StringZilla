@@ -1,4 +1,4 @@
-#![cfg_attr(all(not(test), not(any(feature = "cpus", feature = "cuda", feature = "rocm"))), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![doc = r"
 # StringZilla
 

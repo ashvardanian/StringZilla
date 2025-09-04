@@ -47,10 +47,15 @@ pub struct Byteset {
     bits: [u64; 4],
 }
 
+/// Incremental hasher state for StringZilla's 64-bit hash.
+///
+/// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
+/// zero or more times, and finally call `digest(&self)` to read the current
+/// hash value without consuming the state.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[repr(align(64))] // For optimal performance we align to 64 bytes.
-pub struct HashState {
+pub struct Hasher {
     aes: [u64; 8],
     sum: [u64; 8],
     ins: [u64; 8], // Ignored in comparisons
@@ -220,10 +225,10 @@ impl SemVer {
     }
 }
 
-impl HashState {
-    /// Creates a new `HashState` and initializes it with a given seed.
+impl Hasher {
+    /// Creates a new hasher initialized with `seed`.
     pub fn new(seed: u64) -> Self {
-        let mut state = HashState {
+        let mut state = Hasher {
             aes: [0; 8],
             sum: [0; 8],
             ins: [0; 8],
@@ -236,7 +241,7 @@ impl HashState {
         state
     }
 
-    /// Updates the hash state with more data.
+    /// Updates the hasher with more data.
     pub fn update(&mut self, data: &[u8]) -> &mut Self {
         unsafe {
             sz_hash_state_update(
@@ -254,9 +259,107 @@ impl HashState {
     }
 }
 
-impl PartialEq for HashState {
+impl PartialEq for Hasher {
     fn eq(&self, other: &Self) -> bool {
         self.aes == other.aes && self.sum == other.sum && self.key == other.key
+    }
+}
+
+impl Default for Hasher {
+    #[inline]
+    fn default() -> Self {
+        Hasher::new(0)
+    }
+}
+
+/// Standard Hasher trait to interoperate with `std::collections`.
+impl core::hash::Hasher for Hasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.digest()
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let _ = self.update(bytes);
+    }
+
+    // Feed integers as little-endian bytes for cross-platform stability
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.write(&[i]);
+    }
+    #[inline]
+    fn write_u16(&mut self, i: u16) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_u128(&mut self, i: u128) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_i8(&mut self, i: i8) {
+        self.write(&[i as u8]);
+    }
+    #[inline]
+    fn write_i16(&mut self, i: i16) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_i32(&mut self, i: i32) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_i64(&mut self, i: i64) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_i128(&mut self, i: i128) {
+        self.write(&i.to_le_bytes());
+    }
+    #[inline]
+    fn write_isize(&mut self, i: isize) {
+        self.write(&i.to_le_bytes());
+    }
+}
+
+/// BuildHasher for constructing `Hasher` instances, enabling use with HashMap/HashSet.
+///
+/// By default uses seed 0 for deterministic hashing across runs and platforms.
+/// If you need DOS-resistant randomized seeding, consider wrapping this in your
+/// application with a per-process random seed.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildSzHasher {
+    pub seed: u64,
+}
+
+#[cfg(feature = "std")]
+impl BuildSzHasher {
+    #[inline]
+    pub const fn with_seed(seed: u64) -> Self {
+        Self { seed }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::hash::BuildHasher for BuildSzHasher {
+    type Hasher = Hasher;
+    #[inline]
+    fn build_hasher(&self) -> Self::Hasher {
+        Hasher::new(self.seed)
     }
 }
 
@@ -1728,10 +1831,11 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use std::borrow::Cow;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
+    use std::hash::Hasher as _;
 
     use super::*;
     use crate::sz;
@@ -1757,18 +1861,56 @@ mod tests {
         for seed in [0u64, 42, 123456789].iter() {
             // Single-pass hashing
             assert_eq!(
-                sz::HashState::new(*seed).update("Hello".as_bytes()).digest(),
+                sz::Hasher::new(*seed).update("Hello".as_bytes()).digest(),
                 sz::hash_with_seed("Hello", *seed)
             );
             // Dual pass for short strings
             assert_eq!(
-                sz::HashState::new(*seed)
+                sz::Hasher::new(*seed)
                     .update("Hello".as_bytes())
                     .update("World".as_bytes())
                     .digest(),
                 sz::hash_with_seed("HelloWorld", *seed)
             );
         }
+    }
+
+    #[test]
+    fn streaming_hash() {
+        let mut hasher = sz::Hasher::new(123);
+        hasher.write(b"Hello, ");
+        hasher.write(b"world!");
+        let streamed = hasher.finish();
+
+        let mut hasher = sz::Hasher::new(123);
+        hasher.write(b"Hello, world!");
+        let expected = hasher.finish();
+        assert_eq!(streamed, expected);
+    }
+
+    #[test]
+    fn hashmap_with_sz() {
+        let mut map: HashMap<&str, i32, sz::BuildSzHasher> = HashMap::with_hasher(sz::BuildSzHasher::with_seed(0));
+        map.insert("a", 1);
+        map.insert("b", 2);
+        map.insert("c", 3);
+        assert_eq!(map.get("a"), Some(&1));
+        assert_eq!(map.get("b"), Some(&2));
+        assert_eq!(map.get("c"), Some(&3));
+        assert!(map.get("z").is_none());
+    }
+
+    #[test]
+    fn hashset_with_sz() {
+        let mut set: HashSet<&str, sz::BuildSzHasher> = HashSet::with_hasher(sz::BuildSzHasher::with_seed(42));
+        assert!(set.insert("alpha"));
+        assert!(set.insert("beta"));
+        assert!(set.contains("alpha"));
+        assert!(set.contains("beta"));
+        assert!(!set.contains("gamma"));
+        let len_before = set.len();
+        assert!(!set.insert("alpha"));
+        assert_eq!(set.len(), len_before);
     }
 
     #[test]
@@ -1818,167 +1960,163 @@ mod tests {
         assert_eq!(first_buffer, second_buffer);
     }
 
-    mod search_split_iterators {
-        use super::*;
-
-        #[test]
-        fn test_matches() {
-            let haystack = b"hello world hello universe";
-            let needle = b"hello";
-            let matches: Vec<_> = haystack.sz_matches(needle).collect();
-            assert_eq!(matches, vec![b"hello", b"hello"]);
-        }
-
-        #[test]
-        fn test_rmatches() {
-            let haystack = b"hello world hello universe";
-            let needle = b"hello";
-            let matches: Vec<_> = haystack.sz_rmatches(needle).collect();
-            assert_eq!(matches, vec![b"hello", b"hello"]);
-        }
-
-        #[test]
-        fn test_splits() {
-            let haystack = b"alpha,beta;gamma";
-            let needle = b",";
-            let splits: Vec<_> = haystack.sz_splits(needle).collect();
-            assert_eq!(splits, vec![&b"alpha"[..], &b"beta;gamma"[..]]);
-        }
-
-        #[test]
-        fn test_rsplits() {
-            let haystack = b"alpha,beta;gamma";
-            let needle = b";";
-            let splits: Vec<_> = haystack.sz_rsplits(needle).collect();
-            assert_eq!(splits, vec![&b"gamma"[..], &b"alpha,beta"[..]]);
-        }
-
-        #[test]
-        fn test_splits_with_empty_parts() {
-            let haystack = b"a,,b,";
-            let needle = b",";
-            let splits: Vec<_> = haystack.sz_splits(needle).collect();
-            assert_eq!(splits, vec![b"a", &b""[..], b"b", &b""[..]]);
-        }
-
-        #[test]
-        fn test_matches_with_overlaps() {
-            let haystack = b"aaaa";
-            let needle = b"aa";
-            let matches: Vec<_> = haystack.sz_matches(needle).collect();
-            assert_eq!(matches, vec![b"aa", b"aa", b"aa"]);
-        }
-
-        #[test]
-        fn test_splits_with_utf8() {
-            let haystack = "こんにちは,世界".as_bytes();
-            let needle = b",";
-            let splits: Vec<_> = haystack.sz_splits(needle).collect();
-            assert_eq!(splits, vec!["こんにちは".as_bytes(), "世界".as_bytes()]);
-        }
-
-        #[test]
-        fn test_find_first_of() {
-            let haystack = b"hello world";
-            let needles = b"or";
-            let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
-            assert_eq!(matches, vec![b"o", b"o", b"r"]);
-        }
-
-        #[test]
-        fn test_find_last_of() {
-            let haystack = b"hello world";
-            let needles = b"or";
-            let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
-            assert_eq!(matches, vec![b"r", b"o", b"o"]);
-        }
-
-        #[test]
-        fn test_find_first_not_of() {
-            let haystack = b"aabbbcccd";
-            let needles = b"ab";
-            let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
-            assert_eq!(matches, vec![b"c", b"c", b"c", b"d"]);
-        }
-
-        #[test]
-        fn test_find_last_not_of() {
-            let haystack = b"aabbbcccd";
-            let needles = b"cd";
-            let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
-            assert_eq!(matches, vec![b"b", b"b", b"b", b"a", b"a"]);
-        }
-
-        #[test]
-        fn test_find_first_of_empty_needles() {
-            let haystack = b"hello world";
-            let needles = b"";
-            let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
-            assert_eq!(matches, Vec::<&[u8]>::new());
-        }
-
-        #[test]
-        fn test_find_last_of_empty_haystack() {
-            let haystack = b"";
-            let needles = b"abc";
-            let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
-            assert_eq!(matches, Vec::<&[u8]>::new());
-        }
-
-        #[test]
-        fn test_find_first_not_of_all_matching() {
-            let haystack = b"aaabbbccc";
-            let needles = b"abc";
-            let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
-            assert_eq!(matches, Vec::<&[u8]>::new());
-        }
-
-        #[test]
-        fn test_find_last_not_of_all_not_matching() {
-            let haystack = b"hello world";
-            let needles = b"xyz";
-            let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
-            assert_eq!(
-                matches,
-                vec![b"d", b"l", b"r", b"o", b"w", b" ", b"o", b"l", b"l", b"e", b"h"]
-            );
-        }
-
-        #[test]
-        fn test_range_matches_overlapping() {
-            let haystack = b"aaaa";
-            let matcher = MatcherType::Find(b"aa");
-            let matches: Vec<_> = RangeMatches::new(haystack, matcher, true).collect();
-            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
-        }
-
-        #[test]
-        fn test_range_matches_non_overlapping() {
-            let haystack = b"aaaa";
-            let matcher = MatcherType::Find(b"aa");
-            let matches: Vec<_> = RangeMatches::new(haystack, matcher, false).collect();
-            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
-        }
-
-        #[test]
-        fn test_range_rmatches_overlapping() {
-            let haystack = b"aaaa";
-            let matcher = MatcherType::RFind(b"aa");
-            let matches: Vec<_> = RangeRMatches::new(haystack, matcher, true).collect();
-            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
-        }
-
-        #[test]
-        fn test_range_rmatches_non_overlapping() {
-            let haystack = b"aaaa";
-            let matcher = MatcherType::RFind(b"aa");
-            let matches: Vec<_> = RangeRMatches::new(haystack, matcher, false).collect();
-            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
-        }
+    #[test]
+    fn iter_matches_forward() {
+        let haystack = b"hello world hello universe";
+        let needle = b"hello";
+        let matches: Vec<_> = haystack.sz_matches(needle).collect();
+        assert_eq!(matches, vec![b"hello", b"hello"]);
     }
 
     #[test]
-    fn test_argsort_permutation_default() {
+    fn iter_matches_reverse() {
+        let haystack = b"hello world hello universe";
+        let needle = b"hello";
+        let matches: Vec<_> = haystack.sz_rmatches(needle).collect();
+        assert_eq!(matches, vec![b"hello", b"hello"]);
+    }
+
+    #[test]
+    fn iter_splits_forward() {
+        let haystack = b"alpha,beta;gamma";
+        let needle = b",";
+        let splits: Vec<_> = haystack.sz_splits(needle).collect();
+        assert_eq!(splits, vec![&b"alpha"[..], &b"beta;gamma"[..]]);
+    }
+
+    #[test]
+    fn iter_splits_reverse() {
+        let haystack = b"alpha,beta;gamma";
+        let needle = b";";
+        let splits: Vec<_> = haystack.sz_rsplits(needle).collect();
+        assert_eq!(splits, vec![&b"gamma"[..], &b"alpha,beta"[..]]);
+    }
+
+    #[test]
+    fn iter_splits_with_empty_parts() {
+        let haystack = b"a,,b,";
+        let needle = b",";
+        let splits: Vec<_> = haystack.sz_splits(needle).collect();
+        assert_eq!(splits, vec![b"a", &b""[..], b"b", &b""[..]]);
+    }
+
+    #[test]
+    fn iter_matches_with_overlaps() {
+        let haystack = b"aaaa";
+        let needle = b"aa";
+        let matches: Vec<_> = haystack.sz_matches(needle).collect();
+        assert_eq!(matches, vec![b"aa", b"aa", b"aa"]);
+    }
+
+    #[test]
+    fn iter_splits_with_utf8_haystack() {
+        let haystack = "こんにちは,世界".as_bytes();
+        let needle = b",";
+        let splits: Vec<_> = haystack.sz_splits(needle).collect();
+        assert_eq!(splits, vec!["こんにちは".as_bytes(), "世界".as_bytes()]);
+    }
+
+    #[test]
+    fn iter_find_first_of() {
+        let haystack = b"hello world";
+        let needles = b"or";
+        let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
+        assert_eq!(matches, vec![b"o", b"o", b"r"]);
+    }
+
+    #[test]
+    fn iter_find_last_of() {
+        let haystack = b"hello world";
+        let needles = b"or";
+        let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
+        assert_eq!(matches, vec![b"r", b"o", b"o"]);
+    }
+
+    #[test]
+    fn iter_find_first_not_of() {
+        let haystack = b"aabbbcccd";
+        let needles = b"ab";
+        let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
+        assert_eq!(matches, vec![b"c", b"c", b"c", b"d"]);
+    }
+
+    #[test]
+    fn iter_find_last_not_of() {
+        let haystack = b"aabbbcccd";
+        let needles = b"cd";
+        let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
+        assert_eq!(matches, vec![b"b", b"b", b"b", b"a", b"a"]);
+    }
+
+    #[test]
+    fn iter_find_first_of_empty_needles() {
+        let haystack = b"hello world";
+        let needles = b"";
+        let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
+        assert_eq!(matches, Vec::<&[u8]>::new());
+    }
+
+    #[test]
+    fn iter_find_last_of_empty_haystack() {
+        let haystack = b"";
+        let needles = b"abc";
+        let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
+        assert_eq!(matches, Vec::<&[u8]>::new());
+    }
+
+    #[test]
+    fn iter_find_first_not_of_all_matching() {
+        let haystack = b"aaabbbccc";
+        let needles = b"abc";
+        let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
+        assert_eq!(matches, Vec::<&[u8]>::new());
+    }
+
+    #[test]
+    fn iter_find_last_not_of_all_not_matching() {
+        let haystack = b"hello world";
+        let needles = b"xyz";
+        let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
+        assert_eq!(
+            matches,
+            vec![b"d", b"l", b"r", b"o", b"w", b" ", b"o", b"l", b"l", b"e", b"h"]
+        );
+    }
+
+    #[test]
+    fn iter_range_matches_overlapping() {
+        let haystack = b"aaaa";
+        let matcher = MatcherType::Find(b"aa");
+        let matches: Vec<_> = RangeMatches::new(haystack, matcher, true).collect();
+        assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
+    }
+
+    #[test]
+    fn iter_range_matches_non_overlapping() {
+        let haystack = b"aaaa";
+        let matcher = MatcherType::Find(b"aa");
+        let matches: Vec<_> = RangeMatches::new(haystack, matcher, false).collect();
+        assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
+    }
+
+    #[test]
+    fn iter_range_rmatches_overlapping() {
+        let haystack = b"aaaa";
+        let matcher = MatcherType::RFind(b"aa");
+        let matches: Vec<_> = RangeRMatches::new(haystack, matcher, true).collect();
+        assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
+    }
+
+    #[test]
+    fn iter_range_rmatches_non_overlapping() {
+        let haystack = b"aaaa";
+        let matcher = MatcherType::RFind(b"aa");
+        let matches: Vec<_> = RangeRMatches::new(haystack, matcher, false).collect();
+        assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
+    }
+
+    #[test]
+    fn argsort_permutation_default() {
         // Test with a slice of string literals.
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3]; // output buffer must be at least fruits.len()
@@ -1995,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn test_argsort_permutation_by_custom() {
+    fn argsort_permutation_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -2026,7 +2164,7 @@ mod tests {
     }
 
     #[test]
-    fn test_intersection_default() {
+    fn intersection_default() {
         // Two slices of string literals.
         let set1 = ["banana", "apple", "cherry"];
         let set2 = ["cherry", "orange", "pineapple", "banana"];
@@ -2054,7 +2192,7 @@ mod tests {
     }
 
     #[test]
-    fn test_intersection_by_custom() {
+    fn intersection_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -2108,7 +2246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_intersection_debug() {
+    fn intersection_debug() {
         println!("Starting intersection debug test...");
 
         let set1 = ["banana", "apple", "cherry"];
