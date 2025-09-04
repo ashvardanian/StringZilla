@@ -35,7 +35,7 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
-- 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to setup the environment
+- 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
 [faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
@@ -47,7 +47,7 @@ __Who is this for?__
 - For software engineers optimizing strings in their apps and services.
 - For bioinformaticians and search engineers looking for edit-distances for [USearch](https://github.com/unum-cloud/usearch).
 - For [DBMS][faq-dbms] devs, optimizing `LIKE`, `ORDER BY`, and `GROUP BY` operations.
-- For hardware designers, needing a SWAR baseline for strings-processing functionality.
+- For hardware designers, needing a SWAR baseline for string-processing functionality.
 - For students studying SIMD/SWAR applications to non-data-parallel operations.
 
 [faq-dbms]: https://en.wikipedia.org/wiki/Database
@@ -185,9 +185,9 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>25.8</b> MB/s
     </td>
   </tr>
-  <!-- Mapping Characters with Look-Up Table Transforms -->
+  <!-- Mapping characters with lookup table transforms -->
   <tr>
-    <td colspan="4" align="center">Mapping Characters with Look-Up Table Transforms</td>
+    <td colspan="4" align="center">Mapping characters with lookup table transforms</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
@@ -253,7 +253,7 @@ __Who is this for?__
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4" align="center">Needleman-Wunsch alignment scores, ≅ 10 K aminoacids long</td>
+    <td colspan="4" align="center">Needleman-Wunsch alignment scores, ≅ 10 K amino acids long</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
@@ -277,7 +277,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 
 > Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
-> The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
+> The benchmarks were performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
 > Variance within x86 CPUs will be larger.
 > <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
@@ -291,7 +291,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 > <sup>6</sup> Contrary to the popular opinion, Python's default `sorted` function works faster than the C and C++ standard libraries.
 > That holds for large lists or tuples of strings, but fails as soon as you need more complex logic, like sorting dictionaries by a string key, or producing the "sorted order" permutation.
 > The latter is very common in database engines and is most similar to `numpy.argsort`.
-> Current StringZilla solution can be at least 4x faster without loss of generality.
+> The current StringZilla solution can be at least 4x faster without loss of generality.
 
 [faq-mersenne-twister]: https://en.wikipedia.org/wiki/Mersenne_Twister
 
@@ -303,16 +303,16 @@ It's split into 2 layers:
 1. StringZilla: single-header C library and C++ wrapper for high-performance string operations.
 2. StringZillas: parallel CPU/GPU backends used for large-batch operations and accelerators.
 
-Having a second C++/CUDA layer greatly simplifies the implementation of similarity scoring and fingerprint functions, that would require too much error-prone boilerplate code in pure C.
+Having a second C++/CUDA layer greatly simplifies the implementation of similarity scoring and fingerprinting functions, which would otherwise require too much error-prone boilerplate code in pure C.
 Both layers are designed to be extremely portable:
 
-- [x] across both Little-Endian and Big-Endian architectures.
+- [x] across both little-endian and big-endian architectures.
 - [x] across 32-bit and 64-bit hardware architectures.
-- [x] across Operating Systems and compilers.
+- [x] across operating systems and compilers.
 - [x] across ASCII and UTF-8 encoded inputs.
 
 Not all features are available across all bindings.
-Consider contributing, if you need a feature that's not yet implemented.
+Consider contributing if you need a feature that's not yet implemented.
 
 |                                | Maturity |   C   |  C++  | Python | Rust  |  JS   | Swift |
 | :----------------------------- | :------: | :---: | :---: | :----: | :---: | :---: | :---: |
@@ -354,8 +354,8 @@ python -c "import stringzillas; print(stringzillas.__capabilities__)"   # for pa
 
 ### Basic Usage
 
-If you've ever used the Python `str`, `bytes`, `bytearray`, `memoryview` class, you'll know what to expect.
-StringZilla's `Str` class is a hybrid of those two, providing `str`-like interface to byte-arrays.
+If you've ever used the Python `str`, `bytes`, `bytearray`, or `memoryview` classes, you'll know what to expect.
+StringZilla's `Str` class is a hybrid of the above, providing a `str`-like interface to byte arrays.
 
 ```python
 from stringzilla import Str, File
@@ -369,9 +369,9 @@ alphabet_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
 text_from_array = Str(memoryview(alphabet_array))
 ```
 
-The `File` class memory-maps a file from persistent memory without loading its copy into RAM.
+The `File` class memory-maps a file from persistent storage without loading its copy into RAM.
 The contents of that file would remain immutable, and the mapping can be shared by multiple Python processes simultaneously.
-A standard dataset pre-processing use case would be to map a sizeable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
+A standard dataset pre-processing use case would be to map a sizable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
 
 ### Basic Operations
 
@@ -396,8 +396,8 @@ x: Strs = text.rsplit(separator=' ', maxsplit=sys.maxsize, keepseparator=False)
 x: Strs = text.splitlines(keeplinebreaks=False, maxsplit=sys.maxsize)
 ```
 
-It's important to note, that the last function behavior is slightly different from Python's `str.splitlines`.
-The [native version][faq-splitlines] matches `\n`, `\r`, `\v` or `\x0b`, `\f` or `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\r\n`, `\u2028`, `\u2029`, including 3x two-bytes-long runes.
+It's important to note that the last function's behavior is slightly different from Python's `str.splitlines`.
+The [native version][faq-splitlines] matches `\n`, `\r`, `\v` or `\x0b`, `\f` or `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\r\n`, `\u2028`, `\u2029`, including 3x two-byte-long runes.
 The StringZilla version matches only `\n`, `\v`, `\f`, `\r`, `\x1c`, `\x1d`, `\x1e`, `\x85`, avoiding two-byte-long runes.
 
 [faq-splitlines]: https://docs.python.org/3/library/stdtypes.html#str.splitlines
@@ -438,12 +438,12 @@ sz.translate(image, look_up_table, inplace=True)
 
 ### Hash
 
-Single‑shot and incremental hashing are both supported:
+Single-shot and incremental hashing are both supported:
 
 ```py
 import stringzilla as sz
 
-# One‑shot - stable 64‑bit output across all platforms!
+# One-shot - stable 64-bit output across all platforms!
 one = sz.hash(b"Hello, world!", seed=42)
 
 # Incremental updates return itself; digest does not consume state
@@ -455,7 +455,7 @@ assert one == streamed
 
 ### Collection-Level Operations
 
-Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices, with minimum memory footprint.
+Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices with minimal memory footprint.
 If all the chunks are located in consecutive memory regions, the memory overhead can be as low as 4 bytes per chunk.
 
 ```python
@@ -466,7 +466,7 @@ lines_sorted: Strs = lines.sorted() # returns a new Strs in sorted order
 order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
 
-Working on [RedPajama][redpajama], addressing 20 Billion annotated english documents, one will need only 160 GB of RAM instead of Terabytes.
+Working on [RedPajama][redpajama], addressing 20 billion annotated English documents, one will need only 160 GB of RAM instead of terabytes.
 Once loaded, the data will be memory-mapped, and can be reused between multiple Python processes without copies.
 And of course, you can use slices to navigate the dataset and shard it between multiple workers.
 
@@ -575,7 +575,7 @@ For proteins ~10k chars, 100 pairs:
 - [EditDistance](https://github.com/roy-ht/editdistance): 32.9s
 - StringZilla: __0.8s__
 
-Using the same proteins for Needleman–Wunsch alignment scores:
+Using the same proteins for Needleman-Wunsch alignment scores:
 
 - [BioPython](https://github.com/biopython/biopython): 25.8s
 - StringZilla: __7.8s__
@@ -605,7 +605,7 @@ for packed_row, packed_row_aminoacid in enumerate(aligner.substitution_matrix.al
         reconstructed_column = ord(packed_column_aminoacid)
         subs_reconstructed[reconstructed_row, reconstructed_column] = subs_packed[packed_row, packed_column]
 
-# Let's pick two examples for of tri-peptides (made of 3 aminoacids)
+# Let's pick two examples of tripeptides (made of 3 amino acids)
 glutathione = "ECG" # Need to rebuild human tissue?
 thyrotropin_releasing_hormone = "QHP" # Or to regulate your metabolism?
 
@@ -879,12 +879,12 @@ To target a different device, use the appropriate `szs_device_scope_init_{cpu_co
 When dealing with GPU backends, make sure to use the "unified memory" allocators exposed as `szs_unified_{alloc,free}`.
 Similar stable C ABIs are exposed for other workloads as well.
 
-- UTF‑8: `szs_levenshtein_distances_utf8_{sequence,u32tape,u64tape}`
-- Needleman–Wunsch: `szs_needleman_wunsch_scores_{sequence,u32tape,u64tape}`
+- UTF-8: `szs_levenshtein_distances_utf8_{sequence,u32tape,u64tape}`
+- Needleman-Wunsch: `szs_needleman_wunsch_scores_{sequence,u32tape,u64tape}`
 - Smith-Waterman: `szs_smith_waterman_scores_{sequence,u32tape,u64tape}`
 
 Moreover, in C++ codebases one can tap into the raw templates implementing that functionality, customizing them with custom executors, SIMD plugins, etc.
-For that include `stringzillas/similarities.hpp` for C++ and `stringzillas/similarities.hpp` for CUDA.
+For that include `stringzillas/similarities.hpp` for C++ and `stringzillas/similarities.cuh` for CUDA.
 
 ```cpp
 #include <stringzillas/similarities.hpp>
@@ -913,12 +913,12 @@ auto _ = pool.try_spawn(std::thread::hardware_concurrency());
 auto _ = engine(tape_a, tape_b, distances, pool);
 ```
 
-All of the potentially-failing StringZillas interfaces return error codes, and none raise C++ exceptions.
+All of the potentially failing StringZillas' interfaces return error codes, and none raise C++ exceptions.
 Parallelism is enabled at both collection-level and within individual pairs of large inputs.
 
 ### Rolling Fingerprints
 
-StringZilla exposes parallel fingerprinting (Min‑Hashes or Count‑Min‑Sketches) via the `stringzillas/stringzillas.h` header. 
+StringZilla exposes parallel fingerprinting (Min-Hashes or Count-Min-Sketches) via the `stringzillas/stringzillas.h` header. 
 Use `szs_device_scope_t` to pick hardware and optionally limit capabilities per engine.
 
 ```c
@@ -943,7 +943,7 @@ szs_device_scope_free(device);
 ```
 
 Moreover, in C++ codebases one can tap into the raw templates implementing that functionality, customizing them with custom executors, SIMD plugins, etc.
-For that include `stringzillas/fingerprints.hpp` for C++ and `stringzillas/fingerprints.hpp` for CUDA.
+For that include `stringzillas/fingerprints.hpp` for C++ and `stringzillas/fingerprints.cuh` for CUDA.
 
 ```cpp
 #include <stringzillas/fingerprints.hpp>
@@ -958,7 +958,7 @@ std::vector<std::string> docs = {"alpha beta", "alpha betta"};
 sz::arrow_strings_tape<char, sz::size_t, std::allocator<char>> tape;
 auto _ = tape.try_assign(docs.begin(), docs.end());
 
-// Run on the current thread with a Rabin–Karp family hasher
+// Run on the current thread with a Rabin-Karp family hasher
 constexpr std::size_t dimensions_k = 256;
 using fingerprinter_t = szs::floating_rolling_hashers<sz_cap_serial_k, dimensions_k>;
 fingerprinter_t engine;
@@ -1516,7 +1516,7 @@ assert_eq!(my_str.sz_find("world"), Some(7));
 assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
 ```
 
-The library also exposes Levenshtein and Hamming edit-distances for byte-arrays and UTF-8 strings, as well as Needleman-Wunsch alignment scores.
+The library also exposes Levenshtein and Hamming edit distances for byte arrays and UTF-8 strings, as well as Needleman-Wunsch alignment scores.
 
 ```rust
 use stringzilla::sz;
@@ -1535,7 +1535,7 @@ sz::levenshtein_distance_utf8("façade", "facade") // 1
 
 ### Hash
 
-Single‑shot and incremental hashing are both supported:
+Single-shot and incremental hashing are both supported:
 
 ```rs
 let mut hasher = sz::Hasher::new(42);
@@ -1677,12 +1677,12 @@ const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
 
 ### Hash
 
-Single‑shot and incremental hashing are both supported:
+Single-shot and incremental hashing are both supported:
 
 ```js
 import sz from 'stringzilla';
 
-// One‑shot - stable 64‑bit output across all platforms!
+// One-shot - stable 64-bit output across all platforms!
 const hash = sz.hash(Buffer.from('Hello, world!'), 42); // returns BigInt
 
 // Incremental updates - hasher maintains state
@@ -2019,7 +2019,7 @@ sz.reset_capabilities(sz.__capabilities__)  # Reset to auto-dispatch
 
 ## Contributing 👾
 
-Please check out the [contributing guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) for more details on how to setup the development environment and contribute to this project.
+Please check out the [contributing guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) for more details on how to set up the development environment and contribute to this project.
 If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], and [SimSIMD][simsimd]. 🤗
 
 [usearch]: https://github.com/unum-cloud/usearch

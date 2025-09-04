@@ -228,7 +228,7 @@ SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count
     } while (0)
 
 /**
- *  @brief  Sorting network for 2 elements is just a single compare–swap.
+ *  @brief  Sorting network for 2 elements is just a single compare-swap.
  */
 SZ_INTERNAL void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
     sz_sequence_sorting_network_conditional_swap_(0, 1);
@@ -237,7 +237,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_i
 /**
  *  @brief  Sorting network for 3 elements.
  *
- *  The network uses 3 compare–swap operations:
+ *  The network uses 3 compare-swap operations:
  *
  *      Stage 1: (0, 1)
  *      Stage 2: (0, 2)
@@ -258,7 +258,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_i
 /**
  *  @brief  Sorting network for 4 elements.
  *
- *  The network uses 5 compare–swap operations:
+ *  The network uses 5 compare-swap operations:
  *
  *      Stage 1: (0, 1) and (2, 3)
  *      Stage 2: (0, 2)
@@ -267,17 +267,17 @@ SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_i
  */
 SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
-    // Stage 1: Compare–swap adjacent pairs.
+    // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
     sz_sequence_sorting_network_conditional_swap_(2, 3);
 
-    // Stage 2: Compare–swap (0, 2)
+    // Stage 2: Compare-swap (0, 2)
     sz_sequence_sorting_network_conditional_swap_(0, 2);
 
-    // Stage 3: Compare–swap (1, 3)
+    // Stage 3: Compare-swap (1, 3)
     sz_sequence_sorting_network_conditional_swap_(1, 3);
 
-    // Stage 4: Final compare–swap (1, 2)
+    // Stage 4: Final compare-swap (1, 2)
     sz_sequence_sorting_network_conditional_swap_(1, 2);
 
 #if SZ_DEBUG
@@ -291,7 +291,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_i
  *          and their corresponding offsets in only 19 comparisons, the most efficient
  *          variant currently known.
  *
- *  The network consists of 6 stages with the following compare–swap pairs:
+ *  The network consists of 6 stages with the following compare-swap pairs:
  *
  *      Stage 1: (0,1), (2,3), (4,5), (6,7)
  *      Stage 2: (0,2), (1,3), (4,6), (5,7)
@@ -302,33 +302,33 @@ SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_i
  */
 SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
-    // Stage 1: Compare–swap adjacent pairs.
+    // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
     sz_sequence_sorting_network_conditional_swap_(2, 3);
     sz_sequence_sorting_network_conditional_swap_(4, 5);
     sz_sequence_sorting_network_conditional_swap_(6, 7);
 
-    // Stage 2: Compare–swap with stride 2.
+    // Stage 2: Compare-swap with stride 2.
     sz_sequence_sorting_network_conditional_swap_(0, 2);
     sz_sequence_sorting_network_conditional_swap_(1, 3);
     sz_sequence_sorting_network_conditional_swap_(4, 6);
     sz_sequence_sorting_network_conditional_swap_(5, 7);
 
-    // Stage 3: Compare–swap between middle elements.
+    // Stage 3: Compare-swap between middle elements.
     sz_sequence_sorting_network_conditional_swap_(1, 2);
     sz_sequence_sorting_network_conditional_swap_(5, 6);
 
-    // Stage 4: Compare–swap across the two halves.
+    // Stage 4: Compare-swap across the two halves.
     sz_sequence_sorting_network_conditional_swap_(0, 4);
     sz_sequence_sorting_network_conditional_swap_(1, 5);
     sz_sequence_sorting_network_conditional_swap_(2, 6);
     sz_sequence_sorting_network_conditional_swap_(3, 7);
 
-    // Stage 5: Compare–swap within each half.
+    // Stage 5: Compare-swap within each half.
     sz_sequence_sorting_network_conditional_swap_(2, 4);
     sz_sequence_sorting_network_conditional_swap_(3, 5);
 
-    // Stage 6: Final compare–swap of adjacent elements.
+    // Stage 6: Final compare-swap of adjacent elements.
     sz_sequence_sorting_network_conditional_swap_(1, 2);
     sz_sequence_sorting_network_conditional_swap_(3, 4);
     sz_sequence_sorting_network_conditional_swap_(5, 6);
@@ -544,7 +544,7 @@ SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
 #if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
 #else
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swaps on big-endian
 #endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
@@ -869,7 +869,7 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        
 #if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
 #else
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swaps on big-endian
 #endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
@@ -1112,9 +1112,9 @@ SZ_PUBLIC void sz_sequence_argsort_sve_next_pgrams_(
 
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
 #if !SZ_IS_BIG_ENDIAN_
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; // byte order was swapped
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
 #else
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; // No byte swapping on big-endian
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; // ! No byte swaps on big-endian
 #endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;

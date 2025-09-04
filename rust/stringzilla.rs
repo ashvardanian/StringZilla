@@ -94,13 +94,13 @@ pub struct _SzSequence {
 }
 
 impl Byteset {
-    /// Initializes a bit‑set to an empty collection (all characters banned).
+    /// Initializes a bit-set to an empty collection (all characters banned).
     #[inline]
     pub fn new() -> Self {
         Self { bits: [0; 4] }
     }
 
-    /// Initializes a bit‑set to contain all ASCII characters.
+    /// Initializes a bit-set to contain all ASCII characters.
     #[inline]
     pub fn new_ascii() -> Self {
         Self {
@@ -405,7 +405,7 @@ impl<const N: usize> FixedCString<N> {
     }
 
     /// Returns the current content as a &str.
-    /// Returns an empty string if the content isn’t valid UTF‑8.
+    /// Returns an empty string if the content isn’t valid UTF-8.
     pub fn as_str(&self) -> &str {
         core::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
     }
@@ -914,7 +914,7 @@ where
 }
 
 /// A helper type that holds a mapper closure which, given an index,
-/// returns the corresponding byte‑slice representation.
+/// returns the corresponding byte-slice representation.
 ///
 /// The closure is expected to have type `Fn(usize) -> &[u8]` so that callers
 /// can write closures like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
@@ -955,7 +955,7 @@ where
     get_slice_impl::<F>
 }
 
-/// Sorts a sequence of items by comparing their byte‑slice representations.
+/// Sorts a sequence of items by comparing their byte-slice representations.
 ///
 /// The caller must supply an output buffer `order` whose length is at least
 /// equal to the length of `data`. On success, the function writes the sorted
@@ -978,7 +978,7 @@ pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) 
     argsort_permutation_by(|i| data[i].as_ref(), order)
 }
 
-/// Sorts a sequence of items by comparing their corresponding byte‑slice representations.
+/// Sorts a sequence of items by comparing their corresponding byte-slice representations.
 /// The size of the permutation is inferred from the length of the `order` slice.
 ///
 /// # Example
@@ -1042,7 +1042,7 @@ where
 // Intersection functions
 // ----------------------------------------------------------------------
 
-/// Intersects two sequences (inner join) using their default byte‑slice views.
+/// Intersects two sequences (inner join) using their default byte-slice views.
 ///
 /// Both sequences must have an output buffer provided (for first and second positions)
 /// whose length is at least the minimum of the two input lengths.
@@ -1091,7 +1091,7 @@ pub fn intersection<T: AsRef<[u8]>>(
     )
 }
 
-/// Intersects two sequences (inner join) using their elements corresponding byte‑slice views.
+/// Intersects two sequences (inner join) using their elements corresponding byte-slice views.
 /// The caller must provide a closure that maps an index to the byte slice representation of
 /// the corresponding element in the first and second sequences.
 ///

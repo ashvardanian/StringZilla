@@ -570,7 +570,7 @@ StringZilla's Rust crate supports both `std` and `no_std` builds.
 Other options include:
 
 - `std` (default): enables standard library support.
-- `cpus`: multi‑threaded CPU backend (implies `std`).
+- `cpus`: multi-threaded CPU backend (implies `std`).
 - `cuda`: CUDA backend (implies `cpus` and `std`).
 - `rocm`: ROCm backend (implies `cpus` and `std`).
 

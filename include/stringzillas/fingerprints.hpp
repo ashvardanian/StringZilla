@@ -163,7 +163,7 @@ struct multiplying_rolling_hasher {
 };
 
 /**
- *  @brief Rabin-Karp–style rolling polynomial hash function.
+ *  @brief Rabin-Karp-style rolling polynomial hash function.
  *  @tparam hash_type_ Type of the hash value, can be `u16`, `u32`, or `u64`.
  *  @tparam accumulator_type_ Type used for modulo arithmetic, e.g., `u64_t`.
  *
