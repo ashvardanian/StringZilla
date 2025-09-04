@@ -3107,6 +3107,148 @@ static PyObject *Str_find_last_not_of(PyObject *self, PyObject *const *args, Py_
     return PyLong_FromSsize_t(signed_offset);
 }
 
+static char const doc_count_byteset[] = //
+    "Count the occurrences of any character from a set of characters.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  chars (str): A string containing characters to count.\n"
+    "  start (int, optional): Starting index (default is 0).\n"
+    "  end (int, optional): Ending index (default is the string length).\n"
+    "Returns:\n"
+    "  int: The number of occurrences of any character from the set.";
+
+static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
+    // Fast path variables
+    PyObject *haystack_obj = NULL;
+    PyObject *needle_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // chars is required
+    Py_ssize_t const expected_max = expected_min + 2;  // + start + end
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return NULL;
+    }
+
+    // Fast positional argument extraction
+    if (is_member) {
+        haystack_obj = self;
+        if (positional_args_count >= 1) needle_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) haystack_obj = args[0];
+        if (positional_args_count >= 2) needle_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+                if (start_obj) {
+                    PyErr_SetString(PyExc_TypeError, "start specified twice");
+                    return NULL;
+                }
+                start_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+                if (end_obj) {
+                    PyErr_SetString(PyExc_TypeError, "end specified twice");
+                    return NULL;
+                }
+                end_obj = value;
+            }
+            else if (!is_member && PyUnicode_CompareWithASCIIString(key, "text") == 0) {
+                if (haystack_obj) {
+                    PyErr_SetString(PyExc_TypeError, "text specified twice");
+                    return NULL;
+                }
+                haystack_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "chars") == 0) {
+                if (needle_obj) {
+                    PyErr_SetString(PyExc_TypeError, "chars specified twice");
+                    return NULL;
+                }
+                needle_obj = value;
+            }
+            else {
+                PyErr_SetString(PyExc_TypeError, "Unknown keyword argument");
+                return NULL;
+            }
+        }
+    }
+
+    // Validate required arguments
+    if (!haystack_obj || !needle_obj) {
+        PyErr_SetString(PyExc_TypeError, "Required arguments missing");
+        return NULL;
+    }
+
+    // Parse string objects
+    sz_string_view_t haystack_view;
+    sz_string_view_t needle_view;
+    if (!sz_py_export_string_like(haystack_obj, &haystack_view.start, &haystack_view.length) ||
+        !sz_py_export_string_like(needle_obj, &needle_view.start, &needle_view.length)) {
+        wrap_current_exception("Haystack and needle must be string-like");
+        return NULL;
+    }
+
+    // Parse slice bounds
+    Py_ssize_t start_idx = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
+    Py_ssize_t end_idx = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    if ((start_idx == -1 || end_idx == -1) && PyErr_Occurred()) return NULL;
+
+    // Normalize slice indices
+    if (end_idx == PY_SSIZE_T_MAX) end_idx = (Py_ssize_t)haystack_view.length;
+    sz_size_t normalized_offset, normalized_length;
+    sz_ssize_clamp_interval(haystack_view.length, start_idx, end_idx, &normalized_offset, &normalized_length);
+    haystack_view.start += normalized_offset;
+    haystack_view.length = normalized_length;
+
+    // Handle empty cases
+    if (needle_view.length == 0 || haystack_view.length == 0) return PyLong_FromSsize_t(0);
+
+    // Count occurrences using `sz_find_byte_from`
+    sz_size_t count = 0;
+    sz_cptr_t current_pos = haystack_view.start;
+    sz_size_t remaining_length = haystack_view.length;
+
+    while (remaining_length > 0) {
+        sz_cptr_t found = sz_find_byte_from(current_pos, remaining_length, needle_view.start, needle_view.length);
+        if (found == NULL) break;
+
+        count++;
+        // Move past the found character
+        sz_size_t offset = (sz_size_t)(found - current_pos + 1);
+        if (offset > remaining_length) break;
+        current_pos = found + 1;
+        remaining_length -= offset;
+    }
+
+    return PyLong_FromSize_t(count);
+}
+
 /**
  *  @brief  Given parsed split settings, constructs an iterator that would produce that split.
  */
