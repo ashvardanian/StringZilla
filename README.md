@@ -29,10 +29,12 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 
 - 🐂 __[C](#basic-usage-with-c-99-and-newer) :__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
 - 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
+- 🧮 __[CUDA](#cuda):__ Process in-bulk with `<stringzillas/stringzillas.cuh>` in CUDA C++ 17
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
-- 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#quick-start-golang-🦫):__ Use the `StringZilla` cGo module
+- 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
+- 🟨 __[JavaScript](#quick-start-javascript-🟨):__ Use the `StringZilla` library
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
@@ -961,11 +963,12 @@ auto _ = tape.try_assign(docs.begin(), docs.end());
 
 // Run on the current thread with a Rabin-Karp family hasher
 constexpr std::size_t dimensions_k = 256;
+constexpr std::size_t window_width_k = 7;
+using row_t = std::array<sz_u32_t, 256>;
 using fingerprinter_t = szs::floating_rolling_hashers<sz_cap_serial_k, dimensions_k>;
 fingerprinter_t engine;
-auto _ = engine.try_extend(/*window*/ 7, /*dims*/ 256);
-std::array<sz_u32_t, 256> row{};
-std::vector<decltype(row)> hashes(docs.size()), counts(docs.size());
+auto _ = engine.try_extend(window_width_k, dimensions_k);
+std::vector<row_t> hashes(docs.size()), counts(docs.size());
 auto _ = engine(tape, hashes, counts);
 
 // Or run in parallel with a pool
@@ -973,6 +976,17 @@ fork_union::basic_pool_t pool;
 auto _ = pool.try_spawn(std::thread::hardware_concurrency());
 auto _ = engine(tape, hashes, counts, pool);
 ```
+
+### CUDA
+
+StringZilla provides CUDA C++ templates for composable string batch-processing operations.
+Different GPUs have varying warp sizes, shared memory capacities, and register counts, affecting algorithm selection, so it's important to query the `gpu_specs_t` via `gpu_specs_fetch`.
+For memory management, ensure that you use GPU-visible' unified memory` exposed in an STL-compatible manner as a `unified_alloc` template class.
+For error handling, `cuda_status_t` extends the traditional `status_t` with GPU-specific information.
+It's implicitly convertible to `status_t`, so you can use it in places expecting a `status_t`.
+
+Most algorithms can load-balance both a large number of small strings and a small number of large strings.
+Still, with large H100-scale GPUs, it's best to submit thousands of inputs at once.
 
 ### Memory Ownership and Small String Optimization
 
@@ -1322,25 +1336,6 @@ Standard library functions may not offer the most efficient or convenient method
 - `haystack.lookup(sz::look_up_table::identity())`
 - `haystack.lookup(sz::look_up_table::identity(), haystack.data())`
 
-### Levenshtein Edit Distance and Alignment Scores
-
-Levenshtein and Hamming edit distance are provided for both byte-strings and UTF-8 strings.
-The latter will output the distance in Unicode code points, not bytes.
-Needleman-Wunsch alignment scores are only defined for byte-strings.
-
-```cpp
-// Count number of substitutions in same length strings
-sz::hamming_distance(first, second[, upper_bound]) -> std::size_t;
-sz::hamming_distance_utf8(first, second[, upper_bound]) -> std::size_t;
-
-// Count number of insertions, deletions and substitutions
-sz::levenshtein_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
-sz::levenshtein_distance_utf8(first, second[, upper_bound[, allocator]]) -> std::size_t;
-
-// Substitution-parametrized Needleman-Wunsch global alignment score
-std::int8_t costs[256][256]; // Substitution costs matrix
-sz::alignment_score(first, second, costs[, gap_score[, allocator]) -> std::ptrdiff_t;
-```
 
 ### Sorting in C and C++
 
@@ -1412,10 +1407,15 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_SVE`, `SZ_USE_SVE2`__:
+__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
-> Default values are inferred at compile time.
+> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
+
+__`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
+
+> One can explicitly disable certain families of PTX instructions for compatibility purposes.
+> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
 
 __`SZ_DYNAMIC_DISPATCH`__:
 
