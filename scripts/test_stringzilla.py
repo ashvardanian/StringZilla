@@ -46,7 +46,7 @@ try:
     import numpy as np
 
     numpy_available = True
-except: # noqa: E722
+except:  # noqa: E722
     # NumPy is not installed, most tests will be skipped
     numpy_available = False
 
@@ -59,7 +59,7 @@ try:
     import pyarrow as pa
 
     pyarrow_available = True
-except: # noqa: E722
+except:  # noqa: E722
     # PyArrow is not installed, most tests will be skipped
     pyarrow_available = False
 
@@ -789,6 +789,39 @@ def test_hash_basic_equivalence(body: str, seed_value: int):
     hash_seeded = sz.hash(body, seed=seed_value)
     hash_member = sz.Str(body).hash(seed=seed_value)
     assert hash_seeded == hash_member
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_hasher_incremental_vs_one_shot(seed_value: int):
+    data_full = b"hello world"
+    data_prefix = b"hello "
+    data_suffix = b"world"
+
+    hasher = sz.Hasher(seed=seed_value)
+    hasher.update(data_prefix)
+    hasher.update(data_suffix)
+    streamed_hash = hasher.digest()
+
+    expected_hash = sz.hash(data_full, seed=seed_value)
+    assert isinstance(streamed_hash, int)
+    assert streamed_hash == expected_hash
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_hasher_reset_and_hexdigest(seed_value: int):
+    data = b"some test payload"
+    hasher = sz.Hasher(seed=seed_value)
+    hasher.update(data)
+    streamed_hash = hasher.digest()
+    streamed_hex = hasher.hexdigest()
+    assert isinstance(streamed_hex, str) and len(streamed_hex) == 16 and streamed_hex == format(streamed_hash, "016x")
+
+    hasher.reset()
+    hasher.update(data)
+    re_streamed_hash = hasher.digest()
+    re_streamed_hex = hasher.hexdigest()
+    assert streamed_hash == re_streamed_hash
+    assert streamed_hex == re_streamed_hex
 
 
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
