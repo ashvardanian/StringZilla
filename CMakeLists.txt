@@ -368,9 +368,6 @@ endfunction ()
 function (define_launcher exec_name source cpp_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${source})
-    # TODO: How do we constrain this scope?!
-    #
-    # set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CXX)
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE stringzilla_header)
     add_test(NAME ${exec_name} COMMAND ${exec_name})

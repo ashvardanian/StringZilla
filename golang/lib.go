@@ -12,8 +12,8 @@
 // binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
 package sz
 
-// #cgo CFLAGS: -O3
-// #cgo LDFLAGS: -L. -L/usr/local/lib -lstringzilla_shared
+// #cgo CFLAGS: -O3 -I../include
+// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_release -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
 // #cgo noescape sz_find_byte
@@ -22,10 +22,20 @@ package sz
 // #cgo nocallback sz_rfind
 // #cgo noescape sz_rfind_byte
 // #cgo nocallback sz_rfind_byte
-// #cgo noescape sz_find_char_from
-// #cgo nocallback sz_find_char_from
-// #cgo noescape sz_rfind_char_from
-// #cgo nocallback sz_rfind_char_from
+// #cgo noescape sz_find_byte_from
+// #cgo nocallback sz_find_byte_from
+// #cgo noescape sz_rfind_byte_from
+// #cgo nocallback sz_rfind_byte_from
+// #cgo noescape sz_bytesum
+// #cgo nocallback sz_bytesum
+// #cgo noescape sz_hash
+// #cgo nocallback sz_hash
+// #cgo noescape sz_hash_state_init
+// #cgo nocallback sz_hash_state_init
+// #cgo noescape sz_hash_state_update
+// #cgo nocallback sz_hash_state_update
+// #cgo noescape sz_hash_state_digest
+// #cgo nocallback sz_hash_state_digest
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
@@ -103,13 +113,14 @@ func LastIndexByte(str string, c byte) int64 {
 }
 
 // Index returns the index of the first instance of any byte from `substr` in `str`, or -1 if none are present.
+// Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.IndexAny.
 // https://pkg.go.dev/strings#IndexAny
 func IndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := len(substr)
-	matchPtr := unsafe.Pointer(C.sz_find_char_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	matchPtr := unsafe.Pointer(C.sz_find_byte_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
 	if matchPtr == nil {
 		return -1
 	}
@@ -117,17 +128,58 @@ func IndexAny(str string, substr string) int64 {
 }
 
 // Index returns the index of the last instance of any byte from `substr` in `str`, or -1 if none are present.
+// Note: This is byte-set based (ASCII/bytes), not Unicode rune semantics like strings.LastIndexAny.
 // https://pkg.go.dev/strings#LastIndexAny
 func LastIndexAny(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := len(substr)
-	matchPtr := unsafe.Pointer(C.sz_rfind_char_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+	matchPtr := unsafe.Pointer(C.sz_rfind_byte_from(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
 	if matchPtr == nil {
 		return -1
 	}
 	return int64(uintptr(matchPtr) - uintptr(unsafe.Pointer(strPtr)))
+}
+
+// Bytesum computes a simple 64-bit checksum by summing bytes.
+func Bytesum(str string) uint64 {
+	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+	strLen := C.ulong(len(str))
+	return uint64(C.sz_bytesum(strPtr, strLen))
+}
+
+// Hash computes a 64-bit non-cryptographic hash with a seed.
+func Hash(str string, seed uint64) uint64 {
+	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+	strLen := C.ulong(len(str))
+	return uint64(C.sz_hash(strPtr, strLen, (C.sz_u64_t)(seed)))
+}
+
+// Hasher is a streaming hasher compatible with Hash when fed the same data.
+type Hasher struct {
+	state C.sz_hash_state_t
+}
+
+// NewHasher creates a new streaming hasher with the given seed.
+func NewHasher(seed uint64) *Hasher {
+	h := &Hasher{}
+	C.sz_hash_state_init(&h.state, (C.sz_u64_t)(seed))
+	return h
+}
+
+// Write adds data to the streaming hasher.
+func (h *Hasher) Write(p []byte) *Hasher {
+	if len(p) == 0 {
+		return h
+	}
+	C.sz_hash_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
+	return h
+}
+
+// Digest returns the current 64-bit hash without consuming the state.
+func (h *Hasher) Digest() uint64 {
+	return uint64(C.sz_hash_state_digest(&h.state))
 }
 
 // Count returns the number of overlapping or non-overlapping instances of `substr` in `str`.
@@ -139,11 +191,11 @@ func Count(str string, substr string, overlap bool) int64 {
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := int64(len(substr))
 
-	if strLen == 0 || strLen < substrLen {
-		return 0
-	}
 	if substrLen == 0 {
 		return 1 + strLen
+	}
+	if strLen == 0 || strLen < substrLen {
+		return 0
 	}
 
 	count := int64(0)

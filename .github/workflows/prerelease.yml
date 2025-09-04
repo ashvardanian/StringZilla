@@ -87,6 +87,19 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Build shared library for Go binding
+        run: |
+          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ">=1.24"
+      - name: Test Go binding
+        working-directory: golang
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+        run: go test -v
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
@@ -197,6 +210,19 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Build shared library for Go binding
+        run: |
+          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ">=1.24"
+      - name: Test Go binding
+        working-directory: golang
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+        run: go test -v
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search

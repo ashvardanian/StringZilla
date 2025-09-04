@@ -20,11 +20,12 @@ The project is split into the following parts:
 - `include/stringzilla/stringzilla.h` - single-header C implementation.
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
 - `include/stringzillas/*` - parallel CPU/GPU header-only backends.
-- `c/*` - C sources for dynamic dispatch and parallel backends.
-- `rust/*` - Rust crate sources.
-- `python/*` - Python bindings.
-- `swift/*` - Swift package sources and tests.
-- `javascript/*` - JavaScript bindings.
+- `c/*` - [C](#contributing-in-c-and-c) sources for dynamic dispatch and parallel backends.
+- `rust/*` - [Rust](#contributing-in-rust) crate sources.
+- `python/*` - [Python](#contributing-in-python) bindings.
+- `swift/*` - [Swift](#contributing-in-swift) package sources and tests.
+- `javascript/*` - [JavaScript](#contributing-in-javascript) bindings.
+- `golang/*` - [Go](#contributing-in-golang) bindings.
 - `scripts/*` - Scripts for benchmarking and testing.
 - `cli/*` - SIMD-accelerated CLI utilities.
 

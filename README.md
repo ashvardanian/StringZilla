@@ -32,6 +32,7 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
+- 🦫 __[Go](#quick-start-golang-🦫):__ Use the `StringZilla` cGo module
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
@@ -314,17 +315,17 @@ Both layers are designed to be extremely portable:
 Not all features are available across all bindings.
 Consider contributing if you need a feature that's not yet implemented.
 
-|                                | Maturity |   C   |  C++  | Python | Rust  |  JS   | Swift |
-| :----------------------------- | :------: | :---: | :---: | :----: | :---: | :---: | :---: |
-| Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
-| Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
-| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
-| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |
-| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |
-|                                |          |       |       |        |       |       |       |  |
-| Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
-| Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |
+|                                | Maturity |   C   |  C++  | Python | Rust  |  JS   | Swift |  Go   |
+| :----------------------------- | :------: | :---: | :---: | :----: | :---: | :---: | :---: | :---: |
+| Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
+| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
+|                                |          |       |       |        |       |       |       |       |
+| Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -1731,6 +1732,70 @@ hasher.update("Hello, ")
 hasher.update("world!")
 let streamedHash = hasher.digest()
 assert(hash == streamedHash)
+```
+
+## Quick Start: GoLang 🦫
+
+Add the Go binding as a module dependency:
+
+```bash
+go get github.com/ashvardanian/stringzilla/golang@latest
+```
+
+Build the shared C library once, then ensure your runtime can locate it (Linux shown):
+
+```bash
+cmake -B build_shared -D STRINGZILLA_BUILD_SHARED=1 -D CMAKE_BUILD_TYPE=Release
+cmake --build build_shared --target stringzilla_shared --config Release
+export LD_LIBRARY_PATH="$PWD/build_shared:$LD_LIBRARY_PATH"
+```
+
+Use finders (substring, bytes, and sets):
+
+```go
+package main
+
+import (
+    "fmt"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+func main() {
+    s := "the quick brown fox jumps over the lazy dog"
+
+    // Substrings
+    fmt.Println(sz.Contains(s, "brown"))        // true
+    fmt.Println(sz.Index(s, "the"))             // 0
+    fmt.Println(sz.LastIndex(s, "the"))         // 35
+
+    // Single bytes
+    fmt.Println(sz.IndexByte(s, 'o'))            // 12
+    fmt.Println(sz.LastIndexByte(s, 'o'))        // 41
+
+    // Byte sets
+    fmt.Println(sz.IndexAny(s, "aeiou"))        // 2  (first vowel)
+    fmt.Println(sz.LastIndexAny(s, "aeiou"))    // 43 (last vowel)
+
+    // Counting with/without overlaps
+    fmt.Println(sz.Count("aaaaa", "aa", false)) // 2
+    fmt.Println(sz.Count("aaaaa", "aa", true))  // 4
+    fmt.Println(sz.Count("abc", "", false))     // 4
+    fmt.Println(sz.Bytesum("ABC"), sz.Bytesum("ABCD"))
+}
+```
+
+### Hash
+
+Single-shot and incremental hashing are both supported:
+
+```go
+one := sz.Hash("Hello, world!", 42)
+
+hasher := sz.NewHasher(42)
+hasher.Write([]byte("Hello, "))
+hasher.Write([]byte("world!"))
+streamed := hasher.Digest()
+fmt.Println(one == streamed) // true
 ```
 
 ## Algorithms & Design Decisions 📚
