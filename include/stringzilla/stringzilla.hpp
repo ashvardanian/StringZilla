@@ -2089,6 +2089,7 @@ class basic_string {
 
     basic_string(basic_string &&other) noexcept { move(other); }
     basic_string &operator=(basic_string &&other) noexcept {
+        if (this == &other) return *this;
         if (!is_internal()) {
             _with_alloc([&](sz_alloc_type &alloc) {
                 sz_string_free(&string_, &alloc);
