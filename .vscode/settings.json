@@ -1,4 +1,27 @@
 {
+  "[c]": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4
+  },
+  "[yaml]": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "C_Cpp.dimInactiveRegions": false,
   // This may cause overheating.
@@ -79,6 +102,7 @@
     "Gotoh",
     "GPGPU",
     "hashers",
+    "hashset",
     "Haswell",
     "Heikki",
     "hexdigits",
@@ -227,34 +251,11 @@
     "Zilla",
     "Zillable"
   ],
-  "editor.tabSize": 4,
-  "editor.insertSpaces": true,
   "editor.detectIndentation": false,
   "editor.formatOnSave": true,
+  "editor.insertSpaces": true,
   "editor.rulers": [120],
-  "[javascript]": {
-    "editor.tabSize": 4,
-    "editor.insertSpaces": true,
-    "editor.defaultFormatter": "vscode.typescript-language-features"
-  },
-  "[typescript]": {
-    "editor.tabSize": 4,
-    "editor.insertSpaces": true,
-    "editor.defaultFormatter": "vscode.typescript-language-features"
-  },
-  "[json]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  },
-  "[yaml]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true
-  },
-  "[c]": {
-    "editor.tabSize": 4,
-    "editor.insertSpaces": true
-  },
+  "editor.tabSize": 4,
   "files.associations": {
     "__availability": "cpp",
     "__bit_reference": "cpp",

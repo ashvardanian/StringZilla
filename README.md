@@ -436,6 +436,23 @@ image = open("/image/path.jpeg", "rb").read()
 sz.translate(image, look_up_table, inplace=True)
 ```
 
+### Hash
+
+Single‑shot and incremental hashing are both supported:
+
+```py
+import stringzilla as sz
+
+# One‑shot - stable 64‑bit output across all platforms!
+one = sz.hash(b"Hello, world!", seed=42)
+
+# Incremental updates return itself; digest does not consume state
+hasher = sz.Hasher(seed=42)
+hasher.update(b"Hello, ").update(b"world!")
+streamed = hasher.digest() # or `hexdigest()` for a string
+assert one == streamed
+```
+
 ### Collection-Level Operations
 
 Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices, with minimum memory footprint.
@@ -1516,6 +1533,31 @@ sz::levenshtein_distance_utf8("façade", "facade") // 1
 
 [memchr-benchmarks]: https://github.com/ashvardanian/StringWa.rs
 
+### Hash
+
+Single‑shot and incremental hashing are both supported:
+
+```rs
+let mut hasher = sz::Hasher::new(42);
+hasher.write(b"Hello, ");
+hasher.write(b"world!");
+let streamed = hasher.finish();
+
+let mut hasher = sz::Hasher::new(42);
+hasher.write(b"Hello, world!");
+assert_eq!(streamed, hasher.finish());
+```
+
+To use StringZilla with `std::collections`:
+
+```rs
+use std::collections::HashMap;
+let mut map: HashMap<&str, i32, sz::BuildSzHasher> =
+    HashMap::with_hasher(sz::BuildSzHasher::with_seed(42));
+map.insert("a", 1);
+assert_eq!(map.get("a"), Some(&1));
+```
+
 ### Similarity Scores
 
 StringZilla exposes high-performance, batch-oriented similarity via the `szs` module.
@@ -1602,6 +1644,8 @@ Install the Node.js package and use zero-copy `Buffer` APIs.
 
 ```bash
 npm install stringzilla
+node -p "require('stringzilla').capabilities" # for CommonJS
+node -e "import('stringzilla').then(m=>console.log(m.default.capabilities)).catch(console.error)" # for ESM
 ```
 
 ```js
@@ -1623,19 +1667,30 @@ const lastVowelIndex = sz.findLastByteFrom(haystack, Buffer.from('aeiou'));   //
 const lCount = sz.count(haystack, Buffer.from('l'));                // 3n
 const llOverlapCount = sz.count(haystack, Buffer.from('ll'), true); // 1n
 
-// Hashing
-const hash = sz.hash(haystack, 0); // 64-bit BigInt
-const hasher = new sz.Hasher(0);
-hasher.update(Buffer.from('Hello, '));
-hasher.update(Buffer.from('world!'));
-const streamedHash = hasher.digest();
-
 // Equality/ordering utilities
 const isEqual = sz.equal(Buffer.from('a'), Buffer.from('a'));
 const order = sz.compare(Buffer.from('a'), Buffer.from('b')); // -1, 0, or 1
 
 // Other helpers
 const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
+```
+
+### Hash
+
+Single‑shot and incremental hashing are both supported:
+
+```js
+import sz from 'stringzilla';
+
+// One‑shot - stable 64‑bit output across all platforms!
+const hash = sz.hash(Buffer.from('Hello, world!'), 42); // returns BigInt
+
+// Incremental updates - hasher maintains state
+const hasher = new sz.Hasher(42); // seed: 42
+hasher.update(Buffer.from('Hello, '));
+hasher.update(Buffer.from('world!'));
+const streamedHash = hasher.digest(); // returns BigInt
+console.assert(hash === streamedHash);
 ```
 
 ## Quick Start: Swift 🍏
@@ -1658,6 +1713,24 @@ s[s.findLast(substring: "o")!...] // "o StringZilla. 👋"
 s[s.findFirst(characterFrom: "aeiou")!...] // "ello, world! Welcome to StringZilla. 👋"
 s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
+```
+
+### Hash
+
+StringZilla provides high-performance hashing for Swift strings:
+
+```swift
+import StringZilla
+
+// One-shot hashing - stable 64-bit output across all platforms!
+let hash = "Hello, world!".hash(seed: 42)
+
+// Incremental hashing for streaming data
+var hasher = SZHasher(seed: 42)
+hasher.update("Hello, ")
+hasher.update("world!")
+let streamedHash = hasher.digest()
+assert(hash == streamedHash)
 ```
 
 ## Algorithms & Design Decisions 📚
