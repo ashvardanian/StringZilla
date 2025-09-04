@@ -51,8 +51,10 @@ fn build_stringzilla() {
     let flags_to_try = match target_arch.as_str() {
         "arm" | "aarch64" => vec![
             //
+            "SZ_USE_SVE2_AES",
             "SZ_USE_SVE2",
             "SZ_USE_SVE",
+            "SZ_USE_NEON_AES",
             "SZ_USE_NEON",
         ],
         _ => vec![
