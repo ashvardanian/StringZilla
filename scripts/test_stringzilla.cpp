@@ -255,11 +255,11 @@ void test_byteset_struct() {
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
-void test_hash_equivalence(                                             //
-    sz_hash_t hash_base, sz_hash_state_init_t init_base,                //
-    sz_hash_state_stream_t stream_base, sz_hash_state_fold_t fold_base, //
-    sz_hash_t hash_simd, sz_hash_state_init_t init_simd,                //
-    sz_hash_state_stream_t stream_simd, sz_hash_state_fold_t fold_simd) {
+void test_hash_equivalence(                                               //
+    sz_hash_t hash_base, sz_hash_state_init_t init_base,                  //
+    sz_hash_state_update_t stream_base, sz_hash_state_digest_t fold_base, //
+    sz_hash_t hash_simd, sz_hash_state_init_t init_simd,                  //
+    sz_hash_state_update_t stream_simd, sz_hash_state_digest_t fold_simd) {
 
     auto test_on_seed = [&](std::string text, sz_u64_t seed) {
         // Compute the entire hash at once, expecting the same output
@@ -351,43 +351,43 @@ void test_equivalence() {
     assert(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
 
 #if SZ_USE_HASWELL
-    test_hash_equivalence(                                      //
-        sz_hash_serial, sz_hash_state_init_serial,              //
-        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
-        sz_hash_haswell, sz_hash_state_init_haswell,            //
-        sz_hash_state_stream_haswell, sz_hash_state_fold_haswell);
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_haswell, sz_hash_state_init_haswell,              //
+        sz_hash_state_update_haswell, sz_hash_state_digest_haswell);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    test_hash_equivalence(                                      //
-        sz_hash_serial, sz_hash_state_init_serial,              //
-        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
-        sz_hash_skylake, sz_hash_state_init_skylake,            //
-        sz_hash_state_stream_skylake, sz_hash_state_fold_skylake);
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_skylake, sz_hash_state_init_skylake,              //
+        sz_hash_state_update_skylake, sz_hash_state_digest_skylake);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_skylake);
 #endif
 #if SZ_USE_ICE
-    test_hash_equivalence(                                      //
-        sz_hash_serial, sz_hash_state_init_serial,              //
-        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
-        sz_hash_ice, sz_hash_state_init_ice,                    //
-        sz_hash_state_stream_ice, sz_hash_state_fold_ice);
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_ice, sz_hash_state_init_ice,                      //
+        sz_hash_state_update_ice, sz_hash_state_digest_ice);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_ice);
 #endif
 #if SZ_USE_NEON_AES
-    test_hash_equivalence(                                      //
-        sz_hash_serial, sz_hash_state_init_serial,              //
-        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
-        sz_hash_neon, sz_hash_state_init_neon,                  //
-        sz_hash_state_stream_neon, sz_hash_state_fold_neon);
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_neon, sz_hash_state_init_neon,                    //
+        sz_hash_state_update_neon, sz_hash_state_digest_neon);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
 #endif
 #if SZ_USE_SVE2_AES
-    test_hash_equivalence(                                      //
-        sz_hash_serial, sz_hash_state_init_serial,              //
-        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
-        sz_hash_sve2, sz_hash_state_init_sve2,                  //
-        sz_hash_state_stream_sve2, sz_hash_state_fold_sve2);
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_sve2, sz_hash_state_init_sve2,                    //
+        sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
 #endif
 };

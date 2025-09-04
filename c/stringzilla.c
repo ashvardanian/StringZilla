@@ -50,8 +50,8 @@ typedef struct sz_implementations_t {
     sz_bytesum_t bytesum;
     sz_hash_t hash;
     sz_hash_state_init_t hash_state_init;
-    sz_hash_state_stream_t hash_state_stream;
-    sz_hash_state_fold_t hash_state_fold;
+    sz_hash_state_update_t hash_state_update;
+    sz_hash_state_digest_t hash_state_digest;
     sz_fill_random_t fill_random;
 
     sz_find_byte_t find_byte;
@@ -87,8 +87,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->bytesum = sz_bytesum_serial;
     impl->hash = sz_hash_serial;
     impl->hash_state_init = sz_hash_state_init_serial;
-    impl->hash_state_stream = sz_hash_state_stream_serial;
-    impl->hash_state_fold = sz_hash_state_fold_serial;
+    impl->hash_state_update = sz_hash_state_update_serial;
+    impl->hash_state_digest = sz_hash_state_digest_serial;
     impl->fill_random = sz_fill_random_serial;
 
     impl->find = sz_find_serial;
@@ -115,8 +115,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->bytesum = sz_bytesum_haswell;
         impl->hash = sz_hash_haswell;
         impl->hash_state_init = sz_hash_state_init_haswell;
-        impl->hash_state_stream = sz_hash_state_stream_haswell;
-        impl->hash_state_fold = sz_hash_state_fold_haswell;
+        impl->hash_state_update = sz_hash_state_update_haswell;
+        impl->hash_state_digest = sz_hash_state_digest_haswell;
         impl->fill_random = sz_fill_random_haswell;
 
         impl->find_byte = sz_find_byte_haswell;
@@ -140,8 +140,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->bytesum = sz_bytesum_skylake;
         impl->hash = sz_hash_skylake;
         impl->hash_state_init = sz_hash_state_init_skylake;
-        impl->hash_state_stream = sz_hash_state_stream_skylake;
-        impl->hash_state_fold = sz_hash_state_fold_skylake;
+        impl->hash_state_update = sz_hash_state_update_skylake;
+        impl->hash_state_digest = sz_hash_state_digest_skylake;
         impl->fill_random = sz_fill_random_skylake;
 
         impl->find = sz_find_skylake;
@@ -164,8 +164,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->bytesum = sz_bytesum_ice;
         impl->hash = sz_hash_ice;
         impl->hash_state_init = sz_hash_state_init_ice;
-        impl->hash_state_stream = sz_hash_state_stream_ice;
-        impl->hash_state_fold = sz_hash_state_fold_ice;
+        impl->hash_state_update = sz_hash_state_update_ice;
+        impl->hash_state_digest = sz_hash_state_digest_ice;
         impl->fill_random = sz_fill_random_ice;
 
         impl->sequence_intersect = sz_sequence_intersect_ice;
@@ -196,8 +196,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     if (caps & sz_cap_neon_aes_k) {
         impl->hash = sz_hash_neon;
         impl->hash_state_init = sz_hash_state_init_neon;
-        impl->hash_state_stream = sz_hash_state_stream_neon;
-        impl->hash_state_fold = sz_hash_state_fold_neon;
+        impl->hash_state_update = sz_hash_state_update_neon;
+        impl->hash_state_digest = sz_hash_state_digest_neon;
         impl->fill_random = sz_fill_random_neon;
     }
 #endif
@@ -232,8 +232,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     if (caps & sz_cap_sve2_aes_k) {
         impl->hash = sz_hash_sve2;
         impl->hash_state_init = sz_hash_state_init_sve2;
-        impl->hash_state_stream = sz_hash_state_stream_sve2;
-        impl->hash_state_fold = sz_hash_state_fold_sve2;
+        impl->hash_state_update = sz_hash_state_update_sve2;
+        impl->hash_state_digest = sz_hash_state_digest_sve2;
         impl->fill_random = sz_fill_random_sve2;
     }
 #endif
@@ -309,12 +309,12 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_dispatch_table.hash_state_init(state, seed);
 }
 
-SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    sz_dispatch_table.hash_state_stream(state, text, length);
+SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    sz_dispatch_table.hash_state_update(state, text, length);
 }
 
-SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
-    return sz_dispatch_table.hash_state_fold(state);
+SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
+    return sz_dispatch_table.hash_state_digest(state);
 }
 
 SZ_DYNAMIC void sz_fill_random(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {

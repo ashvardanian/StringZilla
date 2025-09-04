@@ -134,14 +134,14 @@ napi_value hashAPI(napi_env env, napi_callback_info info) {
 static void hasher_cleanup(napi_env env, void *data, void *hint) { free(data); }
 typedef struct {
     sz_hash_state_t state;
-    sz_u64_t seed;
+    sz_u64_t seed; // Used for `reset`
 } hasher_t;
 
 napi_value hasherConstructor(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
-    napi_value jsthis;
-    napi_get_cb_info(env, info, &argc, args, &jsthis, NULL);
+    napi_value js_this;
+    napi_get_cb_info(env, info, &argc, args, &js_this, NULL);
 
     sz_u64_t seed = 0;
     if (argc > 0) {
@@ -156,19 +156,19 @@ napi_value hasherConstructor(napi_env env, napi_callback_info info) {
     hasher_t *hasher = malloc(sizeof(hasher_t));
     hasher->seed = seed;
     sz_hash_state_init(&hasher->state, seed);
-    napi_wrap(env, jsthis, hasher, hasher_cleanup, NULL, NULL);
+    napi_wrap(env, js_this, hasher, hasher_cleanup, NULL, NULL);
 
-    return jsthis;
+    return js_this;
 }
 
 napi_value hasherUpdate(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
-    napi_value jsthis;
-    napi_get_cb_info(env, info, &argc, args, &jsthis, NULL);
+    napi_value js_this;
+    napi_get_cb_info(env, info, &argc, args, &js_this, NULL);
 
     hasher_t *hasher;
-    napi_unwrap(env, jsthis, (void **)&hasher);
+    napi_unwrap(env, js_this, (void **)&hasher);
 
     void *buffer_data;
     size_t buffer_length;
@@ -178,18 +178,18 @@ napi_value hasherUpdate(napi_env env, napi_callback_info info) {
         return NULL;
     }
 
-    sz_hash_state_stream(&hasher->state, (sz_cptr_t)buffer_data, buffer_length);
-    return jsthis;
+    sz_hash_state_update(&hasher->state, (sz_cptr_t)buffer_data, buffer_length);
+    return js_this;
 }
 
 napi_value hasherDigest(napi_env env, napi_callback_info info) {
-    napi_value jsthis;
-    napi_get_cb_info(env, info, NULL, NULL, &jsthis, NULL);
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
 
     hasher_t *hasher;
-    napi_unwrap(env, jsthis, (void **)&hasher);
+    napi_unwrap(env, js_this, (void **)&hasher);
 
-    sz_u64_t hash = sz_hash_state_fold(&hasher->state);
+    sz_u64_t hash = sz_hash_state_digest(&hasher->state);
     napi_value js_result;
     napi_create_bigint_uint64(env, hash, &js_result);
 
@@ -197,14 +197,14 @@ napi_value hasherDigest(napi_env env, napi_callback_info info) {
 }
 
 napi_value hasherReset(napi_env env, napi_callback_info info) {
-    napi_value jsthis;
-    napi_get_cb_info(env, info, NULL, NULL, &jsthis, NULL);
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
 
     hasher_t *hasher;
-    napi_unwrap(env, jsthis, (void **)&hasher);
+    napi_unwrap(env, js_this, (void **)&hasher);
 
     sz_hash_state_init(&hasher->state, hasher->seed);
-    return jsthis;
+    return js_this;
 }
 
 napi_value findLastAPI(napi_env env, napi_callback_info info) {
@@ -485,9 +485,11 @@ napi_value Init(napi_env env, napi_value exports) {
 
     // Create Hasher class constructor
     napi_value hasherClass;
-    napi_property_descriptor hasherProps[] = {{"update", 0, hasherUpdate, 0, 0, 0, napi_default, 0},
-                                              {"digest", 0, hasherDigest, 0, 0, 0, napi_default, 0},
-                                              {"reset", 0, hasherReset, 0, 0, 0, napi_default, 0}};
+    napi_property_descriptor hasherProps[] = {
+        {"update", 0, hasherUpdate, 0, 0, 0, napi_default, 0},
+        {"digest", 0, hasherDigest, 0, 0, 0, napi_default, 0},
+        {"reset", 0, hasherReset, 0, 0, 0, napi_default, 0},
+    };
     napi_define_class(env, "Hasher", NAPI_AUTO_LENGTH, hasherConstructor, NULL,
                       sizeof(hasherProps) / sizeof(hasherProps[0]), hasherProps, &hasherClass);
 
@@ -505,9 +507,10 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor compareDesc = {"compare", 0, compareAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
-    napi_property_descriptor properties[] = {findDesc,         findLastDesc,         findByteDesc, findLastByteDesc,
-                                             findByteFromDesc, findLastByteFromDesc, countDesc,    hashDesc,
-                                             equalDesc,        compareDesc,          byteSumDesc,  hasherDesc};
+    napi_property_descriptor properties[] = {
+        findDesc,  findLastDesc, findByteDesc, findLastByteDesc, findByteFromDesc, findLastByteFromDesc,
+        countDesc, hashDesc,     equalDesc,    compareDesc,      byteSumDesc,      hasherDesc,
+    };
 
     // Define the properties on the `exports` object
     size_t propertyCount = sizeof(properties) / sizeof(properties[0]);

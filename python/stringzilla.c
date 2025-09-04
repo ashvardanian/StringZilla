@@ -106,6 +106,7 @@ static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
 static PyTypeObject SplitIteratorType;
+static PyTypeObject HasherType;
 
 static sz_string_view_t temporary_memory = {NULL, 0};
 
@@ -3882,6 +3883,125 @@ static PyTypeObject SplitIteratorType = {
 
 #pragma endregion
 
+#pragma region Hasher
+
+typedef struct {
+    PyObject ob_base;
+    sz_hash_state_t state;
+    sz_u64_t seed;
+} Hasher;
+
+static void Hasher_dealloc(Hasher *self) { Py_TYPE(self)->tp_free((PyObject *)self); }
+
+static PyObject *Hasher_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    (void)args;
+    (void)kwds;
+    Hasher *self = (Hasher *)type->tp_alloc(type, 0);
+    if (!self) return NULL;
+    self->seed = 0;
+    sz_hash_state_init(&self->state, self->seed);
+    return (PyObject *)self;
+}
+
+static int Hasher_init(Hasher *self, PyObject *args, PyObject *kwargs) {
+    // Positional seed
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 1) {
+        PyErr_SetString(PyExc_TypeError, "Hasher() takes at most 1 positional argument");
+        return -1;
+    }
+    PyObject *seed_obj = nargs == 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
+    // Keyword seed
+    if (kwargs) {
+        PyObject *kw_seed = PyDict_GetItemString(kwargs, "seed");
+        if (kw_seed) {
+            if (seed_obj) {
+                PyErr_SetString(PyExc_TypeError, "seed specified twice");
+                return -1;
+            }
+            seed_obj = kw_seed;
+        }
+        // Check for unexpected kwargs
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "seed") != 0) {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return -1;
+            }
+        }
+    }
+    unsigned long long seed = 0ULL;
+    if (seed_obj) {
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+            return -1;
+        }
+        seed = PyLong_AsUnsignedLongLong(seed_obj);
+        if (PyErr_Occurred()) return -1;
+    }
+    self->seed = (sz_u64_t)seed;
+    sz_hash_state_init(&self->state, self->seed);
+    return 0;
+}
+
+static PyObject *Hasher_update(PyObject *self_obj, PyObject *arg) {
+    Hasher *self = (Hasher *)self_obj;
+    sz_string_view_t text;
+    if (!sz_py_export_string_like(arg, &text.start, &text.length)) {
+        wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+    sz_hash_state_update(&self->state, text.start, text.length);
+    Py_INCREF(self_obj);
+    return self_obj;
+}
+
+static PyObject *Hasher_digest(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Hasher *self = (Hasher *)self_obj;
+    sz_u64_t hash = sz_hash_state_digest(&self->state);
+    return PyLong_FromUnsignedLongLong((unsigned long long)hash);
+}
+
+static PyObject *Hasher_hexdigest(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Hasher *self = (Hasher *)self_obj;
+    sz_u64_t hash = sz_hash_state_digest(&self->state);
+    char buf[17]; // lowercase, zero-padded 16 hex digits
+    snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)hash);
+    return PyUnicode_FromString(buf);
+}
+
+static PyObject *Hasher_reset(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Hasher *self = (Hasher *)self_obj;
+    sz_hash_state_init(&self->state, self->seed);
+    Py_INCREF(self_obj);
+    return self_obj;
+}
+
+static PyMethodDef Hasher_methods[] = {
+    {"update", (PyCFunction)Hasher_update, METH_O, "Update with more data; returns self."},
+    {"digest", (PyCFunction)Hasher_digest, METH_NOARGS, "Return current hash as int (does not consume)."},
+    {"hexdigest", (PyCFunction)Hasher_hexdigest, METH_NOARGS, "Return current hash as lowercase hex (16 digits)."},
+    {"reset", (PyCFunction)Hasher_reset, METH_NOARGS, "Reset to initial seed; returns self."},
+    {NULL, NULL, 0, NULL},
+};
+
+static PyTypeObject HasherType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Hasher",
+    .tp_basicsize = sizeof(Hasher),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = Hasher_new,
+    .tp_init = (initproc)Hasher_init,
+    .tp_dealloc = (destructor)Hasher_dealloc,
+    .tp_methods = Hasher_methods,
+};
+
+#pragma endregion
+
 #pragma region Strs
 
 /**
@@ -5634,6 +5754,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&FileType) < 0) return NULL;
     if (PyType_Ready(&StrsType) < 0) return NULL;
     if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
+    if (PyType_Ready(&HasherType) < 0) return NULL;
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
@@ -5707,6 +5828,17 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&SplitIteratorType);
     if (PyModule_AddObject(m, "SplitIterator", (PyObject *)&SplitIteratorType) < 0) {
+        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&HasherType);
+    if (PyModule_AddObject(m, "Hasher", (PyObject *)&HasherType) < 0) {
+        Py_XDECREF(&HasherType);
         Py_XDECREF(&SplitIteratorType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);

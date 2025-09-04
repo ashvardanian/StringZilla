@@ -696,11 +696,11 @@ typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t);
 /** @brief Signature of `sz_hash_state_init`. */
 typedef void (*sz_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t);
 
-/** @brief Signature of `sz_hash_state_stream`. */
-typedef void (*sz_hash_state_stream_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t);
+/** @brief Signature of `sz_hash_state_update` (legacy) / `sz_hash_state_update` (preferred). */
+typedef void (*sz_hash_state_update_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_hash_state_fold`. */
-typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
+/** @brief Signature of `sz_hash_state_digest` (legacy) / `sz_hash_state_digest` (preferred). */
+typedef sz_u64_t (*sz_hash_state_digest_t)(struct sz_hash_state_t const *);
 
 /** @brief Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);

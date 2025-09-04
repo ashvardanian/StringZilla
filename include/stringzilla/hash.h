@@ -7,7 +7,7 @@
  *
  *  - `sz_bytesum` - for byte-level 64-bit unsigned byte-level checksums.
  *  - `sz_hash` - for 64-bit single-shot hashing using AES instructions.
- *  - `sz_hash_state_init`, `sz_hash_state_stream`, `sz_hash_state_fold` - for incremental hashing.
+ *  - `sz_hash_state_init`, `sz_hash_state_update`, `sz_hash_state_digest` - for incremental hashing.
  *  - `sz_fill_random` - for populating buffers with pseudo-random noise using AES instructions.
  *
  *  Why the hell do we need a yet another hashing library?!
@@ -129,7 +129,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *  @sa     sz_hash_serial, sz_hash_haswell, sz_hash_skylake, sz_hash_ice, sz_hash_neon, sz_hash_sve
  *
  *  @note   The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
- *  @sa     sz_hash_state_init, sz_hash_state_stream, sz_hash_state_fold
+ *  @sa     sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
  */
 SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
@@ -170,7 +170,7 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /**
  *  @brief  The state for incremental construction of a hash.
- *  @see    sz_hash_state_init, sz_hash_state_stream, sz_hash_state_fold.
+ *  @see    sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest.
  */
 typedef struct sz_hash_state_t {
     sz_u512_vec_t aes;
@@ -201,7 +201,7 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
  *  @param[in] text The new data to include in the hash.
  *  @param[in] length The number of bytes in the new data.
  */
-SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief  Finalizes the immutable state and returns the hash.
@@ -209,7 +209,7 @@ SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_
  *  @param[in] state The state to fold.
  *  @return The 64-bit hash value.
  */
-SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state);
+SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
@@ -223,11 +223,11 @@ SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t n
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
 
 #if SZ_USE_HASWELL
 
@@ -243,11 +243,11 @@ SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_haswell(sz_hash_state_t const *state);
 
 #endif
 
@@ -265,11 +265,11 @@ SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state);
 
 #endif
 
@@ -287,11 +287,11 @@ SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t text, sz_size_t length, sz_u64_t nonc
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_ice(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_ice(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_ice(sz_hash_state_t const *state);
 
 #endif
 
@@ -313,11 +313,11 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_neon(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_neon(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state);
 
 #endif
 
@@ -346,11 +346,11 @@ SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t non
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed);
 
-/** @copydoc sz_hash_state_stream */
-SZ_PUBLIC void sz_hash_state_stream_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hash_state_fold */
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve2(sz_hash_state_t const *state);
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state);
 
 #endif
 
@@ -802,7 +802,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
     }
 }
 
-SZ_PUBLIC void sz_hash_state_stream_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     while (length) {
         sz_size_t progress_in_block = state->ins_length % 64;
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -821,7 +821,7 @@ SZ_PUBLIC void sz_hash_state_stream_serial(sz_hash_state_t *state, sz_cptr_t tex
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
     if (length >= 64) return sz_hash_state_finalize_serial_(state);
 
@@ -1183,7 +1183,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
     }
 }
 
-SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     while (length) {
         // Append to the internal buffer until it's full
         if (state->ins_length % 64 == 0 && length >= 64) {
@@ -1221,7 +1221,7 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_haswell(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
     if (length >= 64) return sz_hash_state_finalize_haswell_(state);
 
@@ -1566,7 +1566,7 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
     }
 }
 
-SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     while (length) {
         sz_size_t const progress_in_block = state->ins_length % 64;
         sz_size_t const to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -1588,9 +1588,9 @@ SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t te
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_fold_haswell(state);
+    return sz_hash_state_digest_haswell(state);
 }
 
 SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
@@ -1841,7 +1841,7 @@ SZ_PUBLIC void sz_hash_state_init_ice(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_skylake(state, seed);
 }
 
-SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_ice(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     while (length) {
         sz_size_t progress_in_block = state->ins_length % 64;
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -1863,9 +1863,9 @@ SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, 
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_ice(sz_hash_state_t const *state) {
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_fold_haswell(state);
+    return sz_hash_state_digest_haswell(state);
 }
 
 SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
@@ -2139,7 +2139,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_t const *state) 
     return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_in_register), 0);
 }
 
-SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     // This whole function is identical to Haswell.
     while (length) {
         // Append to the internal buffer until it's full
@@ -2173,7 +2173,7 @@ SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text,
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_neon(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state) {
     // This whole function is identical to Haswell.
     sz_size_t length = state->ins_length;
     if (length >= 64) return sz_hash_state_finalize_neon_(state);
@@ -2546,12 +2546,12 @@ SZ_PUBLIC sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64
 
 SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_neon(state, seed); }
 
-SZ_PUBLIC void sz_hash_state_stream_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    sz_hash_state_stream_neon(state, text, length);
+SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    sz_hash_state_update_neon(state, text, length);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve2(sz_hash_state_t const *state) { //
-    return sz_hash_state_fold_neon(state);
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state) { //
+    return sz_hash_state_digest_neon(state);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
@@ -2701,35 +2701,35 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
 #endif
 }
 
-SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
-    sz_hash_state_stream_ice(state, text, length);
+    sz_hash_state_update_ice(state, text, length);
 #elif SZ_USE_SKYLAKE
-    sz_hash_state_stream_skylake(state, text, length);
+    sz_hash_state_update_skylake(state, text, length);
 #elif SZ_USE_HASWELL
-    sz_hash_state_stream_haswell(state, text, length);
+    sz_hash_state_update_haswell(state, text, length);
 #elif SZ_USE_SVE2_AES
-    sz_hash_state_stream_sve2(state, text, length);
+    sz_hash_state_update_sve2(state, text, length);
 #elif SZ_USE_NEON_AES
-    sz_hash_state_stream_neon(state, text, length);
+    sz_hash_state_update_neon(state, text, length);
 #else
-    sz_hash_state_stream_serial(state, text, length);
+    sz_hash_state_update_serial(state, text, length);
 #endif
 }
 
-SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
+SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 #if SZ_USE_ICE
-    return sz_hash_state_fold_ice(state);
+    return sz_hash_state_digest_ice(state);
 #elif SZ_USE_SKYLAKE
-    return sz_hash_state_fold_skylake(state);
+    return sz_hash_state_digest_skylake(state);
 #elif SZ_USE_HASWELL
-    return sz_hash_state_fold_haswell(state);
+    return sz_hash_state_digest_haswell(state);
 #elif SZ_USE_SVE2_AES
-    return sz_hash_state_fold_sve2(state);
+    return sz_hash_state_digest_sve2(state);
 #elif SZ_USE_NEON_AES
-    return sz_hash_state_fold_neon(state);
+    return sz_hash_state_digest_neon(state);
 #else
-    return sz_hash_state_fold_serial(state);
+    return sz_hash_state_digest_serial(state);
 #endif
 }
 

@@ -119,7 +119,7 @@ struct hash_from_std_t {
 };
 
 /** @brief Wraps hash state initialization, streaming, and folding for streaming benchmarks. */
-template <sz_hash_state_init_t init_, sz_hash_state_stream_t stream_, sz_hash_state_fold_t fold_>
+template <sz_hash_state_init_t init_, sz_hash_state_update_t stream_, sz_hash_state_digest_t fold_>
 struct hash_stream_from_sz {
 
     environment_t const &env;
@@ -189,30 +189,33 @@ void bench_hashing(environment_t const &env) {
 void bench_stream_hashing(environment_t const &env) {
 
     auto validator =
-        hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial> {env};
+        hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_update_serial, sz_hash_state_digest_serial> {env};
     bench_result_t base = bench_unary(env, "sz_hash_stream_serial", validator).log();
     bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
 
 #if SZ_USE_HASWELL
     bench_unary(
         env, "sz_hash_stream_haswell", validator,
-        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell> {env})
+        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_update_haswell, sz_hash_state_digest_haswell> {
+            env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(
         env, "sz_hash_stream_skylake", validator,
-        hash_stream_from_sz<sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake> {env})
+        hash_stream_from_sz<sz_hash_state_init_skylake, sz_hash_state_update_skylake, sz_hash_state_digest_skylake> {
+            env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_ICE
     bench_unary(env, "sz_hash_stream_ice", validator,
-                hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice> {env})
+                hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_update_ice, sz_hash_state_digest_ice> {env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_NEON_AES
-    bench_unary(env, "sz_hash_stream_neon", validator,
-                hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon> {env})
+    bench_unary(
+        env, "sz_hash_stream_neon", validator,
+        hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_update_neon, sz_hash_state_digest_neon> {env})
         .log(base, base_stl);
 #endif
 }

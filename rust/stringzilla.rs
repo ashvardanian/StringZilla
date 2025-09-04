@@ -192,8 +192,8 @@ extern "C" {
     fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
     fn sz_hash_state_init(state: *const c_void, seed: u64);
-    fn sz_hash_state_stream(state: *const c_void, text: *const c_void, length: usize);
-    fn sz_hash_state_fold(state: *const c_void) -> u64;
+    fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
+    fn sz_hash_state_digest(state: *const c_void) -> u64;
 
     pub fn sz_sequence_argsort(
         //
@@ -236,10 +236,10 @@ impl HashState {
         state
     }
 
-    /// Streams data into the hash state.
-    pub fn stream(&mut self, data: &[u8]) -> &mut Self {
+    /// Updates the hash state with more data.
+    pub fn update(&mut self, data: &[u8]) -> &mut Self {
         unsafe {
-            sz_hash_state_stream(
+            sz_hash_state_update(
                 self as *mut _ as *mut c_void,
                 data.as_ptr() as *const c_void,
                 data.len(),
@@ -248,9 +248,9 @@ impl HashState {
         self
     }
 
-    /// Finalizes the hash and returns the folded value.
-    pub fn fold(&self) -> u64 {
-        unsafe { sz_hash_state_fold(self as *const _ as *const c_void) }
+    /// Returns the current hash value without consuming the state.
+    pub fn digest(&self) -> u64 {
+        unsafe { sz_hash_state_digest(self as *const _ as *const c_void) }
     }
 }
 
@@ -1757,15 +1757,15 @@ mod tests {
         for seed in [0u64, 42, 123456789].iter() {
             // Single-pass hashing
             assert_eq!(
-                sz::HashState::new(*seed).stream("Hello".as_bytes()).fold(),
+                sz::HashState::new(*seed).update("Hello".as_bytes()).digest(),
                 sz::hash_with_seed("Hello", *seed)
             );
             // Dual pass for short strings
             assert_eq!(
                 sz::HashState::new(*seed)
-                    .stream("Hello".as_bytes())
-                    .stream("World".as_bytes())
-                    .fold(),
+                    .update("Hello".as_bytes())
+                    .update("World".as_bytes())
+                    .digest(),
                 sz::hash_with_seed("HelloWorld", *seed)
             );
         }

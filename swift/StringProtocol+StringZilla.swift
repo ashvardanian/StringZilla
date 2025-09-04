@@ -292,7 +292,7 @@ public class StringZillaHasher {
         precondition(isInitialized, "Hasher has been finalized and cannot be updated")
 
         content.withStringZillaScope { pointer, length in
-            sz_hash_state_stream(&state, pointer, length)
+            sz_hash_state_update(&state, pointer, length)
         }
         return self
     }
@@ -303,10 +303,13 @@ public class StringZillaHasher {
     public func finalize() -> UInt64 {
         precondition(isInitialized, "Hasher has already been finalized")
 
-        let result = sz_hash_state_fold(&state)
+        let result = sz_hash_state_digest(&state)
         isInitialized = false
         return result
     }
+
+    /// Alias for `finalize()` to match other bindings.
+    public func digest() -> UInt64 { return finalize() }
 
     /// Resets the hasher to its initial state with the same seed.
     /// - Parameter seed: Optional new seed value (if nil, uses the original seed).

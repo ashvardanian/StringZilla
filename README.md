@@ -723,12 +723,12 @@ sz_cptr_t ptr = sz_find_neon(haystack.start, haystack.length, needle.start, need
 sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42);    // 42 is the seed
 sz_u64_t checksum = sz_bytesum(haystack.start, haystack.length); // or accumulate byte values
 
-// Hash strings incrementally with "init", "stream", and "fold":
+// Hash strings incrementally with "init", "update", and "digest":
 sz_hash_state_t state; 
 sz_hash_state_init(&state, 42);
-sz_hash_state_stream(&state, haystack.start, 1);                       // first char
-sz_hash_state_stream(&state, haystack.start + 1, haystack.length - 1); // rest of the string
-sz_u64_t hash_streamed = sz_hash_state_fold(&state);
+sz_hash_state_update(&state, haystack.start, 1);                        // first char
+sz_hash_state_update(&state, haystack.start + 1, haystack.length - 1);  // rest of the string
+sz_u64_t streamed_hash = sz_hash_state_digest(&state);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
@@ -1626,9 +1626,9 @@ const llOverlapCount = sz.count(haystack, Buffer.from('ll'), true); // 1n
 // Hashing
 const hash = sz.hash(haystack, 0); // 64-bit BigInt
 const hasher = new sz.Hasher(0);
-hasher.stream(Buffer.from('Hello, '));
-hasher.stream(Buffer.from('world!'));
-const streamingHash = hasher.fold();
+hasher.update(Buffer.from('Hello, '));
+hasher.update(Buffer.from('world!'));
+const streamedHash = hasher.digest();
 
 // Equality/ordering utilities
 const isEqual = sz.equal(Buffer.from('a'), Buffer.from('a'));
