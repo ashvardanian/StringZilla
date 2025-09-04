@@ -534,7 +534,15 @@ Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
 ## Contributing in JavaScript
 
 ```bash
-npm ci && npm test
+npm ci
+npm test
+```
+
+Log capabilities:
+
+```bash
+npm link stringzilla
+node --input-type=module -e "import('stringzilla').then(m=>console.log(m.default.capabilities))"
 ```
 
 ## Contributing in Swift

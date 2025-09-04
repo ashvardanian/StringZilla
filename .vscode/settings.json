@@ -9,7 +9,7 @@
     "editor.tabSize": 4
   },
   "[json]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.defaultFormatter": "vscode.json-language-features",
     "editor.insertSpaces": true,
     "editor.tabSize": 2
   },
@@ -257,6 +257,7 @@
   "editor.rulers": [120],
   "editor.tabSize": 4,
   "files.associations": {
+    "*.gyp": "json",
     "__availability": "cpp",
     "__bit_reference": "cpp",
     "__bits": "cpp",
