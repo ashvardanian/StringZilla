@@ -396,13 +396,13 @@ jobs:
       - name: Initialize submodules
         run: git submodule update --init --recursive
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Install dependencies
         run: npm install
       - name: Clean install dependencies
-        run: npm ci
+        run: npm install
       - name: Run tests
         run: npm test
       - name: Publish to NPM

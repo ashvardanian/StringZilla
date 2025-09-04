@@ -139,11 +139,11 @@ jobs:
 
         # JavaScript
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Build and test JavaScript
-        run: npm ci && npm test
+        run: npm install && npm test
 
       # Rust
       - name: Test Rust

@@ -534,7 +534,7 @@ Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
 ## Contributing in JavaScript
 
 ```bash
-npm ci
+npm install
 npm test
 ```
 
