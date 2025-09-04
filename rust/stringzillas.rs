@@ -2650,14 +2650,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_backend_info() {
+    fn backend_info() {
         let info = backend_info();
         assert!(!info.is_empty());
         println!("Backend: {}", info);
     }
 
     #[test]
-    fn test_device_scope_creation() {
+    fn device_scope_creation() {
         // Test default device scope
         let default_device = DeviceScope::default();
         match default_device {
@@ -2695,7 +2695,7 @@ mod tests {
     }
 
     #[test]
-    fn test_device_scope_validation() {
+    fn device_scope_validation() {
         // Test valid CPU core count - 0 means use all cores
         let all_cores = DeviceScope::cpu_cores(0);
         assert!(all_cores.is_ok(), "CPU cores 0 should mean all cores");
@@ -2710,7 +2710,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fingerprint_builder_configurations() {
+    fn fingerprint_builder_configurations() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping fingerprint tests - device initialization failed");
@@ -2756,7 +2756,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fingerprint_computation() {
+    fn fingerprint_computation() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping fingerprint computation test - device initialization failed");
@@ -2788,7 +2788,7 @@ mod tests {
     }
 
     #[test]
-    fn test_levenshtein_distance_engine() {
+    fn levenshtein_distance_engine() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping Levenshtein test - device initialization failed");
@@ -2825,7 +2825,7 @@ mod tests {
     }
 
     #[test]
-    fn test_levenshtein_utf8_engine() {
+    fn levenshtein_utf8_engine() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping UTF-8 Levenshtein test - device initialization failed");
@@ -2855,7 +2855,7 @@ mod tests {
     }
 
     #[test]
-    fn test_needleman_wunsch_engine() {
+    fn needleman_wunsch_engine() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping Needleman-Wunsch test - device initialization failed");
@@ -2890,7 +2890,7 @@ mod tests {
     }
 
     #[test]
-    fn test_smith_waterman_engine() {
+    fn smith_waterman_engine() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping Smith-Waterman test - device initialization failed");
@@ -2925,7 +2925,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_allocator() {
+    fn unified_allocator() {
         // Test basic allocation
         let layout = std::alloc::Layout::from_size_align(1024, 8).unwrap();
         let alloc = UnifiedAlloc;
@@ -2952,7 +2952,7 @@ mod tests {
     }
 
     #[test]
-    fn test_error_handling() {
+    fn error_handling() {
         // Test that valid operations don't panic
         let valid_cpu = DeviceScope::cpu_cores(0); // 0 means all cores - valid
         assert!(valid_cpu.is_ok(), "CPU cores 0 should succeed");
@@ -2973,7 +2973,7 @@ mod tests {
     }
 
     #[test]
-    fn test_thread_safety() {
+    fn thread_safety() {
         use std::sync::Arc;
         use std::thread;
 
@@ -3015,7 +3015,7 @@ mod tests {
     }
 
     #[test]
-    fn test_large_batch_processing() {
+    fn large_batch_processing() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping large batch test - device initialization failed");
@@ -3046,7 +3046,7 @@ mod tests {
     }
 
     #[test]
-    fn test_similarity_estimation() {
+    fn similarity_estimation() {
         let device_result = DeviceScope::default();
         if device_result.is_err() {
             println!("Skipping similarity test - device initialization failed");
