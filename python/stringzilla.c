@@ -21,6 +21,10 @@
  *  - `sz_py_export_strings_as_u32tape`.
  *  - `sz_py_export_strings_as_u64tape`.
  *  - `sz_py_replace_strings_allocator`.
+ *
+ *  Function Naming Convention:
+ *  - `Str_like_*`: Functions that can be called both as module-level functions AND as member methods.
+ *  - `Str_*`: Functions that are member-only methods or have simpler calling conventions.
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -1246,8 +1250,8 @@ static char const doc_fill_random[] = //
     "Returns:\n"
     "  None: Mutates the buffer slice in place.";
 
-static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
+static PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "fill_random() expects 1 to 4 positional arguments");
@@ -2020,8 +2024,8 @@ static char const doc_decode[] = //
     "Raises:\n"
     "  UnicodeDecodeError: If decoding fails.";
 
-static PyObject *Str_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+static PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
@@ -2328,8 +2332,8 @@ static char const doc_contains[] = //
     "Returns:\n"
     "  bool: True if the substring is found, False otherwise.";
 
-static PyObject *Str_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
+static PyObject *Str_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -2351,8 +2355,8 @@ static char const doc_find[] = //
     "Returns:\n"
     "  int: The index of the first occurrence, or -1 if not found.";
 
-static PyObject *Str_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
+static PyObject *Str_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -2375,8 +2379,8 @@ static char const doc_index[] = //
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
-static PyObject *Str_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+static PyObject *Str_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -2401,8 +2405,8 @@ static char const doc_rfind[] = //
     "Returns:\n"
     "  int: The index of the last occurrence, or -1 if not found.";
 
-static PyObject *Str_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+static PyObject *Str_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -2425,8 +2429,8 @@ static char const doc_rindex[] = //
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
-static PyObject *Str_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+static PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -2505,8 +2509,8 @@ static char const doc_partition[] = //
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').";
 
-static PyObject *Str_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple) {
+static PyObject *Str_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
     return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k);
 }
 
@@ -2519,8 +2523,8 @@ static char const doc_rpartition[] = //
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).";
 
-static PyObject *Str_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple) {
+static PyObject *Str_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
     return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k);
 }
 
@@ -2536,8 +2540,8 @@ static char const doc_count[] = //
     "Returns:\n"
     "  int: The number of occurrences of the substring.";
 
-static PyObject *Str_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *haystack_obj = NULL;
     PyObject *needle_obj = NULL;
@@ -2669,8 +2673,8 @@ static char const doc_startswith[] = //
     "Returns:\n"
     "  bool: True if the string starts with the prefix, False otherwise.";
 
-static PyObject *Str_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple) {
+static PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *str_obj = NULL;
     PyObject *prefix_obj = NULL;
@@ -2777,8 +2781,8 @@ static char const doc_endswith[] = //
     "Returns:\n"
     "  bool: True if the string ends with the suffix, False otherwise.";
 
-static PyObject *Str_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
+static PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *str_obj = NULL;
     PyObject *suffix_obj = NULL;
@@ -2890,8 +2894,8 @@ static char const doc_translate[] = //
     "  ValueError: If the table is not 256 bytes long.\n"
     "  TypeError: If the table is not a string or dictionary.";
 
-static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple) {
+static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     if (positional_args_count < !is_member + 1 || positional_args_count > !is_member + 4) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
@@ -3030,8 +3034,8 @@ static char const doc_find_first_of[] = //
     "Returns:\n"
     "  int: Index of the first matching character, or -1 if none found.";
 
-static PyObject *Str_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple) {
+static PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -3052,8 +3056,8 @@ static char const doc_find_first_not_of[] = //
     "Returns:\n"
     "  int: Index of the first non-matching character, or -1 if all match.";
 
-static PyObject *Str_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                       PyObject *args_names_tuple) {
+static PyObject *Str_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -3074,8 +3078,8 @@ static char const doc_find_last_of[] = //
     "Returns:\n"
     "  int: Index of the last matching character, or -1 if none found.";
 
-static PyObject *Str_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *args_names_tuple) {
+static PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -3096,8 +3100,8 @@ static char const doc_find_last_not_of[] = //
     "Returns:\n"
     "  int: Index of the last non-matching character, or -1 if all match.";
 
-static PyObject *Str_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                      PyObject *args_names_tuple) {
+static PyObject *Str_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                           PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -3561,8 +3565,8 @@ static char const doc_split[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+static PyObject *Str_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find, 0, sz_false_k,
                                          sz_false_k);
 }
@@ -3580,8 +3584,8 @@ static char const doc_rsplit[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+static PyObject *Str_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind, 0, sz_true_k,
                                          sz_false_k);
 }
@@ -3597,8 +3601,8 @@ static char const doc_split_byteset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple) {
+static PyObject *Str_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, 1,
                                          sz_false_k, sz_false_k);
 }
@@ -3614,8 +3618,8 @@ static char const doc_rsplit_byteset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple) {
+static PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, 1,
                                          sz_true_k, sz_false_k);
 }
@@ -3632,8 +3636,8 @@ static char const doc_split_iter[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple) {
+static PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find, 0, sz_false_k,
                                          sz_true_k);
 }
@@ -3650,8 +3654,8 @@ static char const doc_rsplit_iter[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
+static PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind, 0, sz_true_k,
                                          sz_true_k);
 }
@@ -3666,8 +3670,8 @@ static char const doc_split_byteset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings.";
 
-static PyObject *Str_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *args_names_tuple) {
+static PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, 1,
                                          sz_false_k, sz_true_k);
 }
@@ -3682,8 +3686,8 @@ static char const doc_rsplit_byteset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings in reverse.";
 
-static PyObject *Str_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple) {
+static PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                              PyObject *args_names_tuple) {
     return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, 1,
                                          sz_true_k, sz_true_k);
 }
@@ -3698,8 +3702,8 @@ static char const doc_splitlines[] = //
     "Returns:\n"
     "  Strs: A list of strings split by line breaks.";
 
-static PyObject *Str_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple) {
+static PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
@@ -3841,45 +3845,46 @@ static PyGetSetDef Str_getsetters[] = {
 #define SZ_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
-    {"contains", (PyCFunction)Str_contains, SZ_METHOD_FLAGS, doc_contains},
-    {"count", (PyCFunction)Str_count, SZ_METHOD_FLAGS, doc_count},
-    {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
-    {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
-    {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"contains", (PyCFunction)Str_like_contains, SZ_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)Str_like_count, SZ_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)Str_like_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)Str_like_startswith, SZ_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
+    {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
 
     // Bidirectional operations
-    {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
-    {"index", (PyCFunction)Str_index, SZ_METHOD_FLAGS, doc_index},
-    {"partition", (PyCFunction)Str_partition, SZ_METHOD_FLAGS, doc_partition},
-    {"split", (PyCFunction)Str_split, SZ_METHOD_FLAGS, doc_split},
-    {"rfind", (PyCFunction)Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
-    {"rindex", (PyCFunction)Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
-    {"rpartition", (PyCFunction)Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", (PyCFunction)Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)Str_like_find, SZ_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)Str_like_index, SZ_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)Str_like_partition, SZ_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)Str_like_split, SZ_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)Str_like_rfind, SZ_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)Str_like_rindex, SZ_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)Str_like_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)Str_like_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", (PyCFunction)Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", (PyCFunction)Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"split_byteset", (PyCFunction)Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", (PyCFunction)Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)Str_like_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)Str_like_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
+    {"count_byteset", (PyCFunction)Str_like_count_byteset, SZ_METHOD_FLAGS, doc_count_byteset},
+    {"split_byteset", (PyCFunction)Str_like_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", (PyCFunction)Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", (PyCFunction)Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", (PyCFunction)Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", (PyCFunction)Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
+    {"split_iter", (PyCFunction)Str_like_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
     // In-place transforms
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
-    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+    {"translate", (PyCFunction)Str_like_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     {NULL, NULL, 0, NULL} // Sentinel
 };
@@ -5826,50 +5831,51 @@ static void stringzilla_cleanup(PyObject *m) {
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", (PyCFunction)Str_contains, SZ_METHOD_FLAGS, doc_contains},
-    {"count", (PyCFunction)Str_count, SZ_METHOD_FLAGS, doc_count},
-    {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
-    {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
-    {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"contains", (PyCFunction)Str_like_contains, SZ_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)Str_like_count, SZ_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)Str_like_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)Str_like_startswith, SZ_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
+    {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
     // Bidirectional operations
-    {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
-    {"index", (PyCFunction)Str_index, SZ_METHOD_FLAGS, doc_index},
-    {"partition", (PyCFunction)Str_partition, SZ_METHOD_FLAGS, doc_partition},
-    {"split", (PyCFunction)Str_split, SZ_METHOD_FLAGS, doc_split},
-    {"rfind", (PyCFunction)Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
-    {"rindex", (PyCFunction)Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
-    {"rpartition", (PyCFunction)Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", (PyCFunction)Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)Str_like_find, SZ_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)Str_like_index, SZ_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)Str_like_partition, SZ_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)Str_like_split, SZ_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)Str_like_rfind, SZ_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)Str_like_rindex, SZ_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)Str_like_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)Str_like_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", (PyCFunction)Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", (PyCFunction)Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"split_byteset", (PyCFunction)Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", (PyCFunction)Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)Str_like_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)Str_like_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
+    {"count_byteset", (PyCFunction)Str_like_count_byteset, SZ_METHOD_FLAGS, doc_count_byteset},
+    {"split_byteset", (PyCFunction)Str_like_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", (PyCFunction)Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", (PyCFunction)Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", (PyCFunction)Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", (PyCFunction)Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
+    {"split_iter", (PyCFunction)Str_like_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
     // In-place transforms
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
-    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+    {"translate", (PyCFunction)Str_like_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
-    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
+    {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     // Module-level functionality
     {"random", (PyCFunction)module_random, SZ_METHOD_FLAGS, doc_random},
