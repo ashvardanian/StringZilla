@@ -1,6 +1,5 @@
 # /// script
 # dependencies = [
-#   "stringzilla",
 #   "rapidfuzz",
 #   "python-Levenshtein",
 #   "levenshtein",
@@ -32,6 +31,12 @@ Example usage via UV:
 
     # Benchmark with a file
     uv run --no-project scripts/bench_similarities.py --dataset leipzig1M.txt
+
+    # ... using the same local Python environment
+    uv run --no-project python scripts/bench_similarities.py --dataset leipzig1M.txt
+
+    # ... or as a `uv` script
+    uv run --script scripts/bench_similarities.py --dataset leipzig1M.txt
 
     # Benchmark with limited pairs
     uv run --no-project scripts/bench_similarities.py --dataset leipzig1M.txt --max-pairs 1000
@@ -150,21 +155,6 @@ def log_similarity_operation(
 def benchmark_edit_distances(string_pairs: List[Tuple[str, str]], timeout_seconds: int = 10):
     """Benchmark various edit distance implementations."""
 
-    # StringZilla
-    log_similarity_operation(
-        "stringzilla.edit_distance",
-        string_pairs,
-        sz.edit_distance,
-        timeout_seconds,
-    )
-
-    log_similarity_operation(
-        "stringzilla.edit_distance_unicode",
-        string_pairs,
-        sz.edit_distance_unicode,
-        timeout_seconds,
-    )
-
     # RapidFuzz
     log_similarity_operation(
         "rapidfuzz.Levenshtein.distance",
@@ -252,21 +242,18 @@ def benchmark_edit_distances(string_pairs: List[Tuple[str, str]], timeout_second
 
     # StringZillas Levenshtein distances (batch)
     cpu_scope = szs.DeviceScope(cpu_cores=os.cpu_count())
-    benchmark_stringzillas_batch("stringzillas.LevenshteinDistances(CPU)", szs.LevenshteinDistances, cpu_scope)
+    benchmark_stringzillas_batch("szs.LevenshteinDistances(CPU)", szs.LevenshteinDistances, cpu_scope)
 
     try:
         gpu_scope = szs.DeviceScope(gpu_device=0)
-        benchmark_stringzillas_batch("stringzillas.LevenshteinDistances(GPU)", szs.LevenshteinDistances, gpu_scope)
+        benchmark_stringzillas_batch("szs.LevenshteinDistances(GPU)", szs.LevenshteinDistances, gpu_scope)
     except Exception:
         pass  # GPU may not be available
 
     # StringZillas UTF-8 Levenshtein distances (batch)
-    benchmark_stringzillas_batch("stringzillas.LevenshteinDistancesUTF8(CPU)", szs.LevenshteinDistancesUTF8, cpu_scope)
-
+    benchmark_stringzillas_batch("szs.LevenshteinDistancesUTF8(CPU)", szs.LevenshteinDistancesUTF8, cpu_scope)
     try:
-        benchmark_stringzillas_batch(
-            "stringzillas.LevenshteinDistancesUTF8(GPU)", szs.LevenshteinDistancesUTF8, gpu_scope
-        )
+        benchmark_stringzillas_batch("szs.LevenshteinDistancesUTF8(GPU)", szs.LevenshteinDistancesUTF8, gpu_scope)
     except Exception:
         pass  # GPU may not be available
 
@@ -296,12 +283,6 @@ def benchmark_alignment_scores(string_pairs: List[Tuple[str, str]], timeout_seco
                 reconstructed_row = ord(packed_row_aminoacid)
                 reconstructed_column = ord(packed_column_aminoacid)
                 _blosum_matrix[reconstructed_row, reconstructed_column] = subs_packed[packed_row, packed_column]
-
-    # StringZilla alignment score
-    def sz_alignment_score(a: str, b: str) -> int:
-        return sz.alignment_score(a, b, substitution_matrix=_blosum_matrix, gap_score=1)
-
-    log_similarity_operation("stringzilla.alignment_score", string_pairs, sz_alignment_score, timeout_seconds)
 
     # BioPython alignment score
     log_similarity_operation(
@@ -338,27 +319,18 @@ def benchmark_alignment_scores(string_pairs: List[Tuple[str, str]], timeout_seco
 
     # StringZillas Needleman-Wunsch (global alignment)
     cpu_scope = szs.DeviceScope(cpu_cores=os.cpu_count())
-    benchmark_stringzillas_alignment_batch(
-        "stringzillas.NeedlemanWunsch(CPU)", szs.NeedlemanWunsch, _blosum_matrix, cpu_scope
-    )
+    benchmark_stringzillas_alignment_batch("szs.NeedlemanWunsch(CPU)", szs.NeedlemanWunsch, _blosum_matrix, cpu_scope)
 
     try:
         gpu_scope = szs.DeviceScope(gpu_device=0)
-        benchmark_stringzillas_alignment_batch(
-            "stringzillas.NeedlemanWunsch(GPU)", szs.NeedlemanWunsch, _blosum_matrix, gpu_scope
-        )
+        benchmark_stringzillas_alignment_batch("szs.NeedlemanWunsch(GPU)", szs.NeedlemanWunsch, _blosum_matrix, gpu_scope)
     except:
         pass  # GPU may not be available
 
     # StringZillas Smith-Waterman (local alignment)
-    benchmark_stringzillas_alignment_batch(
-        "stringzillas.SmithWaterman(CPU)", szs.SmithWaterman, _blosum_matrix, cpu_scope
-    )
-
+    benchmark_stringzillas_alignment_batch("szs.SmithWaterman(CPU)", szs.SmithWaterman, _blosum_matrix, cpu_scope)
     try:
-        benchmark_stringzillas_alignment_batch(
-            "stringzillas.SmithWaterman(GPU)", szs.SmithWaterman, _blosum_matrix, gpu_scope
-        )
+        benchmark_stringzillas_alignment_batch("szs.SmithWaterman(GPU)", szs.SmithWaterman, _blosum_matrix, gpu_scope)
     except:
         pass  # GPU may not be available
 
