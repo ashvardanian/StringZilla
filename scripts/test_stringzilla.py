@@ -164,17 +164,17 @@ def test_unit_count_byteset():
     assert big.count_byteset("aeiou") == 2  # a and e
 
     # Empty inputs
-    assert big.count_byteset("", "abc") == 0
-    assert big.count_byteset("abc", "") == 0
-    assert big.count_byteset("", "") == 0
+    assert sz.count_byteset("", "abc") == 0
+    assert sz.count_byteset("abc", "") == 0
+    assert sz.count_byteset("", "") == 0
 
     # Single character set
-    assert big.count_byteset("hello", "l") == 2
-    assert big.count_byteset("hello", "x") == 0
+    assert sz.count_byteset("hello", "l") == 2
+    assert sz.count_byteset("hello", "x") == 0
 
     # Repeated patterns
-    assert big.count_byteset("mississippi", "si") == 8  # s:4, i:4 total
-    assert big.count_byteset("aaaaaa", "a") == 6
+    assert sz.count_byteset("mississippi", "si") == 8  # s:4, i:4 total
+    assert sz.count_byteset("aaaaaa", "a") == 6
 
     # Test start/end bounds
     native = "abcdefghij"

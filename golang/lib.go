@@ -13,7 +13,7 @@
 package sz
 
 // #cgo CFLAGS: -O3 -I../include
-// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_release -lstringzilla_shared
+// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
 // #cgo noescape sz_find_byte

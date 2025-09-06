@@ -484,6 +484,14 @@ Also considering the other optional dependencies for benchmarking and other scri
 uv pip install -r scripts/requirements.txt 
 ```
 
+### Packaging
+
+For source distributions, make sure `MANIFEST.in` is up-to-date:
+
+```bash
+uv build --sdist --out-dir dist
+```
+
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
 Don't forget to use the right [CLI arguments][cibuildwheel-cli] to avoid overloading your Docker runtime.
 
