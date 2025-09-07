@@ -308,7 +308,11 @@ def test_unit_split():
     assert native.splitlines() == list(big.splitlines())
     assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
 
-    # Check for equivalence with native Python strings, including boundary conditions
+    # Check for equivalence with native Python strings, including SWAR boundary conditions
+    assert native.split("l") == list(big.split("l"))
+    assert native.split("li") == list(big.split("li"))
+    assert native.split("lin") == list(big.split("lin"))
+    assert native.split("line") == list(big.split("line"))
     assert native.split("line1") == list(big.split("line1"))
     assert native.split("line3") == list(big.split("line3"))
     assert native.split("\n", maxsplit=0) == list(big.split("\n", maxsplit=0))

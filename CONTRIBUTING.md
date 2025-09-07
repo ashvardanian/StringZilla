@@ -515,7 +515,7 @@ sudo $(which cibuildwheel) --platform linux
 To avoid QEMU issues on SVE and some other uncommon instructions, you can inform the PyTest suite, that it's running in an emulated environment:
 
 ```bash
-SZ_IS_QEMU_=1 sudo $(which cibuildwheel) --platform linux
+SZ_IS_QEMU_=1 sudo $(which cibuildwheel) --platform linux --archs s390x
 ```
 
 On Windows and macOS, to avoid frequent path resolution issues, you may want to use:

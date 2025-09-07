@@ -736,11 +736,31 @@ void test_stl_compatibility_for_reads() {
 
     // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
+    assert(str("abbabbaaaaaa").find("ba") == 2);
+    assert(str("abbabbaaaaaa").find("bb") == 1);
+    assert(str("abbabbaaaaaa").find("bab") == 2);
+    assert(str("abbabbaaaaaa").find("babb") == 2);
+    assert(str("abbabbaaaaaa").find("babba") == 2);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
     assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
     assert(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
+    assert(str("abcdabcdabc________").find("abcd") == 0);
+    assert(str("________abcdabcdabc").find("abcd") == 1);
 
-    // Simple repeating patterns - with one "almost match" before an actual match in each direction
+    // Cover every SWAR case for unique string sequences.
+    auto lowercase_alphabet = str("abcdefghijklmnopqrstuvwxyz");
+    for (std::size_t one_byte_offset = 0; one_byte_offset + 1 <= lowercase_alphabet.size(); ++one_byte_offset)
+        assert(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)) == one_byte_offset);
+    for (std::size_t two_byte_offset = 0; two_byte_offset + 2 <= lowercase_alphabet.size(); ++two_byte_offset)
+        assert(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)) == two_byte_offset);
+    for (std::size_t four_byte_offset = 0; four_byte_offset + 4 <= lowercase_alphabet.size(); ++four_byte_offset)
+        assert(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)) == four_byte_offset);
+    for (std::size_t three_byte_offset = 0; three_byte_offset + 3 <= lowercase_alphabet.size(); ++three_byte_offset)
+        assert(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)) == three_byte_offset);
+    for (std::size_t five_byte_offset = 0; five_byte_offset + 5 <= lowercase_alphabet.size(); ++five_byte_offset)
+        assert(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)) == five_byte_offset);
+
+    // Simple repeating patterns - with one "almost match" before an actual match in each direction.
     assert(str("_ab_abc_").find("abc") == 4);
     assert(str("_abc_ab_").rfind("abc") == 1);
     assert(str("_abc_abcd_").find("abcd") == 5);
@@ -2016,6 +2036,9 @@ int main(int argc, char const **argv) {
     }
     std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
     std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
+#endif
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
+    test_stl_compatibility_for_reads<std::string_view>();
 #endif
 
     // Basic utilities

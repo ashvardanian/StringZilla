@@ -434,7 +434,11 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
 
     sz_u64_vec_t h_even_vec, h_odd_vec, n_vec, matches_even_vec, matches_odd_vec;
     n_vec.u64 = 0;
+#if !SZ_IS_BIG_ENDIAN_
     n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1];
+#else
+    n_vec.u8s[6] = n[0], n_vec.u8s[7] = n[1];
+#endif
     n_vec.u64 *= 0x0001000100010001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
@@ -444,20 +448,20 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
         h_odd_vec.u64 = (h_even_vec.u64 >> 8) | ((sz_u64_t)h[8] << 56);
 #else
         h_even_vec.u64 = *(sz_u64_t *)h;
-        h_odd_vec.u64 = (h_even_vec.u64 << 8) | ((sz_u64_t)h[8] >> 56);
+        h_odd_vec.u64 = (h_even_vec.u64 << 8) | (sz_u64_t)h[8];
 #endif
         matches_even_vec = sz_u64_each_2byte_equal_(h_even_vec, n_vec);
         matches_odd_vec = sz_u64_each_2byte_equal_(h_odd_vec, n_vec);
 
 #if !SZ_IS_BIG_ENDIAN_
-        matches_even_vec.u64 >>= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
+            matches_even_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
         }
 #else
-        matches_even_vec.u64 <<= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
+            matches_odd_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_clz(match_indicators) / 8;
         }
