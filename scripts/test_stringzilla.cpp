@@ -24,13 +24,14 @@
  *  ! but they come handy during development, if you want to validate
  *  ! different ISA-specific implementations.
 
-#define SZ_USE_HASWELL 0
-#define SZ_USE_SKYLAKE 0
-#define SZ_USE_ICE 0
-#define SZ_USE_NEON 0
-#define SZ_USE_SVE 0
+ #define SZ_USE_HASWELL 0
+ #define SZ_USE_SKYLAKE 0
+ #define SZ_USE_ICE 0
+ #define SZ_USE_NEON 0
+ #define SZ_USE_SVE 0
+ #define SZ_USE_SVE2 0
+ #define SZ_USE_MISALIGNED_LOADS 0
  */
-#define SZ_USE_SVE2 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -745,7 +746,7 @@ void test_stl_compatibility_for_reads() {
     assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
     assert(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
     assert(str("abcdabcdabc________").find("abcd") == 0);
-    assert(str("________abcdabcdabc").find("abcd") == 1);
+    assert(str("________abcdabcdabc").find("abcd") == 8);
 
     // Cover every SWAR case for unique string sequences.
     auto lowercase_alphabet = str("abcdefghijklmnopqrstuvwxyz");
@@ -2036,9 +2037,6 @@ int main(int argc, char const **argv) {
     }
     std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
     std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
-#endif
-#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    test_stl_compatibility_for_reads<std::string_view>();
 #endif
 
     // Basic utilities

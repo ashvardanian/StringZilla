@@ -426,46 +426,35 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
     sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_USE_MISALIGNED_LOADS
+    // On big-endian systems, skip SWAR and use simple serial search
+#if SZ_IS_BIG_ENDIAN_
+    for (; h + 2 <= h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+    return SZ_NULL_CHAR;
+#endif
+
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_USE_MISALIGNED_LOADS
     for (; ((sz_size_t)h & 7ull) && h + 2 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
 #endif
 
     sz_u64_vec_t h_even_vec, h_odd_vec, n_vec, matches_even_vec, matches_odd_vec;
     n_vec.u64 = 0;
-#if !SZ_IS_BIG_ENDIAN_
     n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1];
-#else
-    n_vec.u8s[6] = n[0], n_vec.u8s[7] = n[1];
-#endif
     n_vec.u64 *= 0x0001000100010001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     for (; h + 9 <= h_end; h += 8) {
-#if !SZ_IS_BIG_ENDIAN_
         h_even_vec.u64 = *(sz_u64_t *)h;
         h_odd_vec.u64 = (h_even_vec.u64 >> 8) | ((sz_u64_t)h[8] << 56);
-#else
-        h_even_vec.u64 = *(sz_u64_t *)h;
-        h_odd_vec.u64 = (h_even_vec.u64 << 8) | (sz_u64_t)h[8];
-#endif
         matches_even_vec = sz_u64_each_2byte_equal_(h_even_vec, n_vec);
         matches_odd_vec = sz_u64_each_2byte_equal_(h_odd_vec, n_vec);
-
-#if !SZ_IS_BIG_ENDIAN_
+        matches_even_vec.u64 >>= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
-            matches_even_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
         }
-#else
-        if (matches_even_vec.u64 + matches_odd_vec.u64) {
-            matches_odd_vec.u64 >>= 8;
-            sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
-            return h + sz_u64_clz(match_indicators) / 8;
-        }
-#endif
     }
 
     for (; h + 2 <= h_end; ++h)
@@ -498,8 +487,15 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
     sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_USE_MISALIGNED_LOADS
+    // On big-endian systems, skip SWAR and use simple serial search
+#if SZ_IS_BIG_ENDIAN_
+    for (; h + 4 <= h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+    return SZ_NULL_CHAR;
+#endif
+
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_USE_MISALIGNED_LOADS
     for (; ((sz_size_t)h & 7ull) && h + 4 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
 #endif
@@ -515,36 +511,21 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
     for (; h + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= h_end; h += sizeof(sz_u64_t)) {
         h_page_current = *(sz_u64_t *)h;
         h_page_next = *(sz_u32_t *)(h + 8);
-#if !SZ_IS_BIG_ENDIAN_
         h0_vec.u64 = (h_page_current);
         h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
         h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
         h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
-#else
-        h0_vec.u64 = (h_page_current);
-        h1_vec.u64 = (h_page_current << 8) | (h_page_next >> 24);
-        h2_vec.u64 = (h_page_current << 16) | (h_page_next >> 16);
-        h3_vec.u64 = (h_page_current << 24) | (h_page_next >> 8);
-#endif
         matches0_vec = sz_u64_each_4byte_equal_(h0_vec, n_vec);
         matches1_vec = sz_u64_each_4byte_equal_(h1_vec, n_vec);
         matches2_vec = sz_u64_each_4byte_equal_(h2_vec, n_vec);
         matches3_vec = sz_u64_each_4byte_equal_(h3_vec, n_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64) {
-#if !SZ_IS_BIG_ENDIAN_
             matches0_vec.u64 >>= 24;
             matches1_vec.u64 >>= 16;
             matches2_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
-#else
-            matches0_vec.u64 <<= 24;
-            matches1_vec.u64 <<= 16;
-            matches2_vec.u64 <<= 8;
-            sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
-            return h + sz_u64_clz(match_indicators) / 8;
-#endif
         }
     }
 
@@ -578,8 +559,15 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
     sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_USE_MISALIGNED_LOADS
+    // On big-endian systems, skip SWAR and use simple serial search
+#if SZ_IS_BIG_ENDIAN_
+    for (; h + 3 <= h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
+    return SZ_NULL_CHAR;
+#endif
+
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_USE_MISALIGNED_LOADS
     for (; ((sz_size_t)h & 7ull) && h + 3 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
 #endif
@@ -599,17 +587,10 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
         h_page_current = *(sz_u64_t *)h;
         h_page_next = *(sz_u16_t *)(h + 8);
         h0_vec.u64 = (h_page_current);
-#if !SZ_IS_BIG_ENDIAN_
         h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
         h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
         h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
         h4_vec.u64 = (h_page_current >> 32) | (h_page_next << 32);
-#else
-        h1_vec.u64 = (h_page_current << 8) | (h_page_next >> 8);
-        h2_vec.u64 = (h_page_current << 16) | (h_page_next >> 16);
-        h3_vec.u64 = (h_page_current << 24) | (h_page_next >> 24);
-        h4_vec.u64 = (h_page_current << 32) | (h_page_next >> 32);
-#endif
         matches0_vec = sz_u64_each_3byte_equal_(h0_vec, n_vec);
         matches1_vec = sz_u64_each_3byte_equal_(h1_vec, n_vec);
         matches2_vec = sz_u64_each_3byte_equal_(h2_vec, n_vec);
@@ -617,7 +598,6 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
         matches4_vec = sz_u64_each_3byte_equal_(h4_vec, n_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64) {
-#if !SZ_IS_BIG_ENDIAN_
             matches0_vec.u64 >>= 16;
             matches1_vec.u64 >>= 8;
             matches3_vec.u64 <<= 8;
@@ -625,15 +605,6 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_
             sz_u64_t match_indicators =
                 matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
-#else
-            matches0_vec.u64 <<= 16;
-            matches1_vec.u64 <<= 8;
-            matches3_vec.u64 >>= 8;
-            matches4_vec.u64 >>= 16;
-            sz_u64_t match_indicators =
-                matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
-            return h + sz_u64_clz(match_indicators) / 8;
-#endif
         }
     }
 
