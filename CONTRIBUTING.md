@@ -20,12 +20,12 @@ The project is split into the following parts:
 - `include/stringzilla/stringzilla.h` - single-header C implementation.
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
 - `include/stringzillas/*` - parallel CPU/GPU header-only backends.
-- `c/*` - [C](#contributing-in-c-and-c) sources for dynamic dispatch and parallel backends.
-- `rust/*` - [Rust](#contributing-in-rust) crate sources.
-- `python/*` - [Python](#contributing-in-python) bindings.
-- `swift/*` - [Swift](#contributing-in-swift) package sources and tests.
-- `javascript/*` - [JavaScript](#contributing-in-javascript) bindings.
-- `golang/*` - [Go](#contributing-in-golang) bindings.
+- `c/*` - [C, C++, and CUDA](#c-and-c) sources for dynamic dispatch and parallel backends.
+- `rust/*` - [Rust](#rust) crate sources.
+- `python/*` - [Python](#python) bindings.
+- `swift/*` - [Swift](#swift) package sources and tests.
+- `javascript/*` - [JavaScript](#javascript) bindings.
+- `golang/*` - [Go](#golang) bindings.
 - `scripts/*` - Scripts for benchmarking and testing.
 - `cli/*` - SIMD-accelerated CLI utilities.
 
@@ -112,7 +112,7 @@ For Python code:
 
 - Use lower-case names for functions and variables.
 
-## Contributing in C++ and C
+## C++ and C
 
 The primary C implementation and the C++ wrapper are built with CMake.
 Assuming the extensive use of new SIMD intrinsics and recent C++ language features, using a recent compiler is recommended.
@@ -418,7 +418,7 @@ cmake -D CMAKE_BUILD_TYPE=Release \
 cmake --build build_artifacts --config Release
 ```
 
-## Contributing in Parallel C++ and CUDA
+## Parallel C++ and CUDA
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
@@ -437,7 +437,7 @@ cuda-gdb ./build_debug/stringzillas_test_cu20
 cuda-memcheck ./build_debug/stringzillas_test_cu20
 ```
 
-## Contributing in Python
+## Python
 
 Python bindings are implemented using pure CPython, so you wouldn't need to install SWIG, PyBind11, or any other third-party library.
 Still, you need a virtual environment, and it's recommended to use `uv` to create one.
@@ -549,7 +549,7 @@ uv run --no-project scripts/bench_fingerprints.py --help
 
 Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
 
-## Contributing in JavaScript
+## JavaScript
 
 ```bash
 npm install
@@ -563,7 +563,7 @@ npm link stringzilla
 node --input-type=module -e "import('stringzilla').then(m=>console.log(m.default.capabilities))"
 ```
 
-## Contributing in Swift
+## Swift
 
 ```bash
 swift build && swift test
@@ -582,7 +582,7 @@ To format the code on Linux:
 sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "swift format . -i -r --configuration .swift-format"
 ```
 
-## Contributing in Rust
+## Rust
 
 StringZilla's Rust crate supports both `std` and `no_std` builds.
 Other options include:
@@ -615,7 +615,7 @@ cargo package --list --allow-dirty
 
 If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
 
-## Contributing in GoLang
+## GoLang
 
 First, precompile the C library:
 
