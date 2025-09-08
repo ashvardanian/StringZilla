@@ -50,6 +50,8 @@ from stringzilla import Strs
 @pytest.fixture(scope="session", autouse=True)
 def log_test_environment():
     """Automatically log environment info before running any tests."""
+
+    print()  # New line for better readability
     print("=== StringZillas Test Environment ===")
     print(f"Platform: {platform.platform()}")
     print(f"Architecture: {platform.machine()}")
@@ -73,6 +75,7 @@ def log_test_environment():
             sz.reset_capabilities(desired)
 
     print("=" * 40)
+    print()  # New line for better readability
 
 
 def test_library_properties():
@@ -181,6 +184,54 @@ def test_device_scope():
 
     with pytest.raises(TypeError):
         szs.DeviceScope(gpu_device="invalid")
+
+
+def test_parameter_validation():
+    """Test parameter validation and error handling for all engine types."""
+
+    # Test constructor parameter type validation
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(open="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(extend="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(mismatch="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.Fingerprints(ndim="invalid")  # wrong type
+
+    # Test computation input validation
+    engine = szs.LevenshteinDistances()
+
+    # Test None inputs
+    with pytest.raises(TypeError):
+        engine(None, Strs(["test"]))
+
+    with pytest.raises(TypeError):
+        engine(Strs(["test"]), None)
+
+    # Test mismatched input sizes
+    with pytest.raises(ValueError):
+        a = Strs(["a", "b"])
+        b = Strs(["c"])  # Different size
+        engine(a, b)
+
+    # Test with non-Strs inputs
+    with pytest.raises(TypeError):
+        engine(["test"], Strs(["test"]))  # list instead of Strs
+
+    with pytest.raises(TypeError):
+        engine(Strs(["test"]), ["test"])  # list instead of Strs
+
+    # Test Fingerprints computation validation
+    fp_engine = szs.Fingerprints(ndim=5)
+    with pytest.raises(TypeError):
+        fp_engine(None)  # None input
+
+    with pytest.raises(TypeError):
+        fp_engine(["test"])  # list instead of Strs
 
 
 def get_random_string(
@@ -442,7 +493,7 @@ def test_needleman_wunsch_vs_levenshtein_random(
     baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
-    engine = szs.NeedlemanWunsch(
+    engine = szs.NeedlemanWunschScores(
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
         substitution_matrix=character_substitutions,
         open=-1,
@@ -498,7 +549,7 @@ def test_needleman_wunsch_against_affine_gaps(
             subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
-    engine = szs.NeedlemanWunsch(
+    engine = szs.NeedlemanWunschScores(
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
         substitution_matrix=subs,
         open=ag.default_gap_opening,
@@ -578,7 +629,7 @@ def test_smith_waterman_against_affine_gaps(
             subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
-    engine = szs.SmithWaterman(
+    engine = szs.SmithWatermanScores(
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
         substitution_matrix=subs,
         open=ag.default_gap_opening,
