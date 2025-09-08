@@ -180,6 +180,45 @@ constexpr bool is_gpu_capability(sz_capability_t capability) noexcept {
            (capability & sz_cap_hopper_k) != 0;
 }
 
+inline sz_status_t propagate_error(sz::status_t status, char const **reporter_message,
+                                   char const *optional_message = nullptr) noexcept {
+    if (!reporter_message) return static_cast<sz_status_t>(status);
+
+    // If the optional message is provided, use it verbatim
+    if (optional_message && reporter_message) {
+        *reporter_message = optional_message;
+        return static_cast<sz_status_t>(status);
+    }
+
+    // Otherwise, map the status code to a predefined message
+    switch (status) {
+    case sz::status_t::success_k: *reporter_message = nullptr; break;
+    case sz::status_t::bad_alloc_k: *reporter_message = "Memory allocation failed"; break;
+    case sz::status_t::invalid_utf8_k: *reporter_message = "Invalid UTF-8 input"; break;
+    case sz::status_t::contains_duplicates_k: *reporter_message = "Input contains duplicates"; break;
+    case sz::status_t::overflow_risk_k: *reporter_message = "Overflow risk detected"; break;
+    case sz::status_t::unexpected_dimensions_k: *reporter_message = "Input/output size mismatch"; break;
+    case sz::status_t::missing_gpu_k: *reporter_message = "GPU device not available or CUDA not initialized"; break;
+    case sz::status_t::device_code_mismatch_k: *reporter_message = "Backend and executor mismatch"; break;
+    case sz::status_t::device_memory_mismatch_k: *reporter_message = "Use device-reachable or unified memory"; break;
+    case sz::status_t::unknown_k: *reporter_message = "Unknown error"; break;
+    default: *reporter_message = "Unrecognized error code"; break;
+    }
+
+    return static_cast<sz_status_t>(status);
+}
+
+#if SZ_USE_CUDA
+inline sz_status_t propagate_error(szs::cuda_status_t cuda_status, char const **reporter_message,
+                                   char const *optional_message = nullptr) noexcept {
+    if (cuda_status.cuda_error != cudaSuccess) {
+        if (reporter_message) *reporter_message = cudaGetErrorString(cuda_status.cuda_error);
+        return static_cast<sz_status_t>(cuda_status.status);
+    }
+    else { return propagate_error(cuda_status.status, reporter_message, optional_message); }
+}
+#endif
+
 #if SZ_USE_CUDA
 
 /** @brief Redirects to CUDA's unified memory allocator. */
@@ -221,7 +260,7 @@ sz::gpu_specs_t get_specs(gpu_scope_t const &scope) noexcept { return scope.spec
 
 /** Cached default GPU context (device 0) to avoid repeated scheduling boilerplate */
 struct default_gpu_context_t {
-    sz::status_t status = sz::status_t::unknown_k;
+    szs::cuda_status_t status {sz::status_t::unknown_k, cudaSuccess};
     szs::cuda_executor_t executor;
     sz::gpu_specs_t specs;
 };
@@ -229,13 +268,13 @@ struct default_gpu_context_t {
 inline default_gpu_context_t &default_gpu_context() {
     static default_gpu_context_t ctx = [] {
         default_gpu_context_t result;
-        auto specs_status = szs::gpu_specs_fetch(result.specs, 0);
+        szs::cuda_status_t specs_status = szs::gpu_specs_fetch(result.specs, 0);
         if (specs_status.status != sz::status_t::success_k) {
-            result.status = specs_status.status;
+            result.status = specs_status;
             return result;
         }
-        auto exec_status = result.executor.try_scheduling(0);
-        result.status = exec_status.status;
+        szs::cuda_status_t exec_status = result.executor.try_scheduling(0);
+        result.status = exec_status;
         return result;
     }();
     return ctx;
@@ -286,7 +325,7 @@ template <typename texts_type_>
 sz_status_t szs_levenshtein_distances_for_(                                      //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
     texts_type_ const &a_container, texts_type_ const &b_container,              //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -310,24 +349,24 @@ sz_status_t szs_levenshtein_distances_for_(                                     
 #if SZ_USE_CUDA
             if (std::holds_alternative<gpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                sz::status_t status = engine_variant(          //
+                szs::cuda_status_t status = engine_variant(    //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             // Try ephemeral GPU on default scope (device 0)
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
-                else {
-                    sz::status_t status = engine_variant( //
-                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
-                    result = static_cast<sz_status_t>(status);
-                }
+                szs::cuda_status_t status =
+                    ctx.status != sz::status_t::success_k
+                        ? ctx.status
+                        : engine_variant( //
+                              a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                result = propagate_error(status, error_message);
             }
-            else { result = sz_device_code_mismatch_k; }
+            else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
 #else
-            result = sz_status_unknown_k; // GPU support is not enabled
+            result = propagate_error(sz::status_t::missing_gpu_k, error_message);
 #endif // SZ_USE_CUDA
         }
         // CPU backends are only compatible with CPU scopes
@@ -337,16 +376,16 @@ sz_status_t szs_levenshtein_distances_for_(                                     
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
-            else { result = sz_device_code_mismatch_k; }
+            else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
         }
     };
 
@@ -377,7 +416,7 @@ template <typename texts_type_>
 sz_status_t szs_levenshtein_distances_utf8_for_(                                      //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     texts_type_ const &a_container, texts_type_ const &b_container,                   //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -399,7 +438,7 @@ sz_status_t szs_levenshtein_distances_utf8_for_(                                
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
             // No GPU backends for UTF8 Levenshtein distances yet
-            result = sz_status_unknown_k;
+            result = propagate_error(sz::status_t::unknown_k, error_message);
         }
         // CPU backends are only compatible with CPU scopes
         else {
@@ -408,14 +447,14 @@ sz_status_t szs_levenshtein_distances_utf8_for_(                                
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else { result = sz_device_code_mismatch_k; }
         }
@@ -455,7 +494,7 @@ template <typename texts_type_>
 sz_status_t szs_needleman_wunsch_scores_for_(                                      //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     texts_type_ const &a_container, texts_type_ const &b_container,                //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -479,23 +518,23 @@ sz_status_t szs_needleman_wunsch_scores_for_(                                   
 #if SZ_USE_CUDA
             if (std::holds_alternative<gpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                sz::status_t status = engine_variant(          //
+                szs::cuda_status_t status = engine_variant(    //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
-                else {
-                    sz::status_t status = engine_variant( //
-                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
-                    result = static_cast<sz_status_t>(status);
-                }
+                szs::cuda_status_t status =
+                    ctx.status != sz::status_t::success_k
+                        ? ctx.status
+                        : engine_variant( //
+                              a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                result = propagate_error(status, error_message);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
 #else
-            result = sz_status_unknown_k; // GPU support is not enabled
+            result = propagate_error(sz::status_t::unknown_k, error_message); // GPU support is not enabled
 #endif // SZ_USE_CUDA
         }
         // CPU backends are only compatible with CPU scopes
@@ -505,16 +544,16 @@ sz_status_t szs_needleman_wunsch_scores_for_(                                   
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
         }
     };
 
@@ -552,7 +591,7 @@ template <typename texts_type_>
 sz_status_t szs_smith_waterman_scores_for_(                                      //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
     texts_type_ const &a_container, texts_type_ const &b_container,              //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -576,33 +615,33 @@ sz_status_t szs_smith_waterman_scores_for_(                                     
 #if SZ_USE_CUDA
             if (std::holds_alternative<gpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                sz::status_t status = engine_variant(          //
+                szs::cuda_status_t status = engine_variant(    //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 sz::gpu_specs_t specs;
                 auto specs_status = szs::gpu_specs_fetch(specs, 0);
                 if (specs_status.status != sz::status_t::success_k) {
-                    result = static_cast<sz_status_t>(specs_status.status);
+                    result = propagate_error(specs_status, error_message);
                 }
                 else {
                     szs::cuda_executor_t executor;
                     auto exec_status = executor.try_scheduling(0);
                     if (exec_status.status != sz::status_t::success_k) {
-                        result = static_cast<sz_status_t>(exec_status.status);
+                        result = propagate_error(exec_status, error_message);
                     }
                     else {
-                        sz::status_t status = engine_variant( //
+                        szs::cuda_status_t status = engine_variant( //
                             a_container, b_container, results_strided, executor, specs);
-                        result = static_cast<sz_status_t>(status);
+                        result = propagate_error(status, error_message);
                     }
                 }
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
 #else
-            result = sz_status_unknown_k; // GPU support is not enabled
+            result = propagate_error(sz::status_t::unknown_k, error_message); // GPU support is not enabled
 #endif // SZ_USE_CUDA
         }
         // CPU backends are only compatible with CPU scopes
@@ -612,16 +651,16 @@ sz_status_t szs_smith_waterman_scores_for_(                                     
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
                 sz::status_t status = engine_variant(          //
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
         }
     };
 
@@ -670,7 +709,7 @@ sz_status_t szs_fingerprints_for_(                                      //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     texts_type_ const &texts_container,                                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     sz_assert_(device_punned != nullptr && "Device must be initialized");
@@ -709,7 +748,7 @@ sz_status_t szs_fingerprints_for_(                                      //
                 get_executor(device_scope), get_specs(device_scope));
             result = static_cast<sz_status_t>(status);
         }
-        else { result = sz_status_unknown_k; }
+        else { result = propagate_error(sz::status_t::unknown_k, error_message); }
     };
 #if SZ_USE_CUDA
     using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
@@ -729,14 +768,14 @@ sz_status_t szs_fingerprints_for_(                                      //
         }
         else if (std::holds_alternative<default_scope_t>(device->variants)) {
             auto &ctx = default_gpu_context();
-            if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+            if (ctx.status.status != sz::status_t::success_k) { result = propagate_error(ctx.status, error_message); }
             else {
                 sz::status_t status = fallback_hashers( //
                     texts_container, min_hashes_rows, min_counts_rows, ctx.executor, ctx.specs);
-                result = static_cast<sz_status_t>(status);
+                result = propagate_error(status, error_message);
             }
         }
-        else { result = sz_status_unknown_k; }
+        else { result = propagate_error(sz::status_t::unknown_k, error_message); }
     };
 #endif // SZ_USE_CUDA
 
@@ -764,34 +803,34 @@ sz_status_t szs_fingerprints_for_(                                      //
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
                 for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
                     auto &engine_variant = unrolled_hashers[i];
-                    sz::status_t status = engine_variant(                                             //
+                    szs::cuda_status_t status = engine_variant(                                       //
                         texts_container,                                                              //
                         min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         get_executor(device_scope), get_specs(device_scope));
-                    result = static_cast<sz_status_t>(status);
+                    result = propagate_error(status, error_message);
                     if (result != sz_success_k) break;
                 }
             }
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                if (ctx.status != sz::status_t::success_k) { result = propagate_error(ctx.status, error_message); }
                 else {
                     for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
                         auto &engine_variant = unrolled_hashers[i];
-                        sz::status_t status = engine_variant(                                             //
+                        szs::cuda_status_t status = engine_variant(                                       //
                             texts_container,                                                              //
                             min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                             min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                             ctx.executor, ctx.specs);
-                        result = static_cast<sz_status_t>(status);
+                        result = propagate_error(status, error_message);
                         if (result != sz_success_k) break;
                     }
                 }
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
 #else
-            result = sz_status_unknown_k; // GPU support is not enabled
+            result = propagate_error(sz::status_t::unknown_k, error_message); // GPU support is not enabled
 #endif // SZ_USE_CUDA
         }
         // CPU backends are only compatible with CPU scopes
@@ -805,7 +844,7 @@ sz_status_t szs_fingerprints_for_(                                      //
                         min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         get_executor(device_scope), get_specs(device_scope));
-                    result = static_cast<sz_status_t>(status);
+                    result = propagate_error(status, error_message);
                 }
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
@@ -817,10 +856,10 @@ sz_status_t szs_fingerprints_for_(                                      //
                         min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         get_executor(device_scope), get_specs(device_scope));
-                    result = static_cast<sz_status_t>(status);
+                    result = propagate_error(status, error_message);
                 }
             }
-            else { result = sz_status_unknown_k; }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
         }
     };
 
@@ -863,14 +902,14 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
     return static_caps;
 }
 
-SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc, char const **error_message) {
 #if SZ_USE_CUDA
     alloc->allocate = &sz_memory_allocate_from_unified_;
     alloc->free = &sz_memory_free_from_unified_;
     alloc->handle = nullptr;
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 #else
-    return sz_missing_gpu_k;
+    return propagate_error(sz::status_t::missing_gpu_k, error_message);
 #endif
 }
 
@@ -878,93 +917,101 @@ SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *a
 
 #pragma region Device Scopes
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_punned, char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
     auto *scope = new device_scope_t {default_scope_t {}};
-    if (!scope) return sz_bad_alloc_k;
+    if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate device scope");
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned,
+                                                       char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
-    // If cpu_cores is 0, use all available cores
+    // If `cpu_cores` is 0, use all available cores
     if (cpu_cores == 0) cpu_cores = std::thread::hardware_concurrency();
 
-    // If cpu_cores is 1, redirect to default scope
-    if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned);
+    // If `cpu_cores` is 1, redirect to default scope
+    if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned, error_message);
 
     sz::cpu_specs_t specs;
     auto executor = std::make_unique<fu::basic_pool_t>();
-    if (!executor->try_spawn(cpu_cores)) return sz_bad_alloc_k;
+    if (!executor->try_spawn(cpu_cores))
+        return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to spawn thread pool");
 
     auto *scope =
         new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
-    if (!scope) return sz_bad_alloc_k;
+    if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate CPU device scope");
+
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope_punned) {
+SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope_punned,
+                                                        char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
 #if SZ_USE_CUDA
     sz::gpu_specs_t specs;
     auto specs_status = szs::gpu_specs_fetch(specs, static_cast<int>(gpu_device));
-    if (specs_status.status != sz::status_t::success_k) { return static_cast<sz_status_t>(specs_status.status); }
+    if (specs_status.status != sz::status_t::success_k) { return propagate_error(specs_status, error_message); }
     szs::cuda_executor_t executor;
     auto executor_status = executor.try_scheduling(static_cast<int>(gpu_device));
-    if (executor_status.status != sz::status_t::success_k) { return static_cast<sz_status_t>(executor_status.status); }
+    if (executor_status.status != sz::status_t::success_k) return propagate_error(executor_status, error_message);
 
     auto *scope =
         new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
-    if (!scope) return sz_bad_alloc_k;
+    if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate GPU device scope");
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 #else
     sz_unused_(gpu_device);
     sz_unused_(scope_punned);
-    return sz_missing_gpu_k;
+    return propagate_error(sz::status_t::missing_gpu_k, error_message, "CUDA support not compiled in");
 #endif
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_punned, sz_size_t *cpu_cores) {
-    if (scope_punned == nullptr || cpu_cores == nullptr) return sz_status_unknown_k;
+SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_punned, sz_size_t *cpu_cores,
+                                                      char const **error_message) {
+    if (scope_punned == nullptr || cpu_cores == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
 
     if (std::holds_alternative<cpu_scope_t>(scope->variants)) {
         auto &cpu_scope = std::get<cpu_scope_t>(scope->variants);
         if (cpu_scope.executor_ptr) {
             *cpu_cores = cpu_scope.executor_ptr->threads_count();
-            return sz_success_k;
+            return propagate_error(sz::status_t::success_k, error_message);
         }
     }
     // Default scope is single-threaded
     else if (std::holds_alternative<default_scope_t>(scope->variants)) {
         *cpu_cores = 1;
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 
-    return sz_status_unknown_k;
+    return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is GPU-only");
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_punned, sz_size_t *gpu_device) {
-    if (scope_punned == nullptr || gpu_device == nullptr) return sz_status_unknown_k;
+SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_punned, sz_size_t *gpu_device,
+                                                       char const **error_message) {
+    if (scope_punned == nullptr || gpu_device == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
 
 #if SZ_USE_CUDA
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
         auto &gpu_scope = std::get<gpu_scope_t>(scope->variants);
         *gpu_device = static_cast<sz_size_t>(gpu_scope.executor.device_id());
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #else
     sz_unused_(scope_punned);
     sz_unused_(gpu_device);
 #endif
 
-    return sz_status_unknown_k;
+    return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is CPU-only");
 }
 
 SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope_punned) {
@@ -973,10 +1020,11 @@ SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope_punned) {
     delete scope;
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned,
-                                                         sz_capability_t *capabilities) {
+SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned, sz_capability_t *capabilities,
+                                                         char const **error_message) {
 
-    if (scope_punned == nullptr || capabilities == nullptr) return sz_status_unknown_k;
+    if (scope_punned == nullptr || capabilities == nullptr)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
     sz_capability_t system_caps = szs_capabilities();
 
 #if SZ_USE_CUDA
@@ -984,13 +1032,13 @@ SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scop
     if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
         // For GPU scope, intersect system capabilities with CUDA capabilities
         *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cuda_k);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif
 
     // For default and CPU scopes, intersect system capabilities with CPU capabilities
     *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cpus_k);
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 }
 
 #pragma endregion Device Scopes
@@ -1022,7 +1070,7 @@ SZ_DYNAMIC void szs_unified_free(void *ptr, sz_size_t size_bytes) {
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                                             //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
-    szs_levenshtein_distances_t *engine_punned) {
+    szs_levenshtein_distances_t *engine_punned, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1038,19 +1086,21 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
         auto variant = szs::levenshtein_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_ice) {
         auto variant = szs::affine_levenshtein_ice_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_ICE
 
@@ -1060,19 +1110,21 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
         auto variant = szs::levenshtein_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_cuda) {
         auto variant = szs::affine_levenshtein_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_CUDA
 
@@ -1082,19 +1134,21 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
         auto variant = szs::levenshtein_kepler_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_kepler_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_kepler) {
         auto variant = szs::affine_levenshtein_kepler_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_kepler_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_KEPLER
 
@@ -1104,19 +1158,21 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
         auto variant = szs::levenshtein_hopper_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_hopper) {
         auto variant = szs::affine_levenshtein_hopper_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_HOPPER
 
@@ -1124,59 +1180,61 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
         auto variant = szs::levenshtein_serial_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else {
         auto variant = szs::affine_levenshtein_serial_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_sequence(                       //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *a, sz_sequence_t const *b,                              //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
     return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                        //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
     return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                        //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
     return szs_levenshtein_distances_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine_punned) {
@@ -1192,7 +1250,7 @@ SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engin
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                                        //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
-    szs_levenshtein_distances_utf8_t *engine_punned) {
+    szs_levenshtein_distances_utf8_t *engine_punned, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1208,10 +1266,12 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
         auto variant = szs::levenshtein_utf8_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_utf8_backends_t(std::in_place_type_t<szs::levenshtein_utf8_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate UTF-8 Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_ICE
 
@@ -1220,61 +1280,65 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
         auto variant = szs::levenshtein_utf8_serial_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_utf8_backends_t(std::in_place_type_t<szs::levenshtein_utf8_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate UTF-8 Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else {
         auto variant = szs::affine_levenshtein_utf8_serial_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow) levenshtein_utf8_backends_t(
             std::in_place_type_t<szs::affine_levenshtein_utf8_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate UTF-8 Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_utf8_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 
-    return sz_status_unknown_k; // No supported backends available
+    return propagate_error(sz::status_t::unknown_k, error_message, "No supported UTF-8 Levenshtein backends available");
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_sequence(                       //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *a, sz_sequence_t const *b,                                   //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
     return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                        //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                   //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
     return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                        //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                   //
-    sz_size_t *results, sz_size_t results_stride) {
+    sz_size_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
     return szs_levenshtein_distances_utf8_for_(                 //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine_punned) {
@@ -1290,7 +1354,7 @@ SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_ut
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       //
     sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
-    szs_needleman_wunsch_scores_t *engine_punned) {
+    szs_needleman_wunsch_scores_t *engine_punned, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1307,10 +1371,12 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
         auto variant = szs::needleman_wunsch_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_ICE
 
@@ -1320,19 +1386,23 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
         auto variant = szs::needleman_wunsch_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_cuda) {
         auto variant = szs::affine_needleman_wunsch_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow) needleman_wunsch_backends_t(
             std::in_place_type_t<szs::affine_needleman_wunsch_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_CUDA
 
@@ -1342,19 +1412,23 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
         auto variant = szs::needleman_wunsch_hopper_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_hopper) {
         auto variant = szs::affine_needleman_wunsch_hopper_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow) needleman_wunsch_backends_t(
             std::in_place_type_t<szs::affine_needleman_wunsch_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_HOPPER
 
@@ -1362,59 +1436,63 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
         auto variant = szs::needleman_wunsch_serial_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else {
         auto variant = szs::affine_needleman_wunsch_serial_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow) needleman_wunsch_backends_t(
             std::in_place_type_t<szs::affine_needleman_wunsch_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Needleman-Wunsch engine");
 
         *engine_punned = reinterpret_cast<szs_needleman_wunsch_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 }
 
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_sequence(                       //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *a, sz_sequence_t const *b,                                //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
     return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                        //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
     return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                        //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
     return szs_needleman_wunsch_scores_for_(                    //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t engine_punned) {
@@ -1430,7 +1508,7 @@ SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t e
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         //
     sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
-    szs_smith_waterman_scores_t *engine_punned) {
+    szs_smith_waterman_scores_t *engine_punned, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1447,10 +1525,12 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
         auto variant = szs::smith_waterman_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_ICE
 
@@ -1460,19 +1540,23 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
         auto variant = szs::smith_waterman_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_cuda) {
         auto variant = szs::affine_smith_waterman_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_cuda_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_CUDA
 
@@ -1482,19 +1566,23 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
         auto variant = szs::smith_waterman_hopper_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_hopper) {
         auto variant = szs::affine_smith_waterman_hopper_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_hopper_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_HOPPER
 
@@ -1502,59 +1590,63 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
         auto variant = szs::smith_waterman_serial_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else {
         auto variant = szs::affine_smith_waterman_serial_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_serial_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
 
         *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 }
 
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(                       //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *a, sz_sequence_t const *b,                              //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_as_cpp_container_t {a};
     auto b_container = sz_sequence_as_cpp_container_t {b};
     return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                        //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
     return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                        //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
-    sz_ssize_t *results, sz_size_t results_stride) {
+    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
 
     sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
     auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
     auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
     return szs_smith_waterman_scores_for_(                      //
         engine_punned, device_punned, a_container, b_container, //
-        results, results_stride);
+        results, results_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t engine_punned) {
@@ -1571,7 +1663,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
     sz_size_t dimensions, sz_size_t alphabet_size,                    //
     sz_size_t const *window_widths, sz_size_t window_widths_count,    //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
-    szs_fingerprints_t *engine_punned) {
+    szs_fingerprints_t *engine_punned, char const **error_message) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
@@ -1607,10 +1699,11 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
         auto engine =
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
         engine->dimensions = dimensions;
         *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_HASWELL
 
@@ -1632,10 +1725,11 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
         auto engine =
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
         engine->dimensions = dimensions;
         *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_SKYLAKE
 
@@ -1657,10 +1751,11 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
         auto engine =
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
         engine->dimensions = dimensions;
         *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
     else if (can_use_cuda) {
         using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
@@ -1698,10 +1793,11 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
         auto engine =
             new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine) return sz_bad_alloc_k;
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
         engine->dimensions = dimensions;
         *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return sz_success_k;
+        return propagate_error(sz::status_t::success_k, error_message);
     }
 
     // Build the fallback variant with interleaving width dimensions
@@ -1714,50 +1810,51 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
     auto engine =
         new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<fallback_variant_cpus_t>(), std::move(variant));
-    if (!engine) return sz_bad_alloc_k;
+    if (!engine)
+        return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
 
     engine->dimensions = dimensions;
     *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-    return sz_success_k;
+    return propagate_error(sz::status_t::success_k, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(                       //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *texts,                                         //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_as_cpp_container_t {texts};
     return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(                        //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *texts,                                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_u32tape_as_cpp_container_t {texts};
     return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(                        //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *texts,                                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     sz_assert_(texts != nullptr && "Input texts cannot be null");
     auto texts_container = sz_sequence_u64tape_as_cpp_container_t {texts};
     return szs_fingerprints_for_(                      //
         engine_punned, device_punned, texts_container, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_fingerprints_free(szs_fingerprints_t engine_punned) {
@@ -1774,43 +1871,44 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_init(                    //
     sz_size_t dimensions, sz_size_t alphabet_size,                    //
     sz_size_t const *window_widths, sz_size_t window_widths_count,    //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
-    szs_fingerprints_utf8_t *engine_punned) {
+    szs_fingerprints_utf8_t *engine_punned, char const **error_message) {
 
     return szs_fingerprints_init( //
-        dimensions, alphabet_size, window_widths, window_widths_count, alloc, capabilities, engine_punned);
+        dimensions, alphabet_size, window_widths, window_widths_count, alloc, capabilities, engine_punned,
+        error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_sequence(                       //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *texts,                                              //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     return szs_fingerprints_sequence(        //
         engine_punned, device_punned, texts, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u32tape(                        //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *texts,                                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     return szs_fingerprints_u32tape(         //
         engine_punned, device_punned, texts, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u64tape(                        //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *texts,                                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
-    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+    sz_u32_t *min_counts, sz_size_t min_counts_stride, char const **error_message) {
 
     return szs_fingerprints_u64tape(         //
         engine_punned, device_punned, texts, //
-        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_punned) {
@@ -1818,5 +1916,4 @@ SZ_DYNAMIC void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_punned
 }
 
 #pragma endregion Fingerprints UTF8
-
-} // extern "C"
+}

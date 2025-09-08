@@ -1,7 +1,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
-use core::ffi::c_void;
+use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
 use stringtape::{BytesTape, StringTape};
 
@@ -13,6 +13,40 @@ pub type Capability = u32;
 
 // Import from stringzilla module
 pub use crate::stringzilla::Status;
+
+/// Custom error type that preserves detailed error messages from the C API.
+#[derive(Debug)]
+pub struct Error {
+    pub status: Status,
+    pub message: Option<String>,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.message {
+            Some(msg) => write!(f, "{}", msg),
+            None => write!(f, "{:?}", self.status),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<Status> for Error {
+    fn from(status: Status) -> Self {
+        Error { status, message: None }
+    }
+}
+
+fn rust_error_from_c_message(status: Status, error_msg: *const c_char) -> Error {
+    let message = if !error_msg.is_null() && status != Status::Success {
+        unsafe { CStr::from_ptr(error_msg).to_str().ok().map(|s| s.to_string()) }
+    } else {
+        None
+    };
+
+    Error { status, message }
+}
 
 /// Device scope manages execution context and hardware resource allocation.
 ///
@@ -62,7 +96,7 @@ pub use crate::stringzilla::Status;
 /// // GPU might not be available
 /// match DeviceScope::gpu_device(99) {
 ///     Ok(_) => println!("GPU available"),
-///     Err(Status::MissingGpu) => println!("GPU not available or invalid device ID"),
+///     Err(e) if e.status == Status::MissingGpu => println!("GPU not available or invalid device ID"),
 ///     Err(e) => println!("GPU error: {:?}", e),
 /// }
 /// ```
@@ -100,12 +134,13 @@ impl DeviceScope {
     ///     println!("Using CPU with {} cores", device.get_cpu_cores().unwrap());
     /// }
     /// ```
-    pub fn default() -> Result<Self, Status> {
+    pub fn default() -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { szs_device_scope_init_default(&mut handle) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_init_default(&mut handle, &mut error_msg) };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -144,12 +179,13 @@ impl DeviceScope {
     /// - Optimal core count is usually equal to physical cores
     /// - Hyperthreading may not provide linear scaling for SIMD workloads
     /// - Consider NUMA topology for systems with >16 cores
-    pub fn cpu_cores(cpu_cores: usize) -> Result<Self, Status> {
+    pub fn cpu_cores(cpu_cores: usize) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { szs_device_scope_init_cpu_cores(cpu_cores, &mut handle) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_init_cpu_cores(cpu_cores, &mut handle, &mut error_msg) };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -199,12 +235,13 @@ impl DeviceScope {
     /// - GPU is optimal for batch sizes >1000 string pairs
     /// - Memory transfer overhead affects small workloads
     /// - Use unified memory allocation for best GPU performance
-    pub fn gpu_device(gpu_device: usize) -> Result<Self, Status> {
+    pub fn gpu_device(gpu_device: usize) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { szs_device_scope_init_gpu_device(gpu_device, &mut handle) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_init_gpu_device(gpu_device, &mut handle, &mut error_msg) };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -231,12 +268,13 @@ impl DeviceScope {
     /// if caps & 0x1 != 0 { println!("Basic SIMD available"); }
     /// if caps & 0x2 != 0 { println!("Advanced SIMD available"); }
     /// ```
-    pub fn get_capabilities(&self) -> Result<Capability, Status> {
+    pub fn get_capabilities(&self) -> Result<Capability, Error> {
         let mut capabilities: Capability = 0;
-        let status = unsafe { szs_device_scope_get_capabilities(self.handle, &mut capabilities) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_get_capabilities(self.handle, &mut capabilities, &mut error_msg) };
         match status {
             Status::Success => Ok(capabilities),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -262,12 +300,13 @@ impl DeviceScope {
     /// let cores = default_device.get_cpu_cores().unwrap();
     /// println!("Default device using {} CPU cores", cores);
     /// ```
-    pub fn get_cpu_cores(&self) -> Result<usize, Status> {
+    pub fn get_cpu_cores(&self) -> Result<usize, Error> {
         let mut cpu_cores: usize = 0;
-        let status = unsafe { szs_device_scope_get_cpu_cores(self.handle, &mut cpu_cores) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_get_cpu_cores(self.handle, &mut cpu_cores, &mut error_msg) };
         match status {
             Status::Success => Ok(cpu_cores),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -296,12 +335,13 @@ impl DeviceScope {
     /// assert!(cpu_device.get_gpu_device().is_err());
     /// assert!(!cpu_device.is_gpu());
     /// ```
-    pub fn get_gpu_device(&self) -> Result<usize, Status> {
+    pub fn get_gpu_device(&self) -> Result<usize, Error> {
         let mut gpu_device: usize = 0;
-        let status = unsafe { szs_device_scope_get_gpu_device(self.handle, &mut gpu_device) };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe { szs_device_scope_get_gpu_device(self.handle, &mut gpu_device, &mut error_msg) };
         match status {
             Status::Success => Ok(gpu_device),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -743,7 +783,7 @@ impl FingerprintsBuilder {
     /// let result = engine.compute(&device, &test_data, 256);
     /// assert!(result.is_ok());
     /// ```
-    pub fn build(self, device: &DeviceScope) -> Result<Fingerprints, Status> {
+    pub fn build(self, device: &DeviceScope) -> Result<Fingerprints, Error> {
         let mut engine: FingerprintsHandle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
 
@@ -752,6 +792,7 @@ impl FingerprintsBuilder {
             None => (ptr::null(), 0),
         };
 
+        let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_fingerprints_init(
                 self.dimensions,
@@ -761,12 +802,13 @@ impl FingerprintsBuilder {
                 ptr::null(), // No custom allocator
                 capabilities,
                 &mut engine,
+                &mut error_msg,
             )
         };
 
         match status {
             Status::Success => Ok(Fingerprints { handle: engine }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 }
@@ -953,7 +995,7 @@ impl Fingerprints {
         device: &DeviceScope,
         strings: T,
         dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Status>
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -974,6 +1016,7 @@ impl Fingerprints {
         if device.is_gpu() {
             let (tape, use_64bit) = create_tape(strings_slice)?;
 
+            let mut error_msg: *const c_char = ptr::null();
             let status = if use_64bit {
                 let tape_view = create_u64tape_view(&tape);
                 unsafe {
@@ -985,6 +1028,7 @@ impl Fingerprints {
                         hashes_stride,
                         min_counts.as_mut_ptr(),
                         counts_stride,
+                        &mut error_msg,
                     )
                 }
             } else {
@@ -998,15 +1042,17 @@ impl Fingerprints {
                         hashes_stride,
                         min_counts.as_mut_ptr(),
                         counts_stride,
+                        &mut error_msg,
                     )
                 }
             };
             match status {
                 Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
             let sequence = create_sequence_view(strings_slice);
+            let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_fingerprints_sequence(
                     self.handle,
@@ -1016,11 +1062,12 @@ impl Fingerprints {
                     hashes_stride,
                     min_counts.as_mut_ptr(),
                     counts_stride,
+                    &mut error_msg,
                 )
             };
             match status {
                 Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
     }
@@ -1077,12 +1124,32 @@ pub type SmithWatermanScoresHandle = *mut c_void;
 // C API bindings
 extern "C" {
     // Device scope functions
-    fn szs_device_scope_init_default(scope: *mut *mut c_void) -> Status;
-    fn szs_device_scope_init_cpu_cores(cpu_cores: usize, scope: *mut *mut c_void) -> Status;
-    fn szs_device_scope_init_gpu_device(gpu_device: usize, scope: *mut *mut c_void) -> Status;
-    fn szs_device_scope_get_capabilities(scope: *mut c_void, capabilities: *mut Capability) -> Status;
-    fn szs_device_scope_get_cpu_cores(scope: *mut c_void, cpu_cores: *mut usize) -> Status;
-    fn szs_device_scope_get_gpu_device(scope: *mut c_void, gpu_device: *mut usize) -> Status;
+    fn szs_device_scope_init_default(scope: *mut *mut c_void, error_message: *mut *const c_char) -> Status;
+    fn szs_device_scope_init_cpu_cores(
+        cpu_cores: usize,
+        scope: *mut *mut c_void,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_init_gpu_device(
+        gpu_device: usize,
+        scope: *mut *mut c_void,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_capabilities(
+        scope: *mut c_void,
+        capabilities: *mut Capability,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_cpu_cores(
+        scope: *mut c_void,
+        cpu_cores: *mut usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_gpu_device(
+        scope: *mut c_void,
+        gpu_device: *mut usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
     fn szs_device_scope_free(scope: *mut c_void);
 
     // Levenshtein distance functions
@@ -1094,6 +1161,7 @@ extern "C" {
         alloc: *const c_void,
         capabilities: Capability,
         engine: *mut LevenshteinDistancesHandle,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_sequence(
@@ -1103,6 +1171,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_u32tape(
@@ -1112,6 +1181,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u32tape_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_u64tape(
@@ -1121,6 +1191,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u64tape_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_free(engine: LevenshteinDistancesHandle);
@@ -1134,6 +1205,7 @@ extern "C" {
         alloc: *const c_void,
         capabilities: Capability,
         engine: *mut LevenshteinDistancesUtf8Handle,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_sequence(
@@ -1143,6 +1215,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_u32tape(
@@ -1152,6 +1225,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u32tape_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_u64tape(
@@ -1161,6 +1235,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u64tape_t
         results: *mut usize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
@@ -1173,6 +1248,7 @@ extern "C" {
         alloc: *const c_void,
         capabilities: Capability,
         engine: *mut NeedlemanWunschScoresHandle,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_sequence(
@@ -1182,6 +1258,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_u32tape(
@@ -1191,6 +1268,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u32tape_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_u64tape(
@@ -1200,6 +1278,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u64tape_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_free(engine: NeedlemanWunschScoresHandle);
@@ -1212,6 +1291,7 @@ extern "C" {
         alloc: *const c_void,
         capabilities: Capability,
         engine: *mut SmithWatermanScoresHandle,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_sequence(
@@ -1221,6 +1301,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_u32tape(
@@ -1230,6 +1311,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u32tape_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_u64tape(
@@ -1239,6 +1321,7 @@ extern "C" {
         b: *const c_void, // sz_sequence_u64tape_t
         results: *mut isize,
         results_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
@@ -1252,6 +1335,7 @@ extern "C" {
         alloc: *const c_void, // MemoryAllocator - using null for default
         capabilities: Capability,
         engine: *mut FingerprintsHandle,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_fingerprints_sequence(
@@ -1262,6 +1346,7 @@ extern "C" {
         min_hashes_stride: usize,
         min_counts: *mut u32,
         min_counts_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_fingerprints_u32tape(
@@ -1272,6 +1357,7 @@ extern "C" {
         min_hashes_stride: usize,
         min_counts: *mut u32,
         min_counts_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_fingerprints_u64tape(
@@ -1282,6 +1368,7 @@ extern "C" {
         min_hashes_stride: usize,
         min_counts: *mut u32,
         min_counts_stride: usize,
+        error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_fingerprints_free(engine: FingerprintsHandle);
@@ -1446,9 +1533,10 @@ impl LevenshteinDistances {
         mismatch_cost: i8,
         open_cost: i8,
         extend_cost: i8,
-    ) -> Result<Self, Status> {
+    ) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_levenshtein_distances_init(
                 match_cost,
@@ -1458,11 +1546,12 @@ impl LevenshteinDistances {
                 ptr::null(),
                 capabilities,
                 &mut handle,
+                &mut error_msg,
             )
         };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -1517,7 +1606,7 @@ impl LevenshteinDistances {
         device: &DeviceScope,
         sequences_a: T,
         sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Status>
+    ) -> Result<UnifiedVec<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -1535,6 +1624,7 @@ impl LevenshteinDistances {
             let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
             let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
 
+            let mut error_msg: *const c_char = ptr::null();
             let status = if use_64bit_a || use_64bit_b {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
@@ -1546,6 +1636,7 @@ impl LevenshteinDistances {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             } else {
@@ -1559,16 +1650,18 @@ impl LevenshteinDistances {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_levenshtein_distances_sequence(
                     self.handle,
@@ -1577,11 +1670,12 @@ impl LevenshteinDistances {
                     &seq_b as *const _ as *const c_void,
                     results.as_mut_ptr(),
                     results_stride,
+                    &mut error_msg,
                 )
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
     }
@@ -1692,9 +1786,10 @@ impl LevenshteinDistancesUtf8 {
         mismatch_cost: i8,
         open_cost: i8,
         extend_cost: i8,
-    ) -> Result<Self, Status> {
+    ) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_levenshtein_distances_utf8_init(
                 match_cost,
@@ -1704,11 +1799,12 @@ impl LevenshteinDistancesUtf8 {
                 ptr::null(),
                 capabilities,
                 &mut handle,
+                &mut error_msg,
             )
         };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -1760,7 +1856,7 @@ impl LevenshteinDistancesUtf8 {
         device: &DeviceScope,
         sequences_a: T,
         sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Status>
+    ) -> Result<UnifiedVec<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<str>,
@@ -1778,6 +1874,7 @@ impl LevenshteinDistancesUtf8 {
             let (tape_a, use_64bit_a) = create_tape_str(seq_a_slice)?;
             let (tape_b, use_64bit_b) = create_tape_str(seq_b_slice)?;
 
+            let mut error_msg: *const c_char = ptr::null();
             let status = if use_64bit_a || use_64bit_b {
                 let tape_a_view = create_u64tape_view_str(&tape_a);
                 let tape_b_view = create_u64tape_view_str(&tape_b);
@@ -1789,6 +1886,7 @@ impl LevenshteinDistancesUtf8 {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             } else {
@@ -1802,16 +1900,18 @@ impl LevenshteinDistancesUtf8 {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
             let seq_a = create_sequence_view_str(seq_a_slice);
             let seq_b = create_sequence_view_str(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_levenshtein_distances_utf8_sequence(
                     self.handle,
@@ -1820,11 +1920,12 @@ impl LevenshteinDistancesUtf8 {
                     &seq_b as *const _ as *const c_void,
                     results.as_mut_ptr(),
                     results_stride,
+                    &mut error_msg,
                 )
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
     }
@@ -1981,9 +2082,10 @@ impl NeedlemanWunschScores {
         substitution_matrix: &[[i8; 256]; 256],
         open_cost: i8,
         extend_cost: i8,
-    ) -> Result<Self, Status> {
+    ) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_needleman_wunsch_scores_init(
                 substitution_matrix.as_ptr() as *const i8,
@@ -1992,11 +2094,12 @@ impl NeedlemanWunschScores {
                 ptr::null(),
                 capabilities,
                 &mut handle,
+                &mut error_msg,
             )
         };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -2069,7 +2172,7 @@ impl NeedlemanWunschScores {
         device: &DeviceScope,
         sequences_a: T,
         sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Status>
+    ) -> Result<UnifiedVec<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -2087,6 +2190,7 @@ impl NeedlemanWunschScores {
             let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
             let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
 
+            let mut error_msg: *const c_char = ptr::null();
             let status = if use_64bit_a || use_64bit_b {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
@@ -2098,6 +2202,7 @@ impl NeedlemanWunschScores {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             } else {
@@ -2111,16 +2216,18 @@ impl NeedlemanWunschScores {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_needleman_wunsch_scores_sequence(
                     self.handle,
@@ -2129,11 +2236,12 @@ impl NeedlemanWunschScores {
                     &seq_b as *const _ as *const c_void,
                     results.as_mut_ptr(),
                     results_stride,
+                    &mut error_msg,
                 )
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
     }
@@ -2305,9 +2413,10 @@ impl SmithWatermanScores {
         substitution_matrix: &[[i8; 256]; 256],
         open_cost: i8,
         extend_cost: i8,
-    ) -> Result<Self, Status> {
+    ) -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_smith_waterman_scores_init(
                 substitution_matrix.as_ptr() as *const i8,
@@ -2316,11 +2425,12 @@ impl SmithWatermanScores {
                 ptr::null(),
                 capabilities,
                 &mut handle,
+                &mut error_msg,
             )
         };
         match status {
             Status::Success => Ok(Self { handle }),
-            err => Err(err),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
@@ -2408,7 +2518,7 @@ impl SmithWatermanScores {
         device: &DeviceScope,
         sequences_a: T,
         sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Status>
+    ) -> Result<UnifiedVec<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -2426,6 +2536,7 @@ impl SmithWatermanScores {
             let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
             let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
 
+            let mut error_msg: *const c_char = ptr::null();
             let status = if use_64bit_a || use_64bit_b {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
@@ -2437,6 +2548,7 @@ impl SmithWatermanScores {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             } else {
@@ -2450,16 +2562,18 @@ impl SmithWatermanScores {
                         &tape_b_view as *const _ as *const c_void,
                         results.as_mut_ptr(),
                         results_stride,
+                        &mut error_msg,
                     )
                 }
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_smith_waterman_scores_sequence(
                     self.handle,
@@ -2468,11 +2582,12 @@ impl SmithWatermanScores {
                     &seq_b as *const _ as *const c_void,
                     results.as_mut_ptr(),
                     results_stride,
+                    &mut error_msg,
                 )
             };
             match status {
                 Status::Success => Ok(results),
-                err => Err(err),
+                err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
     }
@@ -2514,7 +2629,7 @@ fn create_sequence_view_str<T: AsRef<str>>(strings: &[T]) -> SzSequence {
 }
 
 /// Convert StringTape to appropriate tape view for C API
-fn create_tape<T>(sequences: &[T]) -> Result<(BytesTape<i64, UnifiedAlloc>, bool), Status>
+fn create_tape<T>(sequences: &[T]) -> Result<(BytesTape<i64, UnifiedAlloc>, bool), Error>
 where
     T: AsRef<[u8]>,
 {
@@ -2529,12 +2644,12 @@ where
     };
 
     let mut tape = tape;
-    tape.extend(sequences).map_err(|_| SzStatus::BadAlloc)?;
+    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
     Ok((tape, use_64bit))
 }
 
 /// Convert string sequences to StringTape
-fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, UnifiedAlloc>, bool), Status> {
+fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, UnifiedAlloc>, bool), Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
@@ -2546,7 +2661,7 @@ fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, Un
     };
 
     let mut tape = tape;
-    tape.extend(sequences).map_err(|_| SzStatus::BadAlloc)?;
+    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
     Ok((tape, use_64bit))
 }
 
@@ -2643,6 +2758,8 @@ pub fn backend_info() -> &'static str {
 
     #[cfg(not(any(feature = "cpus", feature = "cuda", feature = "rocm")))]
     return "StringZillas not available - enable cpus, cuda, or rocm feature";
+
+    "CPU backend"
 }
 
 #[cfg(test)]
@@ -2650,7 +2767,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn backend_info() {
+    fn test_backend_info() {
         let info = backend_info();
         assert!(!info.is_empty());
         println!("Backend: {}", info);

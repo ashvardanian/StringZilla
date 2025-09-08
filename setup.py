@@ -105,12 +105,16 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         "-O2",  # optimization level
         "-fdiagnostics-color=always",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
-        "-Wno-unused-function",  # like: ... declared ‘static’ but never defined
-        "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
-        "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
+        "-Wno-unused-function",  # like: ... declared `static` but never defined
         "-fPIC",  # to enable dynamic dispatch
         "-g",  # include debug symbols for better debugging experience
     ]
+    # Add C-specific warning suppressions only for C compilation
+    if not use_cpp:
+        compile_args += [
+            "-Wno-incompatible-pointer-types",  # like: passing argument 4 of `sz_export_prefix_u32` from incompatible pointer type
+            "-Wno-discarded-qualifiers",  # like: passing argument 1 of `free` discards `const` qualifier from pointer target type
+        ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
     ]
@@ -135,7 +139,7 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
 def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
     min_macos = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
-    
+
     # Force single-architecture builds to prevent `universal2`
     if is_64bit_arm():
         current_arch_flags = ["-arch", "arm64"]
@@ -150,14 +154,18 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         "-O2",  # optimization level
         "-fcolor-diagnostics",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
-        "-Wno-incompatible-function-pointer-types",
-        "-Wno-incompatible-pointer-types",  # like: passing argument 4 of 'sz_export_prefix_u32' from incompatible pointer type
-        "-Wno-discarded-qualifiers",  # like: passing argument 1 of 'free' discards 'const' qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
         # "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
         f"-mmacosx-version-min={min_macos}",  # minimum macOS version (respect env if provided)
         *current_arch_flags,  # force single architecture to prevent universal2 builds
     ]
+    # Add C-specific warning suppressions only for C compilation
+    if not use_cpp:
+        compile_args += [
+            "-Wno-incompatible-function-pointer-types",
+            "-Wno-incompatible-pointer-types",  # like: passing argument 4 of `sz_export_prefix_u32` from incompatible pointer type
+            "-Wno-discarded-qualifiers",  # like: passing argument 1 of `free` discards `const` qualifier from pointer target type
+        ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
         *current_arch_flags,  # force single architecture to prevent universal2 builds
