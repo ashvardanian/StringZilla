@@ -544,7 +544,6 @@ For benchmarking, the following scripts are provided.
 uv run --no-project scripts/bench_find.py --help
 uv run --no-project scripts/bench_sequence.py --help
 uv run --no-project scripts/bench_similarities.py --help
-uv run --no-project scripts/bench_fingerprints.py --help
 ```
 
 Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.

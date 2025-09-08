@@ -238,38 +238,40 @@ __Who is this for?__
   </tr>
   <!-- Edit Distance -->
   <tr>
-    <td colspan="4" align="center">Levenshtein edit distance, ≅ 5 bytes long</td>
+    <td colspan="4" align="center">Levenshtein edit distance, text lines ≅ 100 bytes long</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>jellyfish</code> <sup>3</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1,550</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2,220</b> ns
+      via <code>NLTK</code> <sup>3</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>2,490,161</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2,081,543</b> CUPS
     </td>
     <td align="center">
-      <code>szs_levenshtein_distance</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+      <code>szs_levenshtein_distances_t</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>78,851,644</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>36,857,367</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>3,369,569,512</b> CUPS
     </td>
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4" align="center">Needleman-Wunsch alignment scores, ≅ 10 K amino acids long</td>
+    <td colspan="4" align="center">Needleman-Wunsch alignment scores, proteins ≅ 1 K amino acids long</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
       via <code>biopython</code> <sup>4</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>257</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>367</b> ms
+      <span style="color:#ABABAB;">x86:</span> <b>575,981,513</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>436,350,732</b> CUPS
     </td>
     <td align="center">
-      <code>szs_needleman_wunsch_score</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+      <code>szs_needleman_wunsch_scores_t</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>452,629,942</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>520,170,239</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>9,017,327,818</b> CUPS
     </td>
   </tr>
 </table>
@@ -283,6 +285,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 > The benchmarks were performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
 > Variance within x86 CPUs will be larger.
+> For CUDA benchmarks, the Nvidia H100 GPUs were used.
 > <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
 > <sup>2</sup> Six whitespaces in the ASCII set are: ` \t\n\v\f\r`. Python's and other standard libraries have specialized functions for those.
 > <sup>3</sup> Most Python libraries for strings are also implemented in C.

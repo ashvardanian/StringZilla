@@ -458,8 +458,8 @@ def _ensure_bio_resources():
     if _biopython_aligner is None:
         _biopython_aligner = Align.PairwiseAligner()
         _biopython_aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
-        _biopython_aligner.open_gap_score = 1
-        _biopython_aligner.extend_gap_score = 1
+        _biopython_aligner.open_gap_score = -10  # Realistic gap opening cost
+        _biopython_aligner.extend_gap_score = -2  # Realistic gap extension cost
 
         subs_packed = np.array(_biopython_aligner.substitution_matrix).astype(np.int8)
         _blosum_matrix = np.zeros((256, 256), dtype=np.int8)
@@ -516,7 +516,8 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on 1 CPU core
     if name_matches(f"{szs_name}(1xCPU)", filter_pattern):
 
-        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum, 
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -535,7 +536,8 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on all CPU cores
     if name_matches(f"{szs_name}({cpu_cores}xCPU)", filter_pattern):
 
-        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum,
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -554,7 +556,8 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on GPU
     if name_matches(f"{szs_name}(1xGPU)", filter_pattern) and gpu_scope is not None:
 
-        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum,
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -573,7 +576,8 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on 1 CPU core
     if name_matches(f"{szs_name}(1xCPU,batch={batch_size})", filter_pattern):
 
-        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum,
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
@@ -592,7 +596,8 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on all CPU cores
     if name_matches(f"{szs_name}({cpu_cores}xCPU,batch={batch_size})", filter_pattern):
 
-        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum,
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
@@ -611,7 +616,8 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on GPU
     if name_matches(f"{szs_name}(1xGPU,batch={batch_size})", filter_pattern) and gpu_scope is not None:
 
-        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum)
+        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum,
+                          open=-10, extend=-2)  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
