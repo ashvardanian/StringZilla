@@ -327,9 +327,12 @@ jobs:
         uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+        # Ensure modern build backend is available for editable installs
       - name: Build Python StringZillas-CPUs
         run: |
-          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
+          python -m pip install --upgrade pip
+          pip install "setuptools>=64" wheel
+          pip install pytest pytest-repeat numpy pyarrow affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
       - name: Log CPU and Python capabilities
@@ -409,8 +412,11 @@ jobs:
         uses: actions/setup-python@v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+        # Ensure modern build backend is available for editable installs
       - name: Build Python StringZillas-CUDA
         run: |
+          python -m pip install --upgrade pip
+          pip install "setuptools>=64" wheel
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
