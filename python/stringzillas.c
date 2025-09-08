@@ -1029,7 +1029,7 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
 }
 
 static PyObject *NeedlemanWunsch_repr(NeedlemanWunsch *self) {
-    return PyUnicode_FromFormat("NeedlemanWunsch(subs_checksum,open,extend=%s)", self->description);
+    return PyUnicode_FromFormat("NeedlemanWunschScores(subs_checksum,open,extend=%s)", self->description);
 }
 
 static PyObject *NeedlemanWunsch_get_capabilities(NeedlemanWunsch *self, void *closure) {
@@ -1199,7 +1199,7 @@ cleanup:
 }
 
 static char const doc_NeedlemanWunsch[] = //
-    "NeedlemanWunsch(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
+    "NeedlemanWunschScores(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
     "\n"
     "Needleman-Wunsch global alignment scoring engine.\n"
     "\n"
@@ -1222,19 +1222,19 @@ static char const doc_NeedlemanWunsch[] = //
     "  # Minimal CPU example with BLOSUM62 matrix\n"
     "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
     "  matrix = np.zeros((256, 256), dtype=np.int8)\n"
-    "  engine = szs.NeedlemanWunsch(substitution_matrix=matrix)\n"
+    "  engine = szs.NeedlemanWunschScores(substitution_matrix=matrix)\n"
     "  proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"
     "  proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"
     "  scores = engine(proteins_a, proteins_b)\n"
     "  \n"
     "  # GPU example with custom gap penalties\n"
     "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.NeedlemanWunsch(substitution_matrix=matrix, open=-2, extend=-1, capabilities=gpu_scope)\n"
+    "  engine = szs.NeedlemanWunschScores(substitution_matrix=matrix, open=-2, extend=-1, capabilities=gpu_scope)\n"
     "  scores = engine(proteins_a, proteins_b, device=gpu_scope)\n"
     "  ```";
 
 static PyTypeObject NeedlemanWunschType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.NeedlemanWunsch",
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.NeedlemanWunschScores",
     .tp_doc = doc_NeedlemanWunsch,
     .tp_basicsize = sizeof(NeedlemanWunsch),
     .tp_flags = Py_TPFLAGS_DEFAULT,
@@ -1513,7 +1513,7 @@ cleanup:
 }
 
 static PyObject *SmithWaterman_repr(SmithWaterman *self) {
-    return PyUnicode_FromFormat("SmithWaterman(subs_checksum,open,extend=%s)", self->description);
+    return PyUnicode_FromFormat("SmithWatermanScores(subs_checksum,open,extend=%s)", self->description);
 }
 
 static PyObject *SmithWaterman_get_capabilities(SmithWaterman *self, void *closure) {
@@ -1527,7 +1527,7 @@ static PyGetSetDef SmithWaterman_getsetters[] = {
 };
 
 static char const doc_SmithWaterman[] = //
-    "SmithWaterman(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
+    "SmithWatermanScores(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
     "\n"
     "Smith-Waterman local alignment scoring engine.\n"
     "\n"
@@ -1550,19 +1550,19 @@ static char const doc_SmithWaterman[] = //
     "  # Minimal CPU example for local alignment\n"
     "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
     "  matrix = np.eye(256, dtype=np.int8)  # Identity matrix\n"
-    "  engine = szs.SmithWaterman(substitution_matrix=matrix)\n"
+    "  engine = szs.SmithWatermanScores(substitution_matrix=matrix)\n"
     "  seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"
     "  seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"
     "  scores = engine(seqs_a, seqs_b)\n"
     "  \n"
     "  # GPU example with different gap costs\n"
     "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.SmithWaterman(substitution_matrix=matrix, open=-3, extend=-1, capabilities=gpu_scope)\n"
+    "  engine = szs.SmithWatermanScores(substitution_matrix=matrix, open=-3, extend=-1, capabilities=gpu_scope)\n"
     "  scores = engine(seqs_a, seqs_b, device=gpu_scope)\n"
     "  ```";
 
 static PyTypeObject SmithWatermanType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.SmithWaterman",
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.SmithWatermanScores",
     .tp_doc = doc_SmithWaterman,
     .tp_basicsize = sizeof(SmithWaterman),
     .tp_flags = Py_TPFLAGS_DEFAULT,
@@ -2086,7 +2086,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     }
 
     Py_INCREF(&NeedlemanWunschType);
-    if (PyModule_AddObject(m, "NeedlemanWunsch", (PyObject *)&NeedlemanWunschType) < 0) {
+    if (PyModule_AddObject(m, "NeedlemanWunschScores", (PyObject *)&NeedlemanWunschType) < 0) {
         Py_XDECREF(&NeedlemanWunschType);
         Py_XDECREF(&LevenshteinDistancesUTF8Type);
         Py_XDECREF(&LevenshteinDistancesType);
@@ -2096,7 +2096,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     }
 
     Py_INCREF(&SmithWatermanType);
-    if (PyModule_AddObject(m, "SmithWaterman", (PyObject *)&SmithWatermanType) < 0) {
+    if (PyModule_AddObject(m, "SmithWatermanScores", (PyObject *)&SmithWatermanType) < 0) {
         Py_XDECREF(&SmithWatermanType);
         Py_XDECREF(&NeedlemanWunschType);
         Py_XDECREF(&LevenshteinDistancesUTF8Type);
