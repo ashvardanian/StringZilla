@@ -441,8 +441,9 @@ Python bindings are implemented using pure CPython, so you wouldn't need to inst
 Still, you need a virtual environment, and it's recommended to use `uv` to create one.
 
 ```bash
-uv venv --python 3.11                   # or your preferred Python version
+uv venv --python 3.12                   # or your preferred Python version
 source .venv/bin/activate               # to activate the virtual environment
+uv pip install setuptools wheel         # to pull the latest build tools
 uv pip install -e . --force-reinstall   # to build locally from source
 ```
 
@@ -529,6 +530,12 @@ python -m cibuildwheel --platform windows
 ### Benchmarking
 
 For high-performance low-latency benchmarking, stick to C/C++ native benchmarks, as the CPython is likely to cause bottlenecks.
+Before running the benchmarks, pull dependencies:
+
+```sh
+uv pip install -r scripts/requirements.txt
+```
+
 For benchmarking, the following scripts are provided.
 
 ```sh
