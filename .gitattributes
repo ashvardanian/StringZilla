@@ -2,5 +2,8 @@
 # https://github.com/github-linguist/linguist/blob/main/docs/overrides.md
 *.h linguist-language=C
 *.c linguist-language=C
-*.hpp lingujson-language=C++
-*.cpp lingujson-language=C++
+*.hpp linguist-language=C++
+*.cpp linguist-language=C++
+*.cuh linguist-language=CUDA
+*.S linguist-language=Assembly
+*.ptx linguist-language=Assembly

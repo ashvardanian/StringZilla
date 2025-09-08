@@ -1,32 +1,53 @@
 {
   "name": "stringzilla",
   "version": "3.12.6",
-  "description": "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
+  "description": "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
   "author": "Ash Vardanian",
-  "license": "Apache 2.0",
+  "license": "Apache-2.0",
   "main": "javascript/stringzilla.js",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ashvardanian/stringzilla.git"
   },
+  "homepage": "https://ashvardanian.com/posts/stringzilla/",
+  "bugs": {
+    "url": "https://github.com/ashvardanian/stringzilla/issues"
+  },
+  "keywords": [
+    "simd",
+    "search",
+    "string",
+    "performance",
+    "hash",
+    "sort",
+    "gpu",
+    "cuda",
+    "fuzzy-search",
+    "native-addon"
+  ],
   "gypfile": true,
   "engines": {
-    "node": "~10 >=10.20 || >=12.17"
+    "node": ">=18.0.0"
   },
+  "files": [
+    "javascript/",
+    "include/",
+    "c/",
+    "binding.gyp",
+    "README.md"
+  ],
   "dependencies": {
-    "@types/node": "^20.4.5",
-    "bindings": "~1.2.1",
-    "node-addon-api": "^3.0.0"
-  },
-  "scripts": {
-    "test": "node --test ./scripts/test.js"
+    "bindings": "^1.5.0",
+    "node-addon-api": "^8.0.0"
   },
   "devDependencies": {
-    "@semantic-release/exec": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "conventional-changelog-eslint": "^3.0.9",
-    "semantic-release": "^21.1.2",
-    "typescript": "^5.1.6"
+    "@types/node": "^24.0.0"
+  },
+  "scripts": {
+    "test": "node --test ./scripts/test.js",
+    "build": "node-gyp rebuild",
+    "install": "node-gyp rebuild",
+    "prepack": "npm run build"
   }
 }

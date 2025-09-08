@@ -157,7 +157,10 @@ func TestCount(t *testing.T) {
 		{"aaaaa", "a", false, 5},
 		{"aaaaa", "aa", false, 2},
 		{"aaaaa", "aa", true, 4},
-		{"", "", false, 0}, // depending on your intended behavior, adjust as needed
+		{"", "", false, 1},    // empty substring counts as len("") + 1
+		{"", "", true, 1},     // overlap flag doesn't affect empty-substring semantics
+		{"abc", "", false, 4}, // empty substring counts as len("abc") + 1
+		{"", "a", false, 0},   // non-empty needle in empty haystack
 	}
 
 	for _, tt := range tests {
@@ -165,5 +168,31 @@ func TestCount(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("Count(%q, %q, %v) = %d, want %d", tt.s, tt.substr, tt.overlap, got, tt.want)
 		}
+	}
+}
+
+// TestHashing verifies hashing and streaming API properties.
+func TestHashing(t *testing.T) {
+	// Deterministic and seed-sensitive
+	a := sz.Hash("Hello, world!", 42)
+	b := sz.Hash("Hello, world!", 42)
+	c := sz.Hash("Hello, world!", 43)
+	if a != b {
+		t.Fatalf("Hash not deterministic: %d != %d", a, b)
+	}
+	if a == c {
+		t.Fatalf("Different seeds should yield different hashes: %d == %d", a, c)
+	}
+
+	// Streaming equals one-shot
+	h := sz.NewHasher(42)
+	h.Write([]byte("Hello, ")).Write([]byte("world!"))
+	if a != h.Digest() {
+		t.Fatalf("Streaming digest mismatch: %d != %d", a, h.Digest())
+	}
+
+	// Bytesum should be monotonic with appended byte (sanity check)
+	if sz.Bytesum("A") >= sz.Bytesum("AB") {
+		t.Fatalf("Bytesum not increasing with appended byte")
 	}
 }

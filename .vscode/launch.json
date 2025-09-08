@@ -8,7 +8,7 @@
       "name": "Debug C++ Unit Tests",
       "type": "cppdbg",
       "request": "launch",
-      "preLaunchTask": "Build Test: Debug",
+      "preLaunchTask": "Build Test: Debug C++",
       "program": "${workspaceFolder}/build_debug/stringzilla_test_cpp20",
       "cwd": "${workspaceFolder}",
       "environment": [
@@ -19,7 +19,14 @@
       ],
       "stopAtEntry": false,
       "linux": {
-        "MIMode": "gdb"
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for GDB",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ]
       },
       "osx": {
         "MIMode": "lldb"
@@ -31,13 +38,11 @@
       }
     },
     {
-      "name": "Current C++ Benchmark",
+      "name": "Debug Parallel C++ Unit Tests",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}",
-      "args": [
-        "leipzig1M.txt"
-      ],
+      "preLaunchTask": "Build Test: Debug Parallel C++",
+      "program": "${workspaceFolder}/build_debug/stringzillas_test_cpp20",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -46,9 +51,77 @@
         }
       ],
       "stopAtEntry": false,
+      "linux": {
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for GDB",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          },
+          {
+            "description": "Enable object printing",
+            "text": "set print object on",
+            "ignoreFailures": true
+          }
+        ]
+      },
+      "osx": {
+        "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzillas_test_cpp20.exe",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
+      }
+    },
+    {
+      "name": "Debug CUDA Unit Tests",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "preLaunchTask": "Build Test: Debug CUDA",
+      "program": "${workspaceFolder}/build_debug/stringzillas_test_cu20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        }
+      ],
+      "stopAtEntry": false,
+      "initCommands": [
+        "-enable-pretty-printing",
+        "set print frame-arguments all",
+        "set print asm-demangle on"
+      ]
+    },
+    {
+      "name": "Current C++ Benchmark",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}_cpp20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        },
+        {
+          "name": "STRINGWARS_DATASET",
+          "value": "utf8.txt"
+        }
+      ],
+      "stopAtEntry": false,
       "preLaunchTask": "Build Benchmarks: Debug",
       "linux": {
-        "MIMode": "gdb"
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for GDB",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ]
       },
       "osx": {
         "MIMode": "lldb"
@@ -60,8 +133,60 @@
       }
     },
     {
+      "name": "Current Parallel C++ Benchmark",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzillas_${fileBasenameNoExtension}_cpp20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        },
+        {
+          "name": "STRINGWARS_DATASET",
+          "value": "utf8.txt"
+        }
+      ],
+      "stopAtEntry": false,
+      "preLaunchTask": "Build Benchmarks: Debug",
+      "linux": {
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for GDB",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ]
+      },
+      "osx": {
+        "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzillas_${fileBasenameNoExtension}.exe",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
+      }
+    },
+    {
+      "name": "Current CUDA Benchmark",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzillas_${fileBasenameNoExtension}_cu20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "STRINGWARS_DATASET",
+          "value": "leipzig1M.txt"
+        }
+      ],
+      "stopAtEntry": false,
+      "preLaunchTask": "Build Benchmarks: Debug"
+    },
+    {
       "name": "Current Python File",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
@@ -69,25 +194,19 @@
     },
     {
       "name": "Current Python File with Leipzig1M arg",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": [
-        "./leipzig1M.txt"
-      ],
+      "args": ["./leipzig1M.txt"]
     },
     {
       "name": "Current PyTest File",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": [
-        "${file}",
-        "-s",
-        "-x"
-      ],
+      "args": ["${file}", "-s", "-x"],
       "console": "integratedTerminal",
       "justMyCode": false
     }

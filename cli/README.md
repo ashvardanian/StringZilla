@@ -3,12 +3,12 @@
 This section of the project is pretty much a work in progress.
 The goal is to provide a set of command-line utilities that:
 
-- ✅ that benefit the most from SIMD instructions, 
+- ✅ benefit the most from SIMD instructions, 
 - ✅ rely solely on core StringZilla functionality,
-- ✅ works the same on Linux, MacOS, and Windows.
+- ✅ work the same on Linux, macOS, and Windows.
 
 Other utilities are, of course, welcome to use StringZilla but may not be good candidates for this repository.
-To install, pull the Python package from PyPi:
+To install, pull the Python package from PyPI:
 
 ```bash
 pip install stringzilla
@@ -17,17 +17,17 @@ pip install stringzilla
 Currently implemented:
 
 - `sz_wc`: 3x faster `wc` word count.
-- `sz_split`: 4x faster `splt` file splitting.
+- `sz_split`: 4x faster `split` file splitting.
 
-What other interfaces should be added?
+What other interfaces should we add?
 Levenshtein distances?
 Fuzzy search?
-Are there common alternatives to mimic?
+Are there common alternatives to emulate?
 
 ## `wc`: Word Count
 
 The `wc` utility on Linux can be used to count the number of lines, words, and bytes in a file.
-Using SIMD-accelerated character and character-set search, StringZilla, even with slow SSDs, it can be noticeably faster.
+Using SIMD-accelerated character and character-set search, StringZilla can be noticeably faster, even with slow SSDs.
 
 ```bash
 $ time wc enwik9.txt

@@ -1,9 +1,32 @@
-import time
+# /// script
+# dependencies = [
+#   "stringzilla"
+# ]
+# ///
+"""
+StringZilla find operations benchmark script.
+
+This script benchmarks string search operations using different backends:
+- Python's built-in `str.find()` and `str.rfind()`
+- StringZilla's `Str.find()` and `Str.rfind()`
+- Regular expressions with `re.finditer()`
+- StringZilla's `Str.find_first_of()` for character sets
+- String translation operations
+
+Example usage via UV:
+
+    # Benchmark with a file
+    uv run --no-project scripts/bench_find.py --haystack-path leipzig1M.txt
+
+    # Benchmark with synthetic data
+    uv run --no-project scripts/bench_find.py --haystack-pattern "hello world " --haystack-length 1000000
+"""
+
+import argparse
 import re
 import random
+import time
 from typing import List
-
-import fire
 
 from stringzilla import Str
 
@@ -16,7 +39,7 @@ def log(name: str, haystack, patterns, operator: callable):
     bytes_length = len(haystack) * len(patterns)
     secs = (b - a) / 1e9
     gb_per_sec = bytes_length / (1e9 * secs)
-    print(f"{name}: took {secs:} seconds ~ {gb_per_sec:.3f} GB/s")
+    print(f"{name}: took {secs:.4f} seconds ~ {gb_per_sec:.3f} GB/s")
 
 
 def find_all(haystack, pattern) -> int:
@@ -100,6 +123,7 @@ def bench(
     haystack_pattern: str = None,
     haystack_length: int = None,
 ):
+    """Run string search benchmarks."""
     if haystack_path:
         pythonic_str: str = open(haystack_path, "r").read()
     else:
@@ -112,9 +136,7 @@ def bench(
     total_tokens = len(tokens)
     mean_token_length = sum(len(t) for t in tokens) / total_tokens
 
-    print(
-        f"Parsed the file with {total_tokens:,} words of {mean_token_length:.2f} mean length!"
-    )
+    print(f"Prepared {total_tokens:,} tokens of {mean_token_length:.2f} mean length!")
 
     tokens = random.sample(tokens, 100)
     log_functionality(
@@ -124,5 +146,46 @@ def bench(
     )
 
 
+_main_epilog = """
+Examples:
+
+  # Benchmark with a file
+  %(prog)s --haystack-path leipzig1M.txt
+
+  # Benchmark with synthetic data
+  %(prog)s --haystack-pattern "hello world " --haystack-length 1000000
+"""
+
+
+def main():
+    """Main entry point with argument parsing."""
+    parser = argparse.ArgumentParser(
+        description="Benchmark StringZilla find operations",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_main_epilog,
+    )
+
+    parser.add_argument("--haystack-path", help="Path to input file")
+    parser.add_argument(
+        "--haystack-pattern", help="Pattern to repeat for synthetic data"
+    )
+    parser.add_argument(
+        "--haystack-length", type=int, help="Length of synthetic haystack"
+    )
+
+    args = parser.parse_args()
+
+    if args.haystack_path:
+        if args.haystack_pattern or args.haystack_length:
+            parser.error("Cannot specify both --haystack-path and synthetic options")
+    else:
+        if not (args.haystack_pattern and args.haystack_length):
+            parser.error(
+                "Must specify either --haystack-path or both --haystack-pattern and --haystack-length"
+            )
+
+    bench(args.haystack_path, args.haystack_pattern, args.haystack_length)
+
+
 if __name__ == "__main__":
-    fire.Fire(bench)
+    main()

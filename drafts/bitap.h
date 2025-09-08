@@ -16,7 +16,7 @@ extern "C" {
  *  @brief  Bitap algo for exact matching of patterns up to @b 8-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bitap_upto_8bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                         sz_size_t n_length) {
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
@@ -67,7 +67,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 8-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_rfind_bitap_upto_8bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -87,7 +87,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algo for exact matching of patterns up to @b 16-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bitap_upto_16bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -107,7 +107,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 16-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_rfind_bitap_upto_16bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                           sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -127,7 +127,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t
  *  @brief  Bitap algo for exact matching of patterns up to @b 32-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bitap_upto_32bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -147,7 +147,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 32-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_rfind_bitap_upto_32bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                           sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -167,7 +167,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t
  *  @brief  Bitap algo for exact matching of patterns up to @b 64-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bitap_upto_64bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -187,7 +187,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 64-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_rfind_bitap_upto_64bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                           sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -207,7 +207,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t
  *  @brief  Bitap algo for approximate matching of patterns up to @b 64-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bounded_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bounded_bitap_upto_64bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                                  sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -227,7 +227,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_bounded_bitap_upto_64bytes_serial(sz_cptr_t h, sz
  *  @brief  Bitap algorithm for approximate matching of patterns up to @b 64-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_bounded_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+SZ_INTERNAL sz_cptr_t sz_find_bounded_last_bitap_upto_64bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                                       sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
@@ -254,7 +254,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
     sz_u512_vec_t cost_deletion_vec, cost_insertion_vec, cost_substitution_vec;
     sz_size_t min_distance;
 
-    b_vec.zmm = _mm512_maskz_loadu_epi8(_sz_u64_mask_until(b_length), b);
+    b_vec.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(b_length), b);
     previous_vec.zmm = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
                                        47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
                                        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
@@ -342,24 +342,24 @@ sz_u512_vec_t sz_inclusive_min(sz_i32_t previous, sz_error_cost_t gap, sz_u512_v
     shifted_vec.i32s[0] = previous;
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_one, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    sz_assert_(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_two_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_double_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_two, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    sz_assert_(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_four_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_quad_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_four, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    sz_assert_(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_eight_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_octa_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_eight, new_vec.zmm, shifted_vec.zmm);
 
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
-    for (sz_size_t i = 1; i < 16; i++) sz_assert(new_vec.i32s[i] == max(new_vec.i32s[i - 1] + gap, new_vec.i32s[i]));
+    sz_assert_(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    for (sz_size_t i = 1; i < 16; i++) sz_assert_(new_vec.i32s[i] == max(new_vec.i32s[i - 1] + gap, new_vec.i32s[i]));
 
     return new_vec;
 }
@@ -385,7 +385,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
         // 1. Find corresponding word in a set.
         // 2. Produce a bitmask to check against that word.
         load_length = sz_min_of_two(length, 32);
-        load_mask = _sz_u64_mask_until(load_length);
+        load_mask = sz_u64_mask_until_(load_length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text);
 
         // To shift right every byte by 3 bits we can use the GF2 affine transformations.
@@ -440,7 +440,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
         // 1. Find corresponding word in a set.
         // 2. Produce a bitmask to check against that word.
         load_length = sz_min_of_two(length, 32);
-        load_mask = _sz_u64_mask_until(load_length);
+        load_mask = sz_u64_mask_until_(load_length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text + length - load_length);
 
         // To shift right every byte by 3 bits we can use the GF2 affine transformations.
@@ -476,7 +476,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
 
 #endif // SZ_USE_AVX512
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 
 SZ_PUBLIC sz_cptr_t sz_find_neon_too_smart(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
@@ -570,7 +570,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon_too_smart(sz_cptr_t h, sz_size_t h_length, sz_c
     else {
         // Pick the parts of the needle that are worth comparing.
         sz_size_t offset_first, offset_mid, offset_last;
-        _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+        sz_locate_needle_anomalies_(n, n_length, &offset_first, &offset_mid, &offset_last);
         // Broadcast those characters into SIMD registers.
         sz_u64_t matches;
         sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
@@ -946,7 +946,7 @@ SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_si
     }
 }
 
-#endif // SZ_USE_ARM_NEON
+#endif // SZ_USE_NEON
 
 #ifdef __cplusplus
 } // extern "C"
@@ -961,7 +961,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
     // while (a_length >= 8 && b_length >= 8) {
     //     sz_u64_t a_u64 = *(sz_u64_t *)a;
     //     sz_u64_t b_u64 = *(sz_u64_t *)b;
-    //     if (a_u64 != b_u64) return _sz_order_scalars(a_u64, b_u64);
+    //     if (a_u64 != b_u64) return sz_order_scalars_(a_u64, b_u64);
     //     a += 8, b += 8, a_length -= 8, b_length -= 8;
     // }
 
@@ -979,7 +979,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
         //          sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
         //          char a_char = a[first_diff];
         //          char b_char = b[first_diff];
-        //          return _sz_order_scalars(a_char, b_char);
+        //          return sz_order_scalars_(a_char, b_char);
         //      }
         //
         // A wiser approach to avoid serial code, is to perform 2 vector comparisons instead of quality check.
@@ -992,15 +992,15 @@ SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
         // The `_tzcnt_u64` trailing zeros computation, however, also has latency of 3 cycles.
         unsigned char all_equal = _kortestz_mask8_u8(less_mask, greater_mask);
         if (all_equal) { a += 64, b += 64, a_length -= 64, b_length -= 64; }
-        else { return _sz_order_scalars(_tzcnt_u64(less_mask), _tzcnt_u64(greater_mask)); }
+        else { return sz_order_scalars_(_tzcnt_u64(less_mask), _tzcnt_u64(greater_mask)); }
     }
 
     // Assume a case like `("abc\0" < "abc")`.
     // Knowing the length masks of both strings, we can find the bytes that make up the difference
     // and enable them in the `greater_mask`, to signal the presence of null-characters in the end.
     //
-    //      __mmask64 a_mask = _sz_u64_clamp_mask_until(a_length);
-    //      __mmask64 b_mask = _sz_u64_clamp_mask_until(b_length);
+    //      __mmask64 a_mask = sz_u64_clamp_mask_until_(a_length);
+    //      __mmask64 b_mask = sz_u64_clamp_mask_until_(b_length);
     //      a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
     //      b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
     //      __mmask64 after_a_before_b_mask = _kandn_mask64(a_mask, b_mask);
@@ -1015,7 +1015,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u512_vec_t a_vec, b_vec;
 
     // The rare case, when both string are very long surves as a great example to understand
@@ -1032,7 +1032,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         //          sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
         //          char a_char = a[first_diff];
         //          char b_char = b[first_diff];
-        //          return _sz_order_scalars(a_char, b_char);
+        //          return sz_order_scalars_(a_char, b_char);
         //      }
         //
         // A wiser approach to avoid serial code, is to perform 2 vector comparisons instead of quality check.
@@ -1045,15 +1045,15 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         // The `_tzcnt_u64` trailing zeros computation, however, also has latency of 3 cycles.
         unsigned char all_equal = _kortestz_mask8_u8(less_mask, greater_mask);
         if (all_equal) { a += 64, b += 64, a_length -= 64, b_length -= 64; }
-        else { return _sz_order_scalars(_tzcnt_u64(less_mask), _tzcnt_u64(greater_mask)); }
+        else { return sz_order_scalars_(_tzcnt_u64(less_mask), _tzcnt_u64(greater_mask)); }
     }
 
     // Assume a case like `("abc\0" < "abc")`.
     // Knowing the length masks of both strings, we can find the bytes that make up the difference
     // and enable them in the `greater_mask`, to signal the presence of null-characters in the end.
     //
-    //      __mmask64 a_mask = _sz_u64_clamp_mask_until(a_length);
-    //      __mmask64 b_mask = _sz_u64_clamp_mask_until(b_length);
+    //      __mmask64 a_mask = sz_u64_clamp_mask_until_(a_length);
+    //      __mmask64 b_mask = sz_u64_clamp_mask_until_(b_length);
     //      a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
     //      b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
     //      __mmask64 after_a_before_b_mask = _kandn_mask64(a_mask, b_mask);
@@ -1124,8 +1124,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
             for (; length >= 128; target += 64, source += 64, length -= 64) {
                 second_vec.zmm = _mm512_load_si512(target + 64);
                 combined_vec.zmm = _mm512_permutex2var_epi8(first_vec.zmm, selector_vec.zmm, second_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                sz_assert_(combined_vec.u8s[0] == source[0]);
+                sz_assert_(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
@@ -1147,8 +1147,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
                 second_vec.zmm = _mm512_load_si512(target + 64);
                 first_shuffled_vec.zmm = _mm512_shuffle_epi8(first_vec.zmm, first_byte_permute_vec.zmm);
                 second_shuffled_vec.zmm = _mm512_shuffle_epi8(second_vec.zmm, second_byte_permute_vec.zmm);
-                sz_assert(first_shuffled_vec.u8s[0] == source[0]);
-                sz_assert(second_shuffled_vec.u8s[63] == source[63]);
+                sz_assert_(first_shuffled_vec.u8s[0] == source[0]);
+                sz_assert_(second_shuffled_vec.u8s[63] == source[63]);
                 combined_vec.zmm = _mm512_or_si512(first_shuffled_vec.zmm, second_shuffled_vec.zmm);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
@@ -1162,7 +1162,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
             for (; length >= 64; target += 64, source += 64, length -= 64)
                 _mm512_store_si512(target, _mm512_loadu_si512(source));
             // At this point the length is guaranteed to be under 64.
-            __mmask64 mask = _sz_u64_mask_until(length);
+            __mmask64 mask = sz_u64_mask_until_(length);
             _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
         }
     }
@@ -1173,7 +1173,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         for (target += length, source += length; length >= 64; length -= 64)
             _mm512_store_si512(target -= 64, _mm512_loadu_si512(source -= 64));
         // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         _mm512_mask_storeu_epi8(target - length, mask, _mm512_maskz_loadu_epi8(mask, source - length));
     }
 }
@@ -1189,7 +1189,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 
     // On very short buffers, that are one cache line in width or less, we don't need any loops.
     if (length <= 64) {
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
         return;
     }
@@ -1201,8 +1201,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
     sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
     sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-    __mmask64 head_mask = _sz_u64_mask_until(head_length);
-    __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+    __mmask64 head_mask = sz_u64_mask_until_(head_length);
+    __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
 
     // The absolute most common case of using "moves" is shifting the data within a continuous buffer
     // when adding a removing some values in it. In such cases, a typical shift is by 1, 2, 4, 8, 16,
@@ -1272,15 +1272,15 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 
         if (body_length >= 128) {
             // Now that the permutations are prepared, pre-load the first cache line and start the loop.
-            __mmask64 blend_mask = _sz_u64_mask_until(shift_in_page);
+            __mmask64 blend_mask = sz_u64_mask_until_(shift_in_page);
             sz_cptr_t source_page = source - (sz_size_t)source % 64;
             first_vec.zmm = _mm512_load_si512(source_page);
             for (; body_length >= 128; target += 64, source += 64, source_page += 64, body_length -= 64) {
                 second_vec.zmm = _mm512_load_si512(source_page + 64);
                 second_vec.zmm = _mm512_permutexvar_epi8(selector_vec.zmm, second_vec.zmm);
                 combined_vec.zmm = _mm512_mask_blend_epi8(blend_mask, second_vec.zmm, first_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                sz_assert_(combined_vec.u8s[0] == source[0]);
+                sz_assert_(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
@@ -1306,15 +1306,15 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 
         if (body_length >= 128) {
             // Now that the permutations are prepared, pre-load the first cache line and start the loop.
-            __mmask64 blend_mask = _sz_u64_mask_until(shift_in_page);
+            __mmask64 blend_mask = sz_u64_mask_until_(shift_in_page);
             sz_cptr_t source_second_page = source + body_length - (sz_size_t)(source + body_length) % 64;
             first_vec.zmm = _mm512_load_si512(source_second_page);
             for (; body_length >= 128; source_second_page -= 64, body_length -= 64) {
                 second_vec.zmm = _mm512_load_si512(source_second_page - 64);
                 second_vec.zmm = _mm512_permutexvar_epi8(selector_vec.zmm, second_vec.zmm);
                 combined_vec.zmm = _mm512_mask_blend_epi8(blend_mask, second_vec.zmm, first_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                sz_assert_(combined_vec.u8s[0] == source[0]);
+                sz_assert_(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target + head_length + body_length, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
