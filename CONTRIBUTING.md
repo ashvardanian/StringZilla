@@ -163,12 +163,14 @@ cmake --build build_release --config Release
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
+cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug      # Which will produce the following targets:
 build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
 build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
 build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
 ```
+
+Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
 To use CppCheck for static analysis make sure to export the compilation commands.
 Overall, CppCheck and Clang-Tidy are extremely noisy and not suitable for CI, but may be useful for local development.

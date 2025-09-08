@@ -114,6 +114,7 @@ option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZ
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
+option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
 set(STRINGZILLA_TARGET_ARCH
     ""
     CACHE STRING "Architecture to tell the compiler to optimize for (-march)"
@@ -348,7 +349,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # Sanitizer options for Debug mode
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${target} PRIVATE "SZ_DEBUG=1")
-        if (NOT target_type STREQUAL "SHARED_LIBRARY")
+        if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
             if (compiler_id MATCHES "MSVC")
                 target_compile_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
                 target_link_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
