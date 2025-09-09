@@ -7,13 +7,51 @@ from typing import List, Tuple, Final
 import subprocess
 
 
-class CudaBuildExtension(build_ext):
+class NumpyBuildExt(build_ext):
+    """
+    Custom build_ext class that defers `numpy` import until build time.
+
+    This is necessary because NumPy may not be available during the initial
+    `setup.py` parsing phase (e.g., when `cibuildwheel` is gathering build requirements),
+    but we need NumPy's include directories during the actual compilation.
+    By deferring the import to `build_extensions()`, we ensure NumPy is only
+    required when actually building the extensions, not when querying metadata.
+    """
+
     def build_extensions(self):
+        import numpy as np
+
+        numpy_include = np.get_include()
+        for ext in self.extensions:
+            if numpy_include not in ext.include_dirs:
+                ext.include_dirs.append(numpy_include)
+        super().build_extensions()
+
+
+class CudaBuildExtension(NumpyBuildExt):
+    """
+    Custom `build_ext` class for CUDA extensions with deferred NumPy import.
+
+    This class extends `NumpyBuildExt` to handle CUDA source files (.cu) by
+    invoking `nvcc` for compilation, since setuptools doesn't natively support CUDA.
+    The CUDA objects are then linked with standard C/C++ sources.
+    """
+
+    def build_extensions(self):
+        # First, add `numpy` includes, like in `NumpyBuildExt`
+        import numpy as np
+
+        numpy_include = np.get_include()
+        for ext in self.extensions:
+            if numpy_include not in ext.include_dirs:
+                ext.include_dirs.append(numpy_include)
+
+        # Then handle each extension with CUDA-specific compilation
         for ext in self.extensions:
             if any(source.endswith(".cu") for source in ext.sources):
                 self._build_cuda_extension(ext)
             else:
-                super().build_extension(ext)
+                build_ext.build_extension(self, ext)
 
     def _build_cuda_extension(self, ext):
         # Separate CUDA and C sources
@@ -248,32 +286,25 @@ if sz_target == "stringzilla":
         ],
     }
 elif sz_target == "stringzillas-cpus":
-    import numpy as np
-
-    from setuptools import Extension, setup
-    from setuptools.command.build_ext import build_ext
-    import numpy as np  # only used to obtain the include path
-
     __lib_name__ = "stringzillas-cpus"
     ext_modules = [
         Extension(
             "stringzillas",
             ["python/stringzillas.c", "c/stringzillas.cpp"],
-            include_dirs=["include", "c", "fork_union/include", np.get_include()],
+            include_dirs=["include", "c", "fork_union/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
         ),
     ]
+    command_class = {"build_ext": NumpyBuildExt}
 elif sz_target == "stringzillas-cuda":
-    import numpy as np
-
     __lib_name__ = "stringzillas-cuda"
     ext_modules = [
         Extension(
             "stringzillas",
             ["python/stringzillas.c", "c/stringzillas.cu"],
-            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include", np.get_include()],
+            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lcuda", "-lstdc++"],
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,
