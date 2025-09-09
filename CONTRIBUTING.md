@@ -562,6 +562,12 @@ npm link stringzilla
 node --input-type=module -e "import('stringzilla').then(m=>console.log(m.default.capabilities))"
 ```
 
+Check files that would be included in the package:
+
+```bash
+npm pack --dry-run
+```
+
 ## Swift
 
 ```bash
