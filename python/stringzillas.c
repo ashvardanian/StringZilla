@@ -1177,6 +1177,12 @@ static char const doc_NeedlemanWunsch[] = //
     "  scores = engine(proteins_a, proteins_b, device=gpu_scope)\n"
     "  ```";
 
+static PyGetSetDef NeedlemanWunsch_getsetters[] = {
+    {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, "Hardware capabilities used by this engine",
+     NULL},
+    {NULL} /* Sentinel */
+};
+
 static PyTypeObject NeedlemanWunschType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.NeedlemanWunschScores",
     .tp_doc = doc_NeedlemanWunsch,
@@ -1186,6 +1192,8 @@ static PyTypeObject NeedlemanWunschType = {
     .tp_init = (initproc)NeedlemanWunsch_init,
     .tp_dealloc = (destructor)NeedlemanWunsch_dealloc,
     .tp_call = (ternaryfunc)NeedlemanWunsch_call,
+    .tp_repr = (reprfunc)NeedlemanWunsch_repr,
+    .tp_getset = NeedlemanWunsch_getsetters,
 };
 
 #pragma endregion
