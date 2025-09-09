@@ -1852,7 +1852,11 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_> {
         return results;
     }
 
-    __attribute__((no_sanitize("address"))) void roll_group(       //
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((no_sanitize("address")))
+#endif
+    void
+    roll_group(                                                    //
         span<byte_t const> text_chunk, unsigned const group_index, //
         span<rolling_state_t, dimensions_k> last_states,           //
         span<rolling_state_t, dimensions_k> rolling_minimums,      //
