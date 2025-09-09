@@ -530,6 +530,7 @@ python -m cibuildwheel --platform windows
 All together, for one version of Python, OS, hardware platform:
 
 ```bash
+CIBW_BUILD=cp312-* CIBW_ARCHS_LINUX=x86_64 SZ_TARGET=stringzillas-cuda cibuildwheel --platform linux
 CIBW_BUILD=cp312-* CIBW_ARCHS_MACOS=arm64 SZ_TARGET=stringzillas-cpus python3 -m cibuildwheel --platform macos
 ```
 

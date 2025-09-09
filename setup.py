@@ -6,6 +6,7 @@ from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
 
+
 class NumpyBuildExt(build_ext):
     """
     Custom build_ext class that defers `numpy` import until build time.
@@ -17,40 +18,88 @@ class NumpyBuildExt(build_ext):
     required when actually building the extensions, not when querying metadata.
     """
 
-    def build_extensions(self):
+    def build_extension(self, ext):
         import numpy as np
 
+        # Ensure NumPy headers are available
         numpy_include = np.get_include()
-        for ext in self.extensions:
-            if numpy_include not in ext.include_dirs:
-                ext.include_dirs.append(numpy_include)
-        super().build_extensions()
+        if numpy_include not in ext.include_dirs:
+            ext.include_dirs.append(numpy_include)
+
+        # Decide per-language compile flags using our platform helpers
+        if sys.platform == "linux" or sys.platform.startswith("freebsd"):
+            c_compile_args, _, _ = linux_settings(use_cpp=False)
+            cpp_compile_args, _, _ = linux_settings(use_cpp=True)
+        elif sys.platform == "darwin":
+            c_compile_args, _, _ = darwin_settings(use_cpp=False)
+            cpp_compile_args, _, _ = darwin_settings(use_cpp=True)
+        elif sys.platform == "win32":
+            c_compile_args, _, _ = windows_settings(use_cpp=False)
+            cpp_compile_args, _, _ = windows_settings(use_cpp=True)
+        else:
+            c_compile_args, cpp_compile_args = [], []
+
+        # Separate sources by language
+        sources = list(ext.sources or [])
+        c_sources = [s for s in sources if s.endswith(".c")]
+        cpp_sources = [s for s in sources if s.endswith((".cc", ".cpp", ".cxx"))]
+
+        # Compile sources with per-language flags
+        objects: List[str] = []
+        if c_sources:
+            objects += self.compiler.compile(
+                c_sources,
+                output_dir=self.build_temp,
+                macros=ext.define_macros,
+                include_dirs=ext.include_dirs,
+                debug=self.debug,
+                extra_postargs=c_compile_args,
+                depends=ext.depends,
+            )
+        if cpp_sources:
+            objects += self.compiler.compile(
+                cpp_sources,
+                output_dir=self.build_temp,
+                macros=ext.define_macros,
+                include_dirs=ext.include_dirs,
+                debug=self.debug,
+                extra_postargs=cpp_compile_args,
+                depends=ext.depends,
+            )
+
+        # Add any prebuilt/extra objects
+        if getattr(ext, "extra_objects", None):
+            objects += list(ext.extra_objects)
+
+        # Link shared object
+        self.compiler.link_shared_object(
+            objects,
+            self.get_ext_fullpath(ext.name),
+            libraries=ext.libraries,
+            library_dirs=ext.library_dirs,
+            runtime_library_dirs=getattr(ext, "runtime_library_dirs", None),
+            extra_postargs=ext.extra_link_args,
+            export_symbols=self.get_export_symbols(ext),
+            debug=self.debug,
+            build_temp=self.build_temp,
+            target_lang=self.compiler.detect_language(ext.sources),
+        )
 
 
 class CudaBuildExtension(NumpyBuildExt):
     """
     Custom `build_ext` class for CUDA extensions with deferred NumPy import.
 
-    This class extends `NumpyBuildExt` to handle CUDA source files (.cu) by
-    invoking `nvcc` for compilation, since setuptools doesn't natively support CUDA.
-    The CUDA objects are then linked with standard C/C++ sources.
+    Compiles `.cu` files with `nvcc`, then delegates C/C++ compilation and
+    linking to `NumpyBuildExt` on a per-extension basis.
     """
 
-    def build_extensions(self):
-        # First, add `numpy` includes, like in `NumpyBuildExt`
-        import numpy as np
-
-        numpy_include = np.get_include()
-        for ext in self.extensions:
-            if numpy_include not in ext.include_dirs:
-                ext.include_dirs.append(numpy_include)
-
-        # Then handle each extension with CUDA-specific compilation
-        for ext in self.extensions:
-            if any(source.endswith(".cu") for source in ext.sources):
-                self._build_cuda_extension(ext)
-            else:
-                build_ext.build_extension(self, ext)
+    def build_extension(self, ext):
+        # If this extension has CUDA sources, precompile them with nvcc
+        if any(source.endswith(".cu") for source in ext.sources or []):
+            self._build_cuda_extension(ext)
+        # Now compile remaining C/C++ sources and link
+        super().build_extension(ext)
 
     def _build_cuda_extension(self, ext):
         # Separate CUDA and C sources
@@ -102,8 +151,8 @@ class CudaBuildExtension(NumpyBuildExt):
         ext.sources = c_sources
         ext.extra_objects = getattr(ext, "extra_objects", []) + objects
 
-        # Build normally
-        super().build_extension(ext)
+        # After producing CUDA objects, fall through to NumpyBuildExt which
+        # will compile C/C++ sources per-language and link everything.
 
 
 using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
