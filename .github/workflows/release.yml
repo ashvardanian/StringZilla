@@ -515,6 +515,9 @@ jobs:
           submodules: recursive
       - name: Initialize submodules
         run: git submodule update --init --recursive
+      - name: Hide submodule Crates
+        run: |
+          mv fork_union/Cargo.toml fork_union/Cargo.toml.bak
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable

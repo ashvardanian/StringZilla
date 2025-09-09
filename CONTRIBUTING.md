@@ -625,7 +625,7 @@ If you are updating the package contents, you can validate the list of included 
 cargo package --list --allow-dirty
 ```
 
-If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWa.rs`](https://github.com/ashvardanian/StringWa.rs/) repository.
 
 ## GoLang
 

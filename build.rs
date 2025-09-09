@@ -201,4 +201,5 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     println!("cargo:rerun-if-changed=include/stringzillas/fingerprints.cuh");
     println!("cargo:rerun-if-changed=include/stringzillas/similarities.hpp");
     println!("cargo:rerun-if-changed=include/stringzillas/similarities.cuh");
+    println!("cargo:rerun-if-changed=fork_union/include/fork_union.hpp");
 }
