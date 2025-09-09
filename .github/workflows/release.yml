@@ -405,6 +405,7 @@ jobs:
         build_wheels_stringzilla_windows,
         build_sdist_stringzilla,
       ]
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:
       name: pypi-stringzilla
@@ -413,6 +414,9 @@ jobs:
       id-token: write
 
     steps:
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
@@ -420,6 +424,7 @@ jobs:
           pattern: cibw-wheels-stringzilla-*
           path: dist
           merge-multiple: true
+          if-no-artifact-found: ignore
 
       - name: Download source distribution
         uses: actions/download-artifact@v4
@@ -433,6 +438,7 @@ jobs:
           packages-dir: dist
           verbose: true
           print-hash: true
+          skip-existing: true
 
   publish_pypi_stringzillas_cpus:
     name: Publish StringZillas-CPUs to PyPI
@@ -443,6 +449,7 @@ jobs:
         build_wheels_stringzillas_cpus_windows,
         build_sdist_stringzillas_cpus,
       ]
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:
       name: pypi-stringzillas-cpus
@@ -451,6 +458,9 @@ jobs:
       id-token: write
 
     steps:
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
@@ -458,6 +468,7 @@ jobs:
           pattern: cibw-wheels-stringzillas-cpus-*
           path: dist
           merge-multiple: true
+          if-no-artifact-found: ignore
 
       - name: Download source distribution
         uses: actions/download-artifact@v4
@@ -471,10 +482,12 @@ jobs:
           packages-dir: dist
           verbose: true
           print-hash: true
+          skip-existing: true
 
   publish_pypi_stringzillas_cuda:
     name: Publish StringZillas-CUDA to PyPI
     needs: [build_wheels_stringzillas_cuda, build_sdist_stringzillas_cuda]
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:
       name: pypi-stringzillas-cuda
@@ -483,6 +496,9 @@ jobs:
       id-token: write
 
     steps:
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
@@ -490,6 +506,7 @@ jobs:
           pattern: cibw-wheels-stringzillas-cuda-*
           path: dist
           merge-multiple: true
+          if-no-artifact-found: ignore
 
       - name: Download source distribution
         uses: actions/download-artifact@v4
@@ -503,6 +520,7 @@ jobs:
           packages-dir: dist
           verbose: true
           print-hash: true
+          skip-existing: true
 
   publish_rust:
     name: Publish Rust
