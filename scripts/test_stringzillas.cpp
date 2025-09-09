@@ -13,15 +13,15 @@
  *  ! but they come handy during development, if you want to validate
  *  ! different ISA-specific implementations.
 
+#define SZ_USE_NEON 0
+#define SZ_USE_SVE 0
 #define SZ_USE_HASWELL 0
 #define SZ_USE_SKYLAKE 0
 #define SZ_USE_ICE 0
-#define SZ_USE_NEON 0
-#define SZ_USE_SVE 0
-*/
 #define SZ_USE_CUDA 0
 #define SZ_USE_KEPLER 0
 #define SZ_USE_HOPPER 0
+*/
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
