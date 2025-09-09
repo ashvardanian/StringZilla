@@ -129,7 +129,7 @@ environment.SZ_IS_64BIT_ARM_ = "1"
 [[tool.cibuildwheel.overrides]]
 select = "*-macos*_x86_64"
 inherit.environment = "append"
-environment.MACOSX_DEPLOYMENT_TARGET = "10.11"
+environment.MACOSX_DEPLOYMENT_TARGET = "10.13"
 environment.SZ_IS_64BIT_X86_ = "1"
 
 [[tool.cibuildwheel.overrides]]
