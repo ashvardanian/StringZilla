@@ -7,6 +7,12 @@ from typing import List, Tuple, Final
 import subprocess
 
 
+def get_requires_for_build_wheel(config_settings=None):
+    """Override setuptools build requirement discovery to conditionally include NumPy."""
+    sz_target = os.environ.get("SZ_TARGET", "stringzilla")
+    return ["numpy"] if sz_target in ("stringzillas-cpus", "stringzillas-cuda") else []
+
+
 class NumpyBuildExt(build_ext):
     """
     Custom build_ext class that defers `numpy` import until build time.
