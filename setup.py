@@ -6,13 +6,6 @@ from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
 
-
-def get_requires_for_build_wheel(config_settings=None):
-    """Override setuptools build requirement discovery to conditionally include NumPy."""
-    sz_target = os.environ.get("SZ_TARGET", "stringzilla")
-    return ["numpy"] if sz_target in ("stringzillas-cpus", "stringzillas-cuda") else []
-
-
 class NumpyBuildExt(build_ext):
     """
     Custom build_ext class that defers `numpy` import until build time.
@@ -208,7 +201,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         compile_args += [
             "-Wno-incompatible-function-pointer-types",
             "-Wno-incompatible-pointer-types",  # like: passing argument 4 of `sz_export_prefix_u32` from incompatible pointer type
-            "-Wno-discarded-qualifiers",  # like: passing argument 1 of `free` discards `const` qualifier from pointer target type
+            "-Wno-ignored-qualifiers",  # Clang discard qualifiers warning name differs from GCC
         ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch

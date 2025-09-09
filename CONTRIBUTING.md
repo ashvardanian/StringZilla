@@ -527,6 +527,12 @@ On Windows and macOS, to avoid frequent path resolution issues, you may want to 
 python -m cibuildwheel --platform windows
 ```
 
+All together, for one version of Python, OS, hardware platform:
+
+```bash
+CIBW_BUILD=cp312-* CIBW_ARCHS_MACOS=arm64 SZ_TARGET=stringzillas-cpus python3 -m cibuildwheel --platform macos
+```
+
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
 
 ### Benchmarking
