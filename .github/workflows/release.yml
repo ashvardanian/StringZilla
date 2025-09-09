@@ -513,6 +513,8 @@ jobs:
         with:
           ref: "main"
           submodules: recursive
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
