@@ -706,14 +706,14 @@ unsafe impl Allocator for UnifiedAlloc {
 /// Type alias for Vec with unified allocator
 pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 
-/// Raw tape view for C API - contains pointers for FFI
-pub enum CApiTapeView {
+/// Raw tape view for C API - contains pointers for FFI (internal)
+pub(crate) enum CApiTapeView {
     U32(CApiTape32),
     U64(CApiTape64),
 }
 
 /// Simplified trait for tape inputs
-pub trait TapeInput {
+pub(crate) trait TapeInput {
     /// Get the number of sequences in this tape
     fn count(&self) -> usize;
     /// Create appropriate tape view (32-bit or 64-bit based on tape type)
@@ -4162,19 +4162,17 @@ extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, ind
 /// println!("Using backend: {}", info);
 /// ```
 pub fn backend_info() -> &'static str {
-    #[cfg(feature = "cuda")]
-    return "CUDA GPU acceleration enabled";
-
-    #[cfg(all(feature = "rocm", not(feature = "cuda")))]
-    return "ROCm GPU acceleration enabled";
-
-    #[cfg(all(feature = "cpus", not(any(feature = "cuda", feature = "rocm"))))]
-    return "Multi-threaded CPU backend enabled";
-
-    #[cfg(not(any(feature = "cpus", feature = "cuda", feature = "rocm")))]
-    return "StringZillas not available - enable cpus, cuda, or rocm feature";
-
-    "CPU backend"
+    if cfg!(feature = "cuda") {
+        "CUDA GPU acceleration enabled"
+    } else if cfg!(all(feature = "rocm", not(feature = "cuda"))) {
+        "ROCm GPU acceleration enabled"
+    } else if cfg!(all(feature = "cpus", not(any(feature = "cuda", feature = "rocm")))) {
+        "Multi-threaded CPU backend enabled"
+    } else if cfg!(not(any(feature = "cpus", feature = "cuda", feature = "rocm"))) {
+        "StringZillas not available - enable cpus, cuda, or rocm feature"
+    } else {
+        "Unknown backend"
+    }
 }
 
 #[cfg(test)]
