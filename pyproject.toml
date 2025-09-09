@@ -23,7 +23,8 @@ line-length = 120
 
 [tool.cibuildwheel]
 test-requires = ["pytest", "pytest-repeat"]
-test-command = "pytest {project}/scripts/test_stringzilla.py -s -x"
+before-test = ["python {project}/build_backend.py pull-deps {project}"]
+test-command = "python {project}/build_backend.py run-tests {project}"
 build-verbosity = 0
 
 # We need to build for all platforms:
@@ -43,9 +44,7 @@ archs = ["all"]
 skip = ["*-macos*_universal2"]
 
 [tool.cibuildwheel.linux]
-before-build = [
-    "rm -rf {project}/build",
-]
+before-build = ["rm -rf {project}/build"]
 repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 
 # Use more recent images for the most popular SIMD-capable CPU architectures, to have access to newer compilers.
@@ -75,16 +74,13 @@ select = "*-musllinux*"
 before-all = "apk add --update wget python3-dev"
 
 [tool.cibuildwheel.macos]
-before-build = [
-    "rm -rf {project}/build",
-]
+before-build = ["rm -rf {project}/build"]
 repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
 archs = ["x86_64", "arm64"]
 
 [tool.cibuildwheel.windows]
-before-build = [
-    "rd /s /q {project}\\build || echo Done",
-]
+before-build = ["rd /s /q {project}\\build || echo Done"]
+before-test = []
 
 # Detect x86 64-bit builds
 [[tool.cibuildwheel.overrides]]
