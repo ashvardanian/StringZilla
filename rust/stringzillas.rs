@@ -2604,6 +2604,26 @@ impl Drop for SmithWatermanScores {
 unsafe impl Send for SmithWatermanScores {}
 unsafe impl Sync for SmithWatermanScores {}
 
+/// Creates a diagonal substitution matrix for sequence alignment.
+/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
+/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
+pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
+    let mut result = [[0i8; 256]; 256];
+
+    for i in 0..256 {
+        for j in 0..256 {
+            result[i][j] = if i == j { match_score } else { mismatch_score };
+        }
+    }
+
+    result
+}
+
+/// Equivalent to `error_costs_256x256_diagonal(0, -1)`.
+pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
+    error_costs_256x256_diagonal(0, -1)
+}
+
 /// Zero-copy helper to create sz_sequence_t view from any container of byte slices
 fn create_sequence_view<T: AsRef<[u8]>>(strings: &[T]) -> SzSequence {
     SzSequence {
@@ -3227,6 +3247,37 @@ mod tests {
                 assert!(similarity_similar >= similarity_different);
             }
             Err(e) => println!("Similarity estimation failed: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn error_costs_for_needleman_wunsch() {
+        let device_result = DeviceScope::default();
+        if device_result.is_err() {
+            println!("Skipping error_costs test - device initialization failed");
+            return;
+        }
+        let device = device_result.unwrap();
+
+        // Test our diagonal matrix function with NW aligner
+        let matrix = error_costs_256x256_diagonal(2, -1);
+        let engine_result = NeedlemanWunschScores::new(&device, &matrix, -2, -1);
+        if engine_result.is_err() {
+            println!("Skipping error_costs test - NW engine initialization failed");
+            return;
+        }
+        let engine = engine_result.unwrap();
+
+        let seq_a = vec!["ABCD"];
+        let seq_b = vec!["ABCD"];
+        let result = engine.compute(&device, &seq_a, &seq_b);
+
+        match result {
+            Ok(scores) => {
+                assert!(scores[0] > 0, "Identical sequences should have positive score");
+                println!("Error costs matrix integration test passed: score = {}", scores[0]);
+            }
+            Err(e) => println!("Error costs test failed: {:?}", e),
         }
     }
 }

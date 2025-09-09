@@ -858,30 +858,6 @@ where
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
-/// Generates a default substitution matrix for use with the Needleman-Wunsch
-/// alignment algorithm. This matrix is initialized such that diagonal entries
-/// (representing matching characters) are zero, and off-diagonal entries
-/// (representing mismatches) are -1. This setup effectively produces distances
-/// equal to the negative Levenshtein edit distance, suitable for basic sequence
-/// alignment tasks where all mismatches are penalized equally and there are no
-/// rewards for matches.
-///
-/// # Returns
-///
-/// A 256x256 array of `i8`, where each element represents the substitution cost
-/// between two characters (byte values). Matching characters are assigned a cost
-/// of 0, and non-matching characters are assigned a cost of -1.
-pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
-    let mut result = [[0i8; 256]; 256];
-
-    for i in 0..256 {
-        for j in 0..256 {
-            result[i][j] = if i == j { 0 } else { -1 };
-        }
-    }
-
-    result
-}
 
 /// Randomizes the contents of a given byte slice `text` using characters from
 /// a specified `alphabet`. This function mutates `text` in place, replacing each
