@@ -8,8 +8,9 @@
 #   = meaning 15 platforms * 6 Python versions = 90 builds.
 #   = meaning over 2,700,000 tests.
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "build_backend"
+backend-path = ["."]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
