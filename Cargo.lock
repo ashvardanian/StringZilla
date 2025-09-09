@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "stringzilla"
-version = "4.0.3"
+version = "4.0.4"
 dependencies = [
  "allocator-api2",
  "cc",
