@@ -9,7 +9,7 @@
 #   = meaning over 2,700,000 tests.
 [build-system]
 requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+build-backend = "build_backend"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -44,7 +44,6 @@ skip = ["*-macos*_universal2"]
 [tool.cibuildwheel.linux]
 before-build = [
     "rm -rf {project}/build",
-    "if [ \"$SZ_TARGET\" = \"stringzillas-cpus\" ] || [ \"$SZ_TARGET\" = \"stringzillas-cuda\" ]; then pip install numpy || echo 'Warning: Failed to install numpy'; fi",
 ]
 repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 
@@ -77,7 +76,6 @@ before-all = "apk add --update wget python3-dev"
 [tool.cibuildwheel.macos]
 before-build = [
     "rm -rf {project}/build",
-    "if [ \"$SZ_TARGET\" = \"stringzillas-cpus\" ] || [ \"$SZ_TARGET\" = \"stringzillas-cuda\" ]; then pip install numpy || echo 'Warning: Failed to install numpy'; fi",
 ]
 repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
 archs = ["x86_64", "arm64"]
@@ -85,8 +83,6 @@ archs = ["x86_64", "arm64"]
 [tool.cibuildwheel.windows]
 before-build = [
     "rd /s /q {project}\\build || echo Done",
-    "if \"%SZ_TARGET%\"==\"stringzillas-cpus\" (pip install numpy || echo Warning: Failed to install numpy)",
-    "if \"%SZ_TARGET%\"==\"stringzillas-cuda\" (pip install numpy || echo Warning: Failed to install numpy)",
 ]
 
 # Detect x86 64-bit builds
