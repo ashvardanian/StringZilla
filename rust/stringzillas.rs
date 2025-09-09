@@ -1,8 +1,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
-use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
+
+use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use stringtape::{BytesTape, StringTape};
 
 // Re-export common types from stringzilla
@@ -113,8 +114,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(DeviceScope)`: Successfully created device scope
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::Unknown)`: System detection failed
+    /// - `Err(Error)`: Initialization failed
     ///
     /// # Examples
     ///
@@ -156,8 +156,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(DeviceScope)`: Successfully created CPU device scope
-    /// - `Err(Status::InvalidArgument)`: Invalid core count (0 or 1)
-    /// - `Err(Status::BadAlloc)`: Failed to create thread pool
+    /// - `Err(Error)`: Invalid configuration or allocation failure
     ///
     /// # Examples
     ///
@@ -174,7 +173,7 @@ impl DeviceScope {
     /// // ... run benchmark with consistent thread count
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - Optimal core count is usually equal to physical cores
     /// - Hyperthreading may not provide linear scaling for SIMD workloads
@@ -201,8 +200,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(DeviceScope)`: Successfully configured GPU device
-    /// - `Err(Status::MissingGpu)`: CUDA/ROCm not available or invalid device
-    /// - `Err(Status::BadAlloc)`: GPU memory allocation failed
+    /// - `Err(Error)`: CUDA/ROCm unavailable, invalid device, or allocation failure
     ///
     /// # Examples
     ///
@@ -230,7 +228,7 @@ impl DeviceScope {
     ///     .unwrap_or_else(|| DeviceScope::default().unwrap());
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - GPU is optimal for batch sizes >1000 string pairs
     /// - Memory transfer overhead affects small workloads
@@ -254,7 +252,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(Capability)`: Hardware capabilities bitmask
-    /// - `Err(Status::Unknown)`: Failed to query capabilities
+    /// - `Err(Error)`: Failed to query capabilities
     ///
     /// # Examples
     ///
@@ -286,7 +284,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(usize)`: Number of configured CPU cores
-    /// - `Err(Status::Unknown)`: Failed to query configuration
+    /// - `Err(Error)`: Failed to query configuration
     ///
     /// # Examples
     ///
@@ -318,7 +316,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(usize)`: GPU device index (0-based)
-    /// - `Err(Status::Unknown)`: Not configured for GPU or GPU unavailable
+    /// - `Err(Error)`: Not configured for GPU or GPU unavailable
     ///
     /// # Examples
     ///
@@ -784,7 +782,7 @@ pub trait TapeInput {
 /// ).unwrap();
 /// ```
 ///
-/// # Performance Optimization
+/// # Performance
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
@@ -1156,8 +1154,7 @@ impl LevenshteinDistances {
     /// # Returns
     ///
     /// - `Ok(LevenshteinDistances)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid cost configuration
+    /// - `Err(Error)`: Invalid cost configuration or allocation failure
     ///
     /// # Cost Configuration Guidelines
     ///
@@ -1220,7 +1217,7 @@ impl LevenshteinDistances {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<usize>)`: Vector of distances, one per sequence pair
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Behavior
     ///
@@ -1245,7 +1242,7 @@ impl LevenshteinDistances {
     /// println!("Distances: {:?}", distances); // [1, 1, 3]
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - CPU performance scales with SIMD width and core count
     /// - GPU optimal for batches >1000 pairs with medium-length sequences
@@ -1271,7 +1268,7 @@ unsafe impl Send for LevenshteinDistances {}
 unsafe impl Sync for LevenshteinDistances {}
 
 /// Trait for inputs that can be processed by LevenshteinDistancesUtf8 engine
-pub trait LevenshteinDistancesUtf8Inputs {
+pub trait LevenshteinDistancesUtf8Inputs: Sized {
     fn compute_levenshtein_utf8(
         &self,
         other: &Self,
@@ -1567,7 +1564,7 @@ impl LevenshteinDistancesUtf8Inputs for StringTape<u32, UnifiedAlloc> {
 /// println!("UTF-8 distance: {}", utf8_dist[0]);   // 1 (é is 1 character)
 /// ```
 ///
-/// # Performance Considerations
+/// # Performance
 ///
 /// - Slower than binary engine due to UTF-8 decoding overhead
 /// - Performance impact depends on character distribution
@@ -1591,6 +1588,11 @@ impl LevenshteinDistancesUtf8 {
     /// - `mismatch_cost`: Cost when Unicode characters differ
     /// - `open_cost`: Cost to insert/delete a Unicode character
     /// - `extend_cost`: Cost to continue insertion/deletion
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(LevenshteinDistancesUtf8)`: Successfully initialized engine
+    /// - `Err(Error)`: Invalid cost configuration or allocation failure
     ///
     /// # Examples
     ///
@@ -1642,9 +1644,10 @@ impl LevenshteinDistancesUtf8 {
     ///
     /// # Type Requirements
     ///
-    /// Input sequences must implement `AsRef<str>` to ensure valid UTF-8:
-    /// - `&str`, `String`, `Cow<str>` are all supported
-    /// - Invalid UTF-8 will cause undefined behavior
+    /// Inputs must implement `LevenshteinDistancesUtf8Inputs`. Supported containers:
+    /// - `Vec<&str>` and `Vec<String>`
+    /// - `StringTape<u32, _>` and `StringTape<u64, _>`
+    /// All inputs must be valid UTF-8; invalid UTF-8 is unsupported.
     ///
     /// # Examples
     ///
@@ -1696,12 +1699,7 @@ impl Drop for LevenshteinDistancesUtf8 {
 unsafe impl Send for LevenshteinDistancesUtf8 {}
 unsafe impl Sync for LevenshteinDistancesUtf8 {}
 
-/// Trait for inputs that can automatically route to the correct Levenshtein C API
-/// based on their type (sequences vs tapes) and device (CPU vs GPU)
-/// Trait for inputs that can be used with NeedlemanWunschScores engine
-///
-/// Supports both sequence types (Vec<&str>, Vec<&[u8]>) and pre-constructed tapes
-/// for zero-copy processing. Automatically routes to the most appropriate C API.
+/// Trait for inputs that can be processed by NeedlemanWunschScores engine
 pub trait NeedlemanWunschScoresInputs: Sized {
     /// Compute Needleman-Wunsch alignment scores using the most appropriate API for this input type
     fn compute_needleman_wunsch(
@@ -2208,8 +2206,7 @@ impl NeedlemanWunschScores {
     /// # Returns
     ///
     /// - `Ok(NeedlemanWunschScores)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid matrix or gap costs
+    /// - `Err(Error)`: Invalid matrix/gap costs or allocation failure
     ///
     /// # Matrix Guidelines
     ///
@@ -2281,7 +2278,7 @@ impl NeedlemanWunschScores {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<isize>)`: Vector of alignment scores (can be negative)
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Score Interpretation
     ///
@@ -2350,7 +2347,7 @@ unsafe impl Send for NeedlemanWunschScores {}
 unsafe impl Sync for NeedlemanWunschScores {}
 
 /// Trait for inputs that can be processed by SmithWatermanScores engine
-pub trait SmithWatermanScoresInputs {
+pub trait SmithWatermanScoresInputs: Sized {
     fn compute_smith_waterman(
         &self,
         other: &Self,
@@ -2872,7 +2869,7 @@ impl SmithWatermanScores {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<isize>)`: Vector of local alignment scores (≥ 0)
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Score Interpretation
     ///
@@ -2955,21 +2952,6 @@ impl Drop for SmithWatermanScores {
 unsafe impl Send for SmithWatermanScores {}
 unsafe impl Sync for SmithWatermanScores {}
 
-/// Creates a diagonal substitution matrix for sequence alignment.
-/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
-/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
-pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
-    let mut result = [[0i8; 256]; 256];
-
-    for i in 0..256 {
-        for j in 0..256 {
-            result[i][j] = if i == j { match_score } else { mismatch_score };
-        }
-    }
-
-    result
-}
-
 /// Builder for configuring fingerprinting engines with optimal parameters.
 ///
 /// The builder pattern allows fine-tuning of fingerprinting parameters for different
@@ -2982,7 +2964,7 @@ pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8
 /// - **Window widths**: None (use optimal defaults for hardware)
 /// - **Dimensions**: 1024 (provides good balance of accuracy and performance)
 ///
-/// # Performance Guidelines
+/// # Performance
 ///
 /// For optimal SIMD and GPU performance:
 /// - Use dimensions that are multiples of 64
@@ -3044,6 +3026,10 @@ impl FingerprintsBuilder {
     /// - Window widths: Hardware-optimized selection
     /// - Dimensions: 1024 (balances accuracy and performance)
     ///
+    /// # Returns
+    ///
+    /// - `Self`: New builder with defaults
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -3066,6 +3052,10 @@ impl FingerprintsBuilder {
     /// - Network packet inspection
     /// - Binary protocol parsing
     /// - Raw data deduplication
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
     ///
     /// # Examples
     ///
@@ -3100,6 +3090,10 @@ impl FingerprintsBuilder {
     /// - ASCII-based data formats
     ///
     /// Provides better hash distribution than binary mode for ASCII content.
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
     ///
     /// # Examples
     ///
@@ -3137,6 +3131,10 @@ impl FingerprintsBuilder {
     ///
     /// The small alphabet size provides excellent hash quality and performance.
     ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -3172,6 +3170,10 @@ impl FingerprintsBuilder {
     /// - Mass spectrometry data analysis
     ///
     /// Uses the 20 standard amino acids plus Selenocysteine (U) and Pyrrolysine (O).
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
     ///
     /// # Examples
     ///
@@ -3211,6 +3213,10 @@ impl FingerprintsBuilder {
     ///
     /// - `size`: Number of unique characters in your alphabet (> 0)
     ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -3248,6 +3254,10 @@ impl FingerprintsBuilder {
     /// - **Large widths (31+)**: Capture longer patterns, sensitive to changes
     /// - **Multiple widths**: Provide multi-scale pattern detection
     ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
     /// # Domain-Specific Recommendations
     ///
     /// ```rust
@@ -3276,7 +3286,7 @@ impl FingerprintsBuilder {
     ///     .unwrap();
     /// ```
     ///
-    /// # Performance Impact
+    /// # Performance
     ///
     /// - More windows → better accuracy but slower computation
     /// - Use multiples of the number of hash functions for SIMD efficiency
@@ -3292,7 +3302,7 @@ impl FingerprintsBuilder {
     /// cost of increased memory usage and computation time. The optimal value
     /// depends on your accuracy requirements and available resources.
     ///
-    /// # Performance Guidelines
+    /// # Performance
     ///
     /// For optimal SIMD performance, use dimensions that are multiples of 64:
     /// - **64**: Minimal configuration, suitable for rapid prototyping
@@ -3330,6 +3340,10 @@ impl FingerprintsBuilder {
     /// the same for counts. With 1024 dimensions:
     /// - Per fingerprint: 8KB (4KB hashes + 4KB counts)
     /// - 1000 fingerprints: ~8MB total memory
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
     pub fn dimensions(mut self, dimensions: usize) -> Self {
         self.dimensions = dimensions;
         self
@@ -3350,8 +3364,7 @@ impl FingerprintsBuilder {
     /// # Returns
     ///
     /// - `Ok(Fingerprints)`: Successfully created engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid parameter combination
+    /// - `Err(Error)`: Invalid parameter combination or allocation failure
     ///
     /// # Examples
     ///
@@ -3402,8 +3415,7 @@ impl FingerprintsBuilder {
 }
 
 /// Trait for inputs that can be processed by Fingerprints engine
-/// Note: Fingerprints uses a single input (not pairs) with dimensions parameter
-pub trait FingerprintsInputs {
+pub trait FingerprintsInputs: Sized {
     fn compute_fingerprints(
         &self,
         device: &DeviceScope,
@@ -3773,7 +3785,7 @@ impl FingerprintsInputs for StringTape<u32, UnifiedAlloc> {
 /// - **Data cleaning**: Merge similar database records
 /// - **Content filtering**: Identify spam or harmful content
 ///
-/// # Performance Characteristics
+/// # Performance
 ///
 /// - **Throughput**: Processes millions of strings per second
 /// - **Memory**: O(dimensions × batch_size) working memory
@@ -3868,7 +3880,7 @@ impl Fingerprints {
     /// # Returns
     ///
     /// - `Ok((UnifiedVec<u32>, UnifiedVec<u32>))`: (min_hashes, min_counts) in unified memory
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Output Format
     ///
@@ -3909,7 +3921,7 @@ impl Fingerprints {
     /// - GPU: CUDA unified memory (accessible from both CPU and GPU)
     /// - Automatic memory cleanup when vectors are dropped
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - GPU optimal for large batches (>1000 strings)
     /// - Memory usage: 8 bytes per string per dimension
@@ -3940,6 +3952,21 @@ impl Drop for Fingerprints {
 
 unsafe impl Send for Fingerprints {}
 unsafe impl Sync for Fingerprints {}
+
+/// Creates a diagonal substitution matrix for sequence alignment.
+/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
+/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
+pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
+    let mut result = [[0i8; 256]; 256];
+
+    for i in 0..256 {
+        for j in 0..256 {
+            result[i][j] = if i == j { match_score } else { mismatch_score };
+        }
+    }
+
+    result
+}
 
 /// Equivalent to `error_costs_256x256_diagonal(0, -1)`.
 pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
