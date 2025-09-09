@@ -201,7 +201,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         compile_args += [
             "-Wno-incompatible-function-pointer-types",
             "-Wno-incompatible-pointer-types",  # like: passing argument 4 of `sz_export_prefix_u32` from incompatible pointer type
-            "-Wno-discarded-qualifiers",  # like: passing argument 1 of `free` discards `const` qualifier from pointer target type
+            "-Wno-ignored-qualifiers",  # Clang discard qualifiers warning name differs from GCC
         ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
