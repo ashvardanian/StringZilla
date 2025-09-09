@@ -382,6 +382,2594 @@ impl Drop for DeviceScope {
 unsafe impl Send for DeviceScope {}
 unsafe impl Sync for DeviceScope {}
 
+/// Internal representation of sz_sequence_t for passing to C
+#[repr(C)]
+struct SzSequence {
+    handle: *mut c_void,
+    count: usize,
+    get_start: extern "C" fn(*mut c_void, usize) -> *const u8,
+    get_length: extern "C" fn(*mut c_void, usize) -> usize,
+    // Additional fields for our implementation
+    starts: *const *const u8,
+    lengths: *const usize,
+}
+
+/// Raw C API tape structure for 32-bit offsets (data < 4GB)
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct CApiTape32 {
+    data: *const u8,
+    offsets: *const u32,
+    count: usize,
+}
+
+/// Raw C API tape structure for 64-bit offsets (data >= 4GB)
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct CApiTape64 {
+    data: *const u8,
+    offsets: *const u64,
+    count: usize,
+}
+
+/// Opaque handles for similarity engines
+pub type FingerprintsHandle = *mut c_void;
+pub type LevenshteinDistancesHandle = *mut c_void;
+pub type LevenshteinDistancesUtf8Handle = *mut c_void;
+pub type NeedlemanWunschScoresHandle = *mut c_void;
+pub type SmithWatermanScoresHandle = *mut c_void;
+
+// C API bindings
+extern "C" {
+    // Device scope functions
+    fn szs_device_scope_init_default(scope: *mut *mut c_void, error_message: *mut *const c_char) -> Status;
+    fn szs_device_scope_init_cpu_cores(
+        cpu_cores: usize,
+        scope: *mut *mut c_void,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_init_gpu_device(
+        gpu_device: usize,
+        scope: *mut *mut c_void,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_capabilities(
+        scope: *mut c_void,
+        capabilities: *mut Capability,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_cpu_cores(
+        scope: *mut c_void,
+        cpu_cores: *mut usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_get_gpu_device(
+        scope: *mut c_void,
+        gpu_device: *mut usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+    fn szs_device_scope_free(scope: *mut c_void);
+
+    // Levenshtein distance functions
+    fn szs_levenshtein_distances_init(
+        match_cost: i8,
+        mismatch_cost: i8,
+        open_cost: i8,
+        extend_cost: i8,
+        alloc: *const c_void,
+        capabilities: Capability,
+        engine: *mut LevenshteinDistancesHandle,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_sequence(
+        engine: LevenshteinDistancesHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_t
+        b: *const c_void, // sz_sequence_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_u32tape(
+        engine: LevenshteinDistancesHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u32tape_t
+        b: *const c_void, // sz_sequence_u32tape_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_u64tape(
+        engine: LevenshteinDistancesHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u64tape_t
+        b: *const c_void, // sz_sequence_u64tape_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_free(engine: LevenshteinDistancesHandle);
+
+    // Levenshtein distance UTF-8 functions
+    fn szs_levenshtein_distances_utf8_init(
+        match_cost: i8,
+        mismatch_cost: i8,
+        open_cost: i8,
+        extend_cost: i8,
+        alloc: *const c_void,
+        capabilities: Capability,
+        engine: *mut LevenshteinDistancesUtf8Handle,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_utf8_sequence(
+        engine: LevenshteinDistancesUtf8Handle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_t
+        b: *const c_void, // sz_sequence_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_utf8_u32tape(
+        engine: LevenshteinDistancesUtf8Handle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u32tape_t
+        b: *const c_void, // sz_sequence_u32tape_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_utf8_u64tape(
+        engine: LevenshteinDistancesUtf8Handle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u64tape_t
+        b: *const c_void, // sz_sequence_u64tape_t
+        results: *mut usize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
+
+    // Needleman-Wunsch scoring functions
+    fn szs_needleman_wunsch_scores_init(
+        subs: *const i8, // 256x256 substitution matrix
+        open_cost: i8,
+        extend_cost: i8,
+        alloc: *const c_void,
+        capabilities: Capability,
+        engine: *mut NeedlemanWunschScoresHandle,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_needleman_wunsch_scores_sequence(
+        engine: NeedlemanWunschScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_t
+        b: *const c_void, // sz_sequence_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_needleman_wunsch_scores_u32tape(
+        engine: NeedlemanWunschScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u32tape_t
+        b: *const c_void, // sz_sequence_u32tape_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_needleman_wunsch_scores_u64tape(
+        engine: NeedlemanWunschScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u64tape_t
+        b: *const c_void, // sz_sequence_u64tape_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_needleman_wunsch_scores_free(engine: NeedlemanWunschScoresHandle);
+
+    // Smith-Waterman scoring functions
+    fn szs_smith_waterman_scores_init(
+        subs: *const i8, // 256x256 substitution matrix
+        open_cost: i8,
+        extend_cost: i8,
+        alloc: *const c_void,
+        capabilities: Capability,
+        engine: *mut SmithWatermanScoresHandle,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_smith_waterman_scores_sequence(
+        engine: SmithWatermanScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_t
+        b: *const c_void, // sz_sequence_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_smith_waterman_scores_u32tape(
+        engine: SmithWatermanScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u32tape_t
+        b: *const c_void, // sz_sequence_u32tape_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_smith_waterman_scores_u64tape(
+        engine: SmithWatermanScoresHandle,
+        device: *mut c_void,
+        a: *const c_void, // sz_sequence_u64tape_t
+        b: *const c_void, // sz_sequence_u64tape_t
+        results: *mut isize,
+        results_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
+
+    // Fingerprinting functions
+    fn szs_fingerprints_init(
+        dimensions: usize,
+        alphabet_size: usize,
+        window_widths: *const usize,
+        window_widths_count: usize,
+        alloc: *const c_void, // MemoryAllocator - using null for default
+        capabilities: Capability,
+        engine: *mut FingerprintsHandle,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_fingerprints_sequence(
+        engine: FingerprintsHandle,
+        device: *mut c_void,  // DeviceScope
+        texts: *const c_void, // sz_sequence_t
+        min_hashes: *mut u32,
+        min_hashes_stride: usize,
+        min_counts: *mut u32,
+        min_counts_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_fingerprints_u32tape(
+        engine: FingerprintsHandle,
+        device: *mut c_void,  // DeviceScope
+        texts: *const c_void, // sz_sequence_u32tape_t
+        min_hashes: *mut u32,
+        min_hashes_stride: usize,
+        min_counts: *mut u32,
+        min_counts_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_fingerprints_u64tape(
+        engine: FingerprintsHandle,
+        device: *mut c_void,  // DeviceScope
+        texts: *const c_void, // sz_sequence_u64tape_t
+        min_hashes: *mut u32,
+        min_hashes_stride: usize,
+        min_counts: *mut u32,
+        min_counts_stride: usize,
+        error_message: *mut *const c_char,
+    ) -> Status;
+
+    fn szs_fingerprints_free(engine: FingerprintsHandle);
+
+    // Unified allocator functions
+    fn szs_unified_alloc(size_bytes: usize) -> *mut c_void;
+    fn szs_unified_free(ptr: *mut c_void, size_bytes: usize);
+}
+
+/// Unified memory allocator that uses CUDA unified memory when available,
+/// falls back to malloc otherwise. Works with allocator-api2.
+pub struct UnifiedAlloc;
+
+unsafe impl Allocator for UnifiedAlloc {
+    fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, AllocError> {
+        let size = layout.size();
+        if size == 0 {
+            // For zero-sized allocations, return a properly aligned non-null dangling pointer
+            let ptr = core::ptr::NonNull::new(layout.align() as *mut u8).ok_or(AllocError)?;
+            return Ok(core::ptr::NonNull::slice_from_raw_parts(ptr, 0));
+        }
+
+        let ptr = unsafe { szs_unified_alloc(size) };
+        if ptr.is_null() {
+            return Err(AllocError);
+        }
+
+        let ptr = core::ptr::NonNull::new(ptr as *mut u8).ok_or(AllocError)?;
+        Ok(core::ptr::NonNull::slice_from_raw_parts(ptr, size))
+    }
+
+    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
+        if layout.size() != 0 {
+            szs_unified_free(ptr.as_ptr() as *mut c_void, layout.size());
+        }
+    }
+}
+
+/// Type alias for Vec with unified allocator
+pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
+
+/// Raw tape view for C API - contains pointers for FFI
+pub enum CApiTapeView {
+    U32(CApiTape32),
+    U64(CApiTape64),
+}
+
+/// Simplified trait for tape inputs
+pub trait TapeInput {
+    /// Get the number of sequences in this tape
+    fn count(&self) -> usize;
+    /// Create appropriate tape view (32-bit or 64-bit based on tape type)
+    fn create_view(&self) -> CApiTapeView;
+}
+
+/// Levenshtein distance engine for batch processing of binary sequences.
+///
+/// Computes edit distances between pairs of byte sequences using the Wagner-Fischer
+/// dynamic programming algorithm with configurable gap costs. This engine is optimized
+/// for processing large batches of sequence pairs in parallel.
+///
+/// # Algorithm
+///
+/// Uses Wagner-Fischer dynamic programming with affine gap costs:
+/// - **Match cost**: Cost when characters are identical (typically ≤ 0)
+/// - **Mismatch cost**: Cost when characters differ (typically > 0)  
+/// - **Open cost**: Cost to start a gap (insertion/deletion)
+/// - **Extend cost**: Cost to extend an existing gap (usually < open cost)
+///
+/// Time complexity: O(nm) per pair, where n and m are sequence lengths.
+/// Space complexity: O(n+m) with optimizations for large batches.
+///
+/// # Use Cases
+///
+/// - **Spell checking**: Finding closest dictionary matches
+/// - **File deduplication**: Detecting similar binary files
+/// - **Data cleaning**: Merging near-duplicate records
+/// - **Fuzzy matching**: Approximate string search
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+/// // Create engine with standard costs
+/// let device = DeviceScope::default().unwrap();
+/// let engine = LevenshteinDistances::new(
+///     &device,
+///     0,  // match: no cost for identical chars
+///     1,  // mismatch: unit cost for different chars
+///     1,  // open: unit cost to start gap
+///     1,  // extend: unit cost to extend gap
+/// ).unwrap();
+///
+/// // Compare similar strings
+/// let strings_a = vec!["kitten", "saturday"];
+/// let strings_b = vec!["sitting", "sunday"];
+/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
+///
+/// println!("Distance 'kitten' -> 'sitting': {}", distances[0]);  // 3
+/// println!("Distance 'saturday' -> 'sunday': {}", distances[1]); // 3
+/// ```
+///
+/// # Advanced Configuration
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+/// // Biased towards insertions/deletions over substitutions
+/// let device = DeviceScope::default().unwrap();
+/// let engine = LevenshteinDistances::new(
+///     &device,
+///     -1, // match: reward for matches
+///     3,  // mismatch: high cost for substitutions  
+///     1,  // open: low cost for gaps
+///     1,  // extend: same cost to extend
+/// ).unwrap();
+/// ```
+///
+/// # Performance Optimization
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+/// // For maximum performance with large batches
+/// let device = DeviceScope::cpu_cores(8).unwrap(); // or gpu_device(0)
+/// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+///
+/// // Process thousands of pairs efficiently
+/// let large_batch_a: Vec<&str> = (0..10000).map(|i| "test_string").collect();
+/// let large_batch_b: Vec<&str> = (0..10000).map(|i| "test_strong").collect();
+/// let distances = engine.compute(&device, &large_batch_a, &large_batch_b).unwrap();
+/// ```
+pub struct LevenshteinDistances {
+    handle: LevenshteinDistancesHandle,
+}
+
+/// Trait for inputs that can be processed by LevenshteinDistances engine
+pub trait LevenshteinDistancesInputs: Sized {
+    /// Compute Levenshtein distances using the most appropriate API for this input type
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error>;
+
+    /// Get the number of sequences in this input
+    fn sequence_count(&self) -> usize;
+}
+
+/// Helper function for computing Levenshtein distances on sequences
+fn compute_levenshtein_sequences<'a, I1, I2>(
+    _seq_a_iter: I1,
+    _seq_b_iter: I2,
+    seq_a_bytes: &[&[u8]],
+    seq_b_bytes: &[&[u8]],
+    device: &DeviceScope,
+    engine: &LevenshteinDistances,
+) -> Result<UnifiedVec<usize>, Error>
+where
+    I1: Iterator<Item = &'a [u8]>,
+    I2: Iterator<Item = &'a [u8]>,
+{
+    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
+
+    if device.is_gpu() {
+        // GPU: Convert sequences to tapes using extend, then use tape API
+        let tape_a = create_tape(seq_a_bytes)?;
+        let tape_b = create_tape(seq_b_bytes)?;
+
+        let tape_a_view = tape_a.as_c_api_view();
+        let tape_b_view = tape_b.as_c_api_view();
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
+                // If either tape is 64-bit, use 64-bit API
+                let view_a_64 = match &tape_a_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                let view_b_64 = match &tape_b_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                unsafe {
+                    szs_levenshtein_distances_u64tape(
+                        engine.handle,
+                        device.handle,
+                        &view_a_64 as *const _ as *const c_void,
+                        &view_b_64 as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_levenshtein_distances_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    } else {
+        // CPU: Use sequence API directly
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let seq_a = create_sequence_view(seq_a_bytes);
+        let seq_b = create_sequence_view(seq_b_bytes);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances_sequence(
+                engine.handle,
+                device.handle,
+                &seq_a as *const _ as *const c_void,
+                &seq_b as *const _ as *const c_void,
+                results.as_mut_ptr(),
+                results_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+/// Implementation for Vec<&str> - common sequence type
+impl LevenshteinDistancesInputs for Vec<&str> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        // Convert to bytes for CPU path
+        let sequences_a: Vec<&[u8]> = seq_a_slice.iter().map(|s| s.as_bytes()).collect();
+        let sequences_b: Vec<&[u8]> = seq_b_slice.iter().map(|s| s.as_bytes()).collect();
+
+        compute_levenshtein_sequences(
+            seq_a_slice.iter().map(|s| s.as_bytes()),
+            seq_b_slice.iter().map(|s| s.as_bytes()),
+            &sequences_a,
+            &sequences_b,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<&[u8]> - byte sequence type
+impl LevenshteinDistancesInputs for Vec<&[u8]> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        compute_levenshtein_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for BytesTape<u64> inputs
+impl LevenshteinDistancesInputs for BytesTape<u64, UnifiedAlloc> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_levenshtein_distances_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for BytesTape<u32> inputs
+impl LevenshteinDistancesInputs for BytesTape<u32, UnifiedAlloc> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_levenshtein_distances_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u64> inputs
+impl LevenshteinDistancesInputs for StringTape<u64, UnifiedAlloc> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_levenshtein_distances_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u32> inputs  
+impl LevenshteinDistancesInputs for StringTape<u32, UnifiedAlloc> {
+    fn compute_levenshtein(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistances,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_levenshtein_distances_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+impl LevenshteinDistances {
+    /// Create a new Levenshtein distances engine with specified costs.
+    ///
+    /// Initializes the engine with custom gap costs for fine-tuned distance computation.
+    /// The engine automatically selects optimal algorithms based on the device capabilities.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution context and capabilities
+    /// - `match_cost`: Cost when characters match (typically ≤ 0)
+    /// - `mismatch_cost`: Cost when characters differ (typically > 0)
+    /// - `open_cost`: Cost to open a gap (insertion/deletion)
+    /// - `extend_cost`: Cost to extend existing gap (usually ≤ open_cost)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(LevenshteinDistances)`: Successfully initialized engine
+    /// - `Err(Status::BadAlloc)`: Memory allocation failed
+    /// - `Err(Status::InvalidArgument)`: Invalid cost configuration
+    ///
+    /// # Cost Configuration Guidelines
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Standard Levenshtein distance (all operations cost 1)
+    /// let standard = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+    ///
+    /// // Prefer matches, penalize mismatches heavily
+    /// let match_biased = LevenshteinDistances::new(&device, -1, 3, 2, 1).unwrap();
+    ///
+    /// // Linear gap costs (open == extend)
+    /// let linear_gaps = LevenshteinDistances::new(&device, 0, 1, 2, 2).unwrap();
+    ///
+    /// // Affine gap costs (open > extend, penalizes gap opening)
+    /// let affine_gaps = LevenshteinDistances::new(&device, 0, 1, 3, 1).unwrap();
+    /// ```
+    pub fn new(
+        device: &DeviceScope,
+        match_cost: i8,
+        mismatch_cost: i8,
+        open_cost: i8,
+        extend_cost: i8,
+    ) -> Result<Self, Error> {
+        let mut handle = ptr::null_mut();
+        let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances_init(
+                match_cost,
+                mismatch_cost,
+                open_cost,
+                extend_cost,
+                ptr::null(),
+                capabilities,
+                &mut handle,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(Self { handle }),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    /// Compute Levenshtein distances between sequence pairs.
+    ///
+    /// Processes pairs of sequences in parallel, computing edit distance for each pair.
+    /// The function automatically handles both CPU SIMD and GPU acceleration based
+    /// on the device scope configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution
+    /// - `sequences_a`: First collection of sequences
+    /// - `sequences_b`: Second collection of sequences  
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(UnifiedVec<usize>)`: Vector of distances, one per sequence pair
+    /// - `Err(Status)`: Computation failed
+    ///
+    /// # Behavior
+    ///
+    /// - Pairs sequences by index: (a[0], b[0]), (a[1], b[1]), etc.
+    /// - Result length equals `min(sequences_a.len(), sequences_b.len())`
+    /// - Uses unified memory allocation for GPU compatibility
+    /// - Empty sequences are handled correctly (distance equals other sequence length)
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+    ///
+    /// // Basic usage
+    /// let words_a = vec!["cat", "dog", "bird"];
+    /// let words_b = vec!["bat", "fog", "word"];
+    /// let distances = engine.compute(&device, &words_a, &words_b).unwrap();
+    ///
+    /// assert_eq!(distances.len(), 3);
+    /// println!("Distances: {:?}", distances); // [1, 1, 3]
+    /// ```
+    ///
+    /// # Performance Notes
+    ///
+    /// - CPU performance scales with SIMD width and core count
+    /// - GPU optimal for batches >1000 pairs with medium-length sequences
+    /// - Memory layout optimized for cache efficiency
+    /// - Consider sequence length distribution for optimal performance
+    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<usize>, Error>
+    where
+        T: LevenshteinDistancesInputs,
+    {
+        input_a.compute_levenshtein(input_b, device, self)
+    }
+}
+
+impl Drop for LevenshteinDistances {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { szs_levenshtein_distances_free(self.handle) };
+        }
+    }
+}
+
+unsafe impl Send for LevenshteinDistances {}
+unsafe impl Sync for LevenshteinDistances {}
+
+/// Trait for inputs that can be processed by LevenshteinDistancesUtf8 engine
+pub trait LevenshteinDistancesUtf8Inputs {
+    fn compute_levenshtein_utf8(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistancesUtf8,
+    ) -> Result<UnifiedVec<usize>, Error>;
+
+    fn sequence_count(&self) -> usize;
+}
+
+/// Helper function for computing Levenshtein UTF-8 distances on sequences
+fn compute_levenshtein_utf8_sequences<'a, I1, I2>(
+    seq_a_iter: I1,
+    seq_b_iter: I2,
+    seq_a_strs: &[&str],
+    seq_b_strs: &[&str],
+    device: &DeviceScope,
+    engine: &LevenshteinDistancesUtf8,
+) -> Result<UnifiedVec<usize>, Error>
+where
+    I1: Iterator<Item = &'a str>,
+    I2: Iterator<Item = &'a str>,
+{
+    let num_pairs = seq_a_strs.len().min(seq_b_strs.len());
+    if device.is_gpu() {
+        // GPU: Convert sequences to tapes using extend, then use tape API
+        let tape_a = create_tape_str(seq_a_strs)?;
+        let tape_b = create_tape_str(seq_b_strs)?;
+
+        let tape_a_view = tape_a.as_c_api_view();
+        let tape_b_view = tape_b.as_c_api_view();
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
+                // If either tape is 64-bit, use 64-bit API
+                let view_a_64 = match &tape_a_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                let view_b_64 = match &tape_b_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                unsafe {
+                    szs_levenshtein_distances_utf8_u64tape(
+                        engine.handle,
+                        device.handle,
+                        &view_a_64 as *const _ as *const c_void,
+                        &view_b_64 as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_levenshtein_distances_utf8_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    } else {
+        // CPU: Use sequence API directly
+        let seq_a = create_sequence_view_str(seq_a_strs);
+        let seq_b = create_sequence_view_str(seq_b_strs);
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances_utf8_sequence(
+                engine.handle,
+                device.handle,
+                &seq_a as *const _ as *const c_void,
+                &seq_b as *const _ as *const c_void,
+                results.as_mut_ptr(),
+                results_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+/// Implementation for Vec<&str> - string sequence type (UTF-8 only)
+impl LevenshteinDistancesUtf8Inputs for Vec<&str> {
+    fn compute_levenshtein_utf8(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistancesUtf8,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        compute_levenshtein_utf8_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<String> - owned string sequence type (UTF-8 only)
+impl LevenshteinDistancesUtf8Inputs for Vec<String> {
+    fn compute_levenshtein_utf8(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistancesUtf8,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        let seq_a_str_refs: Vec<&str> = self.iter().map(|s| s.as_str()).collect();
+        let seq_b_str_refs: Vec<&str> = other.iter().map(|s| s.as_str()).collect();
+        let seq_a_slice = seq_a_str_refs.as_slice();
+        let seq_b_slice = seq_b_str_refs.as_slice();
+
+        compute_levenshtein_utf8_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for StringTape<u64> inputs - UTF-8 aware
+impl LevenshteinDistancesUtf8Inputs for StringTape<u64, UnifiedAlloc> {
+    fn compute_levenshtein_utf8(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistancesUtf8,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_levenshtein_distances_utf8_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u32> inputs - UTF-8 aware  
+impl LevenshteinDistancesUtf8Inputs for StringTape<u32, UnifiedAlloc> {
+    fn compute_levenshtein_utf8(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &LevenshteinDistancesUtf8,
+    ) -> Result<UnifiedVec<usize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<usize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_levenshtein_distances_utf8_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// UTF-8 aware Levenshtein distance engine for Unicode text processing.
+///
+/// Computes edit distances between UTF-8 encoded strings at the character level
+/// rather than byte level. This engine properly handles multi-byte UTF-8 sequences,
+/// ensuring that operations are performed on Unicode code points.
+///
+/// # UTF-8 vs Binary Processing
+///
+/// - **Binary engine**: Operates on raw bytes, faster but incorrect for Unicode
+/// - **UTF-8 engine**: Operates on Unicode code points, slower but semantically correct
+///
+/// Use this engine when working with international text, emoji, or any content
+/// where character boundaries matter.
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
+/// let device = DeviceScope::default().unwrap();
+/// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
+///
+/// // Unicode strings with emoji and accents
+/// let strings_a = vec!["café", "naïve", "🦀 rust"];
+/// let strings_b = vec!["cafe", "naive", "🔥 rust"];
+/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
+///
+/// // Character-level distances (not byte-level)
+/// println!("'café' -> 'cafe': {}", distances[0]); // 1 (é -> e)
+/// println!("'🦀 rust' -> '🔥 rust': {}", distances[2]); // 1 (🦀 -> 🔥)
+/// ```
+///
+/// # Comparison with Binary Engine
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
+/// let device = DeviceScope::default().unwrap();
+/// let binary_engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+/// let utf8_engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
+///
+/// let text_a = vec!["café"]; // 5 bytes, 4 characters
+/// let text_b = vec!["cafe"]; // 4 bytes, 4 characters
+///
+/// let binary_dist = binary_engine.compute(&device, &text_a, &text_b).unwrap();
+/// let utf8_dist = utf8_engine.compute(&device, &text_a, &text_b).unwrap();
+///
+/// println!("Binary distance: {}", binary_dist[0]); // 2 (é is 2 bytes)
+/// println!("UTF-8 distance: {}", utf8_dist[0]);   // 1 (é is 1 character)
+/// ```
+///
+/// # Performance Considerations
+///
+/// - Slower than binary engine due to UTF-8 decoding overhead
+/// - Performance impact depends on character distribution
+/// - ASCII-only text has minimal overhead
+/// - Complex scripts (Arabic, Thai) have higher overhead
+pub struct LevenshteinDistancesUtf8 {
+    handle: LevenshteinDistancesUtf8Handle,
+}
+
+impl LevenshteinDistancesUtf8 {
+    /// Create a new UTF-8 aware Levenshtein distances engine.
+    ///
+    /// Initializes an engine that processes UTF-8 strings at the character level,
+    /// properly handling multi-byte Unicode sequences. Essential for international
+    /// text processing and semantic correctness.
+    ///
+    /// # Parameters
+    ///
+    /// Same as binary engine, but costs apply to Unicode code points:
+    /// - `match_cost`: Cost when Unicode characters match
+    /// - `mismatch_cost`: Cost when Unicode characters differ
+    /// - `open_cost`: Cost to insert/delete a Unicode character
+    /// - `extend_cost`: Cost to continue insertion/deletion
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Standard Unicode-aware engine
+    /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
+    ///
+    /// // Test with international text
+    /// let greetings_a = vec!["Hello", "Bonjour", "こんにちは"];
+    /// let greetings_b = vec!["Hallo", "Bonjoir", "こんばんは"];
+    /// let distances = engine.compute(&device, &greetings_a, &greetings_b).unwrap();
+    /// ```
+    pub fn new(
+        device: &DeviceScope,
+        match_cost: i8,
+        mismatch_cost: i8,
+        open_cost: i8,
+        extend_cost: i8,
+    ) -> Result<Self, Error> {
+        let mut handle = ptr::null_mut();
+        let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances_utf8_init(
+                match_cost,
+                mismatch_cost,
+                open_cost,
+                extend_cost,
+                ptr::null(),
+                capabilities,
+                &mut handle,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(Self { handle }),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    /// Compute UTF-8 aware Levenshtein distances between string pairs.
+    ///
+    /// Processes Unicode strings character by character, ensuring proper handling
+    /// of multi-byte UTF-8 sequences. Critical for applications requiring semantic
+    /// correctness with international text.
+    ///
+    /// # Type Requirements
+    ///
+    /// Input sequences must implement `AsRef<str>` to ensure valid UTF-8:
+    /// - `&str`, `String`, `Cow<str>` are all supported
+    /// - Invalid UTF-8 will cause undefined behavior
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
+    ///
+    /// // Unicode strings (same container type for both sides)
+    /// let strings_a: Vec<String> = vec!["résumé".to_string(), "naïve".to_string()];
+    /// let strings_b: Vec<String> = vec!["resume".to_string(), "naive".to_string()];
+    /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
+    ///
+    /// // Each accented character counts as 1 edit
+    /// assert_eq!(distances[0], 2); // é->e, é->e
+    /// assert_eq!(distances[1], 1); // ï->i
+    /// ```
+    ///
+    /// # Unicode Normalization
+    ///
+    /// Note: This engine does NOT perform Unicode normalization. Pre-normalize
+    /// your strings if you need to handle composed vs decomposed characters:
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// // These are different at the code point level:
+    /// let composed = vec!["café"];     // é as single code point U+00E9
+    /// let decomposed = vec!["cafe\u{0301}"]; // e + combining acute accent
+    ///
+    /// // Distance would be non-zero without normalization
+    /// // Use unicode-normalization crate if needed
+    /// ```
+    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<usize>, Error>
+    where
+        T: LevenshteinDistancesUtf8Inputs,
+    {
+        input_a.compute_levenshtein_utf8(input_b, device, self)
+    }
+}
+
+impl Drop for LevenshteinDistancesUtf8 {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { szs_levenshtein_distances_utf8_free(self.handle) };
+        }
+    }
+}
+
+unsafe impl Send for LevenshteinDistancesUtf8 {}
+unsafe impl Sync for LevenshteinDistancesUtf8 {}
+
+/// Trait for inputs that can automatically route to the correct Levenshtein C API
+/// based on their type (sequences vs tapes) and device (CPU vs GPU)
+/// Trait for inputs that can be used with NeedlemanWunschScores engine
+///
+/// Supports both sequence types (Vec<&str>, Vec<&[u8]>) and pre-constructed tapes
+/// for zero-copy processing. Automatically routes to the most appropriate C API.
+pub trait NeedlemanWunschScoresInputs: Sized {
+    /// Compute Needleman-Wunsch alignment scores using the most appropriate API for this input type
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error>;
+
+    /// Get the number of sequences in this input
+    fn sequence_count(&self) -> usize;
+}
+
+/// Helper function for computing Needleman-Wunsch scores on sequences
+fn compute_needleman_wunsch_sequences<'a, I1, I2>(
+    seq_a_iter: I1,
+    seq_b_iter: I2,
+    seq_a_bytes: &[&[u8]],
+    seq_b_bytes: &[&[u8]],
+    device: &DeviceScope,
+    engine: &NeedlemanWunschScores,
+) -> Result<UnifiedVec<isize>, Error>
+where
+    I1: Iterator<Item = &'a [u8]>,
+    I2: Iterator<Item = &'a [u8]>,
+{
+    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
+
+    if device.is_gpu() {
+        // GPU: Convert sequences to tapes using extend, then use tape API
+        let tape_a = create_tape(seq_a_bytes)?;
+        let tape_b = create_tape(seq_b_bytes)?;
+
+        let tape_a_view = tape_a.as_c_api_view();
+        let tape_b_view = tape_b.as_c_api_view();
+
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
+                // If either tape is 64-bit, use 64-bit API
+                let view_a_64 = match &tape_a_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                let view_b_64 = match &tape_b_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                unsafe {
+                    szs_needleman_wunsch_scores_u64tape(
+                        engine.handle,
+                        device.handle,
+                        &view_a_64 as *const _ as *const c_void,
+                        &view_b_64 as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_needleman_wunsch_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    } else {
+        // CPU: Use sequence API directly
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let seq_a = create_sequence_view(seq_a_bytes);
+        let seq_b = create_sequence_view(seq_b_bytes);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_needleman_wunsch_scores_sequence(
+                engine.handle,
+                device.handle,
+                &seq_a as *const _ as *const c_void,
+                &seq_b as *const _ as *const c_void,
+                results.as_mut_ptr(),
+                results_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+impl TapeInput for BytesTape<u64, UnifiedAlloc> {
+    fn count(&self) -> usize {
+        let (_, _, count, _) = self.as_raw_parts();
+        count
+    }
+
+    fn create_view(&self) -> CApiTapeView {
+        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
+        CApiTapeView::U64(CApiTape64 {
+            data: data_ptr,
+            offsets: offsets_ptr as *const u64,
+            count,
+        })
+    }
+}
+
+impl TapeInput for BytesTape<u32, UnifiedAlloc> {
+    fn count(&self) -> usize {
+        let (_, _, count, _) = self.as_raw_parts();
+        count
+    }
+
+    fn create_view(&self) -> CApiTapeView {
+        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
+        CApiTapeView::U32(CApiTape32 {
+            data: data_ptr,
+            offsets: offsets_ptr as *const u32,
+            count,
+        })
+    }
+}
+
+impl TapeInput for StringTape<u64, UnifiedAlloc> {
+    fn count(&self) -> usize {
+        let (_, _, count, _) = self.as_raw_parts();
+        count
+    }
+
+    fn create_view(&self) -> CApiTapeView {
+        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
+        CApiTapeView::U64(CApiTape64 {
+            data: data_ptr,
+            offsets: offsets_ptr as *const u64,
+            count,
+        })
+    }
+}
+
+impl TapeInput for StringTape<u32, UnifiedAlloc> {
+    fn count(&self) -> usize {
+        let (_, _, count, _) = self.as_raw_parts();
+        count
+    }
+
+    fn create_view(&self) -> CApiTapeView {
+        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
+        CApiTapeView::U32(CApiTape32 {
+            data: data_ptr,
+            offsets: offsets_ptr as *const u32,
+            count,
+        })
+    }
+}
+
+/// Implementation for Vec<&str> - common sequence type
+impl NeedlemanWunschScoresInputs for Vec<&str> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        // Convert to bytes for CPU path
+        let sequences_a: Vec<&[u8]> = seq_a_slice.iter().map(|s| s.as_bytes()).collect();
+        let sequences_b: Vec<&[u8]> = seq_b_slice.iter().map(|s| s.as_bytes()).collect();
+
+        compute_needleman_wunsch_sequences(
+            seq_a_slice.iter().map(|s| s.as_bytes()),
+            seq_b_slice.iter().map(|s| s.as_bytes()),
+            &sequences_a,
+            &sequences_b,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<&[u8]> - byte sequence type
+impl NeedlemanWunschScoresInputs for Vec<&[u8]> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        compute_needleman_wunsch_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for BytesTape<u64> inputs
+impl NeedlemanWunschScoresInputs for BytesTape<u64, UnifiedAlloc> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_needleman_wunsch_scores_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for BytesTape<u32> inputs
+impl NeedlemanWunschScoresInputs for BytesTape<u32, UnifiedAlloc> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_needleman_wunsch_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u64> inputs
+impl NeedlemanWunschScoresInputs for StringTape<u64, UnifiedAlloc> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_needleman_wunsch_scores_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u32> inputs  
+impl NeedlemanWunschScoresInputs for StringTape<u32, UnifiedAlloc> {
+    fn compute_needleman_wunsch(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &NeedlemanWunschScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_needleman_wunsch_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Needleman-Wunsch global sequence alignment scoring engine.
+///
+/// Implements the Needleman-Wunsch algorithm for finding the optimal global alignment
+/// between two sequences. Unlike edit distance, this algorithm uses a full substitution
+/// matrix and returns alignment scores rather than distances.
+///
+/// # Algorithm Details
+///
+/// The Needleman-Wunsch algorithm finds the optimal global alignment by:
+/// 1. Building a dynamic programming matrix using substitution scores
+/// 2. Applying gap penalties (open + extend costs)
+/// 3. Finding the maximum-scoring path through the entire sequences
+///
+/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
+///
+/// # Applications
+///
+/// - **Bioinformatics**: Protein and DNA sequence alignment
+/// - **Linguistics**: Comparative analysis of languages
+/// - **Data integration**: Aligning structured records
+/// - **Quality control**: Comparing reference vs. observed sequences
+///
+/// # Substitution Matrix
+///
+/// Requires a 256x256 scoring matrix where `matrix[i][j]` gives the score
+/// for aligning character `i` with character `j`. Common matrices include:
+/// - **BLOSUM**: For protein sequences
+/// - **PAM**: For evolutionary analysis
+/// - **Custom**: For domain-specific applications
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+/// // Create simple scoring matrix (match=2, mismatch=-1)
+/// let mut matrix = [[-1i8; 256]; 256];
+/// for i in 0..256 {
+///     matrix[i][i] = 2; // Match score
+/// }
+///
+/// let device = DeviceScope::default().unwrap();
+/// let engine = NeedlemanWunschScores::new(
+///     &device,
+///     &matrix,
+///     -2, // gap open penalty
+///     -1, // gap extend penalty
+/// ).unwrap();
+///
+/// // Align protein sequences
+/// let seq_a = vec!["ACDEFGHIKLMNPQRSTVWY"];
+/// let seq_b = vec!["ACDEFGHIKL---NPQRSTVWY"];
+/// let scores = engine.compute(&device, &seq_a, &seq_b).unwrap();
+///
+/// println!("Global alignment score: {}", scores[0]);
+/// ```
+///
+/// # BLOSUM62 Example
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+/// // Load BLOSUM62 matrix (simplified example)
+/// fn create_blosum62_matrix() -> [[i8; 256]; 256] {
+///     let mut matrix = [[-4i8; 256]; 256]; // Default mismatch
+///     
+///     // Set scores for amino acids (simplified BLOSUM62 subset)
+///     let aa_scores = [
+///         ('A', 'A', 4), ('A', 'R', -1), ('A', 'N', -2),
+///         ('R', 'R', 5), ('R', 'N', 0), ('N', 'N', 6),
+///         // ... (full BLOSUM62 table)
+///     ];
+///     
+///     for (aa1, aa2, score) in aa_scores.iter() {
+///         matrix[*aa1 as usize][*aa2 as usize] = *score;
+///         matrix[*aa2 as usize][*aa1 as usize] = *score; // Symmetric
+///     }
+///     matrix
+/// }
+///
+/// let device = DeviceScope::default().unwrap();
+/// let blosum62 = create_blosum62_matrix();
+/// let engine = NeedlemanWunschScores::new(&device, &blosum62, -11, -1).unwrap();
+/// ```
+pub struct NeedlemanWunschScores {
+    handle: NeedlemanWunschScoresHandle,
+}
+
+impl NeedlemanWunschScores {
+    /// Create a new Needleman-Wunsch global alignment scoring engine.
+    ///
+    /// Initializes the engine with a custom substitution matrix and gap penalties.
+    /// The engine will automatically select optimal implementations based on
+    /// hardware capabilities.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution and capability detection
+    /// - `substitution_matrix`: 256x256 matrix of alignment scores
+    /// - `open_cost`: Penalty for opening a gap (typically negative)
+    /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(NeedlemanWunschScores)`: Successfully initialized engine
+    /// - `Err(Status::BadAlloc)`: Memory allocation failed
+    /// - `Err(Status::InvalidArgument)`: Invalid matrix or gap costs
+    ///
+    /// # Matrix Guidelines
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+    /// // Identity matrix (simple match/mismatch)
+    /// let mut simple_matrix = [[0i8; 256]; 256];
+    /// for i in 0..256 {
+    ///     simple_matrix[i][i] = 1;  // Match
+    ///     for j in 0..256 {
+    ///         if i != j { simple_matrix[i][j] = -1; } // Mismatch
+    ///     }
+    /// }
+    ///
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = NeedlemanWunschScores::new(&device, &simple_matrix, -2, -1).unwrap();
+    /// ```
+    ///
+    /// # Gap Cost Selection
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let device = DeviceScope::default().unwrap();
+    /// // Linear gap costs (open == extend)
+    /// let linear = NeedlemanWunschScores::new(&device, &matrix, -1, -1).unwrap();
+    ///
+    /// // Affine gap costs (prefer fewer, longer gaps)
+    /// let affine = NeedlemanWunschScores::new(&device, &matrix, -5, -1).unwrap();
+    /// ```
+    pub fn new(
+        device: &DeviceScope,
+        substitution_matrix: &[[i8; 256]; 256],
+        open_cost: i8,
+        extend_cost: i8,
+    ) -> Result<Self, Error> {
+        let mut handle = ptr::null_mut();
+        let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_needleman_wunsch_scores_init(
+                substitution_matrix.as_ptr() as *const i8,
+                open_cost,
+                extend_cost,
+                ptr::null(),
+                capabilities,
+                &mut handle,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(Self { handle }),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    /// Compute Needleman-Wunsch global alignment scores between sequence pairs.
+    ///
+    /// Finds the optimal global alignment score for each pair of sequences using
+    /// the configured substitution matrix and gap penalties. Returns positive scores
+    /// for good alignments, negative for poor alignments.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for parallel execution
+    /// - `sequences_a`: First collection of sequences to align
+    /// - `sequences_b`: Second collection of sequences to align
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(UnifiedVec<isize>)`: Vector of alignment scores (can be negative)
+    /// - `Err(Status)`: Computation failed
+    ///
+    /// # Score Interpretation
+    ///
+    /// - **Positive scores**: Good alignment, sequences are similar
+    /// - **Zero scores**: Neutral alignment
+    /// - **Negative scores**: Poor alignment, sequences are dissimilar
+    /// - **Magnitude**: Higher absolute values indicate stronger alignment quality
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # for i in 0..256 { matrix[i][i] = 2; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    ///
+    /// // Compare DNA sequences
+    /// let dna_a = vec!["ATCGATCG", "GGCCTTAA"];
+    /// let dna_b = vec!["ATCGATCC", "GGCCTTAA"]; // One mismatch, one exact
+    /// let scores = engine.compute(&device, &dna_a, &dna_b).unwrap();
+    ///
+    /// println!("DNA alignment scores: {:?}", scores);
+    /// // Expect: [positive but lower for mismatch, high positive for exact match]
+    /// ```
+    ///
+    /// # Batch Processing
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let device = DeviceScope::default().unwrap();
+    /// # let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    /// // Process large batches efficiently
+    /// let sequences: Vec<&str> = vec![
+    ///     "PROTEIN_SEQUENCE_1", "PROTEIN_SEQUENCE_2", /* ... */
+    /// ];
+    /// let references: Vec<&str> = vec![
+    ///     "REFERENCE_SEQ_1", "REFERENCE_SEQ_2", /* ... */
+    /// ];
+    ///
+    /// let scores = engine.compute(&device, &sequences, &references).unwrap();
+    ///
+    /// // Find best alignments
+    /// let best_idx = scores.iter().enumerate()
+    ///     .max_by_key(|(_, &score)| score)
+    ///     .map(|(idx, _)| idx);
+    /// ```
+    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<isize>, Error>
+    where
+        T: NeedlemanWunschScoresInputs,
+    {
+        input_a.compute_needleman_wunsch(input_b, device, self)
+    }
+}
+
+impl Drop for NeedlemanWunschScores {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { szs_needleman_wunsch_scores_free(self.handle) };
+        }
+    }
+}
+
+unsafe impl Send for NeedlemanWunschScores {}
+unsafe impl Sync for NeedlemanWunschScores {}
+
+/// Trait for inputs that can be processed by SmithWatermanScores engine
+pub trait SmithWatermanScoresInputs {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error>;
+
+    fn sequence_count(&self) -> usize;
+}
+
+/// Helper function for computing Smith-Waterman scores on sequences
+fn compute_smith_waterman_sequences<'a, I1, I2>(
+    seq_a_iter: I1,
+    seq_b_iter: I2,
+    seq_a_bytes: &[&[u8]],
+    seq_b_bytes: &[&[u8]],
+    device: &DeviceScope,
+    engine: &SmithWatermanScores,
+) -> Result<UnifiedVec<isize>, Error>
+where
+    I1: Iterator<Item = &'a [u8]>,
+    I2: Iterator<Item = &'a [u8]>,
+{
+    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
+    if device.is_gpu() {
+        // GPU: Convert sequences to tapes using extend, then use tape API
+        let tape_a = create_tape(seq_a_bytes)?;
+        let tape_b = create_tape(seq_b_bytes)?;
+
+        let tape_a_view = tape_a.as_c_api_view();
+        let tape_b_view = tape_b.as_c_api_view();
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
+                // If either tape is 64-bit, use 64-bit API
+                let view_a_64 = match &tape_a_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                let view_b_64 = match &tape_b_view {
+                    CApiTapeView::U64(v) => *v,
+                    CApiTapeView::U32(v) => CApiTape64 {
+                        data: v.data,
+                        offsets: v.offsets as *const u64,
+                        count: v.count,
+                    },
+                };
+                unsafe {
+                    szs_smith_waterman_scores_u64tape(
+                        engine.handle,
+                        device.handle,
+                        &view_a_64 as *const _ as *const c_void,
+                        &view_b_64 as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_smith_waterman_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    } else {
+        // CPU: Use sequence API directly
+        let seq_a = create_sequence_view(seq_a_bytes);
+        let seq_b = create_sequence_view(seq_b_bytes);
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_smith_waterman_scores_sequence(
+                engine.handle,
+                device.handle,
+                &seq_a as *const _ as *const c_void,
+                &seq_b as *const _ as *const c_void,
+                results.as_mut_ptr(),
+                results_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+/// Implementation for Vec<&str> - string sequence type
+impl SmithWatermanScoresInputs for Vec<&str> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        let seq_a_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
+        let seq_b_bytes: Vec<&[u8]> = other.iter().map(|s| s.as_bytes()).collect();
+        let seq_a_slice = seq_a_bytes.as_slice();
+        let seq_b_slice = seq_b_bytes.as_slice();
+
+        compute_smith_waterman_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<&[u8]> - byte sequence type
+impl SmithWatermanScoresInputs for Vec<&[u8]> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        let seq_a_slice = self.as_slice();
+        let seq_b_slice = other.as_slice();
+
+        compute_smith_waterman_sequences(
+            seq_a_slice.iter().cloned(),
+            seq_b_slice.iter().cloned(),
+            seq_a_slice,
+            seq_b_slice,
+            device,
+            engine,
+        )
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for BytesTape<u64> inputs
+impl SmithWatermanScoresInputs for BytesTape<u64, UnifiedAlloc> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_smith_waterman_scores_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for BytesTape<u32> inputs
+impl SmithWatermanScoresInputs for BytesTape<u32, UnifiedAlloc> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_smith_waterman_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u64> inputs
+impl SmithWatermanScoresInputs for StringTape<u64, UnifiedAlloc> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
+                szs_smith_waterman_scores_u64tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u32> inputs  
+impl SmithWatermanScoresInputs for StringTape<u32, UnifiedAlloc> {
+    fn compute_smith_waterman(
+        &self,
+        other: &Self,
+        device: &DeviceScope,
+        engine: &SmithWatermanScores,
+    ) -> Result<UnifiedVec<isize>, Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_pairs = self.count().min(other.count());
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+        let results_stride = core::mem::size_of::<isize>();
+
+        let tape_a_view = self.create_view();
+        let tape_b_view = other.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match (&tape_a_view, &tape_b_view) {
+            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
+                szs_smith_waterman_scores_u32tape(
+                    engine.handle,
+                    device.handle,
+                    view_a as *const _ as *const c_void,
+                    view_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok(results),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Smith-Waterman local sequence alignment scoring engine.
+///
+/// Implements the Smith-Waterman algorithm for finding optimal local alignments
+/// within sequences. Unlike Needleman-Wunsch, this algorithm finds the best-matching
+/// subsequences rather than aligning entire sequences.
+///
+/// # Algorithm Details
+///
+/// The Smith-Waterman algorithm:
+/// 1. Builds a dynamic programming matrix with non-negative scores
+/// 2. Allows scores to reset to zero (no penalty for poor regions)
+/// 3. Returns the maximum score found anywhere in the matrix
+/// 4. Identifies optimal local alignments without end-to-end constraints
+///
+/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
+///
+/// # Applications
+///
+/// - **Homology search**: Finding similar regions in biological sequences
+/// - **Motif discovery**: Identifying conserved patterns
+/// - **Database search**: BLAST-like local similarity search
+/// - **Partial matching**: Finding best substring alignments
+/// - **Fragment analysis**: Comparing incomplete or damaged sequences
+///
+/// # Local vs Global Alignment
+///
+/// ```text
+/// Global (Needleman-Wunsch):
+/// SEQUENCE_A: ATCGATCGATCG----ATCG
+/// SEQUENCE_B: ----ATCGATCGATCGATCG
+/// (Forces end-to-end alignment)
+///
+/// Local (Smith-Waterman):
+/// SEQUENCE_A: ...ATCGATCGATCG...
+/// SEQUENCE_B:    ATCGATCGATCG
+/// (Finds best local match)
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+/// // Create scoring matrix for DNA (A, T, C, G)
+/// let mut dna_matrix = [[-2i8; 256]; 256]; // Mismatch penalty
+/// let dna_chars = [b'A', b'T', b'C', b'G'];
+/// for &c1 in &dna_chars {
+///     for &c2 in &dna_chars {
+///         dna_matrix[c1 as usize][c2 as usize] = if c1 == c2 { 3 } else { -1 };
+///     }
+/// }
+///
+/// let device = DeviceScope::default().unwrap();
+/// let engine = SmithWatermanScores::new(
+///     &device,
+///     &dna_matrix,
+///     -5, // gap open
+///     -1, // gap extend
+/// ).unwrap();
+///
+/// // Find local similarities
+/// let long_seq = vec!["ATCGATCGATCGAAAAAATCGATCGATCG"];
+/// let pattern = vec!["ATCGATCGATCG"];
+/// let scores = engine.compute(&device, &long_seq, &pattern).unwrap();
+///
+/// println!("Local alignment score: {}", scores[0]); // High positive score
+/// ```
+///
+/// # Database Search Example
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+/// # let mut matrix = [[0i8; 256]; 256];
+/// let device = DeviceScope::default().unwrap();
+/// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+///
+/// // Search query against database sequences
+/// let query = "ACDEFGHIKLMN";  // Query sequence
+/// let database = vec![
+///     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",  // Contains query
+///     "ZYXWVUTSRQPONMLKJIHGFEDCBA",  // Reverse complement
+///     "DEFGHIKLM",                  // Partial match
+///     "COMPLETELY_DIFFERENT",        // No similarity
+/// ];
+///
+/// let queries = vec![query; database.len()];  // Repeat query for each DB entry
+/// let scores = engine.compute(&device, &queries, &database).unwrap();
+///
+/// // Find best matches
+/// for (i, &score) in scores.iter().enumerate() {
+///     println!("Database[{}] score: {}", i, score);
+/// }
+/// ```
+pub struct SmithWatermanScores {
+    handle: SmithWatermanScoresHandle,
+}
+
+impl SmithWatermanScores {
+    /// Create a new Smith-Waterman local alignment scoring engine.
+    ///
+    /// Initializes the engine for local sequence alignment with custom scoring parameters.
+    /// The engine automatically adapts to available hardware capabilities.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution context
+    /// - `substitution_matrix`: 256x256 scoring matrix for character pairs
+    /// - `open_cost`: Gap opening penalty (typically negative)
+    /// - `extend_cost`: Gap extension penalty (typically negative, ≥ open_cost)
+    ///
+    /// # Matrix Design for Local Alignment
+    ///
+    /// For effective local alignment, the matrix should have:
+    /// - **Positive match scores**: Reward similar characters
+    /// - **Negative mismatch scores**: Penalize dissimilar characters
+    /// - **Balanced penalties**: Prevent excessive gap formation
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Protein alignment matrix (simplified)
+    /// let mut protein_matrix = [[-1i8; 256]; 256];  // Default mismatch
+    ///
+    /// // Set positive scores for similar amino acids
+    /// let amino_acids = b"ACDEFGHIKLMNPQRSTVWY";
+    /// for &aa in amino_acids {
+    ///     protein_matrix[aa as usize][aa as usize] = 5; // Identity
+    /// }
+    ///
+    /// // Similar amino acids get positive but lower scores
+    /// protein_matrix[b'L' as usize][b'I' as usize] = 2; // Leucine-Isoleucine
+    /// protein_matrix[b'I' as usize][b'L' as usize] = 2;
+    ///
+    /// let engine = SmithWatermanScores::new(&device, &protein_matrix, -3, -1).unwrap();
+    /// ```
+    ///
+    /// # Gap Penalty Strategy
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let device = DeviceScope::default().unwrap();
+    /// // Conservative gaps (discourage insertions/deletions)
+    /// let conservative = SmithWatermanScores::new(&device, &matrix, -10, -2).unwrap();
+    ///
+    /// // Permissive gaps (allow more insertions/deletions)
+    /// let permissive = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// ```
+    pub fn new(
+        device: &DeviceScope,
+        substitution_matrix: &[[i8; 256]; 256],
+        open_cost: i8,
+        extend_cost: i8,
+    ) -> Result<Self, Error> {
+        let mut handle = ptr::null_mut();
+        let capabilities = device.get_capabilities().unwrap_or(0);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_smith_waterman_scores_init(
+                substitution_matrix.as_ptr() as *const i8,
+                open_cost,
+                extend_cost,
+                ptr::null(),
+                capabilities,
+                &mut handle,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(Self { handle }),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    /// Compute Smith-Waterman local alignment scores between sequence pairs.
+    ///
+    /// Finds the optimal local alignment score for each sequence pair. Returns
+    /// the maximum alignment score found within the sequences, representing
+    /// the best possible local match.
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution
+    /// - `sequences_a`: First collection of sequences
+    /// - `sequences_b`: Second collection of sequences
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(UnifiedVec<isize>)`: Vector of local alignment scores (≥ 0)
+    /// - `Err(Status)`: Computation failed
+    ///
+    /// # Score Interpretation
+    ///
+    /// - **High scores**: Strong local similarity found
+    /// - **Low scores**: Weak or no local similarity
+    /// - **Zero scores**: No positive-scoring alignment possible
+    /// - **Never negative**: Smith-Waterman scores are always ≥ 0
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # for i in 0..256 { matrix[i][i] = 3; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    ///
+    /// // Local similarity search
+    /// let sequences = vec![
+    ///     "ATCGATCGATCG_LONG_SEQUENCE_WITH_NOISE",
+    ///     "DIFFERENT_SEQUENCE_ATCGATCGATCG_MORE_NOISE",
+    ///     "COMPLETELY_UNRELATED_SEQUENCE",
+    /// ];
+    /// let pattern = vec!["ATCGATCGATCG"; 3];  // Search for this pattern
+    ///
+    /// let scores = engine.compute(&device, &sequences, &pattern).unwrap();
+    ///
+    /// for (i, &score) in scores.iter().enumerate() {
+    ///     if score > 20 {  // Threshold for significant similarity
+    ///         println!("Sequence {} contains similar region (score: {})", i, score);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Homology Search
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
+    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let device = DeviceScope::default().unwrap();
+    /// # let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// // Find homologous sequences in a database
+    /// let query_seq = vec!["PROTEIN_QUERY_SEQUENCE"];
+    /// let database_seqs = vec![
+    ///     "HOMOLOGOUS_PROTEIN_SEQUENCE_VARIANT_1",
+    ///     "HOMOLOGOUS_PROTEIN_SEQUENCE_VARIANT_2",
+    ///     "UNRELATED_PROTEIN_SEQUENCE",
+    /// ];
+    ///
+    /// let queries = vec![query_seq[0]; database_seqs.len()];
+    /// let scores = engine.compute(&device, &queries, &database_seqs).unwrap();
+    ///
+    /// // Sort by score to find best matches
+    /// let mut scored_results: Vec<_> = scores.iter().enumerate()
+    ///     .map(|(i, &score)| (i, score))
+    ///     .collect();
+    /// scored_results.sort_by_key(|(_, score)| -score);  // Descending
+    ///
+    /// println!("Best matches:");
+    /// for (idx, score) in scored_results.iter().take(3) {
+    ///     println!("Database[{}]: score {}", idx, score);
+    /// }
+    /// ```
+    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<isize>, Error>
+    where
+        T: SmithWatermanScoresInputs,
+    {
+        input_a.compute_smith_waterman(input_b, device, self)
+    }
+}
+
+impl Drop for SmithWatermanScores {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { szs_smith_waterman_scores_free(self.handle) };
+        }
+    }
+}
+
+unsafe impl Send for SmithWatermanScores {}
+unsafe impl Sync for SmithWatermanScores {}
+
+/// Creates a diagonal substitution matrix for sequence alignment.
+/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
+/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
+pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
+    let mut result = [[0i8; 256]; 256];
+
+    for i in 0..256 {
+        for j in 0..256 {
+            result[i][j] = if i == j { match_score } else { mismatch_score };
+        }
+    }
+
+    result
+}
+
 /// Builder for configuring fingerprinting engines with optimal parameters.
 ///
 /// The builder pattern allows fine-tuning of fingerprinting parameters for different
@@ -813,6 +3401,343 @@ impl FingerprintsBuilder {
     }
 }
 
+/// Trait for inputs that can be processed by Fingerprints engine
+/// Note: Fingerprints uses a single input (not pairs) with dimensions parameter
+pub trait FingerprintsInputs {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>;
+
+    fn sequence_count(&self) -> usize;
+}
+
+/// Helper function for computing fingerprints on sequences
+fn compute_fingerprints_sequences<'a, I>(
+    seq_iter: I,
+    seq_bytes: &[&[u8]],
+    device: &DeviceScope,
+    engine: &Fingerprints,
+    dimensions: usize,
+) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
+where
+    I: Iterator<Item = &'a [u8]>,
+{
+    let num_strings = seq_bytes.len();
+    let hashes_size = num_strings * dimensions;
+    let counts_size = num_strings * dimensions;
+    let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+    min_hashes.resize(hashes_size, 0);
+    let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+    min_counts.resize(counts_size, 0);
+    let hashes_stride = dimensions * core::mem::size_of::<u32>();
+    let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+    if device.is_gpu() {
+        // GPU: Convert sequences to tape using extend, then use tape API
+        let tape = create_tape(seq_bytes)?;
+
+        let tape_view = tape.as_c_api_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match tape_view {
+            CApiTapeView::U64(view) => unsafe {
+                szs_fingerprints_u64tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+            CApiTapeView::U32(view) => unsafe {
+                szs_fingerprints_u32tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    } else {
+        // CPU: Use sequence API directly
+        let seq = create_sequence_view(seq_bytes);
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_fingerprints_sequence(
+                engine.handle,
+                device.handle,
+                &seq as *const _ as *const c_void,
+                min_hashes.as_mut_ptr(),
+                hashes_stride,
+                min_counts.as_mut_ptr(),
+                counts_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+/// Implementation for Vec<&str> - string sequence type
+impl FingerprintsInputs for Vec<&str> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        let seq_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
+        let seq_slice = seq_bytes.as_slice();
+
+        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<String> - owned string sequence type
+impl FingerprintsInputs for Vec<String> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        let seq_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
+        let seq_slice = seq_bytes.as_slice();
+
+        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for Vec<&[u8]> - byte sequence type
+impl FingerprintsInputs for Vec<&[u8]> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        let seq_slice = self.as_slice();
+
+        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Implementation for BytesTape<u64> inputs
+impl FingerprintsInputs for BytesTape<u64, UnifiedAlloc> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_strings = self.count();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        let tape_view = self.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match tape_view {
+            CApiTapeView::U64(view) => unsafe {
+                szs_fingerprints_u64tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for BytesTape<u32> inputs
+impl FingerprintsInputs for BytesTape<u32, UnifiedAlloc> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_strings = self.count();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        let tape_view = self.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match tape_view {
+            CApiTapeView::U32(view) => unsafe {
+                szs_fingerprints_u32tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u64> inputs
+impl FingerprintsInputs for StringTape<u64, UnifiedAlloc> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_strings = self.count();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        let tape_view = self.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match tape_view {
+            CApiTapeView::U64(view) => unsafe {
+                szs_fingerprints_u64tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
+/// Implementation for StringTape<u32> inputs  
+impl FingerprintsInputs for StringTape<u32, UnifiedAlloc> {
+    fn compute_fingerprints(
+        &self,
+        device: &DeviceScope,
+        engine: &Fingerprints,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
+        // Both CPU and GPU: use tape API directly
+        let num_strings = self.count();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        let tape_view = self.create_view();
+        let mut error_msg: *const c_char = ptr::null();
+        let status = match tape_view {
+            CApiTapeView::U32(view) => unsafe {
+                szs_fingerprints_u32tape(
+                    engine.handle,
+                    device.handle,
+                    &view as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            },
+            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
+        };
+        match status {
+            Status::Success => Ok((min_hashes, min_counts)),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+
+    fn sequence_count(&self) -> usize {
+        self.count()
+    }
+}
+
 /// High-performance fingerprinting engine for similarity detection and clustering.
 ///
 /// The fingerprinting engine computes Min-Hash signatures and Count-Min-Sketch
@@ -990,86 +3915,16 @@ impl Fingerprints {
     /// - Memory usage: 8 bytes per string per dimension
     /// - Processing time scales linearly with total input size
     /// - SIMD acceleration provides significant speedup on modern CPUs
-    pub fn compute<T, S>(
+    pub fn compute<T>(
         &self,
         device: &DeviceScope,
-        strings: T,
+        input: &T,
         dimensions: usize,
     ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        T: FingerprintsInputs,
     {
-        let strings_slice = strings.as_ref();
-        let num_strings = strings_slice.len();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        if device.is_gpu() {
-            let (tape, use_64bit) = create_tape(strings_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit {
-                let tape_view = create_u64tape_view(&tape);
-                unsafe {
-                    szs_fingerprints_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_view as *const _ as *const c_void,
-                        min_hashes.as_mut_ptr(),
-                        hashes_stride,
-                        min_counts.as_mut_ptr(),
-                        counts_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_view = create_u32tape_view(&tape);
-                unsafe {
-                    szs_fingerprints_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_view as *const _ as *const c_void,
-                        min_hashes.as_mut_ptr(),
-                        hashes_stride,
-                        min_counts.as_mut_ptr(),
-                        counts_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let sequence = create_sequence_view(strings_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_fingerprints_sequence(
-                    self.handle,
-                    device.handle,
-                    &sequence as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
+        input.compute_fingerprints(device, self, dimensions)
     }
 }
 
@@ -1085,1539 +3940,6 @@ impl Drop for Fingerprints {
 
 unsafe impl Send for Fingerprints {}
 unsafe impl Sync for Fingerprints {}
-
-/// Internal representation of sz_sequence_t for passing to C
-#[repr(C)]
-struct SzSequence {
-    handle: *mut c_void,
-    count: usize,
-    get_start: extern "C" fn(*mut c_void, usize) -> *const u8,
-    get_length: extern "C" fn(*mut c_void, usize) -> usize,
-    // Additional fields for our implementation
-    starts: *const *const u8,
-    lengths: *const usize,
-}
-
-/// Apache Arrow-like tape for non-NULL strings with 32-bit offsets
-#[repr(C)]
-struct SzSequenceU32Tape {
-    data: *const u8,
-    offsets: *const u32,
-    count: usize,
-}
-
-/// Apache Arrow-like tape for non-NULL strings with 64-bit offsets
-#[repr(C)]
-struct SzSequenceU64Tape {
-    data: *const u8,
-    offsets: *const u64,
-    count: usize,
-}
-
-/// Opaque handles for similarity engines
-pub type FingerprintsHandle = *mut c_void;
-pub type LevenshteinDistancesHandle = *mut c_void;
-pub type LevenshteinDistancesUtf8Handle = *mut c_void;
-pub type NeedlemanWunschScoresHandle = *mut c_void;
-pub type SmithWatermanScoresHandle = *mut c_void;
-
-// C API bindings
-extern "C" {
-    // Device scope functions
-    fn szs_device_scope_init_default(scope: *mut *mut c_void, error_message: *mut *const c_char) -> Status;
-    fn szs_device_scope_init_cpu_cores(
-        cpu_cores: usize,
-        scope: *mut *mut c_void,
-        error_message: *mut *const c_char,
-    ) -> Status;
-    fn szs_device_scope_init_gpu_device(
-        gpu_device: usize,
-        scope: *mut *mut c_void,
-        error_message: *mut *const c_char,
-    ) -> Status;
-    fn szs_device_scope_get_capabilities(
-        scope: *mut c_void,
-        capabilities: *mut Capability,
-        error_message: *mut *const c_char,
-    ) -> Status;
-    fn szs_device_scope_get_cpu_cores(
-        scope: *mut c_void,
-        cpu_cores: *mut usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-    fn szs_device_scope_get_gpu_device(
-        scope: *mut c_void,
-        gpu_device: *mut usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-    fn szs_device_scope_free(scope: *mut c_void);
-
-    // Levenshtein distance functions
-    fn szs_levenshtein_distances_init(
-        match_cost: i8,
-        mismatch_cost: i8,
-        open_cost: i8,
-        extend_cost: i8,
-        alloc: *const c_void,
-        capabilities: Capability,
-        engine: *mut LevenshteinDistancesHandle,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_sequence(
-        engine: LevenshteinDistancesHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_u32tape(
-        engine: LevenshteinDistancesHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_u64tape(
-        engine: LevenshteinDistancesHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_free(engine: LevenshteinDistancesHandle);
-
-    // Levenshtein distance UTF-8 functions
-    fn szs_levenshtein_distances_utf8_init(
-        match_cost: i8,
-        mismatch_cost: i8,
-        open_cost: i8,
-        extend_cost: i8,
-        alloc: *const c_void,
-        capabilities: Capability,
-        engine: *mut LevenshteinDistancesUtf8Handle,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_utf8_sequence(
-        engine: LevenshteinDistancesUtf8Handle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_utf8_u32tape(
-        engine: LevenshteinDistancesUtf8Handle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_utf8_u64tape(
-        engine: LevenshteinDistancesUtf8Handle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
-        results: *mut usize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
-
-    // Needleman-Wunsch scoring functions
-    fn szs_needleman_wunsch_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
-        open_cost: i8,
-        extend_cost: i8,
-        alloc: *const c_void,
-        capabilities: Capability,
-        engine: *mut NeedlemanWunschScoresHandle,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_needleman_wunsch_scores_sequence(
-        engine: NeedlemanWunschScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_needleman_wunsch_scores_u32tape(
-        engine: NeedlemanWunschScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_needleman_wunsch_scores_u64tape(
-        engine: NeedlemanWunschScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_needleman_wunsch_scores_free(engine: NeedlemanWunschScoresHandle);
-
-    // Smith-Waterman scoring functions
-    fn szs_smith_waterman_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
-        open_cost: i8,
-        extend_cost: i8,
-        alloc: *const c_void,
-        capabilities: Capability,
-        engine: *mut SmithWatermanScoresHandle,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_smith_waterman_scores_sequence(
-        engine: SmithWatermanScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_smith_waterman_scores_u32tape(
-        engine: SmithWatermanScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_smith_waterman_scores_u64tape(
-        engine: SmithWatermanScoresHandle,
-        device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
-        results: *mut isize,
-        results_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
-
-    // Fingerprinting functions
-    fn szs_fingerprints_init(
-        dimensions: usize,
-        alphabet_size: usize,
-        window_widths: *const usize,
-        window_widths_count: usize,
-        alloc: *const c_void, // MemoryAllocator - using null for default
-        capabilities: Capability,
-        engine: *mut FingerprintsHandle,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_fingerprints_sequence(
-        engine: FingerprintsHandle,
-        device: *mut c_void,  // DeviceScope
-        texts: *const c_void, // sz_sequence_t
-        min_hashes: *mut u32,
-        min_hashes_stride: usize,
-        min_counts: *mut u32,
-        min_counts_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_fingerprints_u32tape(
-        engine: FingerprintsHandle,
-        device: *mut c_void,  // DeviceScope
-        texts: *const c_void, // sz_sequence_u32tape_t
-        min_hashes: *mut u32,
-        min_hashes_stride: usize,
-        min_counts: *mut u32,
-        min_counts_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_fingerprints_u64tape(
-        engine: FingerprintsHandle,
-        device: *mut c_void,  // DeviceScope
-        texts: *const c_void, // sz_sequence_u64tape_t
-        min_hashes: *mut u32,
-        min_hashes_stride: usize,
-        min_counts: *mut u32,
-        min_counts_stride: usize,
-        error_message: *mut *const c_char,
-    ) -> Status;
-
-    fn szs_fingerprints_free(engine: FingerprintsHandle);
-
-    // Unified allocator functions
-    fn szs_unified_alloc(size_bytes: usize) -> *mut c_void;
-    fn szs_unified_free(ptr: *mut c_void, size_bytes: usize);
-}
-
-/// Unified memory allocator that uses CUDA unified memory when available,
-/// falls back to malloc otherwise. Works with allocator-api2.
-pub struct UnifiedAlloc;
-
-unsafe impl Allocator for UnifiedAlloc {
-    fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, AllocError> {
-        let size = layout.size();
-        if size == 0 {
-            // For zero-sized allocations, return a properly aligned non-null dangling pointer
-            let ptr = core::ptr::NonNull::new(layout.align() as *mut u8).ok_or(AllocError)?;
-            return Ok(core::ptr::NonNull::slice_from_raw_parts(ptr, 0));
-        }
-
-        let ptr = unsafe { szs_unified_alloc(size) };
-        if ptr.is_null() {
-            return Err(AllocError);
-        }
-
-        let ptr = core::ptr::NonNull::new(ptr as *mut u8).ok_or(AllocError)?;
-        Ok(core::ptr::NonNull::slice_from_raw_parts(ptr, size))
-    }
-
-    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
-        if layout.size() != 0 {
-            szs_unified_free(ptr.as_ptr() as *mut c_void, layout.size());
-        }
-    }
-}
-
-/// Type alias for Vec with unified allocator
-pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
-
-/// Levenshtein distance engine for batch processing of binary sequences.
-///
-/// Computes edit distances between pairs of byte sequences using the Wagner-Fischer
-/// dynamic programming algorithm with configurable gap costs. This engine is optimized
-/// for processing large batches of sequence pairs in parallel.
-///
-/// # Algorithm
-///
-/// Uses Wagner-Fischer dynamic programming with affine gap costs:
-/// - **Match cost**: Cost when characters are identical (typically ≤ 0)
-/// - **Mismatch cost**: Cost when characters differ (typically > 0)  
-/// - **Open cost**: Cost to start a gap (insertion/deletion)
-/// - **Extend cost**: Cost to extend an existing gap (usually < open cost)
-///
-/// Time complexity: O(nm) per pair, where n and m are sequence lengths.
-/// Space complexity: O(n+m) with optimizations for large batches.
-///
-/// # Use Cases
-///
-/// - **Spell checking**: Finding closest dictionary matches
-/// - **File deduplication**: Detecting similar binary files
-/// - **Data cleaning**: Merging near-duplicate records
-/// - **Fuzzy matching**: Approximate string search
-///
-/// # Examples
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // Create engine with standard costs
-/// let device = DeviceScope::default().unwrap();
-/// let engine = LevenshteinDistances::new(
-///     &device,
-///     0,  // match: no cost for identical chars
-///     1,  // mismatch: unit cost for different chars
-///     1,  // open: unit cost to start gap
-///     1,  // extend: unit cost to extend gap
-/// ).unwrap();
-///
-/// // Compare similar strings
-/// let strings_a = vec!["kitten", "saturday"];
-/// let strings_b = vec!["sitting", "sunday"];
-/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-///
-/// println!("Distance 'kitten' -> 'sitting': {}", distances[0]);  // 3
-/// println!("Distance 'saturday' -> 'sunday': {}", distances[1]); // 3
-/// ```
-///
-/// # Advanced Configuration
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // Biased towards insertions/deletions over substitutions
-/// let device = DeviceScope::default().unwrap();
-/// let engine = LevenshteinDistances::new(
-///     &device,
-///     -1, // match: reward for matches
-///     3,  // mismatch: high cost for substitutions  
-///     1,  // open: low cost for gaps
-///     1,  // extend: same cost to extend
-/// ).unwrap();
-/// ```
-///
-/// # Performance Optimization
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // For maximum performance with large batches
-/// let device = DeviceScope::cpu_cores(8).unwrap(); // or gpu_device(0)
-/// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-///
-/// // Process thousands of pairs efficiently
-/// let large_batch_a: Vec<&str> = (0..10000).map(|i| "test_string").collect();
-/// let large_batch_b: Vec<&str> = (0..10000).map(|i| "test_strong").collect();
-/// let distances = engine.compute(&device, &large_batch_a, &large_batch_b).unwrap();
-/// ```
-pub struct LevenshteinDistances {
-    handle: LevenshteinDistancesHandle,
-}
-
-impl LevenshteinDistances {
-    /// Create a new Levenshtein distances engine with specified costs.
-    ///
-    /// Initializes the engine with custom gap costs for fine-tuned distance computation.
-    /// The engine automatically selects optimal algorithms based on the device capabilities.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution context and capabilities
-    /// - `match_cost`: Cost when characters match (typically ≤ 0)
-    /// - `mismatch_cost`: Cost when characters differ (typically > 0)
-    /// - `open_cost`: Cost to open a gap (insertion/deletion)
-    /// - `extend_cost`: Cost to extend existing gap (usually ≤ open_cost)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(LevenshteinDistances)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid cost configuration
-    ///
-    /// # Cost Configuration Guidelines
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Standard Levenshtein distance (all operations cost 1)
-    /// let standard = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-    ///
-    /// // Prefer matches, penalize mismatches heavily
-    /// let match_biased = LevenshteinDistances::new(&device, -1, 3, 2, 1).unwrap();
-    ///
-    /// // Linear gap costs (open == extend)
-    /// let linear_gaps = LevenshteinDistances::new(&device, 0, 1, 2, 2).unwrap();
-    ///
-    /// // Affine gap costs (open > extend, penalizes gap opening)
-    /// let affine_gaps = LevenshteinDistances::new(&device, 0, 1, 3, 1).unwrap();
-    /// ```
-    pub fn new(
-        device: &DeviceScope,
-        match_cost: i8,
-        mismatch_cost: i8,
-        open_cost: i8,
-        extend_cost: i8,
-    ) -> Result<Self, Error> {
-        let mut handle = ptr::null_mut();
-        let capabilities = device.get_capabilities().unwrap_or(0);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_levenshtein_distances_init(
-                match_cost,
-                mismatch_cost,
-                open_cost,
-                extend_cost,
-                ptr::null(),
-                capabilities,
-                &mut handle,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(Self { handle }),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    /// Compute Levenshtein distances between sequence pairs.
-    ///
-    /// Processes pairs of sequences in parallel, computing edit distance for each pair.
-    /// The function automatically handles both CPU SIMD and GPU acceleration based
-    /// on the device scope configuration.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution
-    /// - `sequences_a`: First collection of sequences
-    /// - `sequences_b`: Second collection of sequences  
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(UnifiedVec<usize>)`: Vector of distances, one per sequence pair
-    /// - `Err(Status)`: Computation failed
-    ///
-    /// # Behavior
-    ///
-    /// - Pairs sequences by index: (a[0], b[0]), (a[1], b[1]), etc.
-    /// - Result length equals `min(sequences_a.len(), sequences_b.len())`
-    /// - Uses unified memory allocation for GPU compatibility
-    /// - Empty sequences are handled correctly (distance equals other sequence length)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-    ///
-    /// // Basic usage
-    /// let words_a = vec!["cat", "dog", "bird"];
-    /// let words_b = vec!["bat", "fog", "word"];
-    /// let distances = engine.compute(&device, &words_a, &words_b).unwrap();
-    ///
-    /// assert_eq!(distances.len(), 3);
-    /// println!("Distances: {:?}", distances); // [1, 1, 3]
-    /// ```
-    ///
-    /// # Performance Notes
-    ///
-    /// - CPU performance scales with SIMD width and core count
-    /// - GPU optimal for batches >1000 pairs with medium-length sequences
-    /// - Memory layout optimized for cache efficiency
-    /// - Consider sequence length distribution for optimal performance
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Error>
-    where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
-    {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
-
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-
-        let results_stride = core::mem::size_of::<usize>();
-
-        if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_levenshtein_distances_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
-    }
-}
-
-impl Drop for LevenshteinDistances {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe { szs_levenshtein_distances_free(self.handle) };
-        }
-    }
-}
-
-unsafe impl Send for LevenshteinDistances {}
-unsafe impl Sync for LevenshteinDistances {}
-
-/// UTF-8 aware Levenshtein distance engine for Unicode text processing.
-///
-/// Computes edit distances between UTF-8 encoded strings at the character level
-/// rather than byte level. This engine properly handles multi-byte UTF-8 sequences,
-/// ensuring that operations are performed on Unicode code points.
-///
-/// # UTF-8 vs Binary Processing
-///
-/// - **Binary engine**: Operates on raw bytes, faster but incorrect for Unicode
-/// - **UTF-8 engine**: Operates on Unicode code points, slower but semantically correct
-///
-/// Use this engine when working with international text, emoji, or any content
-/// where character boundaries matter.
-///
-/// # Examples
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
-/// let device = DeviceScope::default().unwrap();
-/// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-///
-/// // Unicode strings with emoji and accents
-/// let strings_a = vec!["café", "naïve", "🦀 rust"];
-/// let strings_b = vec!["cafe", "naive", "🔥 rust"];
-/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-///
-/// // Character-level distances (not byte-level)
-/// println!("'café' -> 'cafe': {}", distances[0]); // 1 (é -> e)
-/// println!("'🦀 rust' -> '🔥 rust': {}", distances[2]); // 1 (🦀 -> 🔥)
-/// ```
-///
-/// # Comparison with Binary Engine
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
-/// let device = DeviceScope::default().unwrap();
-/// let binary_engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-/// let utf8_engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-///
-/// let text_a = vec!["café"]; // 5 bytes, 4 characters
-/// let text_b = vec!["cafe"]; // 4 bytes, 4 characters
-///
-/// let binary_dist = binary_engine.compute(&device, &text_a, &text_b).unwrap();
-/// let utf8_dist = utf8_engine.compute(&device, &text_a, &text_b).unwrap();
-///
-/// println!("Binary distance: {}", binary_dist[0]); // 2 (é is 2 bytes)
-/// println!("UTF-8 distance: {}", utf8_dist[0]);   // 1 (é is 1 character)
-/// ```
-///
-/// # Performance Considerations
-///
-/// - Slower than binary engine due to UTF-8 decoding overhead
-/// - Performance impact depends on character distribution
-/// - ASCII-only text has minimal overhead
-/// - Complex scripts (Arabic, Thai) have higher overhead
-pub struct LevenshteinDistancesUtf8 {
-    handle: LevenshteinDistancesUtf8Handle,
-}
-
-impl LevenshteinDistancesUtf8 {
-    /// Create a new UTF-8 aware Levenshtein distances engine.
-    ///
-    /// Initializes an engine that processes UTF-8 strings at the character level,
-    /// properly handling multi-byte Unicode sequences. Essential for international
-    /// text processing and semantic correctness.
-    ///
-    /// # Parameters
-    ///
-    /// Same as binary engine, but costs apply to Unicode code points:
-    /// - `match_cost`: Cost when Unicode characters match
-    /// - `mismatch_cost`: Cost when Unicode characters differ
-    /// - `open_cost`: Cost to insert/delete a Unicode character
-    /// - `extend_cost`: Cost to continue insertion/deletion
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Standard Unicode-aware engine
-    /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-    ///
-    /// // Test with international text
-    /// let greetings_a = vec!["Hello", "Bonjour", "こんにちは"];
-    /// let greetings_b = vec!["Hallo", "Bonjoir", "こんばんは"];
-    /// let distances = engine.compute(&device, &greetings_a, &greetings_b).unwrap();
-    /// ```
-    pub fn new(
-        device: &DeviceScope,
-        match_cost: i8,
-        mismatch_cost: i8,
-        open_cost: i8,
-        extend_cost: i8,
-    ) -> Result<Self, Error> {
-        let mut handle = ptr::null_mut();
-        let capabilities = device.get_capabilities().unwrap_or(0);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_levenshtein_distances_utf8_init(
-                match_cost,
-                mismatch_cost,
-                open_cost,
-                extend_cost,
-                ptr::null(),
-                capabilities,
-                &mut handle,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(Self { handle }),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    /// Compute UTF-8 aware Levenshtein distances between string pairs.
-    ///
-    /// Processes Unicode strings character by character, ensuring proper handling
-    /// of multi-byte UTF-8 sequences. Critical for applications requiring semantic
-    /// correctness with international text.
-    ///
-    /// # Type Requirements
-    ///
-    /// Input sequences must implement `AsRef<str>` to ensure valid UTF-8:
-    /// - `&str`, `String`, `Cow<str>` are all supported
-    /// - Invalid UTF-8 will cause undefined behavior
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-    ///
-    /// // Unicode strings (same container type for both sides)
-    /// let strings_a: Vec<String> = vec!["résumé".to_string(), "naïve".to_string()];
-    /// let strings_b: Vec<String> = vec!["resume".to_string(), "naive".to_string()];
-    /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-    ///
-    /// // Each accented character counts as 1 edit
-    /// assert_eq!(distances[0], 2); // é->e, é->e
-    /// assert_eq!(distances[1], 1); // ï->i
-    /// ```
-    ///
-    /// # Unicode Normalization
-    ///
-    /// Note: This engine does NOT perform Unicode normalization. Pre-normalize
-    /// your strings if you need to handle composed vs decomposed characters:
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
-    /// // These are different at the code point level:
-    /// let composed = vec!["café"];     // é as single code point U+00E9
-    /// let decomposed = vec!["cafe\u{0301}"]; // e + combining acute accent
-    ///
-    /// // Distance would be non-zero without normalization
-    /// // Use unicode-normalization crate if needed
-    /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Error>
-    where
-        T: AsRef<[S]>,
-        S: AsRef<str>,
-    {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
-
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-
-        let results_stride = core::mem::size_of::<usize>();
-
-        if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape_str(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape_str(seq_b_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view_str(&tape_a);
-                let tape_b_view = create_u64tape_view_str(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_utf8_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_a_view = create_u32tape_view_str(&tape_a);
-                let tape_b_view = create_u32tape_view_str(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_utf8_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let seq_a = create_sequence_view_str(seq_a_slice);
-            let seq_b = create_sequence_view_str(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_levenshtein_distances_utf8_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
-    }
-}
-
-impl Drop for LevenshteinDistancesUtf8 {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe { szs_levenshtein_distances_utf8_free(self.handle) };
-        }
-    }
-}
-
-unsafe impl Send for LevenshteinDistancesUtf8 {}
-unsafe impl Sync for LevenshteinDistancesUtf8 {}
-
-/// Needleman-Wunsch global sequence alignment scoring engine.
-///
-/// Implements the Needleman-Wunsch algorithm for finding the optimal global alignment
-/// between two sequences. Unlike edit distance, this algorithm uses a full substitution
-/// matrix and returns alignment scores rather than distances.
-///
-/// # Algorithm Details
-///
-/// The Needleman-Wunsch algorithm finds the optimal global alignment by:
-/// 1. Building a dynamic programming matrix using substitution scores
-/// 2. Applying gap penalties (open + extend costs)
-/// 3. Finding the maximum-scoring path through the entire sequences
-///
-/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
-///
-/// # Applications
-///
-/// - **Bioinformatics**: Protein and DNA sequence alignment
-/// - **Linguistics**: Comparative analysis of languages
-/// - **Data integration**: Aligning structured records
-/// - **Quality control**: Comparing reference vs. observed sequences
-///
-/// # Substitution Matrix
-///
-/// Requires a 256x256 scoring matrix where `matrix[i][j]` gives the score
-/// for aligning character `i` with character `j`. Common matrices include:
-/// - **BLOSUM**: For protein sequences
-/// - **PAM**: For evolutionary analysis
-/// - **Custom**: For domain-specific applications
-///
-/// # Examples
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Create simple scoring matrix (match=2, mismatch=-1)
-/// let mut matrix = [[-1i8; 256]; 256];
-/// for i in 0..256 {
-///     matrix[i][i] = 2; // Match score
-/// }
-///
-/// let device = DeviceScope::default().unwrap();
-/// let engine = NeedlemanWunschScores::new(
-///     &device,
-///     &matrix,
-///     -2, // gap open penalty
-///     -1, // gap extend penalty
-/// ).unwrap();
-///
-/// // Align protein sequences
-/// let seq_a = vec!["ACDEFGHIKLMNPQRSTVWY"];
-/// let seq_b = vec!["ACDEFGHIKL---NPQRSTVWY"];
-/// let scores = engine.compute(&device, &seq_a, &seq_b).unwrap();
-///
-/// println!("Global alignment score: {}", scores[0]);
-/// ```
-///
-/// # BLOSUM62 Example
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Load BLOSUM62 matrix (simplified example)
-/// fn create_blosum62_matrix() -> [[i8; 256]; 256] {
-///     let mut matrix = [[-4i8; 256]; 256]; // Default mismatch
-///     
-///     // Set scores for amino acids (simplified BLOSUM62 subset)
-///     let aa_scores = [
-///         ('A', 'A', 4), ('A', 'R', -1), ('A', 'N', -2),
-///         ('R', 'R', 5), ('R', 'N', 0), ('N', 'N', 6),
-///         // ... (full BLOSUM62 table)
-///     ];
-///     
-///     for (aa1, aa2, score) in aa_scores.iter() {
-///         matrix[*aa1 as usize][*aa2 as usize] = *score;
-///         matrix[*aa2 as usize][*aa1 as usize] = *score; // Symmetric
-///     }
-///     matrix
-/// }
-///
-/// let device = DeviceScope::default().unwrap();
-/// let blosum62 = create_blosum62_matrix();
-/// let engine = NeedlemanWunschScores::new(&device, &blosum62, -11, -1).unwrap();
-/// ```
-pub struct NeedlemanWunschScores {
-    handle: NeedlemanWunschScoresHandle,
-}
-
-impl NeedlemanWunschScores {
-    /// Create a new Needleman-Wunsch global alignment scoring engine.
-    ///
-    /// Initializes the engine with a custom substitution matrix and gap penalties.
-    /// The engine will automatically select optimal implementations based on
-    /// hardware capabilities.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution and capability detection
-    /// - `substitution_matrix`: 256x256 matrix of alignment scores
-    /// - `open_cost`: Penalty for opening a gap (typically negative)
-    /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(NeedlemanWunschScores)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid matrix or gap costs
-    ///
-    /// # Matrix Guidelines
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// // Identity matrix (simple match/mismatch)
-    /// let mut simple_matrix = [[0i8; 256]; 256];
-    /// for i in 0..256 {
-    ///     simple_matrix[i][i] = 1;  // Match
-    ///     for j in 0..256 {
-    ///         if i != j { simple_matrix[i][j] = -1; } // Mismatch
-    ///     }
-    /// }
-    ///
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = NeedlemanWunschScores::new(&device, &simple_matrix, -2, -1).unwrap();
-    /// ```
-    ///
-    /// # Gap Cost Selection
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # let device = DeviceScope::default().unwrap();
-    /// // Linear gap costs (open == extend)
-    /// let linear = NeedlemanWunschScores::new(&device, &matrix, -1, -1).unwrap();
-    ///
-    /// // Affine gap costs (prefer fewer, longer gaps)
-    /// let affine = NeedlemanWunschScores::new(&device, &matrix, -5, -1).unwrap();
-    /// ```
-    pub fn new(
-        device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
-        open_cost: i8,
-        extend_cost: i8,
-    ) -> Result<Self, Error> {
-        let mut handle = ptr::null_mut();
-        let capabilities = device.get_capabilities().unwrap_or(0);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_needleman_wunsch_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
-                open_cost,
-                extend_cost,
-                ptr::null(),
-                capabilities,
-                &mut handle,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(Self { handle }),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    /// Compute Needleman-Wunsch global alignment scores between sequence pairs.
-    ///
-    /// Finds the optimal global alignment score for each pair of sequences using
-    /// the configured substitution matrix and gap penalties. Returns positive scores
-    /// for good alignments, negative for poor alignments.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for parallel execution
-    /// - `sequences_a`: First collection of sequences to align
-    /// - `sequences_b`: Second collection of sequences to align
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(UnifiedVec<isize>)`: Vector of alignment scores (can be negative)
-    /// - `Err(Status)`: Computation failed
-    ///
-    /// # Score Interpretation
-    ///
-    /// - **Positive scores**: Good alignment, sequences are similar
-    /// - **Zero scores**: Neutral alignment
-    /// - **Negative scores**: Poor alignment, sequences are dissimilar
-    /// - **Magnitude**: Higher absolute values indicate stronger alignment quality
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 2; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
-    ///
-    /// // Compare DNA sequences
-    /// let dna_a = vec!["ATCGATCG", "GGCCTTAA"];
-    /// let dna_b = vec!["ATCGATCC", "GGCCTTAA"]; // One mismatch, one exact
-    /// let scores = engine.compute(&device, &dna_a, &dna_b).unwrap();
-    ///
-    /// println!("DNA alignment scores: {:?}", scores);
-    /// // Expect: [positive but lower for mismatch, high positive for exact match]
-    /// ```
-    ///
-    /// # Batch Processing
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
-    /// // Process large batches efficiently
-    /// let sequences: Vec<&str> = vec![
-    ///     "PROTEIN_SEQUENCE_1", "PROTEIN_SEQUENCE_2", /* ... */
-    /// ];
-    /// let references: Vec<&str> = vec![
-    ///     "REFERENCE_SEQ_1", "REFERENCE_SEQ_2", /* ... */
-    /// ];
-    ///
-    /// let scores = engine.compute(&device, &sequences, &references).unwrap();
-    ///
-    /// // Find best alignments
-    /// let best_idx = scores.iter().enumerate()
-    ///     .max_by_key(|(_, &score)| score)
-    ///     .map(|(idx, _)| idx);
-    /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Error>
-    where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
-    {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
-
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-
-        let results_stride = core::mem::size_of::<isize>();
-
-        if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_needleman_wunsch_scores_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_needleman_wunsch_scores_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_needleman_wunsch_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
-    }
-}
-
-impl Drop for NeedlemanWunschScores {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe { szs_needleman_wunsch_scores_free(self.handle) };
-        }
-    }
-}
-
-unsafe impl Send for NeedlemanWunschScores {}
-unsafe impl Sync for NeedlemanWunschScores {}
-
-/// Smith-Waterman local sequence alignment scoring engine.
-///
-/// Implements the Smith-Waterman algorithm for finding optimal local alignments
-/// within sequences. Unlike Needleman-Wunsch, this algorithm finds the best-matching
-/// subsequences rather than aligning entire sequences.
-///
-/// # Algorithm Details
-///
-/// The Smith-Waterman algorithm:
-/// 1. Builds a dynamic programming matrix with non-negative scores
-/// 2. Allows scores to reset to zero (no penalty for poor regions)
-/// 3. Returns the maximum score found anywhere in the matrix
-/// 4. Identifies optimal local alignments without end-to-end constraints
-///
-/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
-///
-/// # Applications
-///
-/// - **Homology search**: Finding similar regions in biological sequences
-/// - **Motif discovery**: Identifying conserved patterns
-/// - **Database search**: BLAST-like local similarity search
-/// - **Partial matching**: Finding best substring alignments
-/// - **Fragment analysis**: Comparing incomplete or damaged sequences
-///
-/// # Local vs Global Alignment
-///
-/// ```text
-/// Global (Needleman-Wunsch):
-/// SEQUENCE_A: ATCGATCGATCG----ATCG
-/// SEQUENCE_B: ----ATCGATCGATCGATCG
-/// (Forces end-to-end alignment)
-///
-/// Local (Smith-Waterman):
-/// SEQUENCE_A: ...ATCGATCGATCG...
-/// SEQUENCE_B:    ATCGATCGATCG
-/// (Finds best local match)
-/// ```
-///
-/// # Examples
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// // Create scoring matrix for DNA (A, T, C, G)
-/// let mut dna_matrix = [[-2i8; 256]; 256]; // Mismatch penalty
-/// let dna_chars = [b'A', b'T', b'C', b'G'];
-/// for &c1 in &dna_chars {
-///     for &c2 in &dna_chars {
-///         dna_matrix[c1 as usize][c2 as usize] = if c1 == c2 { 3 } else { -1 };
-///     }
-/// }
-///
-/// let device = DeviceScope::default().unwrap();
-/// let engine = SmithWatermanScores::new(
-///     &device,
-///     &dna_matrix,
-///     -5, // gap open
-///     -1, // gap extend
-/// ).unwrap();
-///
-/// // Find local similarities
-/// let long_seq = vec!["ATCGATCGATCGAAAAAATCGATCGATCG"];
-/// let pattern = vec!["ATCGATCGATCG"];
-/// let scores = engine.compute(&device, &long_seq, &pattern).unwrap();
-///
-/// println!("Local alignment score: {}", scores[0]); // High positive score
-/// ```
-///
-/// # Database Search Example
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// # let mut matrix = [[0i8; 256]; 256];
-/// let device = DeviceScope::default().unwrap();
-/// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
-///
-/// // Search query against database sequences
-/// let query = "ACDEFGHIKLMN";  // Query sequence
-/// let database = vec![
-///     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",  // Contains query
-///     "ZYXWVUTSRQPONMLKJIHGFEDCBA",  // Reverse complement
-///     "DEFGHIKLM",                  // Partial match
-///     "COMPLETELY_DIFFERENT",        // No similarity
-/// ];
-///
-/// let queries = vec![query; database.len()];  // Repeat query for each DB entry
-/// let scores = engine.compute(&device, &queries, &database).unwrap();
-///
-/// // Find best matches
-/// for (i, &score) in scores.iter().enumerate() {
-///     println!("Database[{}] score: {}", i, score);
-/// }
-/// ```
-pub struct SmithWatermanScores {
-    handle: SmithWatermanScoresHandle,
-}
-
-impl SmithWatermanScores {
-    /// Create a new Smith-Waterman local alignment scoring engine.
-    ///
-    /// Initializes the engine for local sequence alignment with custom scoring parameters.
-    /// The engine automatically adapts to available hardware capabilities.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution context
-    /// - `substitution_matrix`: 256x256 scoring matrix for character pairs
-    /// - `open_cost`: Gap opening penalty (typically negative)
-    /// - `extend_cost`: Gap extension penalty (typically negative, ≥ open_cost)
-    ///
-    /// # Matrix Design for Local Alignment
-    ///
-    /// For effective local alignment, the matrix should have:
-    /// - **Positive match scores**: Reward similar characters
-    /// - **Negative mismatch scores**: Penalize dissimilar characters
-    /// - **Balanced penalties**: Prevent excessive gap formation
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Protein alignment matrix (simplified)
-    /// let mut protein_matrix = [[-1i8; 256]; 256];  // Default mismatch
-    ///
-    /// // Set positive scores for similar amino acids
-    /// let amino_acids = b"ACDEFGHIKLMNPQRSTVWY";
-    /// for &aa in amino_acids {
-    ///     protein_matrix[aa as usize][aa as usize] = 5; // Identity
-    /// }
-    ///
-    /// // Similar amino acids get positive but lower scores
-    /// protein_matrix[b'L' as usize][b'I' as usize] = 2; // Leucine-Isoleucine
-    /// protein_matrix[b'I' as usize][b'L' as usize] = 2;
-    ///
-    /// let engine = SmithWatermanScores::new(&device, &protein_matrix, -3, -1).unwrap();
-    /// ```
-    ///
-    /// # Gap Penalty Strategy
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # let device = DeviceScope::default().unwrap();
-    /// // Conservative gaps (discourage insertions/deletions)
-    /// let conservative = SmithWatermanScores::new(&device, &matrix, -10, -2).unwrap();
-    ///
-    /// // Permissive gaps (allow more insertions/deletions)
-    /// let permissive = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
-    /// ```
-    pub fn new(
-        device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
-        open_cost: i8,
-        extend_cost: i8,
-    ) -> Result<Self, Error> {
-        let mut handle = ptr::null_mut();
-        let capabilities = device.get_capabilities().unwrap_or(0);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_smith_waterman_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
-                open_cost,
-                extend_cost,
-                ptr::null(),
-                capabilities,
-                &mut handle,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(Self { handle }),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    /// Compute Smith-Waterman local alignment scores between sequence pairs.
-    ///
-    /// Finds the optimal local alignment score for each sequence pair. Returns
-    /// the maximum alignment score found within the sequences, representing
-    /// the best possible local match.
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution
-    /// - `sequences_a`: First collection of sequences
-    /// - `sequences_b`: Second collection of sequences
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(UnifiedVec<isize>)`: Vector of local alignment scores (≥ 0)
-    /// - `Err(Status)`: Computation failed
-    ///
-    /// # Score Interpretation
-    ///
-    /// - **High scores**: Strong local similarity found
-    /// - **Low scores**: Weak or no local similarity
-    /// - **Zero scores**: No positive-scoring alignment possible
-    /// - **Never negative**: Smith-Waterman scores are always ≥ 0
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 3; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
-    ///
-    /// // Local similarity search
-    /// let sequences = vec![
-    ///     "ATCGATCGATCG_LONG_SEQUENCE_WITH_NOISE",
-    ///     "DIFFERENT_SEQUENCE_ATCGATCGATCG_MORE_NOISE",
-    ///     "COMPLETELY_UNRELATED_SEQUENCE",
-    /// ];
-    /// let pattern = vec!["ATCGATCGATCG"; 3];  // Search for this pattern
-    ///
-    /// let scores = engine.compute(&device, &sequences, &pattern).unwrap();
-    ///
-    /// for (i, &score) in scores.iter().enumerate() {
-    ///     if score > 20 {  // Threshold for significant similarity
-    ///         println!("Sequence {} contains similar region (score: {})", i, score);
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// # Homology Search
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
-    /// // Find homologous sequences in a database
-    /// let query_seq = vec!["PROTEIN_QUERY_SEQUENCE"];
-    /// let database_seqs = vec![
-    ///     "HOMOLOGOUS_PROTEIN_SEQUENCE_VARIANT_1",
-    ///     "HOMOLOGOUS_PROTEIN_SEQUENCE_VARIANT_2",
-    ///     "UNRELATED_PROTEIN_SEQUENCE",
-    /// ];
-    ///
-    /// let queries = vec![query_seq[0]; database_seqs.len()];
-    /// let scores = engine.compute(&device, &queries, &database_seqs).unwrap();
-    ///
-    /// // Sort by score to find best matches
-    /// let mut scored_results: Vec<_> = scores.iter().enumerate()
-    ///     .map(|(i, &score)| (i, score))
-    ///     .collect();
-    /// scored_results.sort_by_key(|(_, score)| -score);  // Descending
-    ///
-    /// println!("Best matches:");
-    /// for (idx, score) in scored_results.iter().take(3) {
-    ///     println!("Database[{}]: score {}", idx, score);
-    /// }
-    /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Error>
-    where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
-    {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
-
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-
-        let results_stride = core::mem::size_of::<isize>();
-
-        if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_smith_waterman_scores_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_smith_waterman_scores_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_smith_waterman_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
-    }
-}
-
-impl Drop for SmithWatermanScores {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe { szs_smith_waterman_scores_free(self.handle) };
-        }
-    }
-}
-
-unsafe impl Send for SmithWatermanScores {}
-unsafe impl Sync for SmithWatermanScores {}
-
-/// Creates a diagonal substitution matrix for sequence alignment.
-/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
-/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
-pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
-    let mut result = [[0i8; 256]; 256];
-
-    for i in 0..256 {
-        for j in 0..256 {
-            result[i][j] = if i == j { match_score } else { mismatch_score };
-        }
-    }
-
-    result
-}
 
 /// Equivalent to `error_costs_256x256_diagonal(0, -1)`.
 pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
@@ -2648,8 +3970,94 @@ fn create_sequence_view_str<T: AsRef<str>>(strings: &[T]) -> SzSequence {
     }
 }
 
-/// Convert StringTape to appropriate tape view for C API
-fn create_tape<T>(sequences: &[T]) -> Result<(BytesTape<i64, UnifiedAlloc>, bool), Error>
+/// Size-adaptive BytesTape - automatically uses 32-bit or 64-bit offsets based on data size
+pub enum SizedBytesTape {
+    Small(BytesTape<u32, UnifiedAlloc>), // For data < 4GB
+    Large(BytesTape<u64, UnifiedAlloc>), // For data >= 4GB
+}
+
+impl SizedBytesTape {
+    /// Returns true if using 64-bit offsets (for large datasets)
+    pub fn is_large(&self) -> bool {
+        matches!(self, SizedBytesTape::Large(_))
+    }
+
+    /// Get the number of sequences
+    pub fn count(&self) -> usize {
+        match self {
+            SizedBytesTape::Small(tape) => tape.as_raw_parts().2,
+            SizedBytesTape::Large(tape) => tape.as_raw_parts().2,
+        }
+    }
+
+    /// Create a tape view for C API
+    pub fn as_c_api_view(&self) -> CApiTapeView {
+        match self {
+            SizedBytesTape::Small(tape) => {
+                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
+                CApiTapeView::U32(CApiTape32 {
+                    data: data_ptr,
+                    offsets: offsets_ptr as *const u32,
+                    count,
+                })
+            }
+            SizedBytesTape::Large(tape) => {
+                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
+                CApiTapeView::U64(CApiTape64 {
+                    data: data_ptr,
+                    offsets: offsets_ptr as *const u64,
+                    count,
+                })
+            }
+        }
+    }
+}
+
+/// Size-adaptive StringTape - automatically uses 32-bit or 64-bit offsets based on data size
+pub enum SizedStringTape {
+    Small(StringTape<u32, UnifiedAlloc>), // For data < 4GB
+    Large(StringTape<u64, UnifiedAlloc>), // For data >= 4GB
+}
+
+impl SizedStringTape {
+    /// Returns true if using 64-bit offsets (for large datasets)
+    pub fn is_large(&self) -> bool {
+        matches!(self, SizedStringTape::Large(_))
+    }
+
+    /// Get the number of sequences
+    pub fn count(&self) -> usize {
+        match self {
+            SizedStringTape::Small(tape) => tape.as_raw_parts().2,
+            SizedStringTape::Large(tape) => tape.as_raw_parts().2,
+        }
+    }
+
+    /// Create a tape view for C API
+    pub fn as_c_api_view(&self) -> CApiTapeView {
+        match self {
+            SizedStringTape::Small(tape) => {
+                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
+                CApiTapeView::U32(CApiTape32 {
+                    data: data_ptr,
+                    offsets: offsets_ptr as *const u32,
+                    count,
+                })
+            }
+            SizedStringTape::Large(tape) => {
+                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
+                CApiTapeView::U64(CApiTape64 {
+                    data: data_ptr,
+                    offsets: offsets_ptr as *const u64,
+                    count,
+                })
+            }
+        }
+    }
+}
+
+/// Convert byte sequences to appropriate tape (32-bit or 64-bit based on size)
+pub fn create_tape<T>(sequences: &[T]) -> Result<SizedBytesTape, Error>
 where
     T: AsRef<[u8]>,
 {
@@ -2657,71 +4065,31 @@ where
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    let tape = if use_64bit {
-        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    if use_64bit {
+        let mut tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(SizedBytesTape::Large(tape))
     } else {
-        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
-    };
-
-    let mut tape = tape;
-    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-    Ok((tape, use_64bit))
+        let mut tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(SizedBytesTape::Small(tape))
+    }
 }
 
-/// Convert string sequences to StringTape
-fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, UnifiedAlloc>, bool), Error> {
+/// Convert string sequences to appropriate tape (32-bit or 64-bit based on size)
+pub fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<SizedStringTape, Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    let tape = if use_64bit {
-        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    if use_64bit {
+        let mut tape = StringTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(SizedStringTape::Large(tape))
     } else {
-        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
-    };
-
-    let mut tape = tape;
-    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-    Ok((tape, use_64bit))
-}
-
-/// Convert 32-bit BytesTape to SzSequenceU32Tape for C API
-fn create_u32tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU32Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u32,
-        count,
-    }
-}
-
-/// Convert 32-bit StringTape to SzSequenceU32Tape for C API
-fn create_u32tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU32Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u32,
-        count,
-    }
-}
-
-/// Convert 64-bit BytesTape to SzSequenceU64Tape for C API  
-fn create_u64tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU64Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u64,
-        count,
-    }
-}
-
-/// Convert 64-bit StringTape to SzSequenceU64Tape for C API  
-fn create_u64tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU64Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u64,
-        count,
+        let mut tape = StringTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(SizedStringTape::Small(tape))
     }
 }
 
