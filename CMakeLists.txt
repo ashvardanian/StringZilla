@@ -43,7 +43,7 @@
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(
     stringzilla
-    VERSION 4.0.0
+    VERSION 4.0.1
     LANGUAGES C CXX ASM
     DESCRIPTION "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla"
