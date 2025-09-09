@@ -73,14 +73,13 @@ jobs:
           unprotect_reviews: True
           force: True
 
-  build_wheels_stringzilla:
-    name: Build StringZilla ${{ matrix.python-version }} for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  build_wheels_stringzilla_linux:
+    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu
+    runs-on: ubuntu-24.04
     needs: versioning
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-13, windows-2022]
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
       - uses: actions/checkout@v5
@@ -93,7 +92,6 @@ jobs:
         with:
           python-version: 3.x
       - name: Setup QEMU
-        if: matrix.os == 'ubuntu-24.04' # We only need QEMU for Linux builds
         uses: docker/setup-qemu-action@v3
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.21.3
@@ -101,24 +99,87 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
           CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
           SZ_TARGET: stringzilla
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-stringzilla-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-stringzilla-ubuntu-24.04-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  build_wheels_stringzillas_cpus:
-    name: Build StringZillas-CPUs ${{ matrix.python-version }} for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  build_wheels_stringzilla_macos:
+    name: Build StringZilla ${{ matrix.python-version }} for macOS
+    runs-on: macos-13
     needs: versioning
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-13, windows-2022]
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzilla-macos-13-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_wheels_stringzilla_windows:
+    name: Build StringZilla ${{ matrix.python-version }} for Windows
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzilla-windows-2022-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_wheels_stringzillas_cpus_linux:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
       - uses: actions/checkout@v5
@@ -131,7 +192,6 @@ jobs:
         with:
           python-version: 3.x
       - name: Setup QEMU
-        if: matrix.os == 'ubuntu-24.04' # We only need QEMU for Linux builds
         uses: docker/setup-qemu-action@v3
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.21.3
@@ -139,17 +199,80 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
           CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
           SZ_TARGET: stringzillas-cpus
-          # Limit to 64-bit architectures only
           CIBW_ARCHS_LINUX: x86_64 aarch64
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzillas-cpus-ubuntu-24.04-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_wheels_stringzillas_cpus_macos:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for macOS
+    runs-on: macos-13
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          SZ_TARGET: stringzillas-cpus
           CIBW_ARCHS_MACOS: x86_64 arm64
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-stringzillas-cpus-macos-13-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  build_wheels_stringzillas_cpus_windows:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["38", "39", "310", "311", "312", "313"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.21.3
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          SZ_TARGET: stringzillas-cpus
           CIBW_ARCHS_WINDOWS: AMD64 ARM64
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-stringzillas-cpus-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-stringzillas-cpus-windows-2022-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -275,7 +398,13 @@ jobs:
 
   publish_pypi_stringzilla:
     name: Publish StringZilla to PyPI
-    needs: [build_wheels_stringzilla, build_sdist_stringzilla]
+    needs:
+      [
+        build_wheels_stringzilla_linux,
+        build_wheels_stringzilla_macos,
+        build_wheels_stringzilla_windows,
+        build_sdist_stringzilla,
+      ]
     runs-on: ubuntu-24.04
     environment:
       name: pypi-stringzilla
@@ -307,7 +436,13 @@ jobs:
 
   publish_pypi_stringzillas_cpus:
     name: Publish StringZillas-CPUs to PyPI
-    needs: [build_wheels_stringzillas_cpus, build_sdist_stringzillas_cpus]
+    needs:
+      [
+        build_wheels_stringzillas_cpus_linux,
+        build_wheels_stringzillas_cpus_macos,
+        build_wheels_stringzillas_cpus_windows,
+        build_sdist_stringzillas_cpus,
+      ]
     runs-on: ubuntu-24.04
     environment:
       name: pypi-stringzillas-cpus
@@ -575,3 +710,73 @@ jobs:
         with:
           file: "*.zip"
           update_latest_release: true
+
+  # Aggregators for README badges (per-platform)
+  status_linux:
+    name: Linux CI
+    needs:
+      - build_wheels_stringzilla_linux
+      - build_wheels_stringzillas_cpus_linux
+      - build_wheels_stringzillas_cuda
+      - create_linux_deb_package
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate Linux status
+        run: |
+          echo "Linux job results:"
+          echo "build_wheels_stringzilla_linux: ${{ needs.build_wheels_stringzilla_linux.result }}"
+          echo "build_wheels_stringzillas_cpus_linux: ${{ needs.build_wheels_stringzillas_cpus_linux.result }}"
+          echo "build_wheels_stringzillas_cuda: ${{ needs.build_wheels_stringzillas_cuda.result }}"
+          echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_linux.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_linux.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cuda.result }}" != "success" ] || \
+             [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
+            echo "One or more Linux dependencies failed.";
+            exit 1;
+          fi
+
+  status_windows:
+    name: Windows CI
+    needs:
+      - build_wheels_stringzilla_windows
+      - build_wheels_stringzillas_cpus_windows
+      - create_windows_dll_library
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate Windows status
+        run: |
+          echo "Windows job results:"
+          echo "build_wheels_stringzilla_windows: ${{ needs.build_wheels_stringzilla_windows.result }}"
+          echo "build_wheels_stringzillas_cpus_windows: ${{ needs.build_wheels_stringzillas_cpus_windows.result }}"
+          echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_windows.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_windows.result }}" != "success" ] || \
+             [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
+            echo "One or more Windows dependencies failed.";
+            exit 1;
+          fi
+
+  status_macos:
+    name: macOS CI
+    needs:
+      - build_wheels_stringzilla_macos
+      - build_wheels_stringzillas_cpus_macos
+      - create_macos_library
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate macOS status
+        run: |
+          echo "macOS job results:"
+          echo "build_wheels_stringzilla_macos: ${{ needs.build_wheels_stringzilla_macos.result }}"
+          echo "build_wheels_stringzillas_cpus_macos: ${{ needs.build_wheels_stringzillas_cpus_macos.result }}"
+          echo "create_macos_library: ${{ needs.create_macos_library.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_macos.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_macos.result }}" != "success" ] || \
+             [ "${{ needs.create_macos_library.result }}" != "success" ]; then
+            echo "One or more macOS dependencies failed.";
+            exit 1;
+          fi
