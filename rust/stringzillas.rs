@@ -1008,7 +1008,7 @@ impl LevenshteinDistances {
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
 
             // Forward to the in-place variant to avoid code duplication
-            self.compute_into(device, tape_a, tape_b, &mut results)?;
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
             Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
@@ -1050,7 +1050,7 @@ impl LevenshteinDistances {
         device: &DeviceScope,
         a: AnyBytesTape<'a>,
         b: AnyBytesTape<'a>,
-        results: &mut UnifiedVec<usize>,
+        results: &mut [usize],
     ) -> Result<(), Error> {
         // Convert to FFI views and validate matching offset widths
         let mut error_msg: *const c_char = ptr::null();
@@ -1280,7 +1280,7 @@ impl LevenshteinDistancesUtf8 {
             let force_64bit = should_use_64bit_for_strings(seq_a_slice, seq_b_slice);
             let tape_a = copy_chars_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_chars_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results)?;
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
             Ok(results)
         } else {
             let seq_a = SzSequenceFromChars::to_sz_sequence(seq_a_slice);
@@ -1316,7 +1316,7 @@ impl LevenshteinDistancesUtf8 {
         device: &DeviceScope,
         a: AnyCharsTape<'a>,
         b: AnyCharsTape<'a>,
-        results: &mut UnifiedVec<usize>,
+        results: &mut [usize],
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
         let results_stride = core::mem::size_of::<usize>();
@@ -1548,7 +1548,7 @@ impl NeedlemanWunschScores {
             let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
             let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results)?;
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
             Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
@@ -1587,7 +1587,7 @@ impl NeedlemanWunschScores {
         device: &DeviceScope,
         a: AnyBytesTape<'a>,
         b: AnyBytesTape<'a>,
-        results: &mut UnifiedVec<isize>,
+        results: &mut [isize],
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
         let results_stride = core::mem::size_of::<isize>();
@@ -1878,7 +1878,7 @@ impl SmithWatermanScores {
             let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
             let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results)?;
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
             Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
@@ -1907,7 +1907,7 @@ impl SmithWatermanScores {
         device: &DeviceScope,
         a: AnyBytesTape<'a>,
         b: AnyBytesTape<'a>,
-        results: &mut UnifiedVec<isize>,
+        results: &mut [isize],
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
         let results_stride = core::mem::size_of::<isize>();
@@ -2556,7 +2556,7 @@ impl Fingerprints {
             let force_64bit = total_size > u32::MAX as usize || strings_slice.len() > u32::MAX as usize;
             let tape = copy_bytes_into_tape(strings_slice, force_64bit)?;
 
-            self.compute_into(device, tape, dimensions, &mut min_hashes, &mut min_counts)?;
+            self.compute_into(device, tape, dimensions, &mut min_hashes[..], &mut min_counts[..])?;
             Ok((min_hashes, min_counts))
         } else {
             let sequence = SzSequenceFromBytes::to_sz_sequence(strings_slice);
@@ -2590,8 +2590,8 @@ impl Fingerprints {
         device: &DeviceScope,
         texts: AnyBytesTape<'a>,
         dimensions: usize,
-        min_hashes: &mut UnifiedVec<u32>,
-        min_counts: &mut UnifiedVec<u32>,
+        min_hashes: &mut [u32],
+        min_counts: &mut [u32],
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
         let count = match &texts {
@@ -3311,7 +3311,7 @@ mod tests {
             &device,
             AnyBytesTape::Tape32(ta),
             AnyBytesTape::Tape32(tb),
-            &mut results,
+            &mut results[..],
         );
         if let Ok(()) = res {
             assert_eq!(&results[..], &[3, 3]);
@@ -3344,7 +3344,7 @@ mod tests {
             &device,
             AnyBytesTape::Tape64(ta),
             AnyBytesTape::Tape64(tb),
-            &mut results,
+            &mut results[..],
         );
         if let Ok(()) = res {
             // abc vs yabd => distance 2, abcdef vs abcxef => distance 1
