@@ -375,14 +375,31 @@ this_directory = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f:
     long_description = f.read()
 
+# Different descriptions for different variants
+if sz_target == "stringzilla":
+    __description__ = "Search, hash, sort, and process strings faster via SWAR and SIMD"
+elif sz_target == "stringzillas-cpus":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, on multi-core CPUs"
+    )
+elif sz_target == "stringzillas-cuda":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and CUDA on Nvidia GPUs"
+    )
+elif sz_target == "stringzillas-rocm":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and ROCm on AMD GPUs"
+    )
+else:
+    __description__ = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 
 setup(
     name=__lib_name__,
     version=__version__,
-    description="Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
+    description=__description__,
     author="Ash Vardanian",
     author_email="1983160+ashvardanian@users.noreply.github.com",
-    url="https://github.com/ashvardanian/stringzilla",
+    url="https://github.com/ashvardanian/StringZilla",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
