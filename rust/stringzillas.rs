@@ -370,9 +370,7 @@ impl DeviceScope {
 impl Drop for DeviceScope {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe {
-                szs_device_scope_free(self.handle);
-            }
+            unsafe { szs_device_scope_free(self.handle) };
         }
     }
 }
@@ -2622,9 +2620,7 @@ impl Fingerprints {
 impl Drop for Fingerprints {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe {
-                szs_fingerprints_free(self.handle);
-            }
+            unsafe { szs_fingerprints_free(self.handle) };
         }
     }
 }

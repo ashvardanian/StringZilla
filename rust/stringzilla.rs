@@ -69,6 +69,9 @@ pub type SortedIdx = usize;
 pub trait SequenceData {
     type Item;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn index(&self, idx: usize) -> &Self::Item;
 }
 
@@ -151,6 +154,12 @@ impl Byteset {
     }
 }
 
+impl Default for Byteset {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: AsRef<[u8]>> From<T> for Byteset {
     #[inline]
     fn from(bytes: T) -> Self {
@@ -159,7 +168,7 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
 }
 
 use core::fmt::{self, Write};
-use core::{ffi::c_void, ffi::CStr, usize};
+use core::{ffi::c_void, ffi::CStr};
 
 // Import the functions from the StringZillable C library.
 extern "C" {
@@ -408,6 +417,12 @@ impl<const N: usize> FixedCString<N> {
     /// Returns an empty string if the content isn’t valid UTF-8.
     pub fn as_str(&self) -> &str {
         core::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
+    }
+}
+
+impl<const N: usize> Default for FixedCString<N> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
