@@ -230,7 +230,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
 
     constexpr span() noexcept = default;
     constexpr span(value_type *data, size_type size) noexcept : data_(data), size_(size) {}
-    constexpr span(value_type *data, value_type *end) noexcept : data_(data), size_(end - data) {}
+    constexpr span(value_type *data, value_type *end) noexcept : data_(data), size_(static_cast<size_type>(end - data)) {}
 
     sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
 
