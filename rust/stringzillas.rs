@@ -4,7 +4,7 @@ use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
 
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
-use stringtape::{BytesTape, BytesTapeView, StringTape, StringTapeView};
+use stringtape::{BytesTape, BytesTapeView, CharsTape, CharsTapeView};
 
 // Re-export common types from stringzilla
 pub use crate::stringzilla::{SortedIdx, Status as SzStatus};
@@ -51,11 +51,11 @@ fn rust_error_from_c_message(status: Status, error_msg: *const c_char) -> Error 
 
 /// Tape variant that can hold either 32-bit or 64-bit string tapes with unsigned offsets
 pub enum AnyCharsTape<'a> {
-    Tape32(StringTape<u32, UnifiedAlloc>),
-    Tape64(StringTape<u64, UnifiedAlloc>),
+    Tape32(CharsTape<u32, UnifiedAlloc>),
+    Tape64(CharsTape<u64, UnifiedAlloc>),
     // Zero-copy FFI views (UTF-8)
-    View32(StringTapeView<'a, u32>),
-    View64(StringTapeView<'a, u64>),
+    View32(CharsTapeView<'a, u32>),
+    View64(CharsTapeView<'a, u64>),
 }
 
 /// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
@@ -370,8 +370,8 @@ impl From<&BytesTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
     }
 }
 
-impl From<&StringTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
-    fn from(tape: &StringTape<u32, UnifiedAlloc>) -> Self {
+impl From<&CharsTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
+    fn from(tape: &CharsTape<u32, UnifiedAlloc>) -> Self {
         let parts = tape.as_raw_parts();
         SzSequenceU32Tape {
             data: parts.data_ptr,
@@ -392,8 +392,8 @@ impl From<&BytesTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
     }
 }
 
-impl From<&StringTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
-    fn from(tape: &StringTape<u64, UnifiedAlloc>) -> Self {
+impl From<&CharsTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
+    fn from(tape: &CharsTape<u64, UnifiedAlloc>) -> Self {
         let parts = tape.as_raw_parts();
         SzSequenceU64Tape {
             data: parts.data_ptr,
@@ -448,8 +448,8 @@ impl<'a> From<&BytesTapeView<'a, u64>> for SzSequenceU64Tape {
     }
 }
 
-impl<'a> From<StringTapeView<'a, u32>> for SzSequenceU32Tape {
-    fn from(view: StringTapeView<'a, u32>) -> Self {
+impl<'a> From<CharsTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: CharsTapeView<'a, u32>) -> Self {
         let p = view.as_raw_parts();
         SzSequenceU32Tape {
             data: p.data_ptr,
@@ -459,8 +459,8 @@ impl<'a> From<StringTapeView<'a, u32>> for SzSequenceU32Tape {
     }
 }
 
-impl<'a> From<StringTapeView<'a, u64>> for SzSequenceU64Tape {
-    fn from(view: StringTapeView<'a, u64>) -> Self {
+impl<'a> From<CharsTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: CharsTapeView<'a, u64>) -> Self {
         let p = view.as_raw_parts();
         SzSequenceU64Tape {
             data: p.data_ptr,
@@ -470,8 +470,8 @@ impl<'a> From<StringTapeView<'a, u64>> for SzSequenceU64Tape {
     }
 }
 
-impl<'a> From<&StringTapeView<'a, u32>> for SzSequenceU32Tape {
-    fn from(view: &StringTapeView<'a, u32>) -> Self {
+impl<'a> From<&CharsTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: &CharsTapeView<'a, u32>) -> Self {
         let p = view.as_raw_parts();
         SzSequenceU32Tape {
             data: p.data_ptr,
@@ -481,8 +481,8 @@ impl<'a> From<&StringTapeView<'a, u32>> for SzSequenceU32Tape {
     }
 }
 
-impl<'a> From<&StringTapeView<'a, u64>> for SzSequenceU64Tape {
-    fn from(view: &StringTapeView<'a, u64>) -> Self {
+impl<'a> From<&CharsTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: &CharsTapeView<'a, u64>) -> Self {
         let p = view.as_raw_parts();
         SzSequenceU64Tape {
             data: p.data_ptr,
@@ -1306,7 +1306,7 @@ impl LevenshteinDistancesUtf8 {
 
     /// Compute UTF-8 Levenshtein distances into an existing results buffer.
     ///
-    /// - Accepts `AnyCharsTape<'_>` for both sides: `StringTape` or `StringTapeView`.
+    /// - Accepts `AnyCharsTape<'_>` for both sides: `CharsTape` or `CharsTapeView`.
     /// - Supports 32-bit or 64-bit offsets; both inputs must use the same width.
     /// - No result allocations; writes into `results`.
     ///
@@ -2746,18 +2746,18 @@ where
     }
 }
 
-/// Convert string sequences to StringTape
+/// Convert string sequences to CharsTape
 fn copy_chars_into_tape<'a, T: AsRef<str>>(sequences: &[T], force_64bit: bool) -> Result<AnyCharsTape<'a>, Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = force_64bit || total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
     if use_64bit {
-        let mut tape = StringTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        let mut tape = CharsTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
         Ok(AnyCharsTape::Tape64(tape))
     } else {
-        let mut tape = StringTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        let mut tape = CharsTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
         Ok(AnyCharsTape::Tape32(tape))
     }
