@@ -355,44 +355,44 @@ struct SzSequenceU64Tape {
 // Conversions from tape containers to FFI views
 impl From<&BytesTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
     fn from(tape: &BytesTape<u32, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU32Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
 impl From<&StringTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
     fn from(tape: &StringTape<u32, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU32Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
 impl From<&BytesTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
     fn from(tape: &BytesTape<u64, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU64Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
 impl From<&StringTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
     fn from(tape: &StringTape<u64, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU64Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
