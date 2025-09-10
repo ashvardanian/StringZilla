@@ -69,6 +69,9 @@ pub type SortedIdx = usize;
 pub trait SequenceData {
     type Item;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn index(&self, idx: usize) -> &Self::Item;
 }
 
@@ -151,6 +154,12 @@ impl Byteset {
     }
 }
 
+impl Default for Byteset {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: AsRef<[u8]>> From<T> for Byteset {
     #[inline]
     fn from(bytes: T) -> Self {
@@ -159,55 +168,68 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
 }
 
 use core::fmt::{self, Write};
-use core::{ffi::c_void, ffi::CStr, usize};
+use core::{ffi::c_void, ffi::CStr};
 
 // Import the functions from the StringZillable C library.
 extern "C" {
 
-    fn sz_dynamic_dispatch() -> i32;
-    fn sz_version_major() -> i32;
-    fn sz_version_minor() -> i32;
-    fn sz_version_patch() -> i32;
-    fn sz_capabilities() -> u32;
-    fn sz_capabilities_to_string(caps: u32) -> *const c_void;
+    pub(crate) fn sz_dynamic_dispatch() -> i32;
+    pub(crate) fn sz_version_major() -> i32;
+    pub(crate) fn sz_version_minor() -> i32;
+    pub(crate) fn sz_version_patch() -> i32;
+    pub(crate) fn sz_capabilities() -> u32;
+    pub(crate) fn sz_capabilities_to_string(caps: u32) -> *const c_void;
 
-    fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
-    fn sz_fill(target: *const c_void, length: usize, value: u8);
-    fn sz_move(target: *const c_void, source: *const c_void, length: usize);
-    fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
-    fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
+    pub(crate) fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
+    pub(crate) fn sz_fill(target: *const c_void, length: usize, value: u8);
+    pub(crate) fn sz_move(target: *const c_void, source: *const c_void, length: usize);
+    pub(crate) fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
+    pub(crate) fn sz_lookup(
+        target: *const c_void,
+        length: usize,
+        source: *const c_void,
+        lut: *const u8,
+    ) -> *const c_void;
 
-    fn sz_find(
+    pub(crate) fn sz_find(
         haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
     ) -> *const c_void;
 
-    fn sz_rfind(
+    pub(crate) fn sz_rfind(
         haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
     ) -> *const c_void;
 
-    fn sz_find_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
-    fn sz_rfind_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
+    pub(crate) fn sz_find_byteset(
+        haystack: *const c_void,
+        haystack_length: usize,
+        byteset: *const c_void,
+    ) -> *const c_void;
+    pub(crate) fn sz_rfind_byteset(
+        haystack: *const c_void,
+        haystack_length: usize,
+        byteset: *const c_void,
+    ) -> *const c_void;
 
-    fn sz_bytesum(text: *const c_void, length: usize) -> u64;
-    fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
-    fn sz_hash_state_init(state: *const c_void, seed: u64);
-    fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
-    fn sz_hash_state_digest(state: *const c_void) -> u64;
+    pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
+    pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
+    pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
+    pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
+    pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
 
-    pub fn sz_sequence_argsort(
+    pub(crate) fn sz_sequence_argsort(
         //
         sequence: *const _SzSequence,
         alloc: *const c_void,
         order: *mut SortedIdx,
     ) -> Status;
 
-    pub fn sz_sequence_intersect(
+    pub(crate) fn sz_sequence_intersect(
         first_sequence: *const _SzSequence,
         second_sequence: *const _SzSequence,
         alloc: *const c_void,
@@ -411,6 +433,12 @@ impl<const N: usize> FixedCString<N> {
     }
 }
 
+impl<const N: usize> Default for FixedCString<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize> Write for FixedCString<N> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let bytes = s.as_bytes();
@@ -430,8 +458,7 @@ pub type SmallCString = FixedCString<256>;
 
 /// Copies the capabilities C-string into a fixed buffer and returns it.
 /// The returned SmallCString is guaranteed to be null-terminated.
-pub fn capabilities() -> SmallCString {
-    let caps = unsafe { sz_capabilities() };
+pub(crate) fn capabilities_from_enum(caps: u32) -> SmallCString {
     let caps_ptr = unsafe { sz_capabilities_to_string(caps) };
     // Assume that the external function returns a valid null-terminated C string.
     let cstr = unsafe { CStr::from_ptr(caps_ptr as *const i8) };
@@ -444,6 +471,13 @@ pub fn capabilities() -> SmallCString {
     let s = core::str::from_utf8(bytes).unwrap_or("");
     let _ = buf.write_str(s);
     buf
+}
+
+/// Copies the capabilities C-string into a fixed buffer and returns it.
+/// The returned SmallCString is guaranteed to be null-terminated.
+pub fn capabilities() -> SmallCString {
+    let caps = unsafe { sz_capabilities() };
+    capabilities_from_enum(caps)
 }
 
 /// Computes the checksum value of unsigned bytes in a given byte slice `text`.
@@ -857,7 +891,6 @@ where
 {
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
-
 
 /// Randomizes the contents of a given byte slice `text` using characters from
 /// a specified `alphabet`. This function mutates `text` in place, replacing each

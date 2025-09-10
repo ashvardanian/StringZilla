@@ -1,8 +1,9 @@
 extern crate alloc;
 use alloc::vec::Vec;
-use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
+
+use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use stringtape::{BytesTape, StringTape};
 
 // Re-export common types from stringzilla
@@ -48,92 +49,33 @@ fn rust_error_from_c_message(status: Status, error_msg: *const c_char) -> Error 
     Error { status, message }
 }
 
-/// Device scope manages execution context and hardware resource allocation.
+/// Tape variant that can hold either 32-bit or 64-bit string tapes with unsigned offsets
+pub enum CharsTapeVariants {
+    Tape32(StringTape<u32, UnifiedAlloc>),
+    Tape64(StringTape<u64, UnifiedAlloc>),
+}
+
+/// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
+pub enum BytesTapeVariants {
+    Tape32(BytesTape<u32, UnifiedAlloc>),
+    Tape64(BytesTape<u64, UnifiedAlloc>),
+}
+
+/// Manages execution context and hardware resource allocation.
 ///
-/// Device scopes automatically detect available hardware capabilities and select
-/// optimal implementations. They coordinate between CPU and GPU resources and
-/// manage memory allocation strategies.
-///
-/// # Hardware Detection
-///
-/// Device scopes automatically detect:
-/// - CPU SIMD capabilities (AVX2, AVX-512, NEON, SVE)
-/// - GPU availability (CUDA, ROCm)
-/// - Memory hierarchy and bandwidth
-/// - Thread pool configuration
-///
-/// # Examples
+/// Auto-detects available hardware (CPU SIMD, GPU) and selects optimal implementations.
 ///
 /// ```rust
-/// use stringzilla::szs::{DeviceScope, Status};
-///
-/// // Default scope - automatically detects best available hardware
+/// use stringzilla::szs::DeviceScope;
 /// let device = DeviceScope::default().unwrap();
-/// println!("Capabilities: 0x{:x}", device.get_capabilities().unwrap());
-///
-/// // Explicit CPU configuration for reproducible results
 /// let cpu_device = DeviceScope::cpu_cores(4).unwrap();
-/// assert_eq!(cpu_device.get_cpu_cores().unwrap(), 4);
-/// assert!(!cpu_device.is_gpu());
-///
-/// // GPU configuration (requires CUDA/ROCm)
-/// if let Ok(gpu_device) = DeviceScope::gpu_device(0) {
-///     assert!(gpu_device.is_gpu());
-///     println!("Using GPU device: {}", gpu_device.get_gpu_device().unwrap());
-/// }
-/// ```
-///
-/// # Error Handling
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, Status};
-/// // CPU cores 0 means use all available cores - this is valid
-/// match DeviceScope::cpu_cores(0) {
-///     Ok(_) => println!("Using all CPU cores"),
-///     Err(e) => println!("Failed to create device scope: {:?}", e),
-/// }
-///
-/// // GPU might not be available
-/// match DeviceScope::gpu_device(99) {
-///     Ok(_) => println!("GPU available"),
-///     Err(e) if e.status == Status::MissingGpu => println!("GPU not available or invalid device ID"),
-///     Err(e) => println!("GPU error: {:?}", e),
-/// }
 /// ```
 pub struct DeviceScope {
     handle: *mut c_void,
 }
 
 impl DeviceScope {
-    /// Create a device scope with system defaults.
-    ///
-    /// Automatically detects available hardware and selects the optimal configuration.
-    /// This is the recommended method for most use cases as it adapts to the runtime environment.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(DeviceScope)`: Successfully created device scope
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::Unknown)`: System detection failed
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::DeviceScope;
-    /// // Create default device scope
-    /// let device = DeviceScope::default().expect("Failed to initialize device");
-    ///
-    /// // Check detected capabilities
-    /// let caps = device.get_capabilities().unwrap();
-    /// println!("Hardware capabilities: 0x{:x}", caps);
-    ///
-    /// // Verify it's working
-    /// if device.is_gpu() {
-    ///     println!("GPU acceleration available");
-    /// } else {
-    ///     println!("Using CPU with {} cores", device.get_cpu_cores().unwrap());
-    /// }
-    /// ```
+    /// Create device scope with auto-detected optimal hardware configuration.
     pub fn default() -> Result<Self, Error> {
         let mut handle = ptr::null_mut();
         let mut error_msg: *const c_char = ptr::null();
@@ -156,8 +98,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(DeviceScope)`: Successfully created CPU device scope
-    /// - `Err(Status::InvalidArgument)`: Invalid core count (0 or 1)
-    /// - `Err(Status::BadAlloc)`: Failed to create thread pool
+    /// - `Err(Error)`: Invalid configuration or allocation failure
     ///
     /// # Examples
     ///
@@ -174,7 +115,7 @@ impl DeviceScope {
     /// // ... run benchmark with consistent thread count
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - Optimal core count is usually equal to physical cores
     /// - Hyperthreading may not provide linear scaling for SIMD workloads
@@ -201,8 +142,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(DeviceScope)`: Successfully configured GPU device
-    /// - `Err(Status::MissingGpu)`: CUDA/ROCm not available or invalid device
-    /// - `Err(Status::BadAlloc)`: GPU memory allocation failed
+    /// - `Err(Error)`: CUDA/ROCm unavailable, invalid device, or allocation failure
     ///
     /// # Examples
     ///
@@ -230,7 +170,7 @@ impl DeviceScope {
     ///     .unwrap_or_else(|| DeviceScope::default().unwrap());
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - GPU is optimal for batch sizes >1000 string pairs
     /// - Memory transfer overhead affects small workloads
@@ -254,7 +194,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(Capability)`: Hardware capabilities bitmask
-    /// - `Err(Status::Unknown)`: Failed to query capabilities
+    /// - `Err(Error)`: Failed to query capabilities
     ///
     /// # Examples
     ///
@@ -286,7 +226,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(usize)`: Number of configured CPU cores
-    /// - `Err(Status::Unknown)`: Failed to query configuration
+    /// - `Err(Error)`: Failed to query configuration
     ///
     /// # Examples
     ///
@@ -372,9 +312,7 @@ impl DeviceScope {
 impl Drop for DeviceScope {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe {
-                szs_device_scope_free(self.handle);
-            }
+            unsafe { szs_device_scope_free(self.handle) };
         }
     }
 }
@@ -382,711 +320,7 @@ impl Drop for DeviceScope {
 unsafe impl Send for DeviceScope {}
 unsafe impl Sync for DeviceScope {}
 
-/// Builder for configuring fingerprinting engines with optimal parameters.
-///
-/// The builder pattern allows fine-tuning of fingerprinting parameters for different
-/// use cases. Default values are chosen to work well across diverse workloads,
-/// but specific applications may benefit from custom configuration.
-///
-/// # Default Configuration
-///
-/// - **Alphabet size**: 0 (auto-detect as 256 for binary data)
-/// - **Window widths**: None (use optimal defaults for hardware)
-/// - **Dimensions**: 1024 (provides good balance of accuracy and performance)
-///
-/// # Performance Guidelines
-///
-/// For optimal SIMD and GPU performance:
-/// - Use dimensions that are multiples of 64
-/// - Choose window widths appropriate for your data
-/// - Match alphabet size to your actual character set
-///
-/// # Examples
-///
-/// ```rust
-/// # use stringzilla::szs::{Fingerprints, DeviceScope};
-/// let device = DeviceScope::default().unwrap();
-///
-/// // Default configuration (good for most use cases)
-/// let general_engine = Fingerprints::builder()
-///     .build(&device)
-///     .unwrap();
-///
-/// // DNA sequence analysis
-/// let dna_engine = Fingerprints::builder()
-///     .dna()  // 4-character alphabet: A, C, G, T
-///     .window_widths(&[3, 5, 7, 9])  // k-mer sizes for genomics
-///     .dimensions(256)  // 64 * 4 window widths
-///     .build(&device)
-///     .unwrap();
-///
-/// // High-precision text analysis
-/// let text_engine = Fingerprints::builder()
-///     .ascii()  // 128-character alphabet
-///     .window_widths(&[3, 4, 5, 7, 9, 11, 15, 31])  // Multiple n-gram sizes
-///     .dimensions(512)  // 64 * 8 window widths
-///     .build(&device)
-///     .unwrap();
-/// ```
-///
-/// # Alphabet-Specific Presets
-///
-/// ```rust
-/// # use stringzilla::szs::{Fingerprints, DeviceScope};
-/// # let device = DeviceScope::default().unwrap();
-/// // Bioinformatics applications
-/// let dna_engine = Fingerprints::builder().dna().build(&device).unwrap();         // A,C,G,T
-/// let protein_engine = Fingerprints::builder().protein().build(&device).unwrap(); // 22 amino acids
-///
-/// // Text processing
-/// let ascii_engine = Fingerprints::builder().ascii().build(&device).unwrap();     // ASCII text
-/// let binary_engine = Fingerprints::builder().binary().build(&device).unwrap();   // Binary data
-/// ```
-pub struct FingerprintsBuilder {
-    alphabet_size: usize,
-    window_widths: Option<Vec<usize>>,
-    dimensions: usize,
-}
-
-impl FingerprintsBuilder {
-    /// Create a new builder with system-optimized defaults.
-    ///
-    /// Uses intelligent defaults that adapt to available hardware capabilities:
-    /// - Alphabet size: 256 (suitable for binary data and most text)
-    /// - Window widths: Hardware-optimized selection
-    /// - Dimensions: 1024 (balances accuracy and performance)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::FingerprintsBuilder;
-    /// let builder = FingerprintsBuilder::new();
-    /// // Further customize with method chaining...
-    /// ```
-    pub fn new() -> Self {
-        Self {
-            alphabet_size: 0,
-            window_widths: None,
-            dimensions: 1024, // Default dimensions
-        }
-    }
-
-    /// Configure for binary data processing (256-character alphabet).
-    ///
-    /// Optimizes the engine for processing arbitrary binary data, including:
-    /// - File content analysis
-    /// - Network packet inspection
-    /// - Binary protocol parsing
-    /// - Raw data deduplication
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = Fingerprints::builder()
-    ///     .binary()
-    ///     .dimensions(256)
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Process binary data
-    /// let binary_data = vec![
-    ///     &[0x89, 0x50, 0x4E, 0x47][..], // PNG header
-    ///     &[0xFF, 0xD8, 0xFF, 0xE0][..], // JPEG header  
-    ///     &[0x50, 0x4B, 0x03, 0x04][..], // ZIP header
-    /// ];
-    /// let (hashes, counts) = engine.compute(&device, &binary_data, 256).unwrap();
-    /// ```
-    pub fn binary(mut self) -> Self {
-        self.alphabet_size = 256;
-        self
-    }
-
-    /// Configure for ASCII text processing (128-character alphabet).
-    ///
-    /// Optimizes for English text and ASCII-only content:
-    /// - Plain text documents
-    /// - Source code analysis
-    /// - Log file processing
-    /// - ASCII-based data formats
-    ///
-    /// Provides better hash distribution than binary mode for ASCII content.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = Fingerprints::builder()
-    ///     .ascii()
-    ///     .window_widths(&[3, 5, 7])  // Good for word-level analysis
-    ///     .dimensions(256)
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Analyze text documents
-    /// let documents = vec![
-    ///     "The quick brown fox jumps over the lazy dog",
-    ///     "A journey of a thousand miles begins with a single step",
-    ///     "To be or not to be, that is the question",
-    /// ];
-    /// let (hashes, counts) = engine.compute(&device, &documents, 256).unwrap();
-    /// ```
-    pub fn ascii(mut self) -> Self {
-        self.alphabet_size = 128;
-        self
-    }
-
-    /// Configure for DNA sequence analysis (4-character alphabet: A, C, G, T).
-    ///
-    /// Highly optimized for genomic applications:
-    /// - DNA sequencing analysis
-    /// - Genome assembly
-    /// - Variant detection
-    /// - Phylogenetic analysis
-    /// - k-mer counting
-    ///
-    /// The small alphabet size provides excellent hash quality and performance.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = Fingerprints::builder()
-    ///     .dna()
-    ///     .window_widths(&[21, 31])  // Common k-mer sizes in genomics
-    ///     .dimensions(128)  // 64 * 2 window widths
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Analyze DNA sequences
-    /// let sequences = vec![
-    ///     "ATCGATCGATCGATCGATCGATCG",
-    ///     "GCTAGCTAGCTAGCTAGCTAGCTA",
-    ///     "TTAAGGCCTTAAGGCCTTAAGGCC",
-    /// ];
-    /// let (k_mer_hashes, k_mer_counts) = engine.compute(&device, &sequences, 128).unwrap();
-    /// ```
-    pub fn dna(mut self) -> Self {
-        self.alphabet_size = 4;
-        self
-    }
-
-    /// Configure for protein sequence analysis (22-character amino acid alphabet).
-    ///
-    /// Optimized for proteomics and structural biology:
-    /// - Protein similarity search
-    /// - Structural motif discovery
-    /// - Functional domain analysis
-    /// - Evolutionary studies
-    /// - Mass spectrometry data analysis
-    ///
-    /// Uses the 20 standard amino acids plus Selenocysteine (U) and Pyrrolysine (O).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = Fingerprints::builder()
-    ///     .protein()
-    ///     .window_widths(&[5, 7, 9])  // Good for motif detection
-    ///     .dimensions(192)  // 64 * 3 window widths
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Analyze protein sequences
-    /// let proteins = vec![
-    ///     "ACDEFGHIKLMNPQRSTVWY",  // Standard amino acids
-    ///     "MVLSEGEWQLVLHVWAKVEADVAGHGQDILIRLFKSHPETLEKFDRFKHLKTEAEMKASED",
-    ///     "GSHMVKVALYDYMPMNANDLQLRKGMHFRFKVAEQAARLIQPQEKKLAKAQQTLDLRSQIQQQQEQLGQ",
-    /// ];
-    /// let (peptide_hashes, peptide_counts) = engine.compute(&device, &proteins, 192).unwrap();
-    /// ```
-    pub fn protein(mut self) -> Self {
-        self.alphabet_size = 22;
-        self
-    }
-
-    /// Set a custom alphabet size for specialized applications.
-    ///
-    /// Use this for domain-specific alphabets or when you know the exact
-    /// character set size in your data. Common custom sizes:
-    /// - 16: Hexadecimal data
-    /// - 64: Base64 encoded data  
-    /// - 85: Base85 encoded data
-    /// - Custom: Domain-specific character sets
-    ///
-    /// # Parameters
-    ///
-    /// - `size`: Number of unique characters in your alphabet (> 0)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Hexadecimal data (0-9, A-F)
-    /// let hex_engine = Fingerprints::builder()
-    ///     .alphabet_size(16)
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Custom alphabet for specific domain
-    /// let custom_engine = Fingerprints::builder()
-    ///     .alphabet_size(32)  // Custom 32-character set
-    ///     .window_widths(&[4, 6, 8])
-    ///     .build(&device)
-    ///     .unwrap();
-    /// ```
-    pub fn alphabet_size(mut self, size: usize) -> Self {
-        self.alphabet_size = size;
-        self
-    }
-
-    /// Configure window widths (n-gram sizes) for rolling hash computation.
-    ///
-    /// Window widths determine the size of substrings used for hashing. Different
-    /// widths capture patterns at different scales. If not specified, the system
-    /// selects optimal widths based on hardware capabilities and alphabet size.
-    ///
-    /// # Guidelines
-    ///
-    /// - **Small widths (3-5)**: Capture local patterns, good for noisy data
-    /// - **Medium widths (7-15)**: Balance between specificity and robustness
-    /// - **Large widths (31+)**: Capture longer patterns, sensitive to changes
-    /// - **Multiple widths**: Provide multi-scale pattern detection
-    ///
-    /// # Domain-Specific Recommendations
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Natural language (word-level patterns)
-    /// let text_engine = Fingerprints::builder()
-    ///     .ascii()
-    ///     .window_widths(&[3, 4, 5, 7])  // Character n-grams
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Genomics (k-mer analysis)
-    /// let genomics_engine = Fingerprints::builder()
-    ///     .dna()
-    ///     .window_widths(&[15, 21, 31])  // Standard k-mer sizes
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // Document similarity (longer patterns)
-    /// let doc_engine = Fingerprints::builder()
-    ///     .binary()
-    ///     .window_widths(&[5, 7, 11, 15, 31])  // Multi-scale analysis
-    ///     .build(&device)
-    ///     .unwrap();
-    /// ```
-    ///
-    /// # Performance Impact
-    ///
-    /// - More windows → better accuracy but slower computation
-    /// - Use multiples of the number of hash functions for SIMD efficiency
-    /// - Consider total dimensions = 64 × number_of_windows for optimal performance
-    pub fn window_widths(mut self, widths: &[usize]) -> Self {
-        self.window_widths = Some(widths.to_vec());
-        self
-    }
-
-    /// Set the total number of dimensions (hash functions) per fingerprint.
-    ///
-    /// Higher dimensions provide better accuracy and collision resistance at the
-    /// cost of increased memory usage and computation time. The optimal value
-    /// depends on your accuracy requirements and available resources.
-    ///
-    /// # Performance Guidelines
-    ///
-    /// For optimal SIMD performance, use dimensions that are multiples of 64:
-    /// - **64**: Minimal configuration, suitable for rapid prototyping
-    /// - **128**: Good for small-scale similarity detection
-    /// - **256**: Balanced accuracy/performance for most applications
-    /// - **512**: High accuracy for critical applications
-    /// - **1024**: Maximum accuracy, use when precision is paramount
-    ///
-    /// # Recommended Formulas
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Basic formula: 64 * number_of_window_widths
-    /// let balanced_engine = Fingerprints::builder()
-    ///     .dna()
-    ///     .window_widths(&[3, 5, 7, 9])  // 4 widths
-    ///     .dimensions(256)  // 64 * 4 = 256
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// // High-precision configuration
-    /// let precision_engine = Fingerprints::builder()
-    ///     .binary()
-    ///     .window_widths(&[5, 7, 11, 15])  // 4 widths
-    ///     .dimensions(512)  // 128 * 4 = 512 for extra precision
-    ///     .build(&device)
-    ///     .unwrap();
-    /// ```
-    ///
-    /// # Memory Usage
-    ///
-    /// Each fingerprint uses `dimensions * sizeof(u32)` bytes for hashes plus
-    /// the same for counts. With 1024 dimensions:
-    /// - Per fingerprint: 8KB (4KB hashes + 4KB counts)
-    /// - 1000 fingerprints: ~8MB total memory
-    pub fn dimensions(mut self, dimensions: usize) -> Self {
-        self.dimensions = dimensions;
-        self
-    }
-
-    /// Build the fingerprinting engine with the configured parameters.
-    ///
-    /// Creates an optimized fingerprinting engine based on the builder configuration
-    /// and the target device capabilities. The engine automatically adapts its
-    /// implementation strategy based on available hardware features.
-    ///
-    /// # Parameter Resolution
-    ///
-    /// - **alphabet_size = 0**: Defaults to 256 (binary mode)
-    /// - **window_widths = None**: Uses hardware-optimized defaults
-    /// - **dimensions**: Used as specified, should be multiple of 64
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Fingerprints)`: Successfully created engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid parameter combination
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Build with validation
-    /// let engine = Fingerprints::builder()
-    ///     .dna()
-    ///     .dimensions(256)
-    ///     .build(&device)
-    ///     .expect("Failed to create fingerprinting engine");
-    ///
-    /// // Verify engine is ready for use
-    /// let test_data = vec!["ATCGATCG"];
-    /// let result = engine.compute(&device, &test_data, 256);
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn build(self, device: &DeviceScope) -> Result<Fingerprints, Error> {
-        let mut engine: FingerprintsHandle = ptr::null_mut();
-        let capabilities = device.get_capabilities().unwrap_or(0);
-
-        let (widths_ptr, widths_len) = match &self.window_widths {
-            Some(widths) => (widths.as_ptr(), widths.len()),
-            None => (ptr::null(), 0),
-        };
-
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_fingerprints_init(
-                self.dimensions,
-                self.alphabet_size,
-                widths_ptr,
-                widths_len,
-                ptr::null(), // No custom allocator
-                capabilities,
-                &mut engine,
-                &mut error_msg,
-            )
-        };
-
-        match status {
-            Status::Success => Ok(Fingerprints { handle: engine }),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-/// High-performance fingerprinting engine for similarity detection and clustering.
-///
-/// The fingerprinting engine computes Min-Hash signatures and Count-Min-Sketch
-/// data structures for collections of strings. These techniques enable efficient
-/// similarity estimation, duplicate detection, and approximate set operations.
-///
-/// # Algorithms
-///
-/// ## Min-Hash
-/// Locality-sensitive hashing technique that estimates Jaccard similarity:
-/// - Maps each string to a fixed-size signature
-/// - Similar strings produce similar signatures
-/// - Enables fast similarity queries in high-dimensional spaces
-///
-/// ## Count-Min-Sketch
-/// Probabilistic data structure for frequency estimation:
-/// - Tracks approximate frequencies of elements
-/// - Space-efficient alternative to exact counting
-/// - Supports streaming data processing
-///
-/// ## Rolling Hash
-/// Efficient hash computation over sliding windows:
-/// - Multiple window sizes capture patterns at different scales
-/// - SIMD optimizations for parallel hash computation
-/// - Configurable alphabet sizes for domain-specific optimization
-///
-/// # Use Cases
-///
-/// - **Document deduplication**: Find near-duplicate documents
-/// - **Plagiarism detection**: Identify similar text passages
-/// - **Genomic analysis**: k-mer counting and sequence clustering
-/// - **Web crawling**: Detect duplicate web pages
-/// - **Data cleaning**: Merge similar database records
-/// - **Content filtering**: Identify spam or harmful content
-///
-/// # Performance Characteristics
-///
-/// - **Throughput**: Processes millions of strings per second
-/// - **Memory**: O(dimensions × batch_size) working memory
-/// - **Accuracy**: Configurable precision vs. speed tradeoffs
-/// - **Scalability**: Linear scaling with CPU cores, excellent GPU acceleration
-///
-/// # Examples
-///
-/// ## Document Similarity
-///
-/// ```rust
-/// # use stringzilla::szs::{Fingerprints, DeviceScope};
-/// let device = DeviceScope::default().unwrap();
-/// let engine = Fingerprints::builder()
-///     .ascii()  // Text processing optimized
-///     .dimensions(512)  // High precision
-///     .build(&device)
-///     .unwrap();
-///
-/// let documents = vec![
-///     "The quick brown fox jumps over the lazy dog",
-///     "A quick brown fox leaps over a lazy dog",  // Similar
-///     "Completely different content about science", // Dissimilar
-/// ];
-///
-/// let (hashes, _counts) = engine.compute(&device, &documents, 512).unwrap();
-///
-/// // Compare fingerprints to estimate similarity
-/// // Higher overlap in hash values indicates higher similarity
-/// ```
-///
-/// ## Genomic k-mer Analysis
-///
-/// ```rust
-/// # use stringzilla::szs::{Fingerprints, DeviceScope};
-/// let device = DeviceScope::default().unwrap();
-/// let engine = Fingerprints::builder()
-///     .dna()  // 4-character alphabet optimization
-///     .window_widths(&[21, 31])  // Standard k-mer sizes
-///     .dimensions(128)  // Memory-efficient
-///     .build(&device)
-///     .unwrap();
-///
-/// // Analyze genomic sequences
-/// let sequences = vec![
-///     "ATCGATCGATCGATCGATCGATCGATCGATCG",
-///     "GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA",
-///     "TTAAGGCCTTAAGGCCTTAAGGCCTTAAGGCC",
-/// ];
-///
-/// let (k_mer_hashes, k_mer_counts) = engine.compute(&device, &sequences, 128).unwrap();
-///
-/// // Use hashes for sequence clustering or counts for abundance analysis
-/// ```
-pub struct Fingerprints {
-    handle: FingerprintsHandle,
-}
-
-impl Fingerprints {
-    /// Create a new builder for configuring the fingerprinting engine.
-    ///
-    /// Returns a builder instance with intelligent defaults that can be customized
-    /// for specific use cases. The builder pattern provides a fluent interface
-    /// for configuring complex fingerprinting parameters.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::Fingerprints;
-    /// // Start with default configuration
-    /// let builder = Fingerprints::builder();
-    ///
-    /// // Customize as needed
-    /// // let engine = builder.dna().dimensions(256).build(&device)?;
-    /// ```
-    pub fn builder() -> FingerprintsBuilder {
-        FingerprintsBuilder::new()
-    }
-
-    /// Compute Min-Hash fingerprints and Count-Min-Sketch data for a collection of strings.
-    ///
-    /// Processes the input strings and generates two types of output:
-    /// - **Min-Hashes**: Locality-sensitive hash signatures for similarity detection
-    /// - **Min-Counts**: Frequency sketches for approximate counting queries
-    ///
-    /// # Parameters
-    ///
-    /// - `device`: Device scope for execution (CPU or GPU)
-    /// - `strings`: Collection of input strings to fingerprint
-    /// - `dimensions`: Number of hash functions per fingerprint (should match engine config)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok((UnifiedVec<u32>, UnifiedVec<u32>))`: (min_hashes, min_counts) in unified memory
-    /// - `Err(Status)`: Computation failed
-    ///
-    /// # Output Format
-    ///
-    /// Both output vectors have layout: `num_strings × dimensions`
-    /// - `min_hashes[i * dimensions + j]`: j-th hash of i-th string
-    /// - `min_counts[i * dimensions + j]`: j-th count of i-th string
-    ///
-    /// # Similarity Estimation
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
-    /// let device = DeviceScope::default().unwrap();
-    /// let dimensions = 256;
-    /// let engine = Fingerprints::builder()
-    ///     .dimensions(dimensions)
-    ///     .build(&device)
-    ///     .unwrap();
-    ///
-    /// let strings = vec!["hello world", "hello word", "goodbye world"];
-    ///
-    /// let (hashes, _counts) = engine.compute(&device, &strings, dimensions).unwrap();
-    ///
-    /// // Estimate Jaccard similarity between strings 0 and 1
-    /// let mut matches = 0;
-    /// for i in 0..dimensions {
-    ///     if hashes[0 * dimensions + i] == hashes[1 * dimensions + i] {
-    ///         matches += 1;
-    ///     }
-    /// }
-    /// let similarity = matches as f64 / dimensions as f64;
-    /// println!("Estimated Jaccard similarity: {:.3}", similarity);
-    /// ```
-    ///
-    /// # Memory Management
-    ///
-    /// Uses unified memory allocation for optimal GPU performance:
-    /// - CPU: Standard heap allocation
-    /// - GPU: CUDA unified memory (accessible from both CPU and GPU)
-    /// - Automatic memory cleanup when vectors are dropped
-    ///
-    /// # Performance Notes
-    ///
-    /// - GPU optimal for large batches (>1000 strings)
-    /// - Memory usage: 8 bytes per string per dimension
-    /// - Processing time scales linearly with total input size
-    /// - SIMD acceleration provides significant speedup on modern CPUs
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        strings: T,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
-    where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
-    {
-        let strings_slice = strings.as_ref();
-        let num_strings = strings_slice.len();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        if device.is_gpu() {
-            let (tape, use_64bit) = create_tape(strings_slice)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit {
-                let tape_view = create_u64tape_view(&tape);
-                unsafe {
-                    szs_fingerprints_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_view as *const _ as *const c_void,
-                        min_hashes.as_mut_ptr(),
-                        hashes_stride,
-                        min_counts.as_mut_ptr(),
-                        counts_stride,
-                        &mut error_msg,
-                    )
-                }
-            } else {
-                let tape_view = create_u32tape_view(&tape);
-                unsafe {
-                    szs_fingerprints_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_view as *const _ as *const c_void,
-                        min_hashes.as_mut_ptr(),
-                        hashes_stride,
-                        min_counts.as_mut_ptr(),
-                        counts_stride,
-                        &mut error_msg,
-                    )
-                }
-            };
-            match status {
-                Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        } else {
-            let sequence = create_sequence_view(strings_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_fingerprints_sequence(
-                    self.handle,
-                    device.handle,
-                    &sequence as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            };
-            match status {
-                Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
-        }
-    }
-}
-
-impl Drop for Fingerprints {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe {
-                szs_fingerprints_free(self.handle);
-            }
-        }
-    }
-}
-
-unsafe impl Send for Fingerprints {}
-unsafe impl Sync for Fingerprints {}
-
-/// Internal representation of sz_sequence_t for passing to C
+/// Internal representation of `sz_sequence_t` for passing to C
 #[repr(C)]
 struct SzSequence {
     handle: *mut c_void,
@@ -1098,20 +332,137 @@ struct SzSequence {
     lengths: *const usize,
 }
 
-/// Apache Arrow-like tape for non-NULL strings with 32-bit offsets
+/// Raw C API tape structure for 32-bit offsets (data < 4GB),
+/// matching `sz_sequence_u32tape_t` in the C API
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct SzSequenceU32Tape {
     data: *const u8,
     offsets: *const u32,
     count: usize,
 }
 
-/// Apache Arrow-like tape for non-NULL strings with 64-bit offsets
+/// Raw C API tape structure for 64-bit offsets (data >= 4GB),
+/// matching `sz_sequence_u64tape_t` in the C API
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct SzSequenceU64Tape {
     data: *const u8,
     offsets: *const u64,
     count: usize,
+}
+
+// Conversions from tape containers to FFI views
+impl From<&BytesTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
+    fn from(tape: &BytesTape<u32, UnifiedAlloc>) -> Self {
+        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        SzSequenceU32Tape {
+            data: data_ptr,
+            offsets: offsets_ptr,
+            count,
+        }
+    }
+}
+
+impl From<&StringTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
+    fn from(tape: &StringTape<u32, UnifiedAlloc>) -> Self {
+        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        SzSequenceU32Tape {
+            data: data_ptr,
+            offsets: offsets_ptr,
+            count,
+        }
+    }
+}
+
+impl From<&BytesTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
+    fn from(tape: &BytesTape<u64, UnifiedAlloc>) -> Self {
+        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        SzSequenceU64Tape {
+            data: data_ptr,
+            offsets: offsets_ptr,
+            count,
+        }
+    }
+}
+
+impl From<&StringTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
+    fn from(tape: &StringTape<u64, UnifiedAlloc>) -> Self {
+        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        SzSequenceU64Tape {
+            data: data_ptr,
+            offsets: offsets_ptr,
+            count,
+        }
+    }
+}
+
+/// Generic callback to get start of string at index for byte slices
+extern "C" fn sz_sequence_get_start_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> *const u8 {
+    unsafe {
+        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        strings[index].as_ref().as_ptr()
+    }
+}
+
+/// Generic callback to get length of string at index for byte slices
+extern "C" fn sz_sequence_get_length_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> usize {
+    unsafe {
+        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        strings[index].as_ref().len()
+    }
+}
+
+/// Generic callback to get start of string at index for string slices
+extern "C" fn sz_sequence_get_start_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> *const u8 {
+    unsafe {
+        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        strings[index].as_ref().as_bytes().as_ptr()
+    }
+}
+
+/// Generic callback to get length of string at index for string slices
+extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> usize {
+    unsafe {
+        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        strings[index].as_ref().as_bytes().len()
+    }
+}
+
+/// Trait for types that can be converted to SzSequence for byte sequences
+trait SzSequenceFromBytes {
+    fn to_sz_sequence(&self) -> SzSequence;
+}
+
+impl<T: AsRef<[u8]>> SzSequenceFromBytes for [T] {
+    fn to_sz_sequence(&self) -> SzSequence {
+        SzSequence {
+            handle: self.as_ptr() as *mut c_void,
+            count: self.len(),
+            get_start: sz_sequence_get_start_generic::<T>,
+            get_length: sz_sequence_get_length_generic::<T>,
+            starts: ptr::null(),
+            lengths: ptr::null(),
+        }
+    }
+}
+
+/// Trait for types that can be converted to SzSequence for string sequences
+trait SzSequenceFromChars {
+    fn to_sz_sequence(&self) -> SzSequence;
+}
+
+impl<T: AsRef<str>> SzSequenceFromChars for [T] {
+    fn to_sz_sequence(&self) -> SzSequence {
+        SzSequence {
+            handle: self.as_ptr() as *mut c_void,
+            count: self.len(),
+            get_start: sz_sequence_get_start_str::<T>,
+            get_length: sz_sequence_get_length_str::<T>,
+            starts: ptr::null(),
+            lengths: ptr::null(),
+        }
+    }
 }
 
 /// Opaque handles for similarity engines
@@ -1123,6 +474,13 @@ pub type SmithWatermanScoresHandle = *mut c_void;
 
 // C API bindings
 extern "C" {
+
+    // Metadata functions
+    fn szs_version_major() -> i32;
+    fn szs_version_minor() -> i32;
+    fn szs_version_patch() -> i32;
+    fn szs_capabilities() -> u32;
+
     // Device scope functions
     fn szs_device_scope_init_default(scope: *mut *mut c_void, error_message: *mut *const c_char) -> Status;
     fn szs_device_scope_init_cpu_cores(
@@ -1376,6 +734,7 @@ extern "C" {
     // Unified allocator functions
     fn szs_unified_alloc(size_bytes: usize) -> *mut c_void;
     fn szs_unified_free(ptr: *mut c_void, size_bytes: usize);
+
 }
 
 /// Unified memory allocator that uses CUDA unified memory when available,
@@ -1410,80 +769,38 @@ unsafe impl Allocator for UnifiedAlloc {
 /// Type alias for Vec with unified allocator
 pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 
+/// Returns StringZillas similarity engine version information.
+pub fn version() -> crate::stringzilla::SemVer {
+    crate::stringzilla::SemVer {
+        major: unsafe { szs_version_major() },
+        minor: unsafe { szs_version_minor() },
+        patch: unsafe { szs_version_patch() },
+    }
+}
+
+/// Copies the capabilities C-string into a fixed buffer and returns it.
+/// The returned SmallCString is guaranteed to be null-terminated.
+pub fn capabilities() -> crate::stringzilla::SmallCString {
+    let caps = unsafe { szs_capabilities() };
+    crate::stringzilla::capabilities_from_enum(caps)
+}
+
 /// Levenshtein distance engine for batch processing of binary sequences.
 ///
-/// Computes edit distances between pairs of byte sequences using the Wagner-Fischer
-/// dynamic programming algorithm with configurable gap costs. This engine is optimized
-/// for processing large batches of sequence pairs in parallel.
-///
-/// # Algorithm
-///
-/// Uses Wagner-Fischer dynamic programming with affine gap costs:
-/// - **Match cost**: Cost when characters are identical (typically ≤ 0)
-/// - **Mismatch cost**: Cost when characters differ (typically > 0)  
-/// - **Open cost**: Cost to start a gap (insertion/deletion)
-/// - **Extend cost**: Cost to extend an existing gap (usually < open cost)
-///
-/// Time complexity: O(nm) per pair, where n and m are sequence lengths.
-/// Space complexity: O(n+m) with optimizations for large batches.
-///
-/// # Use Cases
-///
-/// - **Spell checking**: Finding closest dictionary matches
-/// - **File deduplication**: Detecting similar binary files
-/// - **Data cleaning**: Merging near-duplicate records
-/// - **Fuzzy matching**: Approximate string search
+/// Computes edit distances between byte sequence pairs using configurable gap costs.
+/// Optimized for processing large batches in parallel.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // Create engine with standard costs
 /// let device = DeviceScope::default().unwrap();
-/// let engine = LevenshteinDistances::new(
-///     &device,
-///     0,  // match: no cost for identical chars
-///     1,  // mismatch: unit cost for different chars
-///     1,  // open: unit cost to start gap
-///     1,  // extend: unit cost to extend gap
-/// ).unwrap();
+/// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
 ///
-/// // Compare similar strings
 /// let strings_a = vec!["kitten", "saturday"];
 /// let strings_b = vec!["sitting", "sunday"];
 /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-///
-/// println!("Distance 'kitten' -> 'sitting': {}", distances[0]);  // 3
-/// println!("Distance 'saturday' -> 'sunday': {}", distances[1]); // 3
-/// ```
-///
-/// # Advanced Configuration
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // Biased towards insertions/deletions over substitutions
-/// let device = DeviceScope::default().unwrap();
-/// let engine = LevenshteinDistances::new(
-///     &device,
-///     -1, // match: reward for matches
-///     3,  // mismatch: high cost for substitutions  
-///     1,  // open: low cost for gaps
-///     1,  // extend: same cost to extend
-/// ).unwrap();
-/// ```
-///
-/// # Performance Optimization
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-/// // For maximum performance with large batches
-/// let device = DeviceScope::cpu_cores(8).unwrap(); // or gpu_device(0)
-/// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-///
-/// // Process thousands of pairs efficiently
-/// let large_batch_a: Vec<&str> = (0..10000).map(|i| "test_string").collect();
-/// let large_batch_b: Vec<&str> = (0..10000).map(|i| "test_strong").collect();
-/// let distances = engine.compute(&device, &large_batch_a, &large_batch_b).unwrap();
+/// assert_eq!(&distances[..], &[3, 3]);
 /// ```
 pub struct LevenshteinDistances {
     handle: LevenshteinDistancesHandle,
@@ -1492,41 +809,11 @@ pub struct LevenshteinDistances {
 impl LevenshteinDistances {
     /// Create a new Levenshtein distances engine with specified costs.
     ///
-    /// Initializes the engine with custom gap costs for fine-tuned distance computation.
-    /// The engine automatically selects optimal algorithms based on the device capabilities.
-    ///
     /// # Parameters
-    ///
-    /// - `device`: Device scope for execution context and capabilities
     /// - `match_cost`: Cost when characters match (typically ≤ 0)
-    /// - `mismatch_cost`: Cost when characters differ (typically > 0)
+    /// - `mismatch_cost`: Cost when characters differ (typically > 0)  
     /// - `open_cost`: Cost to open a gap (insertion/deletion)
     /// - `extend_cost`: Cost to extend existing gap (usually ≤ open_cost)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(LevenshteinDistances)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid cost configuration
-    ///
-    /// # Cost Configuration Guidelines
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
-    /// let device = DeviceScope::default().unwrap();
-    ///
-    /// // Standard Levenshtein distance (all operations cost 1)
-    /// let standard = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-    ///
-    /// // Prefer matches, penalize mismatches heavily
-    /// let match_biased = LevenshteinDistances::new(&device, -1, 3, 2, 1).unwrap();
-    ///
-    /// // Linear gap costs (open == extend)
-    /// let linear_gaps = LevenshteinDistances::new(&device, 0, 1, 2, 2).unwrap();
-    ///
-    /// // Affine gap costs (open > extend, penalizes gap opening)
-    /// let affine_gaps = LevenshteinDistances::new(&device, 0, 1, 3, 1).unwrap();
-    /// ```
     pub fn new(
         device: &DeviceScope,
         match_cost: i8,
@@ -1570,7 +857,7 @@ impl LevenshteinDistances {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<usize>)`: Vector of distances, one per sequence pair
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Behavior
     ///
@@ -1595,7 +882,7 @@ impl LevenshteinDistances {
     /// println!("Distances: {:?}", distances); // [1, 1, 3]
     /// ```
     ///
-    /// # Performance Notes
+    /// # Performance
     ///
     /// - CPU performance scales with SIMD width and core count
     /// - GPU optimal for batches >1000 pairs with medium-length sequences
@@ -1621,46 +908,51 @@ impl LevenshteinDistances {
         let results_stride = core::mem::size_of::<usize>();
 
         if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
+            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
+            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
 
             let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+            let status = match (&tape_a, &tape_b) {
+                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
+                    let tape_a_view = SzSequenceU64Tape::from(ta);
+                    let tape_b_view = SzSequenceU64Tape::from(tb);
+                    unsafe {
+                        szs_levenshtein_distances_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
+                    let tape_a_view = SzSequenceU32Tape::from(ta);
+                    let tape_b_view = SzSequenceU32Tape::from(tb);
+                    unsafe {
+                        szs_levenshtein_distances_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
+                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
             };
             match status {
                 Status::Success => Ok(results),
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
+            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
+            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
             let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_levenshtein_distances_sequence(
@@ -1694,17 +986,8 @@ unsafe impl Sync for LevenshteinDistances {}
 
 /// UTF-8 aware Levenshtein distance engine for Unicode text processing.
 ///
-/// Computes edit distances between UTF-8 encoded strings at the character level
-/// rather than byte level. This engine properly handles multi-byte UTF-8 sequences,
-/// ensuring that operations are performed on Unicode code points.
-///
-/// # UTF-8 vs Binary Processing
-///
-/// - **Binary engine**: Operates on raw bytes, faster but incorrect for Unicode
-/// - **UTF-8 engine**: Operates on Unicode code points, slower but semantically correct
-///
-/// Use this engine when working with international text, emoji, or any content
-/// where character boundaries matter.
+/// Computes edit distances at the character level, properly handling multi-byte
+/// UTF-8 sequences. Use for international text, emoji, or when character boundaries matter.
 ///
 /// # Examples
 ///
@@ -1713,40 +996,11 @@ unsafe impl Sync for LevenshteinDistances {}
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
 ///
-/// // Unicode strings with emoji and accents
-/// let strings_a = vec!["café", "naïve", "🦀 rust"];
-/// let strings_b = vec!["cafe", "naive", "🔥 rust"];
+/// let strings_a = vec!["café", "🦀 rust"];
+/// let strings_b = vec!["cafe", "🔥 rust"];
 /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-///
-/// // Character-level distances (not byte-level)
-/// println!("'café' -> 'cafe': {}", distances[0]); // 1 (é -> e)
-/// println!("'🦀 rust' -> '🔥 rust': {}", distances[2]); // 1 (🦀 -> 🔥)
+/// assert_eq!(&distances[..], &[1, 1]); // Character-level edits
 /// ```
-///
-/// # Comparison with Binary Engine
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
-/// let device = DeviceScope::default().unwrap();
-/// let binary_engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
-/// let utf8_engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
-///
-/// let text_a = vec!["café"]; // 5 bytes, 4 characters
-/// let text_b = vec!["cafe"]; // 4 bytes, 4 characters
-///
-/// let binary_dist = binary_engine.compute(&device, &text_a, &text_b).unwrap();
-/// let utf8_dist = utf8_engine.compute(&device, &text_a, &text_b).unwrap();
-///
-/// println!("Binary distance: {}", binary_dist[0]); // 2 (é is 2 bytes)
-/// println!("UTF-8 distance: {}", utf8_dist[0]);   // 1 (é is 1 character)
-/// ```
-///
-/// # Performance Considerations
-///
-/// - Slower than binary engine due to UTF-8 decoding overhead
-/// - Performance impact depends on character distribution
-/// - ASCII-only text has minimal overhead
-/// - Complex scripts (Arabic, Thai) have higher overhead
 pub struct LevenshteinDistancesUtf8 {
     handle: LevenshteinDistancesUtf8Handle,
 }
@@ -1765,6 +1019,11 @@ impl LevenshteinDistancesUtf8 {
     /// - `mismatch_cost`: Cost when Unicode characters differ
     /// - `open_cost`: Cost to insert/delete a Unicode character
     /// - `extend_cost`: Cost to continue insertion/deletion
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(LevenshteinDistancesUtf8)`: Successfully initialized engine
+    /// - `Err(Error)`: Invalid cost configuration or allocation failure
     ///
     /// # Examples
     ///
@@ -1813,12 +1072,6 @@ impl LevenshteinDistancesUtf8 {
     /// Processes Unicode strings character by character, ensuring proper handling
     /// of multi-byte UTF-8 sequences. Critical for applications requiring semantic
     /// correctness with international text.
-    ///
-    /// # Type Requirements
-    ///
-    /// Input sequences must implement `AsRef<str>` to ensure valid UTF-8:
-    /// - `&str`, `String`, `Cow<str>` are all supported
-    /// - Invalid UTF-8 will cause undefined behavior
     ///
     /// # Examples
     ///
@@ -1871,46 +1124,52 @@ impl LevenshteinDistancesUtf8 {
         let results_stride = core::mem::size_of::<usize>();
 
         if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape_str(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape_str(seq_b_slice)?;
+            let force_64bit = should_use_64bit_for_strings(seq_a_slice, seq_b_slice);
+
+            let tape_a = copy_chars_into_tape(seq_a_slice, force_64bit)?;
+            let tape_b = copy_chars_into_tape(seq_b_slice, force_64bit)?;
 
             let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view_str(&tape_a);
-                let tape_b_view = create_u64tape_view_str(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_utf8_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+            let status = match (&tape_a, &tape_b) {
+                (CharsTapeVariants::Tape64(ta), CharsTapeVariants::Tape64(tb)) => {
+                    let tape_a_view = SzSequenceU64Tape::from(ta);
+                    let tape_b_view = SzSequenceU64Tape::from(tb);
+                    unsafe {
+                        szs_levenshtein_distances_utf8_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
-            } else {
-                let tape_a_view = create_u32tape_view_str(&tape_a);
-                let tape_b_view = create_u32tape_view_str(&tape_b);
-                unsafe {
-                    szs_levenshtein_distances_utf8_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+                (CharsTapeVariants::Tape32(ta), CharsTapeVariants::Tape32(tb)) => {
+                    let tape_a_view = SzSequenceU32Tape::from(ta);
+                    let tape_b_view = SzSequenceU32Tape::from(tb);
+                    unsafe {
+                        szs_levenshtein_distances_utf8_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
+                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
             };
             match status {
                 Status::Success => Ok(results),
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
-            let seq_a = create_sequence_view_str(seq_a_slice);
-            let seq_b = create_sequence_view_str(seq_b_slice);
+            let seq_a = SzSequenceFromChars::to_sz_sequence(seq_a_slice);
+            let seq_b = SzSequenceFromChars::to_sz_sequence(seq_b_slice);
             let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_levenshtein_distances_utf8_sequence(
@@ -1944,85 +1203,25 @@ unsafe impl Sync for LevenshteinDistancesUtf8 {}
 
 /// Needleman-Wunsch global sequence alignment scoring engine.
 ///
-/// Implements the Needleman-Wunsch algorithm for finding the optimal global alignment
-/// between two sequences. Unlike edit distance, this algorithm uses a full substitution
-/// matrix and returns alignment scores rather than distances.
-///
-/// # Algorithm Details
-///
-/// The Needleman-Wunsch algorithm finds the optimal global alignment by:
-/// 1. Building a dynamic programming matrix using substitution scores
-/// 2. Applying gap penalties (open + extend costs)
-/// 3. Finding the maximum-scoring path through the entire sequences
-///
-/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
-///
-/// # Applications
-///
-/// - **Bioinformatics**: Protein and DNA sequence alignment
-/// - **Linguistics**: Comparative analysis of languages
-/// - **Data integration**: Aligning structured records
-/// - **Quality control**: Comparing reference vs. observed sequences
-///
-/// # Substitution Matrix
-///
-/// Requires a 256x256 scoring matrix where `matrix[i][j]` gives the score
-/// for aligning character `i` with character `j`. Common matrices include:
-/// - **BLOSUM**: For protein sequences
-/// - **PAM**: For evolutionary analysis
-/// - **Custom**: For domain-specific applications
+/// Finds optimal global alignments using a substitution matrix and gap penalties.
+/// Returns alignment scores rather than distances.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Create simple scoring matrix (match=2, mismatch=-1)
+/// // Create scoring matrix (match=2, mismatch=-1)
 /// let mut matrix = [[-1i8; 256]; 256];
 /// for i in 0..256 {
-///     matrix[i][i] = 2; // Match score
+///     matrix[i][i] = 2;
 /// }
 ///
 /// let device = DeviceScope::default().unwrap();
-/// let engine = NeedlemanWunschScores::new(
-///     &device,
-///     &matrix,
-///     -2, // gap open penalty
-///     -1, // gap extend penalty
-/// ).unwrap();
+/// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
 ///
-/// // Align protein sequences
-/// let seq_a = vec!["ACDEFGHIKLMNPQRSTVWY"];
-/// let seq_b = vec!["ACDEFGHIKL---NPQRSTVWY"];
+/// let seq_a = vec!["ACGT"];
+/// let seq_b = vec!["AGCT"];
 /// let scores = engine.compute(&device, &seq_a, &seq_b).unwrap();
-///
-/// println!("Global alignment score: {}", scores[0]);
-/// ```
-///
-/// # BLOSUM62 Example
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Load BLOSUM62 matrix (simplified example)
-/// fn create_blosum62_matrix() -> [[i8; 256]; 256] {
-///     let mut matrix = [[-4i8; 256]; 256]; // Default mismatch
-///     
-///     // Set scores for amino acids (simplified BLOSUM62 subset)
-///     let aa_scores = [
-///         ('A', 'A', 4), ('A', 'R', -1), ('A', 'N', -2),
-///         ('R', 'R', 5), ('R', 'N', 0), ('N', 'N', 6),
-///         // ... (full BLOSUM62 table)
-///     ];
-///     
-///     for (aa1, aa2, score) in aa_scores.iter() {
-///         matrix[*aa1 as usize][*aa2 as usize] = *score;
-///         matrix[*aa2 as usize][*aa1 as usize] = *score; // Symmetric
-///     }
-///     matrix
-/// }
-///
-/// let device = DeviceScope::default().unwrap();
-/// let blosum62 = create_blosum62_matrix();
-/// let engine = NeedlemanWunschScores::new(&device, &blosum62, -11, -1).unwrap();
 /// ```
 pub struct NeedlemanWunschScores {
     handle: NeedlemanWunschScoresHandle,
@@ -2031,52 +1230,10 @@ pub struct NeedlemanWunschScores {
 impl NeedlemanWunschScores {
     /// Create a new Needleman-Wunsch global alignment scoring engine.
     ///
-    /// Initializes the engine with a custom substitution matrix and gap penalties.
-    /// The engine will automatically select optimal implementations based on
-    /// hardware capabilities.
-    ///
     /// # Parameters
-    ///
-    /// - `device`: Device scope for execution and capability detection
     /// - `substitution_matrix`: 256x256 matrix of alignment scores
     /// - `open_cost`: Penalty for opening a gap (typically negative)
     /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(NeedlemanWunschScores)`: Successfully initialized engine
-    /// - `Err(Status::BadAlloc)`: Memory allocation failed
-    /// - `Err(Status::InvalidArgument)`: Invalid matrix or gap costs
-    ///
-    /// # Matrix Guidelines
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// // Identity matrix (simple match/mismatch)
-    /// let mut simple_matrix = [[0i8; 256]; 256];
-    /// for i in 0..256 {
-    ///     simple_matrix[i][i] = 1;  // Match
-    ///     for j in 0..256 {
-    ///         if i != j { simple_matrix[i][j] = -1; } // Mismatch
-    ///     }
-    /// }
-    ///
-    /// let device = DeviceScope::default().unwrap();
-    /// let engine = NeedlemanWunschScores::new(&device, &simple_matrix, -2, -1).unwrap();
-    /// ```
-    ///
-    /// # Gap Cost Selection
-    ///
-    /// ```rust
-    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # let device = DeviceScope::default().unwrap();
-    /// // Linear gap costs (open == extend)
-    /// let linear = NeedlemanWunschScores::new(&device, &matrix, -1, -1).unwrap();
-    ///
-    /// // Affine gap costs (prefer fewer, longer gaps)
-    /// let affine = NeedlemanWunschScores::new(&device, &matrix, -5, -1).unwrap();
-    /// ```
     pub fn new(
         device: &DeviceScope,
         substitution_matrix: &[[i8; 256]; 256],
@@ -2187,46 +1344,51 @@ impl NeedlemanWunschScores {
         let results_stride = core::mem::size_of::<isize>();
 
         if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
+            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
+            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
 
             let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_needleman_wunsch_scores_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+            let status = match (&tape_a, &tape_b) {
+                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
+                    let tape_a_view = SzSequenceU64Tape::from(ta);
+                    let tape_b_view = SzSequenceU64Tape::from(tb);
+                    unsafe {
+                        szs_needleman_wunsch_scores_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_needleman_wunsch_scores_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
+                    let tape_a_view = SzSequenceU32Tape::from(ta);
+                    let tape_b_view = SzSequenceU32Tape::from(tb);
+                    unsafe {
+                        szs_needleman_wunsch_scores_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
+                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
             };
             match status {
                 Status::Success => Ok(results),
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
+            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
+            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
             let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_needleman_wunsch_scores_sequence(
@@ -2260,95 +1422,25 @@ unsafe impl Sync for NeedlemanWunschScores {}
 
 /// Smith-Waterman local sequence alignment scoring engine.
 ///
-/// Implements the Smith-Waterman algorithm for finding optimal local alignments
-/// within sequences. Unlike Needleman-Wunsch, this algorithm finds the best-matching
-/// subsequences rather than aligning entire sequences.
-///
-/// # Algorithm Details
-///
-/// The Smith-Waterman algorithm:
-/// 1. Builds a dynamic programming matrix with non-negative scores
-/// 2. Allows scores to reset to zero (no penalty for poor regions)
-/// 3. Returns the maximum score found anywhere in the matrix
-/// 4. Identifies optimal local alignments without end-to-end constraints
-///
-/// Time complexity: O(nm), Space complexity: O(nm) or O(n+m) with optimizations.
-///
-/// # Applications
-///
-/// - **Homology search**: Finding similar regions in biological sequences
-/// - **Motif discovery**: Identifying conserved patterns
-/// - **Database search**: BLAST-like local similarity search
-/// - **Partial matching**: Finding best substring alignments
-/// - **Fragment analysis**: Comparing incomplete or damaged sequences
-///
-/// # Local vs Global Alignment
-///
-/// ```text
-/// Global (Needleman-Wunsch):
-/// SEQUENCE_A: ATCGATCGATCG----ATCG
-/// SEQUENCE_B: ----ATCGATCGATCGATCG
-/// (Forces end-to-end alignment)
-///
-/// Local (Smith-Waterman):
-/// SEQUENCE_A: ...ATCGATCGATCG...
-/// SEQUENCE_B:    ATCGATCGATCG
-/// (Finds best local match)
-/// ```
+/// Finds optimal local alignments within sequences using a substitution matrix
+/// and gap penalties. Returns maximum scores found anywhere in the alignment matrix.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// // Create scoring matrix for DNA (A, T, C, G)
-/// let mut dna_matrix = [[-2i8; 256]; 256]; // Mismatch penalty
-/// let dna_chars = [b'A', b'T', b'C', b'G'];
-/// for &c1 in &dna_chars {
-///     for &c2 in &dna_chars {
-///         dna_matrix[c1 as usize][c2 as usize] = if c1 == c2 { 3 } else { -1 };
-///     }
+/// // Create scoring matrix
+/// let mut matrix = [[-1i8; 256]; 256];
+/// for i in 0..256 {
+///     matrix[i][i] = 2;
 /// }
 ///
-/// let device = DeviceScope::default().unwrap();
-/// let engine = SmithWatermanScores::new(
-///     &device,
-///     &dna_matrix,
-///     -5, // gap open
-///     -1, // gap extend
-/// ).unwrap();
-///
-/// // Find local similarities
-/// let long_seq = vec!["ATCGATCGATCGAAAAAATCGATCGATCG"];
-/// let pattern = vec!["ATCGATCGATCG"];
-/// let scores = engine.compute(&device, &long_seq, &pattern).unwrap();
-///
-/// println!("Local alignment score: {}", scores[0]); // High positive score
-/// ```
-///
-/// # Database Search Example
-///
-/// ```rust
-/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// # let mut matrix = [[0i8; 256]; 256];
 /// let device = DeviceScope::default().unwrap();
 /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
 ///
-/// // Search query against database sequences
-/// let query = "ACDEFGHIKLMN";  // Query sequence
-/// let database = vec![
-///     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",  // Contains query
-///     "ZYXWVUTSRQPONMLKJIHGFEDCBA",  // Reverse complement
-///     "DEFGHIKLM",                  // Partial match
-///     "COMPLETELY_DIFFERENT",        // No similarity
-/// ];
-///
-/// let queries = vec![query; database.len()];  // Repeat query for each DB entry
-/// let scores = engine.compute(&device, &queries, &database).unwrap();
-///
-/// // Find best matches
-/// for (i, &score) in scores.iter().enumerate() {
-///     println!("Database[{}] score: {}", i, score);
-/// }
+/// let seq_a = vec!["ACGTAAACGT"];
+/// let seq_b = vec!["ACGT"];
+/// let scores = engine.compute(&device, &seq_a, &seq_b).unwrap();
 /// ```
 pub struct SmithWatermanScores {
     handle: SmithWatermanScoresHandle,
@@ -2449,7 +1541,7 @@ impl SmithWatermanScores {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<isize>)`: Vector of local alignment scores (≥ 0)
-    /// - `Err(Status)`: Computation failed
+    /// - `Err(Error)`: Computation failed
     ///
     /// # Score Interpretation
     ///
@@ -2533,46 +1625,51 @@ impl SmithWatermanScores {
         let results_stride = core::mem::size_of::<isize>();
 
         if device.is_gpu() {
-            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
-            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
+            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
+            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
 
             let mut error_msg: *const c_char = ptr::null();
-            let status = if use_64bit_a || use_64bit_b {
-                let tape_a_view = create_u64tape_view(&tape_a);
-                let tape_b_view = create_u64tape_view(&tape_b);
-                unsafe {
-                    szs_smith_waterman_scores_u64tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+            let status = match (&tape_a, &tape_b) {
+                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
+                    let tape_a_view = SzSequenceU64Tape::from(ta);
+                    let tape_b_view = SzSequenceU64Tape::from(tb);
+                    unsafe {
+                        szs_smith_waterman_scores_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
-            } else {
-                let tape_a_view = create_u32tape_view(&tape_a);
-                let tape_b_view = create_u32tape_view(&tape_b);
-                unsafe {
-                    szs_smith_waterman_scores_u32tape(
-                        self.handle,
-                        device.handle,
-                        &tape_a_view as *const _ as *const c_void,
-                        &tape_b_view as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
+                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
+                    let tape_a_view = SzSequenceU32Tape::from(ta);
+                    let tape_b_view = SzSequenceU32Tape::from(tb);
+                    unsafe {
+                        szs_smith_waterman_scores_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                            &mut error_msg,
+                        )
+                    }
                 }
+                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
             };
             match status {
                 Status::Success => Ok(results),
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         } else {
-            let seq_a = create_sequence_view(seq_a_slice);
-            let seq_b = create_sequence_view(seq_b_slice);
+            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
+            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
             let mut error_msg: *const c_char = ptr::null();
             let status = unsafe {
                 szs_smith_waterman_scores_sequence(
@@ -2604,6 +1701,643 @@ impl Drop for SmithWatermanScores {
 unsafe impl Send for SmithWatermanScores {}
 unsafe impl Sync for SmithWatermanScores {}
 
+/// Builder for configuring fingerprinting engines with optimal parameters.
+///
+/// Provides preset configurations for common use cases and allows fine-tuning
+/// of parameters for specific applications.
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
+/// let device = DeviceScope::default().unwrap();
+///
+/// // DNA sequence analysis
+/// let dna_engine = Fingerprints::builder()
+///     .dna()
+///     .dimensions(256)
+///     .build(&device)
+///     .unwrap();
+///
+/// // Text processing
+/// let text_engine = Fingerprints::builder()
+///     .ascii()
+///     .dimensions(512)
+///     .build(&device)
+///     .unwrap();
+/// ```
+pub struct FingerprintsBuilder {
+    alphabet_size: usize,
+    window_widths: Option<Vec<usize>>,
+    dimensions: usize,
+}
+
+impl FingerprintsBuilder {
+    /// Create a new builder with system-optimized defaults.
+    ///
+    /// Uses intelligent defaults that adapt to available hardware capabilities:
+    /// - Alphabet size: 256 (suitable for binary data and most text)
+    /// - Window widths: Hardware-optimized selection
+    /// - Dimensions: 1024 (balances accuracy and performance)
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: New builder with defaults
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::FingerprintsBuilder;
+    /// let builder = FingerprintsBuilder::new();
+    /// // Further customize with method chaining...
+    /// ```
+    pub fn new() -> Self {
+        Self {
+            alphabet_size: 0,
+            window_widths: None,
+            dimensions: 1024, // Default dimensions
+        }
+    }
+
+    /// Configure for binary data processing (256-character alphabet).
+    ///
+    /// Optimizes the engine for processing arbitrary binary data, including:
+    /// - File content analysis
+    /// - Network packet inspection
+    /// - Binary protocol parsing
+    /// - Raw data deduplication
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .binary()
+    ///     .dimensions(256)
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Process binary data
+    /// let binary_data = vec![
+    ///     &[0x89, 0x50, 0x4E, 0x47][..], // PNG header
+    ///     &[0xFF, 0xD8, 0xFF, 0xE0][..], // JPEG header  
+    ///     &[0x50, 0x4B, 0x03, 0x04][..], // ZIP header
+    /// ];
+    /// let (hashes, counts) = engine.compute(&device, &binary_data, 256).unwrap();
+    /// ```
+    pub fn binary(mut self) -> Self {
+        self.alphabet_size = 256;
+        self
+    }
+
+    /// Configure for ASCII text processing (128-character alphabet).
+    ///
+    /// Optimizes for English text and ASCII-only content:
+    /// - Plain text documents
+    /// - Source code analysis
+    /// - Log file processing
+    /// - ASCII-based data formats
+    ///
+    /// Provides better hash distribution than binary mode for ASCII content.
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .ascii()
+    ///     .window_widths(&[3, 5, 7])  // Good for word-level analysis
+    ///     .dimensions(256)
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Analyze text documents
+    /// let documents = vec![
+    ///     "The quick brown fox jumps over the lazy dog",
+    ///     "A journey of a thousand miles begins with a single step",
+    ///     "To be or not to be, that is the question",
+    /// ];
+    /// let (hashes, counts) = engine.compute(&device, &documents, 256).unwrap();
+    /// ```
+    pub fn ascii(mut self) -> Self {
+        self.alphabet_size = 128;
+        self
+    }
+
+    /// Configure for DNA sequence analysis (4-character alphabet: A, C, G, T).
+    ///
+    /// Highly optimized for genomic applications:
+    /// - DNA sequencing analysis
+    /// - Genome assembly
+    /// - Variant detection
+    /// - Phylogenetic analysis
+    /// - k-mer counting
+    ///
+    /// The small alphabet size provides excellent hash quality and performance.
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .dna()
+    ///     .window_widths(&[21, 31])  // Common k-mer sizes in genomics
+    ///     .dimensions(128)  // 64 * 2 window widths
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Analyze DNA sequences
+    /// let sequences = vec![
+    ///     "ATCGATCGATCGATCGATCGATCG",
+    ///     "GCTAGCTAGCTAGCTAGCTAGCTA",
+    ///     "TTAAGGCCTTAAGGCCTTAAGGCC",
+    /// ];
+    /// let (k_mer_hashes, k_mer_counts) = engine.compute(&device, &sequences, 128).unwrap();
+    /// ```
+    pub fn dna(mut self) -> Self {
+        self.alphabet_size = 4;
+        self
+    }
+
+    /// Configure for protein sequence analysis (22-character amino acid alphabet).
+    ///
+    /// Optimized for proteomics and structural biology:
+    /// - Protein similarity search
+    /// - Structural motif discovery
+    /// - Functional domain analysis
+    /// - Evolutionary studies
+    /// - Mass spectrometry data analysis
+    ///
+    /// Uses the 20 standard amino acids plus Selenocysteine (U) and Pyrrolysine (O).
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .protein()
+    ///     .window_widths(&[5, 7, 9])  // Good for motif detection
+    ///     .dimensions(192)  // 64 * 3 window widths
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Analyze protein sequences
+    /// let proteins = vec![
+    ///     "ACDEFGHIKLMNPQRSTVWY",  // Standard amino acids
+    ///     "MVLSEGEWQLVLHVWAKVEADVAGHGQDILIRLFKSHPETLEKFDRFKHLKTEAEMKASED",
+    ///     "GSHMVKVALYDYMPMNANDLQLRKGMHFRFKVAEQAARLIQPQEKKLAKAQQTLDLRSQIQQQQEQLGQ",
+    /// ];
+    /// let (peptide_hashes, peptide_counts) = engine.compute(&device, &proteins, 192).unwrap();
+    /// ```
+    pub fn protein(mut self) -> Self {
+        self.alphabet_size = 22;
+        self
+    }
+
+    /// Set a custom alphabet size for specialized applications.
+    ///
+    /// Use this for domain-specific alphabets or when you know the exact
+    /// character set size in your data. Common custom sizes:
+    /// - 16: Hexadecimal data
+    /// - 64: Base64 encoded data  
+    /// - 85: Base85 encoded data
+    /// - Custom: Domain-specific character sets
+    ///
+    /// # Parameters
+    ///
+    /// - `size`: Number of unique characters in your alphabet (> 0)
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Hexadecimal data (0-9, A-F)
+    /// let hex_engine = Fingerprints::builder()
+    ///     .alphabet_size(16)
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Custom alphabet for specific domain
+    /// let custom_engine = Fingerprints::builder()
+    ///     .alphabet_size(32)  // Custom 32-character set
+    ///     .window_widths(&[4, 6, 8])
+    ///     .build(&device)
+    ///     .unwrap();
+    /// ```
+    pub fn alphabet_size(mut self, size: usize) -> Self {
+        self.alphabet_size = size;
+        self
+    }
+
+    /// Configure window widths (n-gram sizes) for rolling hash computation.
+    ///
+    /// Window widths determine the size of substrings used for hashing. Different
+    /// widths capture patterns at different scales. If not specified, the system
+    /// selects optimal widths based on hardware capabilities and alphabet size.
+    ///
+    /// # Guidelines
+    ///
+    /// - **Small widths (3-5)**: Capture local patterns, good for noisy data
+    /// - **Medium widths (7-15)**: Balance between specificity and robustness
+    /// - **Large widths (31+)**: Capture longer patterns, sensitive to changes
+    /// - **Multiple widths**: Provide multi-scale pattern detection
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Domain-Specific Recommendations
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Natural language (word-level patterns)
+    /// let text_engine = Fingerprints::builder()
+    ///     .ascii()
+    ///     .window_widths(&[3, 4, 5, 7])  // Character n-grams
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Genomics (k-mer analysis)
+    /// let genomics_engine = Fingerprints::builder()
+    ///     .dna()
+    ///     .window_widths(&[15, 21, 31])  // Standard k-mer sizes
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // Document similarity (longer patterns)
+    /// let doc_engine = Fingerprints::builder()
+    ///     .binary()
+    ///     .window_widths(&[5, 7, 11, 15, 31])  // Multi-scale analysis
+    ///     .build(&device)
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Performance
+    ///
+    /// - More windows → better accuracy but slower computation
+    /// - Use multiples of the number of hash functions for SIMD efficiency
+    /// - Consider total dimensions = 64 × number_of_windows for optimal performance
+    pub fn window_widths(mut self, widths: &[usize]) -> Self {
+        self.window_widths = Some(widths.to_vec());
+        self
+    }
+
+    /// Set the total number of dimensions (hash functions) per fingerprint.
+    ///
+    /// Higher dimensions provide better accuracy and collision resistance at the
+    /// cost of increased memory usage and computation time. The optimal value
+    /// depends on your accuracy requirements and available resources.
+    ///
+    /// # Performance
+    ///
+    /// For optimal SIMD performance, use dimensions that are multiples of 64:
+    /// - **64**: Minimal configuration, suitable for rapid prototyping
+    /// - **128**: Good for small-scale similarity detection
+    /// - **256**: Balanced accuracy/performance for most applications
+    /// - **512**: High accuracy for critical applications
+    /// - **1024**: Maximum accuracy, use when precision is paramount
+    ///
+    /// # Recommended Formulas
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Basic formula: 64 * number_of_window_widths
+    /// let balanced_engine = Fingerprints::builder()
+    ///     .dna()
+    ///     .window_widths(&[3, 5, 7, 9])  // 4 widths
+    ///     .dimensions(256)  // 64 * 4 = 256
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// // High-precision configuration
+    /// let precision_engine = Fingerprints::builder()
+    ///     .binary()
+    ///     .window_widths(&[5, 7, 11, 15])  // 4 widths
+    ///     .dimensions(512)  // 128 * 4 = 512 for extra precision
+    ///     .build(&device)
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Memory Usage
+    ///
+    /// Each fingerprint uses `dimensions * sizeof(u32)` bytes for hashes plus
+    /// the same for counts. With 1024 dimensions:
+    /// - Per fingerprint: 8KB (4KB hashes + 4KB counts)
+    /// - 1000 fingerprints: ~8MB total memory
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    pub fn dimensions(mut self, dimensions: usize) -> Self {
+        self.dimensions = dimensions;
+        self
+    }
+
+    /// Build the fingerprinting engine with the configured parameters.
+    ///
+    /// Creates an optimized fingerprinting engine based on the builder configuration
+    /// and the target device capabilities. The engine automatically adapts its
+    /// implementation strategy based on available hardware features.
+    ///
+    /// # Parameter Resolution
+    ///
+    /// - **alphabet_size = 0**: Defaults to 256 (binary mode)
+    /// - **window_widths = None**: Uses hardware-optimized defaults
+    /// - **dimensions**: Used as specified, should be multiple of 64
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Fingerprints)`: Successfully created engine
+    /// - `Err(Error)`: Invalid parameter combination or allocation failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    ///
+    /// // Build with validation
+    /// let engine = Fingerprints::builder()
+    ///     .dna()
+    ///     .dimensions(256)
+    ///     .build(&device)
+    ///     .expect("Failed to create fingerprinting engine");
+    ///
+    /// // Verify engine is ready for use
+    /// let test_data = vec!["ATCGATCG"];
+    /// let result = engine.compute(&device, &test_data, 256);
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn build(self, device: &DeviceScope) -> Result<Fingerprints, Error> {
+        let mut engine: FingerprintsHandle = ptr::null_mut();
+        let capabilities = device.get_capabilities().unwrap_or(0);
+
+        let (widths_ptr, widths_len) = match &self.window_widths {
+            Some(widths) => (widths.as_ptr(), widths.len()),
+            None => (ptr::null(), 0),
+        };
+
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_fingerprints_init(
+                self.dimensions,
+                self.alphabet_size,
+                widths_ptr,
+                widths_len,
+                ptr::null(), // No custom allocator
+                capabilities,
+                &mut engine,
+                &mut error_msg,
+            )
+        };
+
+        match status {
+            Status::Success => Ok(Fingerprints { handle: engine }),
+            err => Err(rust_error_from_c_message(err, error_msg)),
+        }
+    }
+}
+
+/// High-performance fingerprinting engine for similarity detection and clustering.
+///
+/// Computes Min-Hash signatures and Count-Min-Sketch data structures for efficient
+/// similarity estimation, duplicate detection, and approximate set operations.
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
+/// let device = DeviceScope::cpu_cores(1).unwrap();
+/// let engine = Fingerprints::builder()
+///     .ascii()
+///     .dimensions(256)
+///     .build(&device)
+///     .unwrap();
+///
+/// let documents = vec![
+///     "The quick brown fox jumps over the lazy dog",
+///     "A quick brown fox leaps over a lazy dog",
+/// ];
+///
+/// let (hashes, counts) = engine.compute(&device, &documents, 256).unwrap();
+/// ```
+pub struct Fingerprints {
+    handle: FingerprintsHandle,
+}
+
+impl Fingerprints {
+    /// Create a new builder for configuring the fingerprinting engine.
+    ///
+    /// Returns a builder instance with intelligent defaults that can be customized
+    /// for specific use cases. The builder pattern provides a fluent interface
+    /// for configuring complex fingerprinting parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::Fingerprints;
+    /// // Start with default configuration
+    /// let builder = Fingerprints::builder();
+    ///
+    /// // Customize as needed
+    /// // let engine = builder.dna().dimensions(256).build(&device)?;
+    /// ```
+    pub fn builder() -> FingerprintsBuilder {
+        FingerprintsBuilder::new()
+    }
+
+    /// Compute Min-Hash fingerprints and Count-Min-Sketch data for a collection of strings.
+    ///
+    /// Processes the input strings and generates two types of output:
+    /// - **Min-Hashes**: Locality-sensitive hash signatures for similarity detection
+    /// - **Min-Counts**: Frequency sketches for approximate counting queries
+    ///
+    /// # Parameters
+    ///
+    /// - `device`: Device scope for execution (CPU or GPU)
+    /// - `strings`: Collection of input strings to fingerprint
+    /// - `dimensions`: Number of hash functions per fingerprint (should match engine config)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok((UnifiedVec<u32>, UnifiedVec<u32>))`: (min_hashes, min_counts) in unified memory
+    /// - `Err(Error)`: Computation failed
+    ///
+    /// # Output Format
+    ///
+    /// Both output vectors have layout: `num_strings × dimensions`
+    /// - `min_hashes[i * dimensions + j]`: j-th hash of i-th string
+    /// - `min_counts[i * dimensions + j]`: j-th count of i-th string
+    ///
+    /// # Similarity Estimation
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let dimensions = 256;
+    /// let engine = Fingerprints::builder()
+    ///     .dimensions(dimensions)
+    ///     .build(&device)
+    ///     .unwrap();
+    ///
+    /// let strings = vec!["hello world", "hello word", "goodbye world"];
+    ///
+    /// let (hashes, _counts) = engine.compute(&device, &strings, dimensions).unwrap();
+    ///
+    /// // Estimate Jaccard similarity between strings 0 and 1
+    /// let mut matches = 0;
+    /// for i in 0..dimensions {
+    ///     if hashes[0 * dimensions + i] == hashes[1 * dimensions + i] {
+    ///         matches += 1;
+    ///     }
+    /// }
+    /// let similarity = matches as f64 / dimensions as f64;
+    /// println!("Estimated Jaccard similarity: {:.3}", similarity);
+    /// ```
+    ///
+    /// # Memory Management
+    ///
+    /// Uses unified memory allocation for optimal GPU performance:
+    /// - CPU: Standard heap allocation
+    /// - GPU: CUDA unified memory (accessible from both CPU and GPU)
+    /// - Automatic memory cleanup when vectors are dropped
+    ///
+    /// # Performance
+    ///
+    /// - GPU optimal for large batches (>1000 strings)
+    /// - Memory usage: 8 bytes per string per dimension
+    /// - Processing time scales linearly with total input size
+    /// - SIMD acceleration provides significant speedup on modern CPUs
+    pub fn compute<T, S>(
+        &self,
+        device: &DeviceScope,
+        strings: T,
+        dimensions: usize,
+    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
+    {
+        let strings_slice = strings.as_ref();
+        let num_strings = strings_slice.len();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        if device.is_gpu() {
+            // For fingerprints we only have one collection, so estimate if it needs 64-bit
+            let total_size: usize = strings_slice.iter().map(|s| s.as_ref().len()).sum();
+            let force_64bit = total_size > u32::MAX as usize || strings_slice.len() > u32::MAX as usize;
+            let tape = copy_bytes_into_tape(strings_slice, force_64bit)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = match &tape {
+                BytesTapeVariants::Tape64(t) => {
+                    let tape_view = SzSequenceU64Tape::from(t);
+                    unsafe {
+                        szs_fingerprints_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_view as *const _ as *const c_void,
+                            min_hashes.as_mut_ptr(),
+                            hashes_stride,
+                            min_counts.as_mut_ptr(),
+                            counts_stride,
+                            &mut error_msg,
+                        )
+                    }
+                }
+                BytesTapeVariants::Tape32(t) => {
+                    let tape_view = SzSequenceU32Tape::from(t);
+                    unsafe {
+                        szs_fingerprints_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_view as *const _ as *const c_void,
+                            min_hashes.as_mut_ptr(),
+                            hashes_stride,
+                            min_counts.as_mut_ptr(),
+                            counts_stride,
+                            &mut error_msg,
+                        )
+                    }
+                }
+            };
+            match status {
+                Status::Success => Ok((min_hashes, min_counts)),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let sequence = SzSequenceFromBytes::to_sz_sequence(strings_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_fingerprints_sequence(
+                    self.handle,
+                    device.handle,
+                    &sequence as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok((min_hashes, min_counts)),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
+    }
+}
+
+impl Drop for Fingerprints {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { szs_fingerprints_free(self.handle) };
+        }
+    }
+}
+
+unsafe impl Send for Fingerprints {}
+unsafe impl Sync for Fingerprints {}
+
 /// Creates a diagonal substitution matrix for sequence alignment.
 /// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
 /// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
@@ -2624,136 +2358,60 @@ pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
     error_costs_256x256_diagonal(0, -1)
 }
 
-/// Zero-copy helper to create sz_sequence_t view from any container of byte slices
-fn create_sequence_view<T: AsRef<[u8]>>(strings: &[T]) -> SzSequence {
-    SzSequence {
-        handle: strings.as_ptr() as *mut c_void,
-        count: strings.len(),
-        get_start: sz_sequence_get_start_generic::<T>,
-        get_length: sz_sequence_get_length_generic::<T>,
-        starts: ptr::null(),
-        lengths: ptr::null(),
-    }
+/// Check if either byte collection requires 64-bit tapes
+fn should_use_64bit_for_bytes<T: AsRef<[u8]>>(seq_a: &[T], seq_b: &[T]) -> bool {
+    let total_size_a: usize = seq_a.iter().map(|s| s.as_ref().len()).sum();
+    let total_size_b: usize = seq_b.iter().map(|s| s.as_ref().len()).sum();
+    total_size_a > u32::MAX as usize
+        || seq_a.len() > u32::MAX as usize
+        || total_size_b > u32::MAX as usize
+        || seq_b.len() > u32::MAX as usize
 }
 
-/// Zero-copy helper to create sz_sequence_t view from any container of strings
-fn create_sequence_view_str<T: AsRef<str>>(strings: &[T]) -> SzSequence {
-    SzSequence {
-        handle: strings.as_ptr() as *mut c_void,
-        count: strings.len(),
-        get_start: sz_sequence_get_start_str::<T>,
-        get_length: sz_sequence_get_length_str::<T>,
-        starts: ptr::null(),
-        lengths: ptr::null(),
-    }
+/// Check if either string collection requires 64-bit tapes
+fn should_use_64bit_for_strings<T: AsRef<str>>(seq_a: &[T], seq_b: &[T]) -> bool {
+    let total_size_a: usize = seq_a.iter().map(|s| s.as_ref().len()).sum();
+    let total_size_b: usize = seq_b.iter().map(|s| s.as_ref().len()).sum();
+    total_size_a > u32::MAX as usize
+        || seq_a.len() > u32::MAX as usize
+        || total_size_b > u32::MAX as usize
+        || seq_b.len() > u32::MAX as usize
 }
 
-/// Convert StringTape to appropriate tape view for C API
-fn create_tape<T>(sequences: &[T]) -> Result<(BytesTape<i64, UnifiedAlloc>, bool), Error>
+/// Convert byte sequences to BytesTape
+fn copy_bytes_into_tape<T>(sequences: &[T], force_64bit: bool) -> Result<BytesTapeVariants, Error>
 where
     T: AsRef<[u8]>,
 {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
-    let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
+    let use_64bit = force_64bit || total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    let tape = if use_64bit {
-        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    if use_64bit {
+        let mut tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(BytesTapeVariants::Tape64(tape))
     } else {
-        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
-    };
-
-    let mut tape = tape;
-    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-    Ok((tape, use_64bit))
+        let mut tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(BytesTapeVariants::Tape32(tape))
+    }
 }
 
 /// Convert string sequences to StringTape
-fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, UnifiedAlloc>, bool), Error> {
+fn copy_chars_into_tape<T: AsRef<str>>(sequences: &[T], force_64bit: bool) -> Result<CharsTapeVariants, Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
-    let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
+    let use_64bit = force_64bit || total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    let tape = if use_64bit {
-        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    if use_64bit {
+        let mut tape = StringTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(CharsTapeVariants::Tape64(tape))
     } else {
-        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
-    };
-
-    let mut tape = tape;
-    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-    Ok((tape, use_64bit))
-}
-
-/// Convert 32-bit BytesTape to SzSequenceU32Tape for C API
-fn create_u32tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU32Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u32,
-        count,
-    }
-}
-
-/// Convert 32-bit StringTape to SzSequenceU32Tape for C API
-fn create_u32tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU32Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u32,
-        count,
-    }
-}
-
-/// Convert 64-bit BytesTape to SzSequenceU64Tape for C API  
-fn create_u64tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU64Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u64,
-        count,
-    }
-}
-
-/// Convert 64-bit StringTape to SzSequenceU64Tape for C API  
-fn create_u64tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
-    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
-    SzSequenceU64Tape {
-        data: data_ptr,
-        offsets: offsets_ptr as *const u64,
-        count,
-    }
-}
-
-/// Generic C callback to get start of string at index for byte slices
-extern "C" fn sz_sequence_get_start_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> *const u8 {
-    unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
-        strings[index].as_ref().as_ptr()
-    }
-}
-
-/// Generic C callback to get length of string at index for byte slices
-extern "C" fn sz_sequence_get_length_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> usize {
-    unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
-        strings[index].as_ref().len()
-    }
-}
-
-/// Generic C callback to get start of string at index for str slices
-extern "C" fn sz_sequence_get_start_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> *const u8 {
-    unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
-        strings[index].as_ref().as_bytes().as_ptr()
-    }
-}
-
-/// Generic C callback to get length of string at index for str slices
-extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> usize {
-    unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
-        strings[index].as_ref().as_bytes().len()
+        let mut tape = StringTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        Ok(CharsTapeVariants::Tape32(tape))
     }
 }
 
@@ -2767,19 +2425,17 @@ extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, ind
 /// println!("Using backend: {}", info);
 /// ```
 pub fn backend_info() -> &'static str {
-    #[cfg(feature = "cuda")]
-    return "CUDA GPU acceleration enabled";
-
-    #[cfg(all(feature = "rocm", not(feature = "cuda")))]
-    return "ROCm GPU acceleration enabled";
-
-    #[cfg(all(feature = "cpus", not(any(feature = "cuda", feature = "rocm"))))]
-    return "Multi-threaded CPU backend enabled";
-
-    #[cfg(not(any(feature = "cpus", feature = "cuda", feature = "rocm")))]
-    return "StringZillas not available - enable cpus, cuda, or rocm feature";
-
-    "CPU backend"
+    if cfg!(feature = "cuda") {
+        "CUDA GPU acceleration enabled"
+    } else if cfg!(all(feature = "rocm", not(feature = "cuda"))) {
+        "ROCm GPU acceleration enabled"
+    } else if cfg!(all(feature = "cpus", not(any(feature = "cuda", feature = "rocm")))) {
+        "Multi-threaded CPU backend enabled"
+    } else if cfg!(not(any(feature = "cpus", feature = "cuda", feature = "rocm"))) {
+        "StringZillas not available - enable cpus, cuda, or rocm feature"
+    } else {
+        "Unknown backend"
+    }
 }
 
 #[cfg(test)]
