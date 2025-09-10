@@ -316,7 +316,7 @@ impl DeviceScope {
     /// # Returns
     ///
     /// - `Ok(usize)`: GPU device index (0-based)
-    /// - `Err(Error)`: Not configured for GPU or GPU unavailable
+    /// - `Err(Status::Unknown)`: Not configured for GPU or GPU unavailable
     ///
     /// # Examples
     ///
@@ -395,7 +395,7 @@ struct SzSequence {
 /// Raw C API tape structure for 32-bit offsets (data < 4GB)
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct CApiTape32 {
+struct SzSequenceU32Tape {
     data: *const u8,
     offsets: *const u32,
     count: usize,
@@ -404,7 +404,7 @@ struct CApiTape32 {
 /// Raw C API tape structure for 64-bit offsets (data >= 4GB)
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct CApiTape64 {
+struct SzSequenceU64Tape {
     data: *const u8,
     offsets: *const u64,
     count: usize,
@@ -706,20 +706,6 @@ unsafe impl Allocator for UnifiedAlloc {
 /// Type alias for Vec with unified allocator
 pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 
-/// Raw tape view for C API - contains pointers for FFI (internal)
-pub(crate) enum CApiTapeView {
-    U32(CApiTape32),
-    U64(CApiTape64),
-}
-
-/// Simplified trait for tape inputs
-pub(crate) trait TapeInput {
-    /// Get the number of sequences in this tape
-    fn count(&self) -> usize;
-    /// Create appropriate tape view (32-bit or 64-bit based on tape type)
-    fn create_view(&self) -> CApiTapeView;
-}
-
 /// Levenshtein distance engine for batch processing of binary sequences.
 ///
 /// Computes edit distances between pairs of byte sequences using the Wagner-Fischer
@@ -797,344 +783,6 @@ pub(crate) trait TapeInput {
 /// ```
 pub struct LevenshteinDistances {
     handle: LevenshteinDistancesHandle,
-}
-
-/// Trait for inputs that can be processed by LevenshteinDistances engine
-pub trait LevenshteinDistancesInputs: Sized {
-    /// Compute Levenshtein distances using the most appropriate API for this input type
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error>;
-
-    /// Get the number of sequences in this input
-    fn sequence_count(&self) -> usize;
-}
-
-/// Helper function for computing Levenshtein distances on sequences
-fn compute_levenshtein_sequences<'a, I1, I2>(
-    _seq_a_iter: I1,
-    _seq_b_iter: I2,
-    seq_a_bytes: &[&[u8]],
-    seq_b_bytes: &[&[u8]],
-    device: &DeviceScope,
-    engine: &LevenshteinDistances,
-) -> Result<UnifiedVec<usize>, Error>
-where
-    I1: Iterator<Item = &'a [u8]>,
-    I2: Iterator<Item = &'a [u8]>,
-{
-    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
-
-    if device.is_gpu() {
-        // GPU: Convert sequences to tapes using extend, then use tape API
-        let tape_a = create_tape(seq_a_bytes)?;
-        let tape_b = create_tape(seq_b_bytes)?;
-
-        let tape_a_view = tape_a.as_c_api_view();
-        let tape_b_view = tape_b.as_c_api_view();
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
-                // If either tape is 64-bit, use 64-bit API
-                let view_a_64 = match &tape_a_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                let view_b_64 = match &tape_b_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                unsafe {
-                    szs_levenshtein_distances_u64tape(
-                        engine.handle,
-                        device.handle,
-                        &view_a_64 as *const _ as *const c_void,
-                        &view_b_64 as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            }
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_levenshtein_distances_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    } else {
-        // CPU: Use sequence API directly
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let seq_a = create_sequence_view(seq_a_bytes);
-        let seq_b = create_sequence_view(seq_b_bytes);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_levenshtein_distances_sequence(
-                engine.handle,
-                device.handle,
-                &seq_a as *const _ as *const c_void,
-                &seq_b as *const _ as *const c_void,
-                results.as_mut_ptr(),
-                results_stride,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-/// Implementation for Vec<&str> - common sequence type
-impl LevenshteinDistancesInputs for Vec<&str> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        // Convert to bytes for CPU path
-        let sequences_a: Vec<&[u8]> = seq_a_slice.iter().map(|s| s.as_bytes()).collect();
-        let sequences_b: Vec<&[u8]> = seq_b_slice.iter().map(|s| s.as_bytes()).collect();
-
-        compute_levenshtein_sequences(
-            seq_a_slice.iter().map(|s| s.as_bytes()),
-            seq_b_slice.iter().map(|s| s.as_bytes()),
-            &sequences_a,
-            &sequences_b,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<&[u8]> - byte sequence type
-impl LevenshteinDistancesInputs for Vec<&[u8]> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        compute_levenshtein_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for BytesTape<u64> inputs
-impl LevenshteinDistancesInputs for BytesTape<u64, UnifiedAlloc> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_levenshtein_distances_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for BytesTape<u32> inputs
-impl LevenshteinDistancesInputs for BytesTape<u32, UnifiedAlloc> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_levenshtein_distances_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u64> inputs
-impl LevenshteinDistancesInputs for StringTape<u64, UnifiedAlloc> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_levenshtein_distances_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u32> inputs  
-impl LevenshteinDistancesInputs for StringTape<u32, UnifiedAlloc> {
-    fn compute_levenshtein(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistances,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_levenshtein_distances_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
 }
 
 impl LevenshteinDistances {
@@ -1248,11 +896,83 @@ impl LevenshteinDistances {
     /// - GPU optimal for batches >1000 pairs with medium-length sequences
     /// - Memory layout optimized for cache efficiency
     /// - Consider sequence length distribution for optimal performance
-    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<usize>, Error>
+    pub fn compute<T, S>(
+        &self,
+        device: &DeviceScope,
+        sequences_a: T,
+        sequences_b: T,
+    ) -> Result<UnifiedVec<usize>, Error>
     where
-        T: LevenshteinDistancesInputs,
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
     {
-        input_a.compute_levenshtein(input_b, device, self)
+        let seq_a_slice = sequences_a.as_ref();
+        let seq_b_slice = sequences_b.as_ref();
+        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+
+        let results_stride = core::mem::size_of::<usize>();
+
+        if device.is_gpu() {
+            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = if use_64bit_a || use_64bit_b {
+                let tape_a_view = create_u64tape_view(&tape_a);
+                let tape_b_view = create_u64tape_view(&tape_b);
+                unsafe {
+                    szs_levenshtein_distances_u64tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            } else {
+                let tape_a_view = create_u32tape_view(&tape_a);
+                let tape_b_view = create_u32tape_view(&tape_b);
+                unsafe {
+                    szs_levenshtein_distances_u32tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let seq_a = create_sequence_view(seq_a_slice);
+            let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_levenshtein_distances_sequence(
+                    self.handle,
+                    device.handle,
+                    &seq_a as *const _ as *const c_void,
+                    &seq_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
     }
 }
 
@@ -1266,254 +986,6 @@ impl Drop for LevenshteinDistances {
 
 unsafe impl Send for LevenshteinDistances {}
 unsafe impl Sync for LevenshteinDistances {}
-
-/// Trait for inputs that can be processed by LevenshteinDistancesUtf8 engine
-pub trait LevenshteinDistancesUtf8Inputs: Sized {
-    fn compute_levenshtein_utf8(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistancesUtf8,
-    ) -> Result<UnifiedVec<usize>, Error>;
-
-    fn sequence_count(&self) -> usize;
-}
-
-/// Helper function for computing Levenshtein UTF-8 distances on sequences
-fn compute_levenshtein_utf8_sequences<'a, I1, I2>(
-    seq_a_iter: I1,
-    seq_b_iter: I2,
-    seq_a_strs: &[&str],
-    seq_b_strs: &[&str],
-    device: &DeviceScope,
-    engine: &LevenshteinDistancesUtf8,
-) -> Result<UnifiedVec<usize>, Error>
-where
-    I1: Iterator<Item = &'a str>,
-    I2: Iterator<Item = &'a str>,
-{
-    let num_pairs = seq_a_strs.len().min(seq_b_strs.len());
-    if device.is_gpu() {
-        // GPU: Convert sequences to tapes using extend, then use tape API
-        let tape_a = create_tape_str(seq_a_strs)?;
-        let tape_b = create_tape_str(seq_b_strs)?;
-
-        let tape_a_view = tape_a.as_c_api_view();
-        let tape_b_view = tape_b.as_c_api_view();
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
-                // If either tape is 64-bit, use 64-bit API
-                let view_a_64 = match &tape_a_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                let view_b_64 = match &tape_b_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                unsafe {
-                    szs_levenshtein_distances_utf8_u64tape(
-                        engine.handle,
-                        device.handle,
-                        &view_a_64 as *const _ as *const c_void,
-                        &view_b_64 as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            }
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_levenshtein_distances_utf8_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    } else {
-        // CPU: Use sequence API directly
-        let seq_a = create_sequence_view_str(seq_a_strs);
-        let seq_b = create_sequence_view_str(seq_b_strs);
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_levenshtein_distances_utf8_sequence(
-                engine.handle,
-                device.handle,
-                &seq_a as *const _ as *const c_void,
-                &seq_b as *const _ as *const c_void,
-                results.as_mut_ptr(),
-                results_stride,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-/// Implementation for Vec<&str> - string sequence type (UTF-8 only)
-impl LevenshteinDistancesUtf8Inputs for Vec<&str> {
-    fn compute_levenshtein_utf8(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistancesUtf8,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        compute_levenshtein_utf8_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<String> - owned string sequence type (UTF-8 only)
-impl LevenshteinDistancesUtf8Inputs for Vec<String> {
-    fn compute_levenshtein_utf8(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistancesUtf8,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        let seq_a_str_refs: Vec<&str> = self.iter().map(|s| s.as_str()).collect();
-        let seq_b_str_refs: Vec<&str> = other.iter().map(|s| s.as_str()).collect();
-        let seq_a_slice = seq_a_str_refs.as_slice();
-        let seq_b_slice = seq_b_str_refs.as_slice();
-
-        compute_levenshtein_utf8_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for StringTape<u64> inputs - UTF-8 aware
-impl LevenshteinDistancesUtf8Inputs for StringTape<u64, UnifiedAlloc> {
-    fn compute_levenshtein_utf8(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistancesUtf8,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_levenshtein_distances_utf8_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u32> inputs - UTF-8 aware  
-impl LevenshteinDistancesUtf8Inputs for StringTape<u32, UnifiedAlloc> {
-    fn compute_levenshtein_utf8(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &LevenshteinDistancesUtf8,
-    ) -> Result<UnifiedVec<usize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<usize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_levenshtein_distances_utf8_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
 
 /// UTF-8 aware Levenshtein distance engine for Unicode text processing.
 ///
@@ -1642,13 +1114,6 @@ impl LevenshteinDistancesUtf8 {
     /// of multi-byte UTF-8 sequences. Critical for applications requiring semantic
     /// correctness with international text.
     ///
-    /// # Type Requirements
-    ///
-    /// Inputs must implement `LevenshteinDistancesUtf8Inputs`. Supported containers:
-    /// - `Vec<&str>` and `Vec<String>`
-    /// - `StringTape<u32, _>` and `StringTape<u64, _>`
-    /// All inputs must be valid UTF-8; invalid UTF-8 is unsupported.
-    ///
     /// # Examples
     ///
     /// ```rust
@@ -1680,11 +1145,83 @@ impl LevenshteinDistancesUtf8 {
     /// // Distance would be non-zero without normalization
     /// // Use unicode-normalization crate if needed
     /// ```
-    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<usize>, Error>
+    pub fn compute<T, S>(
+        &self,
+        device: &DeviceScope,
+        sequences_a: T,
+        sequences_b: T,
+    ) -> Result<UnifiedVec<usize>, Error>
     where
-        T: LevenshteinDistancesUtf8Inputs,
+        T: AsRef<[S]>,
+        S: AsRef<str>,
     {
-        input_a.compute_levenshtein_utf8(input_b, device, self)
+        let seq_a_slice = sequences_a.as_ref();
+        let seq_b_slice = sequences_b.as_ref();
+        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+
+        let results_stride = core::mem::size_of::<usize>();
+
+        if device.is_gpu() {
+            let (tape_a, use_64bit_a) = create_tape_str(seq_a_slice)?;
+            let (tape_b, use_64bit_b) = create_tape_str(seq_b_slice)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = if use_64bit_a || use_64bit_b {
+                let tape_a_view = create_u64tape_view_str(&tape_a);
+                let tape_b_view = create_u64tape_view_str(&tape_b);
+                unsafe {
+                    szs_levenshtein_distances_utf8_u64tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            } else {
+                let tape_a_view = create_u32tape_view_str(&tape_a);
+                let tape_b_view = create_u32tape_view_str(&tape_b);
+                unsafe {
+                    szs_levenshtein_distances_utf8_u32tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let seq_a = create_sequence_view_str(seq_a_slice);
+            let seq_b = create_sequence_view_str(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_levenshtein_distances_utf8_sequence(
+                    self.handle,
+                    device.handle,
+                    &seq_a as *const _ as *const c_void,
+                    &seq_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
     }
 }
 
@@ -1698,410 +1235,6 @@ impl Drop for LevenshteinDistancesUtf8 {
 
 unsafe impl Send for LevenshteinDistancesUtf8 {}
 unsafe impl Sync for LevenshteinDistancesUtf8 {}
-
-/// Trait for inputs that can be processed by NeedlemanWunschScores engine
-pub trait NeedlemanWunschScoresInputs: Sized {
-    /// Compute Needleman-Wunsch alignment scores using the most appropriate API for this input type
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error>;
-
-    /// Get the number of sequences in this input
-    fn sequence_count(&self) -> usize;
-}
-
-/// Helper function for computing Needleman-Wunsch scores on sequences
-fn compute_needleman_wunsch_sequences<'a, I1, I2>(
-    seq_a_iter: I1,
-    seq_b_iter: I2,
-    seq_a_bytes: &[&[u8]],
-    seq_b_bytes: &[&[u8]],
-    device: &DeviceScope,
-    engine: &NeedlemanWunschScores,
-) -> Result<UnifiedVec<isize>, Error>
-where
-    I1: Iterator<Item = &'a [u8]>,
-    I2: Iterator<Item = &'a [u8]>,
-{
-    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
-
-    if device.is_gpu() {
-        // GPU: Convert sequences to tapes using extend, then use tape API
-        let tape_a = create_tape(seq_a_bytes)?;
-        let tape_b = create_tape(seq_b_bytes)?;
-
-        let tape_a_view = tape_a.as_c_api_view();
-        let tape_b_view = tape_b.as_c_api_view();
-
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
-                // If either tape is 64-bit, use 64-bit API
-                let view_a_64 = match &tape_a_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                let view_b_64 = match &tape_b_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                unsafe {
-                    szs_needleman_wunsch_scores_u64tape(
-                        engine.handle,
-                        device.handle,
-                        &view_a_64 as *const _ as *const c_void,
-                        &view_b_64 as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            }
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_needleman_wunsch_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    } else {
-        // CPU: Use sequence API directly
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let seq_a = create_sequence_view(seq_a_bytes);
-        let seq_b = create_sequence_view(seq_b_bytes);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_needleman_wunsch_scores_sequence(
-                engine.handle,
-                device.handle,
-                &seq_a as *const _ as *const c_void,
-                &seq_b as *const _ as *const c_void,
-                results.as_mut_ptr(),
-                results_stride,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-impl TapeInput for BytesTape<u64, UnifiedAlloc> {
-    fn count(&self) -> usize {
-        let (_, _, count, _) = self.as_raw_parts();
-        count
-    }
-
-    fn create_view(&self) -> CApiTapeView {
-        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
-        CApiTapeView::U64(CApiTape64 {
-            data: data_ptr,
-            offsets: offsets_ptr as *const u64,
-            count,
-        })
-    }
-}
-
-impl TapeInput for BytesTape<u32, UnifiedAlloc> {
-    fn count(&self) -> usize {
-        let (_, _, count, _) = self.as_raw_parts();
-        count
-    }
-
-    fn create_view(&self) -> CApiTapeView {
-        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
-        CApiTapeView::U32(CApiTape32 {
-            data: data_ptr,
-            offsets: offsets_ptr as *const u32,
-            count,
-        })
-    }
-}
-
-impl TapeInput for StringTape<u64, UnifiedAlloc> {
-    fn count(&self) -> usize {
-        let (_, _, count, _) = self.as_raw_parts();
-        count
-    }
-
-    fn create_view(&self) -> CApiTapeView {
-        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
-        CApiTapeView::U64(CApiTape64 {
-            data: data_ptr,
-            offsets: offsets_ptr as *const u64,
-            count,
-        })
-    }
-}
-
-impl TapeInput for StringTape<u32, UnifiedAlloc> {
-    fn count(&self) -> usize {
-        let (_, _, count, _) = self.as_raw_parts();
-        count
-    }
-
-    fn create_view(&self) -> CApiTapeView {
-        let (data_ptr, offsets_ptr, count, _) = self.as_raw_parts();
-        CApiTapeView::U32(CApiTape32 {
-            data: data_ptr,
-            offsets: offsets_ptr as *const u32,
-            count,
-        })
-    }
-}
-
-/// Implementation for Vec<&str> - common sequence type
-impl NeedlemanWunschScoresInputs for Vec<&str> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        // Convert to bytes for CPU path
-        let sequences_a: Vec<&[u8]> = seq_a_slice.iter().map(|s| s.as_bytes()).collect();
-        let sequences_b: Vec<&[u8]> = seq_b_slice.iter().map(|s| s.as_bytes()).collect();
-
-        compute_needleman_wunsch_sequences(
-            seq_a_slice.iter().map(|s| s.as_bytes()),
-            seq_b_slice.iter().map(|s| s.as_bytes()),
-            &sequences_a,
-            &sequences_b,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<&[u8]> - byte sequence type
-impl NeedlemanWunschScoresInputs for Vec<&[u8]> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        compute_needleman_wunsch_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for BytesTape<u64> inputs
-impl NeedlemanWunschScoresInputs for BytesTape<u64, UnifiedAlloc> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_needleman_wunsch_scores_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for BytesTape<u32> inputs
-impl NeedlemanWunschScoresInputs for BytesTape<u32, UnifiedAlloc> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_needleman_wunsch_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u64> inputs
-impl NeedlemanWunschScoresInputs for StringTape<u64, UnifiedAlloc> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_needleman_wunsch_scores_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u32> inputs  
-impl NeedlemanWunschScoresInputs for StringTape<u32, UnifiedAlloc> {
-    fn compute_needleman_wunsch(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &NeedlemanWunschScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_needleman_wunsch_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
 
 /// Needleman-Wunsch global sequence alignment scoring engine.
 ///
@@ -2278,7 +1411,7 @@ impl NeedlemanWunschScores {
     /// # Returns
     ///
     /// - `Ok(UnifiedVec<isize>)`: Vector of alignment scores (can be negative)
-    /// - `Err(Error)`: Computation failed
+    /// - `Err(Status)`: Computation failed
     ///
     /// # Score Interpretation
     ///
@@ -2327,11 +1460,83 @@ impl NeedlemanWunschScores {
     ///     .max_by_key(|(_, &score)| score)
     ///     .map(|(idx, _)| idx);
     /// ```
-    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<isize>, Error>
+    pub fn compute<T, S>(
+        &self,
+        device: &DeviceScope,
+        sequences_a: T,
+        sequences_b: T,
+    ) -> Result<UnifiedVec<isize>, Error>
     where
-        T: NeedlemanWunschScoresInputs,
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
     {
-        input_a.compute_needleman_wunsch(input_b, device, self)
+        let seq_a_slice = sequences_a.as_ref();
+        let seq_b_slice = sequences_b.as_ref();
+        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+
+        let results_stride = core::mem::size_of::<isize>();
+
+        if device.is_gpu() {
+            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = if use_64bit_a || use_64bit_b {
+                let tape_a_view = create_u64tape_view(&tape_a);
+                let tape_b_view = create_u64tape_view(&tape_b);
+                unsafe {
+                    szs_needleman_wunsch_scores_u64tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            } else {
+                let tape_a_view = create_u32tape_view(&tape_a);
+                let tape_b_view = create_u32tape_view(&tape_b);
+                unsafe {
+                    szs_needleman_wunsch_scores_u32tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let seq_a = create_sequence_view(seq_a_slice);
+            let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_needleman_wunsch_scores_sequence(
+                    self.handle,
+                    device.handle,
+                    &seq_a as *const _ as *const c_void,
+                    &seq_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
     }
 }
 
@@ -2345,338 +1550,6 @@ impl Drop for NeedlemanWunschScores {
 
 unsafe impl Send for NeedlemanWunschScores {}
 unsafe impl Sync for NeedlemanWunschScores {}
-
-/// Trait for inputs that can be processed by SmithWatermanScores engine
-pub trait SmithWatermanScoresInputs: Sized {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error>;
-
-    fn sequence_count(&self) -> usize;
-}
-
-/// Helper function for computing Smith-Waterman scores on sequences
-fn compute_smith_waterman_sequences<'a, I1, I2>(
-    seq_a_iter: I1,
-    seq_b_iter: I2,
-    seq_a_bytes: &[&[u8]],
-    seq_b_bytes: &[&[u8]],
-    device: &DeviceScope,
-    engine: &SmithWatermanScores,
-) -> Result<UnifiedVec<isize>, Error>
-where
-    I1: Iterator<Item = &'a [u8]>,
-    I2: Iterator<Item = &'a [u8]>,
-{
-    let num_pairs = seq_a_bytes.len().min(seq_b_bytes.len());
-    if device.is_gpu() {
-        // GPU: Convert sequences to tapes using extend, then use tape API
-        let tape_a = create_tape(seq_a_bytes)?;
-        let tape_b = create_tape(seq_b_bytes)?;
-
-        let tape_a_view = tape_a.as_c_api_view();
-        let tape_b_view = tape_b.as_c_api_view();
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(_), _) | (_, CApiTapeView::U64(_)) => {
-                // If either tape is 64-bit, use 64-bit API
-                let view_a_64 = match &tape_a_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                let view_b_64 = match &tape_b_view {
-                    CApiTapeView::U64(v) => *v,
-                    CApiTapeView::U32(v) => CApiTape64 {
-                        data: v.data,
-                        offsets: v.offsets as *const u64,
-                        count: v.count,
-                    },
-                };
-                unsafe {
-                    szs_smith_waterman_scores_u64tape(
-                        engine.handle,
-                        device.handle,
-                        &view_a_64 as *const _ as *const c_void,
-                        &view_b_64 as *const _ as *const c_void,
-                        results.as_mut_ptr(),
-                        results_stride,
-                        &mut error_msg,
-                    )
-                }
-            }
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_smith_waterman_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    } else {
-        // CPU: Use sequence API directly
-        let seq_a = create_sequence_view(seq_a_bytes);
-        let seq_b = create_sequence_view(seq_b_bytes);
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_smith_waterman_scores_sequence(
-                engine.handle,
-                device.handle,
-                &seq_a as *const _ as *const c_void,
-                &seq_b as *const _ as *const c_void,
-                results.as_mut_ptr(),
-                results_stride,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-/// Implementation for Vec<&str> - string sequence type
-impl SmithWatermanScoresInputs for Vec<&str> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        let seq_a_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
-        let seq_b_bytes: Vec<&[u8]> = other.iter().map(|s| s.as_bytes()).collect();
-        let seq_a_slice = seq_a_bytes.as_slice();
-        let seq_b_slice = seq_b_bytes.as_slice();
-
-        compute_smith_waterman_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<&[u8]> - byte sequence type
-impl SmithWatermanScoresInputs for Vec<&[u8]> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        let seq_a_slice = self.as_slice();
-        let seq_b_slice = other.as_slice();
-
-        compute_smith_waterman_sequences(
-            seq_a_slice.iter().cloned(),
-            seq_b_slice.iter().cloned(),
-            seq_a_slice,
-            seq_b_slice,
-            device,
-            engine,
-        )
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for BytesTape<u64> inputs
-impl SmithWatermanScoresInputs for BytesTape<u64, UnifiedAlloc> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_smith_waterman_scores_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for BytesTape<u32> inputs
-impl SmithWatermanScoresInputs for BytesTape<u32, UnifiedAlloc> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_smith_waterman_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u64> inputs
-impl SmithWatermanScoresInputs for StringTape<u64, UnifiedAlloc> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U64(view_a), CApiTapeView::U64(view_b)) => unsafe {
-                szs_smith_waterman_scores_u64tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u32> inputs  
-impl SmithWatermanScoresInputs for StringTape<u32, UnifiedAlloc> {
-    fn compute_smith_waterman(
-        &self,
-        other: &Self,
-        device: &DeviceScope,
-        engine: &SmithWatermanScores,
-    ) -> Result<UnifiedVec<isize>, Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_pairs = self.count().min(other.count());
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
-        let results_stride = core::mem::size_of::<isize>();
-
-        let tape_a_view = self.create_view();
-        let tape_b_view = other.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match (&tape_a_view, &tape_b_view) {
-            (CApiTapeView::U32(view_a), CApiTapeView::U32(view_b)) => unsafe {
-                szs_smith_waterman_scores_u32tape(
-                    engine.handle,
-                    device.handle,
-                    view_a as *const _ as *const c_void,
-                    view_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok(results),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
 
 /// Smith-Waterman local sequence alignment scoring engine.
 ///
@@ -2933,11 +1806,83 @@ impl SmithWatermanScores {
     ///     println!("Database[{}]: score {}", idx, score);
     /// }
     /// ```
-    pub fn compute<T>(&self, device: &DeviceScope, input_a: &T, input_b: &T) -> Result<UnifiedVec<isize>, Error>
+    pub fn compute<T, S>(
+        &self,
+        device: &DeviceScope,
+        sequences_a: T,
+        sequences_b: T,
+    ) -> Result<UnifiedVec<isize>, Error>
     where
-        T: SmithWatermanScoresInputs,
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
     {
-        input_a.compute_smith_waterman(input_b, device, self)
+        let seq_a_slice = sequences_a.as_ref();
+        let seq_b_slice = sequences_b.as_ref();
+        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+
+        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+        results.resize(num_pairs, 0);
+
+        let results_stride = core::mem::size_of::<isize>();
+
+        if device.is_gpu() {
+            let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+            let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = if use_64bit_a || use_64bit_b {
+                let tape_a_view = create_u64tape_view(&tape_a);
+                let tape_b_view = create_u64tape_view(&tape_b);
+                unsafe {
+                    szs_smith_waterman_scores_u64tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            } else {
+                let tape_a_view = create_u32tape_view(&tape_a);
+                let tape_b_view = create_u32tape_view(&tape_b);
+                unsafe {
+                    szs_smith_waterman_scores_u32tape(
+                        self.handle,
+                        device.handle,
+                        &tape_a_view as *const _ as *const c_void,
+                        &tape_b_view as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                        &mut error_msg,
+                    )
+                }
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let seq_a = create_sequence_view(seq_a_slice);
+            let seq_b = create_sequence_view(seq_b_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_smith_waterman_scores_sequence(
+                    self.handle,
+                    device.handle,
+                    &seq_a as *const _ as *const c_void,
+                    &seq_b as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok(results),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
     }
 }
 
@@ -3414,342 +2359,6 @@ impl FingerprintsBuilder {
     }
 }
 
-/// Trait for inputs that can be processed by Fingerprints engine
-pub trait FingerprintsInputs: Sized {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>;
-
-    fn sequence_count(&self) -> usize;
-}
-
-/// Helper function for computing fingerprints on sequences
-fn compute_fingerprints_sequences<'a, I>(
-    seq_iter: I,
-    seq_bytes: &[&[u8]],
-    device: &DeviceScope,
-    engine: &Fingerprints,
-    dimensions: usize,
-) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
-where
-    I: Iterator<Item = &'a [u8]>,
-{
-    let num_strings = seq_bytes.len();
-    let hashes_size = num_strings * dimensions;
-    let counts_size = num_strings * dimensions;
-    let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-    min_hashes.resize(hashes_size, 0);
-    let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-    min_counts.resize(counts_size, 0);
-    let hashes_stride = dimensions * core::mem::size_of::<u32>();
-    let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-    if device.is_gpu() {
-        // GPU: Convert sequences to tape using extend, then use tape API
-        let tape = create_tape(seq_bytes)?;
-
-        let tape_view = tape.as_c_api_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match tape_view {
-            CApiTapeView::U64(view) => unsafe {
-                szs_fingerprints_u64tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-            CApiTapeView::U32(view) => unsafe {
-                szs_fingerprints_u32tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    } else {
-        // CPU: Use sequence API directly
-        let seq = create_sequence_view(seq_bytes);
-        let mut error_msg: *const c_char = ptr::null();
-        let status = unsafe {
-            szs_fingerprints_sequence(
-                engine.handle,
-                device.handle,
-                &seq as *const _ as *const c_void,
-                min_hashes.as_mut_ptr(),
-                hashes_stride,
-                min_counts.as_mut_ptr(),
-                counts_stride,
-                &mut error_msg,
-            )
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-}
-
-/// Implementation for Vec<&str> - string sequence type
-impl FingerprintsInputs for Vec<&str> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        let seq_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
-        let seq_slice = seq_bytes.as_slice();
-
-        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<String> - owned string sequence type
-impl FingerprintsInputs for Vec<String> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        let seq_bytes: Vec<&[u8]> = self.iter().map(|s| s.as_bytes()).collect();
-        let seq_slice = seq_bytes.as_slice();
-
-        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for Vec<&[u8]> - byte sequence type
-impl FingerprintsInputs for Vec<&[u8]> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        let seq_slice = self.as_slice();
-
-        compute_fingerprints_sequences(seq_slice.iter().cloned(), seq_slice, device, engine, dimensions)
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.len()
-    }
-}
-
-/// Implementation for BytesTape<u64> inputs
-impl FingerprintsInputs for BytesTape<u64, UnifiedAlloc> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_strings = self.count();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        let tape_view = self.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match tape_view {
-            CApiTapeView::U64(view) => unsafe {
-                szs_fingerprints_u64tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for BytesTape<u32> inputs
-impl FingerprintsInputs for BytesTape<u32, UnifiedAlloc> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_strings = self.count();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        let tape_view = self.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match tape_view {
-            CApiTapeView::U32(view) => unsafe {
-                szs_fingerprints_u32tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("BytesTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u64> inputs
-impl FingerprintsInputs for StringTape<u64, UnifiedAlloc> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_strings = self.count();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        let tape_view = self.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match tape_view {
-            CApiTapeView::U64(view) => unsafe {
-                szs_fingerprints_u64tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u64> should always create CApiTapeView::U64"),
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
-/// Implementation for StringTape<u32> inputs  
-impl FingerprintsInputs for StringTape<u32, UnifiedAlloc> {
-    fn compute_fingerprints(
-        &self,
-        device: &DeviceScope,
-        engine: &Fingerprints,
-        dimensions: usize,
-    ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error> {
-        // Both CPU and GPU: use tape API directly
-        let num_strings = self.count();
-        let hashes_size = num_strings * dimensions;
-        let counts_size = num_strings * dimensions;
-        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
-        min_hashes.resize(hashes_size, 0);
-        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
-        min_counts.resize(counts_size, 0);
-        let hashes_stride = dimensions * core::mem::size_of::<u32>();
-        let counts_stride = dimensions * core::mem::size_of::<u32>();
-
-        let tape_view = self.create_view();
-        let mut error_msg: *const c_char = ptr::null();
-        let status = match tape_view {
-            CApiTapeView::U32(view) => unsafe {
-                szs_fingerprints_u32tape(
-                    engine.handle,
-                    device.handle,
-                    &view as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    hashes_stride,
-                    min_counts.as_mut_ptr(),
-                    counts_stride,
-                    &mut error_msg,
-                )
-            },
-            _ => unreachable!("StringTape<u32> should always create CApiTapeView::U32"),
-        };
-        match status {
-            Status::Success => Ok((min_hashes, min_counts)),
-            err => Err(rust_error_from_c_message(err, error_msg)),
-        }
-    }
-
-    fn sequence_count(&self) -> usize {
-        self.count()
-    }
-}
-
 /// High-performance fingerprinting engine for similarity detection and clustering.
 ///
 /// The fingerprinting engine computes Min-Hash signatures and Count-Min-Sketch
@@ -3927,16 +2536,86 @@ impl Fingerprints {
     /// - Memory usage: 8 bytes per string per dimension
     /// - Processing time scales linearly with total input size
     /// - SIMD acceleration provides significant speedup on modern CPUs
-    pub fn compute<T>(
+    pub fn compute<T, S>(
         &self,
         device: &DeviceScope,
-        input: &T,
+        strings: T,
         dimensions: usize,
     ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
     where
-        T: FingerprintsInputs,
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
     {
-        input.compute_fingerprints(device, self, dimensions)
+        let strings_slice = strings.as_ref();
+        let num_strings = strings_slice.len();
+        let hashes_size = num_strings * dimensions;
+        let counts_size = num_strings * dimensions;
+
+        let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+        min_hashes.resize(hashes_size, 0);
+        let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+        min_counts.resize(counts_size, 0);
+
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+        if device.is_gpu() {
+            let (tape, use_64bit) = create_tape(strings_slice)?;
+
+            let mut error_msg: *const c_char = ptr::null();
+            let status = if use_64bit {
+                let tape_view = create_u64tape_view(&tape);
+                unsafe {
+                    szs_fingerprints_u64tape(
+                        self.handle,
+                        device.handle,
+                        &tape_view as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            } else {
+                let tape_view = create_u32tape_view(&tape);
+                unsafe {
+                    szs_fingerprints_u32tape(
+                        self.handle,
+                        device.handle,
+                        &tape_view as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            };
+            match status {
+                Status::Success => Ok((min_hashes, min_counts)),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        } else {
+            let sequence = create_sequence_view(strings_slice);
+            let mut error_msg: *const c_char = ptr::null();
+            let status = unsafe {
+                szs_fingerprints_sequence(
+                    self.handle,
+                    device.handle,
+                    &sequence as *const _ as *const c_void,
+                    min_hashes.as_mut_ptr(),
+                    hashes_stride,
+                    min_counts.as_mut_ptr(),
+                    counts_stride,
+                    &mut error_msg,
+                )
+            };
+            match status {
+                Status::Success => Ok((min_hashes, min_counts)),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            }
+        }
     }
 }
 
@@ -3997,94 +2676,8 @@ fn create_sequence_view_str<T: AsRef<str>>(strings: &[T]) -> SzSequence {
     }
 }
 
-/// Size-adaptive BytesTape - automatically uses 32-bit or 64-bit offsets based on data size
-pub enum SizedBytesTape {
-    Small(BytesTape<u32, UnifiedAlloc>), // For data < 4GB
-    Large(BytesTape<u64, UnifiedAlloc>), // For data >= 4GB
-}
-
-impl SizedBytesTape {
-    /// Returns true if using 64-bit offsets (for large datasets)
-    pub fn is_large(&self) -> bool {
-        matches!(self, SizedBytesTape::Large(_))
-    }
-
-    /// Get the number of sequences
-    pub fn count(&self) -> usize {
-        match self {
-            SizedBytesTape::Small(tape) => tape.as_raw_parts().2,
-            SizedBytesTape::Large(tape) => tape.as_raw_parts().2,
-        }
-    }
-
-    /// Create a tape view for C API
-    pub fn as_c_api_view(&self) -> CApiTapeView {
-        match self {
-            SizedBytesTape::Small(tape) => {
-                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
-                CApiTapeView::U32(CApiTape32 {
-                    data: data_ptr,
-                    offsets: offsets_ptr as *const u32,
-                    count,
-                })
-            }
-            SizedBytesTape::Large(tape) => {
-                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
-                CApiTapeView::U64(CApiTape64 {
-                    data: data_ptr,
-                    offsets: offsets_ptr as *const u64,
-                    count,
-                })
-            }
-        }
-    }
-}
-
-/// Size-adaptive StringTape - automatically uses 32-bit or 64-bit offsets based on data size
-pub enum SizedStringTape {
-    Small(StringTape<u32, UnifiedAlloc>), // For data < 4GB
-    Large(StringTape<u64, UnifiedAlloc>), // For data >= 4GB
-}
-
-impl SizedStringTape {
-    /// Returns true if using 64-bit offsets (for large datasets)
-    pub fn is_large(&self) -> bool {
-        matches!(self, SizedStringTape::Large(_))
-    }
-
-    /// Get the number of sequences
-    pub fn count(&self) -> usize {
-        match self {
-            SizedStringTape::Small(tape) => tape.as_raw_parts().2,
-            SizedStringTape::Large(tape) => tape.as_raw_parts().2,
-        }
-    }
-
-    /// Create a tape view for C API
-    pub fn as_c_api_view(&self) -> CApiTapeView {
-        match self {
-            SizedStringTape::Small(tape) => {
-                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
-                CApiTapeView::U32(CApiTape32 {
-                    data: data_ptr,
-                    offsets: offsets_ptr as *const u32,
-                    count,
-                })
-            }
-            SizedStringTape::Large(tape) => {
-                let (data_ptr, offsets_ptr, count, _) = tape.as_raw_parts();
-                CApiTapeView::U64(CApiTape64 {
-                    data: data_ptr,
-                    offsets: offsets_ptr as *const u64,
-                    count,
-                })
-            }
-        }
-    }
-}
-
-/// Convert byte sequences to appropriate tape (32-bit or 64-bit based on size)
-pub fn create_tape<T>(sequences: &[T]) -> Result<SizedBytesTape, Error>
+/// Convert StringTape to appropriate tape view for C API
+fn create_tape<T>(sequences: &[T]) -> Result<(BytesTape<i64, UnifiedAlloc>, bool), Error>
 where
     T: AsRef<[u8]>,
 {
@@ -4092,31 +2685,71 @@ where
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    if use_64bit {
-        let mut tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(SizedBytesTape::Large(tape))
+    let tape = if use_64bit {
+        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
     } else {
-        let mut tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(SizedBytesTape::Small(tape))
-    }
+        BytesTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    };
+
+    let mut tape = tape;
+    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+    Ok((tape, use_64bit))
 }
 
-/// Convert string sequences to appropriate tape (32-bit or 64-bit based on size)
-pub fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<SizedStringTape, Error> {
+/// Convert string sequences to StringTape
+fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<i64, UnifiedAlloc>, bool), Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
-    if use_64bit {
-        let mut tape = StringTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(SizedStringTape::Large(tape))
+    let tape = if use_64bit {
+        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
     } else {
-        let mut tape = StringTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(SizedStringTape::Small(tape))
+        StringTape::<i64, UnifiedAlloc>::new_in(UnifiedAlloc)
+    };
+
+    let mut tape = tape;
+    tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+    Ok((tape, use_64bit))
+}
+
+/// Convert 32-bit BytesTape to SzSequenceU32Tape for C API
+fn create_u32tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
+    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+    SzSequenceU32Tape {
+        data: data_ptr,
+        offsets: offsets_ptr as *const u32,
+        count,
+    }
+}
+
+/// Convert 32-bit StringTape to SzSequenceU32Tape for C API
+fn create_u32tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU32Tape {
+    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+    SzSequenceU32Tape {
+        data: data_ptr,
+        offsets: offsets_ptr as *const u32,
+        count,
+    }
+}
+
+/// Convert 64-bit BytesTape to SzSequenceU64Tape for C API  
+fn create_u64tape_view(tape: &BytesTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
+    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+    SzSequenceU64Tape {
+        data: data_ptr,
+        offsets: offsets_ptr as *const u64,
+        count,
+    }
+}
+
+/// Convert 64-bit StringTape to SzSequenceU64Tape for C API  
+fn create_u64tape_view_str(tape: &StringTape<i64, UnifiedAlloc>) -> SzSequenceU64Tape {
+    let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+    SzSequenceU64Tape {
+        data: data_ptr,
+        offsets: offsets_ptr as *const u64,
+        count,
     }
 }
 
