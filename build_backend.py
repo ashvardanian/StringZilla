@@ -131,9 +131,13 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
     if project_dir is None:
         project_dir = "."
     proj = Path(project_dir).resolve()
-    tests = [str(proj / "scripts" / "test_stringzilla.py")]
-    if os.environ.get("SZ_TARGET", "stringzilla") != "stringzilla":
-        tests.append(str(proj / "scripts" / "test_stringzillas.py"))
+    sz_target = os.environ.get("SZ_TARGET", "stringzilla")
+    if sz_target == "stringzilla":
+        tests = [str(proj / "scripts" / "test_stringzilla.py")]
+    else:
+        # For stringzillas-cpus and stringzillas-cuda, only test stringzillas
+        # but we still need to build stringzilla as a dependency
+        tests = [str(proj / "scripts" / "test_stringzillas.py")]
     subprocess.check_call([sys.executable, "-m", "pytest", "-s", "-x", *tests])  # noqa: S603
 
 
