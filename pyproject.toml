@@ -80,7 +80,6 @@ archs = ["x86_64", "arm64"]
 
 [tool.cibuildwheel.windows]
 before-build = ["rd /s /q {project}\\build || echo Done"]
-before-test = []
 
 # Detect x86 64-bit builds
 [[tool.cibuildwheel.overrides]]

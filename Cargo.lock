@@ -32,9 +32,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "stringtape"
-version = "1.0.0"
+version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d3e0ba0aed6bdc1c8aba4d972586ad30a6ca8f831c5ce6bdc074054ac886239"
+checksum = "f0ea5814704d9321d7e6c5034791cde39fcf011539834db00416121178e80f1f"
 dependencies = [
  "allocator-api2",
 ]

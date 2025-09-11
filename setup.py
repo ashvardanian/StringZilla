@@ -276,8 +276,13 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
 def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
         "/std:c++17" if use_cpp else "/std:c11",  # use C++17 for StringZillas, C11 for StringZilla, as MSVC has no C99
-        "/Wall",  # stick close to the C language standard, avoid compiler extensions
+        "/W3",  # use W3 instead of /Wall to avoid excessive warnings
         "/O2",  # optimization level
+        "/wd4365",  # disable C4365: signed/unsigned mismatch
+        "/wd4820",  # disable C4820: padding added after data member
+        "/wd5027",  # disable C5027: move assignment operator implicitly defined as deleted
+        "/wd4626",  # disable C4626: assignment operator implicitly defined as deleted
+        "/wd4127",  # disable C4127: conditional expression is constant
     ]
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
@@ -370,14 +375,31 @@ this_directory = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f:
     long_description = f.read()
 
+# Different descriptions for different variants
+if sz_target == "stringzilla":
+    __description__ = "Search, hash, sort, and process strings faster via SWAR and SIMD"
+elif sz_target == "stringzillas-cpus":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, on multi-core CPUs"
+    )
+elif sz_target == "stringzillas-cuda":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and CUDA on Nvidia GPUs"
+    )
+elif sz_target == "stringzillas-rocm":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and ROCm on AMD GPUs"
+    )
+else:
+    __description__ = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 
 setup(
     name=__lib_name__,
     version=__version__,
-    description="Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
+    description=__description__,
     author="Ash Vardanian",
     author_email="1983160+ashvardanian@users.noreply.github.com",
-    url="https://github.com/ashvardanian/stringzilla",
+    url="https://github.com/ashvardanian/StringZilla",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",

@@ -4,7 +4,7 @@ use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
 
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
-use stringtape::{BytesTape, StringTape};
+use stringtape::{BytesTape, BytesTapeView, CharsTape, CharsTapeView};
 
 // Re-export common types from stringzilla
 pub use crate::stringzilla::{SortedIdx, Status as SzStatus};
@@ -50,15 +50,21 @@ fn rust_error_from_c_message(status: Status, error_msg: *const c_char) -> Error 
 }
 
 /// Tape variant that can hold either 32-bit or 64-bit string tapes with unsigned offsets
-pub enum CharsTapeVariants {
-    Tape32(StringTape<u32, UnifiedAlloc>),
-    Tape64(StringTape<u64, UnifiedAlloc>),
+pub enum AnyCharsTape<'a> {
+    Tape32(CharsTape<u32, UnifiedAlloc>),
+    Tape64(CharsTape<u64, UnifiedAlloc>),
+    // Zero-copy FFI views (UTF-8)
+    View32(CharsTapeView<'a, u32>),
+    View64(CharsTapeView<'a, u64>),
 }
 
 /// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
-pub enum BytesTapeVariants {
+pub enum AnyBytesTape<'a> {
     Tape32(BytesTape<u32, UnifiedAlloc>),
     Tape64(BytesTape<u64, UnifiedAlloc>),
+    // Zero-copy FFI views (bytes)
+    View32(BytesTapeView<'a, u32>),
+    View64(BytesTapeView<'a, u64>),
 }
 
 /// Manages execution context and hardware resource allocation.
@@ -355,44 +361,133 @@ struct SzSequenceU64Tape {
 // Conversions from tape containers to FFI views
 impl From<&BytesTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
     fn from(tape: &BytesTape<u32, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU32Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
-impl From<&StringTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
-    fn from(tape: &StringTape<u32, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+impl From<&CharsTape<u32, UnifiedAlloc>> for SzSequenceU32Tape {
+    fn from(tape: &CharsTape<u32, UnifiedAlloc>) -> Self {
+        let parts = tape.as_raw_parts();
         SzSequenceU32Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
 impl From<&BytesTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
     fn from(tape: &BytesTape<u64, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+        let parts = tape.as_raw_parts();
         SzSequenceU64Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
         }
     }
 }
 
-impl From<&StringTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
-    fn from(tape: &StringTape<u64, UnifiedAlloc>) -> Self {
-        let (data_ptr, offsets_ptr, count, _capacity) = tape.as_raw_parts();
+impl From<&CharsTape<u64, UnifiedAlloc>> for SzSequenceU64Tape {
+    fn from(tape: &CharsTape<u64, UnifiedAlloc>) -> Self {
+        let parts = tape.as_raw_parts();
         SzSequenceU64Tape {
-            data: data_ptr,
-            offsets: offsets_ptr,
-            count,
+            data: parts.data_ptr,
+            offsets: parts.offsets_ptr,
+            count: parts.items_count,
+        }
+    }
+}
+
+// Conversions from stringtape views to FFI views
+impl<'a> From<BytesTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: BytesTapeView<'a, u32>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU32Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<BytesTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: BytesTapeView<'a, u64>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU64Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<&BytesTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: &BytesTapeView<'a, u32>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU32Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<&BytesTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: &BytesTapeView<'a, u64>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU64Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<CharsTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: CharsTapeView<'a, u32>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU32Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<CharsTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: CharsTapeView<'a, u64>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU64Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<&CharsTapeView<'a, u32>> for SzSequenceU32Tape {
+    fn from(view: &CharsTapeView<'a, u32>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU32Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
+        }
+    }
+}
+
+impl<'a> From<&CharsTapeView<'a, u64>> for SzSequenceU64Tape {
+    fn from(view: &CharsTapeView<'a, u64>) -> Self {
+        let p = view.as_raw_parts();
+        SzSequenceU64Tape {
+            data: p.data_ptr,
+            offsets: p.offsets_ptr,
+            count: p.items_count,
         }
     }
 }
@@ -912,44 +1007,9 @@ impl LevenshteinDistances {
             let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
 
-            let mut error_msg: *const c_char = ptr::null();
-            let status = match (&tape_a, &tape_b) {
-                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
-                    let tape_a_view = SzSequenceU64Tape::from(ta);
-                    let tape_b_view = SzSequenceU64Tape::from(tb);
-                    unsafe {
-                        szs_levenshtein_distances_u64tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
-                    let tape_a_view = SzSequenceU32Tape::from(ta);
-                    let tape_b_view = SzSequenceU32Tape::from(tb);
-                    unsafe {
-                        szs_levenshtein_distances_u32tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            // Forward to the in-place variant to avoid code duplication
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
+            Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
             let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
@@ -970,6 +1030,99 @@ impl LevenshteinDistances {
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
+    }
+
+    /// Compute Levenshtein distances into an existing results buffer.
+    ///
+    /// - Accepts `AnyBytesTape<'_>` for both sides: either owned `BytesTape` or `BytesTapeView`.
+    /// - Supports 32-bit or 64-bit offsets; both inputs must use the same width.
+    /// - Writes distances into `results` without reallocating.
+    ///
+    /// Requirements
+    /// - `results.len() >= min(a.len(), b.len())`
+    /// - For GPU devices, inputs should be allocated in unified/device memory.
+    ///
+    /// Errors
+    /// - `UnexpectedDimensions` if buffer is too small or widths are mixed.
+    /// - Underlying engine errors forwarded from the FFI.
+    pub fn compute_into<'a>(
+        &self,
+        device: &DeviceScope,
+        a: AnyBytesTape<'a>,
+        b: AnyBytesTape<'a>,
+        results: &mut [usize],
+    ) -> Result<(), Error> {
+        // Convert to FFI views and validate matching offset widths
+        let mut error_msg: *const c_char = ptr::null();
+        let results_stride = core::mem::size_of::<usize>();
+
+        // Convert both inputs to 64-bit views if possible, else to 32-bit views.
+        let a64 = match &a {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        let b64 = match &b {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a64, b64) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_levenshtein_distances_u64tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        let a32 = match &a {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        let b32 = match &b {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a32, b32) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_levenshtein_distances_u32tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        // Mixed widths are unsupported to avoid implicit widening and extra copies
+        Err(Error::from(SzStatus::UnexpectedDimensions))
     }
 }
 
@@ -1125,48 +1278,10 @@ impl LevenshteinDistancesUtf8 {
 
         if device.is_gpu() {
             let force_64bit = should_use_64bit_for_strings(seq_a_slice, seq_b_slice);
-
             let tape_a = copy_chars_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_chars_into_tape(seq_b_slice, force_64bit)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = match (&tape_a, &tape_b) {
-                (CharsTapeVariants::Tape64(ta), CharsTapeVariants::Tape64(tb)) => {
-                    let tape_a_view = SzSequenceU64Tape::from(ta);
-                    let tape_b_view = SzSequenceU64Tape::from(tb);
-                    unsafe {
-                        szs_levenshtein_distances_utf8_u64tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                (CharsTapeVariants::Tape32(ta), CharsTapeVariants::Tape32(tb)) => {
-                    let tape_a_view = SzSequenceU32Tape::from(ta);
-                    let tape_b_view = SzSequenceU32Tape::from(tb);
-                    unsafe {
-                        szs_levenshtein_distances_utf8_u32tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
+            Ok(results)
         } else {
             let seq_a = SzSequenceFromChars::to_sz_sequence(seq_a_slice);
             let seq_b = SzSequenceFromChars::to_sz_sequence(seq_b_slice);
@@ -1187,6 +1302,92 @@ impl LevenshteinDistancesUtf8 {
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
+    }
+
+    /// Compute UTF-8 Levenshtein distances into an existing results buffer.
+    ///
+    /// - Accepts `AnyCharsTape<'_>` for both sides: `CharsTape` or `CharsTapeView`.
+    /// - Supports 32-bit or 64-bit offsets; both inputs must use the same width.
+    /// - No result allocations; writes into `results`.
+    ///
+    /// Requirements and errors are the same as the bytes variant.
+    pub fn compute_into<'a>(
+        &self,
+        device: &DeviceScope,
+        a: AnyCharsTape<'a>,
+        b: AnyCharsTape<'a>,
+        results: &mut [usize],
+    ) -> Result<(), Error> {
+        let mut error_msg: *const c_char = ptr::null();
+        let results_stride = core::mem::size_of::<usize>();
+
+        // Try 64-bit first
+        let a64 = match &a {
+            AnyCharsTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyCharsTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        let b64 = match &b {
+            AnyCharsTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyCharsTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a64, b64) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_levenshtein_distances_utf8_u64tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        // Then 32-bit
+        let a32 = match &a {
+            AnyCharsTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyCharsTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        let b32 = match &b {
+            AnyCharsTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyCharsTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a32, b32) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_levenshtein_distances_utf8_u32tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        Err(Error::from(SzStatus::UnexpectedDimensions))
     }
 }
 
@@ -1347,45 +1548,8 @@ impl NeedlemanWunschScores {
             let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
             let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = match (&tape_a, &tape_b) {
-                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
-                    let tape_a_view = SzSequenceU64Tape::from(ta);
-                    let tape_b_view = SzSequenceU64Tape::from(tb);
-                    unsafe {
-                        szs_needleman_wunsch_scores_u64tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
-                    let tape_a_view = SzSequenceU32Tape::from(ta);
-                    let tape_b_view = SzSequenceU32Tape::from(tb);
-                    unsafe {
-                        szs_needleman_wunsch_scores_u32tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
+            Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
             let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
@@ -1406,6 +1570,92 @@ impl NeedlemanWunschScores {
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
+    }
+
+    /// Compute Needleman–Wunsch scores into an existing results buffer.
+    ///
+    /// - Accepts `AnyBytesTape<'_>` inputs (owned tapes or views), with matching offset widths.
+    /// - Writes scores into `results` without allocating. On GPU, inputs should be device-accessible.
+    /// - Errors if `results.len()` is insufficient or widths are mixed.
+    /// Compute Smith–Waterman scores into an existing results buffer.
+    ///
+    /// - Accepts `AnyBytesTape<'_>` inputs (owned tapes or views), with matching offset widths.
+    /// - Writes scores into `results` without allocating. On GPU, inputs should be device-accessible.
+    /// - Errors if `results.len()` is insufficient or widths are mixed.
+    pub fn compute_into<'a>(
+        &self,
+        device: &DeviceScope,
+        a: AnyBytesTape<'a>,
+        b: AnyBytesTape<'a>,
+        results: &mut [isize],
+    ) -> Result<(), Error> {
+        let mut error_msg: *const c_char = ptr::null();
+        let results_stride = core::mem::size_of::<isize>();
+
+        let a64 = match &a {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        let b64 = match &b {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a64, b64) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_needleman_wunsch_scores_u64tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        let a32 = match &a {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        let b32 = match &b {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a32, b32) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_needleman_wunsch_scores_u32tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+        Err(Error::from(SzStatus::UnexpectedDimensions))
     }
 }
 
@@ -1628,45 +1878,8 @@ impl SmithWatermanScores {
             let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
             let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
             let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-
-            let mut error_msg: *const c_char = ptr::null();
-            let status = match (&tape_a, &tape_b) {
-                (BytesTapeVariants::Tape64(ta), BytesTapeVariants::Tape64(tb)) => {
-                    let tape_a_view = SzSequenceU64Tape::from(ta);
-                    let tape_b_view = SzSequenceU64Tape::from(tb);
-                    unsafe {
-                        szs_smith_waterman_scores_u64tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                (BytesTapeVariants::Tape32(ta), BytesTapeVariants::Tape32(tb)) => {
-                    let tape_a_view = SzSequenceU32Tape::from(ta);
-                    let tape_b_view = SzSequenceU32Tape::from(tb);
-                    unsafe {
-                        szs_smith_waterman_scores_u32tape(
-                            self.handle,
-                            device.handle,
-                            &tape_a_view as *const _ as *const c_void,
-                            &tape_b_view as *const _ as *const c_void,
-                            results.as_mut_ptr(),
-                            results_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                _ => unreachable!("Both tapes should have the same variant due to force_64bit logic"),
-            };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
+            Ok(results)
         } else {
             let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
             let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
@@ -1687,6 +1900,82 @@ impl SmithWatermanScores {
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
         }
+    }
+
+    pub fn compute_into<'a>(
+        &self,
+        device: &DeviceScope,
+        a: AnyBytesTape<'a>,
+        b: AnyBytesTape<'a>,
+        results: &mut [isize],
+    ) -> Result<(), Error> {
+        let mut error_msg: *const c_char = ptr::null();
+        let results_stride = core::mem::size_of::<isize>();
+
+        let a64 = match &a {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        let b64 = match &b {
+            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
+            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a64, b64) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_smith_waterman_scores_u64tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+
+        let a32 = match &a {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        let b32 = match &b {
+            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
+            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+            _ => None,
+        };
+        if let (Some(va), Some(vb)) = (a32, b32) {
+            let need = core::cmp::min(va.count, vb.count);
+            if results.len() < need {
+                return Err(Error::from(SzStatus::UnexpectedDimensions));
+            }
+            let status = unsafe {
+                szs_smith_waterman_scores_u32tape(
+                    self.handle,
+                    device.handle,
+                    &va as *const _ as *const c_void,
+                    &vb as *const _ as *const c_void,
+                    results.as_mut_ptr(),
+                    results_stride,
+                    &mut error_msg,
+                )
+            };
+            return match status {
+                Status::Success => Ok(()),
+                err => Err(rust_error_from_c_message(err, error_msg)),
+            };
+        }
+        Err(Error::from(SzStatus::UnexpectedDimensions))
     }
 }
 
@@ -2267,43 +2556,8 @@ impl Fingerprints {
             let force_64bit = total_size > u32::MAX as usize || strings_slice.len() > u32::MAX as usize;
             let tape = copy_bytes_into_tape(strings_slice, force_64bit)?;
 
-            let mut error_msg: *const c_char = ptr::null();
-            let status = match &tape {
-                BytesTapeVariants::Tape64(t) => {
-                    let tape_view = SzSequenceU64Tape::from(t);
-                    unsafe {
-                        szs_fingerprints_u64tape(
-                            self.handle,
-                            device.handle,
-                            &tape_view as *const _ as *const c_void,
-                            min_hashes.as_mut_ptr(),
-                            hashes_stride,
-                            min_counts.as_mut_ptr(),
-                            counts_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-                BytesTapeVariants::Tape32(t) => {
-                    let tape_view = SzSequenceU32Tape::from(t);
-                    unsafe {
-                        szs_fingerprints_u32tape(
-                            self.handle,
-                            device.handle,
-                            &tape_view as *const _ as *const c_void,
-                            min_hashes.as_mut_ptr(),
-                            hashes_stride,
-                            min_counts.as_mut_ptr(),
-                            counts_stride,
-                            &mut error_msg,
-                        )
-                    }
-                }
-            };
-            match status {
-                Status::Success => Ok((min_hashes, min_counts)),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            self.compute_into(device, tape, dimensions, &mut min_hashes[..], &mut min_counts[..])?;
+            Ok((min_hashes, min_counts))
         } else {
             let sequence = SzSequenceFromBytes::to_sz_sequence(strings_slice);
             let mut error_msg: *const c_char = ptr::null();
@@ -2323,6 +2577,100 @@ impl Fingerprints {
                 Status::Success => Ok((min_hashes, min_counts)),
                 err => Err(rust_error_from_c_message(err, error_msg)),
             }
+        }
+    }
+
+    /// Compute Min-Hash and Count-Min-Sketch into existing buffers.
+    ///
+    /// - Accepts `AnyBytesTape<'_>` (owned or view) with either 32- or 64-bit offsets.
+    /// - Writes `dimensions` hashes and counts per input row into the provided buffers.
+    /// - Buffer lengths must be at least `texts.len() * dimensions`.
+    pub fn compute_into<'a>(
+        &self,
+        device: &DeviceScope,
+        texts: AnyBytesTape<'a>,
+        dimensions: usize,
+        min_hashes: &mut [u32],
+        min_counts: &mut [u32],
+    ) -> Result<(), Error> {
+        let mut error_msg: *const c_char = ptr::null();
+        let count = match &texts {
+            AnyBytesTape::Tape64(t) => SzSequenceU64Tape::from(t).count,
+            AnyBytesTape::View64(v) => SzSequenceU64Tape::from(v).count,
+            AnyBytesTape::Tape32(t) => SzSequenceU32Tape::from(t).count,
+            AnyBytesTape::View32(v) => SzSequenceU32Tape::from(v).count,
+        };
+        let need = count * dimensions;
+        if min_hashes.len() < need || min_counts.len() < need {
+            return Err(Error::from(SzStatus::UnexpectedDimensions));
+        }
+        let hashes_stride = dimensions * core::mem::size_of::<u32>();
+        let counts_stride = dimensions * core::mem::size_of::<u32>();
+        let status = match &texts {
+            AnyBytesTape::Tape64(t) => {
+                let v = SzSequenceU64Tape::from(t);
+                unsafe {
+                    szs_fingerprints_u64tape(
+                        self.handle,
+                        device.handle,
+                        &v as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            AnyBytesTape::View64(vv) => {
+                let v = SzSequenceU64Tape::from(vv);
+                unsafe {
+                    szs_fingerprints_u64tape(
+                        self.handle,
+                        device.handle,
+                        &v as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            AnyBytesTape::Tape32(t) => {
+                let v = SzSequenceU32Tape::from(t);
+                unsafe {
+                    szs_fingerprints_u32tape(
+                        self.handle,
+                        device.handle,
+                        &v as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+            AnyBytesTape::View32(vv) => {
+                let v = SzSequenceU32Tape::from(vv);
+                unsafe {
+                    szs_fingerprints_u32tape(
+                        self.handle,
+                        device.handle,
+                        &v as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                        &mut error_msg,
+                    )
+                }
+            }
+        };
+        match status {
+            Status::Success => Ok(()),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 }
@@ -2379,7 +2727,7 @@ fn should_use_64bit_for_strings<T: AsRef<str>>(seq_a: &[T], seq_b: &[T]) -> bool
 }
 
 /// Convert byte sequences to BytesTape
-fn copy_bytes_into_tape<T>(sequences: &[T], force_64bit: bool) -> Result<BytesTapeVariants, Error>
+fn copy_bytes_into_tape<'a, T>(sequences: &[T], force_64bit: bool) -> Result<AnyBytesTape<'a>, Error>
 where
     T: AsRef<[u8]>,
 {
@@ -2390,28 +2738,28 @@ where
     if use_64bit {
         let mut tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(BytesTapeVariants::Tape64(tape))
+        Ok(AnyBytesTape::Tape64(tape))
     } else {
         let mut tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(BytesTapeVariants::Tape32(tape))
+        Ok(AnyBytesTape::Tape32(tape))
     }
 }
 
-/// Convert string sequences to StringTape
-fn copy_chars_into_tape<T: AsRef<str>>(sequences: &[T], force_64bit: bool) -> Result<CharsTapeVariants, Error> {
+/// Convert string sequences to CharsTape
+fn copy_chars_into_tape<'a, T: AsRef<str>>(sequences: &[T], force_64bit: bool) -> Result<AnyCharsTape<'a>, Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = force_64bit || total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
 
     if use_64bit {
-        let mut tape = StringTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        let mut tape = CharsTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(CharsTapeVariants::Tape64(tape))
+        Ok(AnyCharsTape::Tape64(tape))
     } else {
-        let mut tape = StringTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        let mut tape = CharsTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
         tape.extend(sequences).map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        Ok(CharsTapeVariants::Tape32(tape))
+        Ok(AnyCharsTape::Tape32(tape))
     }
 }
 
@@ -2934,6 +3282,73 @@ mod tests {
                 println!("Error costs matrix integration test passed: score = {}", scores[0]);
             }
             Err(e) => println!("Error costs test failed: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn levenshtein_compute_into_u32_bytes() {
+        let device = match DeviceScope::default() {
+            Ok(d) => d,
+            Err(_) => return, // skip if device unavailable
+        };
+        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        let a = [b"kitten".as_ref(), b"saturday".as_ref()];
+        let b = [b"sitting".as_ref(), b"sunday".as_ref()];
+
+        let mut ta = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        ta.extend(a).unwrap();
+        let mut tb = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tb.extend(b).unwrap();
+
+        let mut results: UnifiedVec<usize> = UnifiedVec::with_capacity_in(2, UnifiedAlloc);
+        results.resize(2, 0);
+
+        let res = engine.compute_into(
+            &device,
+            AnyBytesTape::Tape32(ta),
+            AnyBytesTape::Tape32(tb),
+            &mut results[..],
+        );
+        if let Ok(()) = res {
+            assert_eq!(&results[..], &[3, 3]);
+        }
+    }
+
+    #[test]
+    fn levenshtein_compute_into_u64_bytes() {
+        let device = match DeviceScope::default() {
+            Ok(d) => d,
+            Err(_) => return, // skip if device unavailable
+        };
+        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        let a = [b"abc".as_ref(), b"abcdef".as_ref()];
+        let b = [b"yabd".as_ref(), b"abcxef".as_ref()];
+
+        let mut ta = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        ta.extend(a).unwrap();
+        let mut tb = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        tb.extend(b).unwrap();
+
+        let mut results: UnifiedVec<usize> = UnifiedVec::with_capacity_in(2, UnifiedAlloc);
+        results.resize(2, 0);
+
+        let res = engine.compute_into(
+            &device,
+            AnyBytesTape::Tape64(ta),
+            AnyBytesTape::Tape64(tb),
+            &mut results[..],
+        );
+        if let Ok(()) = res {
+            // abc vs yabd => distance 2, abcdef vs abcxef => distance 1
+            assert_eq!(&results[..], &[2, 1]);
         }
     }
 }
