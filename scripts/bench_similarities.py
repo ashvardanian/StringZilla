@@ -12,6 +12,7 @@
 #   "biopython",
 #   "numpy",
 #   "tqdm",
+#   "cudf",
 # ]
 # ///
 """
@@ -26,6 +27,7 @@ This script benchmarks string similarity operations using various libraries:
 - nltk: Natural language toolkit distances
 - edlib: Fast sequence alignment
 - biopython: Needleman-Wunsch alignment with BLOSUM matrices
+- cudf: GPU-accelerated RAPIDS edit distance
 
 Example usage via UV:
 
@@ -88,6 +90,14 @@ try:
     BIOPYTHON_AVAILABLE = True
 except ImportError:
     BIOPYTHON_AVAILABLE = False
+
+# For RAPIDS cuDF GPU-accelerated edit distance
+try:
+    import cudf
+
+    CUDF_AVAILABLE = True
+except ImportError:
+    CUDF_AVAILABLE = False
 
 # Global state for initialized models
 _biopython_aligner = None
@@ -218,6 +228,7 @@ def benchmark_third_party_edit_distances(
     string_pairs: List[Tuple[str, str]],
     timeout_seconds: int = 10,
     filter_pattern: Optional[re.Pattern] = None,
+    batch_size: int = 2048,
 ):
     """Benchmark various edit distance implementations."""
 
@@ -310,6 +321,26 @@ def benchmark_third_party_edit_distances(
             timeout_seconds,
             batch_size=1,
             is_utf8=False,  # Binary/bytes
+        )
+
+    # cuDF edit_distance
+    if name_matches(f"cudf.edit_distance(batch={batch_size})", filter_pattern) and CUDF_AVAILABLE:
+
+        def batch_kernel(a_list: List[str], b_list: List[str]) -> List[int]:
+            # Create cuDF Series from string lists
+            s1 = cudf.Series(a_list)
+            s2 = cudf.Series(b_list)
+            # Compute edit distances and return as list
+            results = s1.str.edit_distance(s2)
+            return results.to_arrow().to_numpy()
+
+        log_similarity_operation(
+            f"cudf.edit_distance(batch={batch_size})",
+            string_pairs,
+            batch_kernel,
+            timeout_seconds=timeout_seconds,
+            batch_size=batch_size,
+            is_utf8=True,  # UTF-8 codepoints
         )
 
 
@@ -516,8 +547,12 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on 1 CPU core
     if name_matches(f"{szs_name}(1xCPU)", filter_pattern):
 
-        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum, 
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=default_scope,
+            substitution_matrix=blosum,
+            open=-10,
+            extend=-2,
+        )  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -536,8 +571,9 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on all CPU cores
     if name_matches(f"{szs_name}({cpu_cores}xCPU)", filter_pattern):
 
-        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum,
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=cpu_scope, substitution_matrix=blosum, open=-10, extend=-2
+        )  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -556,8 +592,9 @@ def benchmark_stringzillas_similarity_scores(
     # Single-input variants on GPU
     if name_matches(f"{szs_name}(1xGPU)", filter_pattern) and gpu_scope is not None:
 
-        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum,
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=gpu_scope, substitution_matrix=blosum, open=-10, extend=-2
+        )  # Same gap costs as BioPython
 
         def kernel(a: str, b: str) -> int:
             a_array = sz.Strs([a])
@@ -576,8 +613,9 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on 1 CPU core
     if name_matches(f"{szs_name}(1xCPU,batch={batch_size})", filter_pattern):
 
-        engine = szs_class(capabilities=default_scope, substitution_matrix=blosum,
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=default_scope, substitution_matrix=blosum, open=-10, extend=-2
+        )  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
@@ -596,8 +634,9 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on all CPU cores
     if name_matches(f"{szs_name}({cpu_cores}xCPU,batch={batch_size})", filter_pattern):
 
-        engine = szs_class(capabilities=cpu_scope, substitution_matrix=blosum,
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=cpu_scope, substitution_matrix=blosum, open=-10, extend=-2
+        )  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
@@ -616,8 +655,9 @@ def benchmark_stringzillas_similarity_scores(
     # Batch-input variants on GPU
     if name_matches(f"{szs_name}(1xGPU,batch={batch_size})", filter_pattern) and gpu_scope is not None:
 
-        engine = szs_class(capabilities=gpu_scope, substitution_matrix=blosum,
-                          open=-10, extend=-2)  # Same gap costs as BioPython
+        engine = szs_class(
+            capabilities=gpu_scope, substitution_matrix=blosum, open=-10, extend=-2
+        )  # Same gap costs as BioPython
 
         def kernel(a_list: List[str], b_list: List[str]) -> List[int]:
             a_array = sz.Strs(a_list)
@@ -670,21 +710,26 @@ def bench(
     print()
 
     print("=== Edit Distance Benchmarks ===")
-    benchmark_third_party_edit_distances(pairs, timeout_seconds, filter_pattern)
+    benchmark_third_party_edit_distances(
+        pairs,
+        timeout_seconds=timeout_seconds,
+        filter_pattern=filter_pattern,
+        batch_size=batch_size,
+    )
     benchmark_stringzillas_edit_distances(
         pairs,
-        timeout_seconds,
-        batch_size,
-        filter_pattern,
+        timeout_seconds=timeout_seconds,
+        batch_size=batch_size,
+        filter_pattern=filter_pattern,
         szs_class=szs.LevenshteinDistances,
         szs_name="szs.LevenshteinDistances",
         is_utf8=False,
     )
     benchmark_stringzillas_edit_distances(
         pairs,
-        timeout_seconds,
-        batch_size,
-        filter_pattern,
+        timeout_seconds=timeout_seconds,
+        batch_size=batch_size,
+        filter_pattern=filter_pattern,
         szs_class=szs.LevenshteinDistancesUTF8,
         szs_name="szs.LevenshteinDistancesUTF8",
         is_utf8=True,
@@ -696,17 +741,17 @@ def bench(
     benchmark_third_party_similarity_scores(pairs, timeout_seconds, filter_pattern)
     benchmark_stringzillas_similarity_scores(
         pairs,
-        timeout_seconds,
-        batch_size,
-        filter_pattern,
+        timeout_seconds=timeout_seconds,
+        batch_size=batch_size,
+        filter_pattern=filter_pattern,
         szs_class=szs.NeedlemanWunschScores,
         szs_name="szs.NeedlemanWunschScores",
     )
     benchmark_stringzillas_similarity_scores(
         pairs,
-        timeout_seconds,
-        batch_size,
-        filter_pattern,
+        timeout_seconds=timeout_seconds,
+        batch_size=batch_size,
+        filter_pattern=filter_pattern,
         szs_class=szs.SmithWatermanScores,
         szs_name="szs.SmithWatermanScores",
     )

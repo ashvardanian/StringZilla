@@ -25,6 +25,7 @@ distance # https://github.com/doukremt/distance
 polyleven # https://github.com/fujimotos/polyleven
 edlib # https://github.com/Martinsos/edlib
 nltk # https://github.com/nltk/nltk
+cudf-cu12 # https://github.com/rapidsai/cudf
 
 # For Needleman-Wunsch and Smith-Waterman algorithms with custom scoring matrices:
 biopython # https://github.com/biopython/biopython

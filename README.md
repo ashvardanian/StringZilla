@@ -244,15 +244,16 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>NLTK</code> <sup>3</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>2,490,161</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2,081,543</b> CUPS
+      via <code>NLTK</code> <sup>3</sup> and <code>CuDF</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>1,615,306</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1,349,980</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>6,532,411,354</b> CUPS
     </td>
     <td align="center">
       <code>szs_levenshtein_distances_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>78,851,644</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>36,857,367</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>3,369,569,512</b> CUPS
+      <span style="color:#ABABAB;">x86:</span> <b>3,434,427,548</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1,605,340,403</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>93,662,026,653</b> CUPS
     </td>
   </tr>
   <!-- Alignment Score -->
