@@ -393,6 +393,12 @@ elif sz_target == "stringzillas-rocm":
 else:
     __description__ = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 
+# Ensure multi-backend packages depend on the base CPython module
+install_requires = []
+if sz_target != "stringzilla":
+    # Keep versions in lockstep to ensure ABI compatibility
+    install_requires = [f"stringzilla=={__version__}"]
+
 setup(
     name=__lib_name__,
     version=__version__,
@@ -433,4 +439,5 @@ setup(
     packages=find_packages(),
     entry_points=entry_points,
     cmdclass=command_class,
+    install_requires=install_requires,
 )
