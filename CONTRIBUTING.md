@@ -537,24 +537,7 @@ $env:CIBW_BUILD = "cp312-*"; $env:CIBW_ARCHS_WINDOWS = "AMD64"; $env:SZ_TARGET =
 
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
 
-### Benchmarking
-
-For high-performance low-latency benchmarking, stick to C/C++ native benchmarks, as the CPython is likely to cause bottlenecks.
-Before running the benchmarks, pull dependencies:
-
-```sh
-uv pip install -r scripts/requirements.txt
-```
-
-For benchmarking, the following scripts are provided.
-
-```sh
-uv run --no-project scripts/bench_find.py --help
-uv run --no-project scripts/bench_sequence.py --help
-uv run --no-project scripts/bench_similarities.py --help
-```
-
-Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWa.rs`](https://github.com/ashvardanian/StringWa.rs/) repository.
 
 ## JavaScript
 
