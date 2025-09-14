@@ -183,14 +183,16 @@ def get_compiler() -> str:
 
 def is_64bit_x86() -> bool:
     if using_cibuildwheel:
-        return "SZ_IS_64BIT_X86_" in os.environ
+        if "SZ_IS_64BIT_X86_" in os.environ:
+            return True
     arch = platform.machine()
     return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
     if using_cibuildwheel:
-        return "SZ_IS_64BIT_ARM_" in os.environ
+        if "SZ_IS_64BIT_ARM_" in os.environ:
+            return True
     arch = platform.machine()
     return arch in ["arm64", "aarch64", "ARM64"]
 
