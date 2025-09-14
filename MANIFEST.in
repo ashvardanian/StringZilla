@@ -3,6 +3,7 @@ include VERSION
 include LICENSE
 include build_backend.py
 include setup.py
+include SZ_TARGET.env
 
 graft include
 graft fork_union/include

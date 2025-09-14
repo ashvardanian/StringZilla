@@ -489,10 +489,16 @@ uv pip install -r scripts/requirements.txt
 
 ### Packaging
 
-For source distributions, make sure `MANIFEST.in` is up-to-date:
+For source distributions, make sure `MANIFEST.in` is up-to-date.
+When building `sdist`-s for the variant packages, you must set `SZ_TARGET` so the `sdist` metadata `Name` matches the package on PyPI.
+Use the backend helper to build all three correctly named `sdist`-s into `dist/`:
 
 ```bash
-uv build --sdist --out-dir dist
+uv pip install build
+uv build --sdist --out-dir dist # defaults to `stringzilla`
+SZ_TARGET=stringzilla uv run --no-project python build_backend.py build-sdists
+SZ_TARGET=stringzillas-cpus uv run --no-project python build_backend.py build-sdists
+SZ_TARGET=stringzillas-cuda uv run --no-project python build_backend.py build-sdists
 ```
 
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.

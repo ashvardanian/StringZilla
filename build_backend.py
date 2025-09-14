@@ -10,8 +10,8 @@ Responsibilities
         wheel test environment and to run the appropriate tests.
 
 CLI Commands
-    -   pull-deps [PROJECT_DIR]: when testing parallel targets, installs 
-        the serial stringzilla into the test venv, and ensures test-only 
+    -   pull-deps [PROJECT_DIR]: when testing parallel targets, installs
+        the serial stringzilla into the test venv, and ensures test-only
         deps (NumPy, affine-gaps) are present.
     -   run-tests [PROJECT_DIR]: runs scripts/test_stringzilla.py and,
         for parallel targets, also runs scripts/test_stringzillas.py.
@@ -30,15 +30,21 @@ def _build_meta():
     return _orig_build_meta
 
 
+def _detect_target() -> str:
+    t = os.environ.get("SZ_TARGET")
+    if t:
+        return t
+    try:
+        return Path("SZ_TARGET.env").read_text(encoding="utf-8").strip() or "stringzilla"
+    except FileNotFoundError:
+        return "stringzilla"
+
+
 def get_requires_for_build_wheel(config_settings=None):
     """Get build requirements, conditionally including numpy."""
     requirements = _build_meta().get_requires_for_build_wheel(config_settings)
-
-    # Add NumPy for variants that need it
-    sz_target = os.environ.get("SZ_TARGET", "stringzilla")
-    if sz_target in ("stringzillas-cpus", "stringzillas-cuda"):
+    if _detect_target() in ("stringzillas-cpus", "stringzillas-cuda"):
         requirements.append("numpy")
-
     return requirements
 
 
@@ -51,8 +57,7 @@ def get_requires_for_build_editable(config_settings=None):
     else:
         requirements = bm.get_requires_for_build_wheel(config_settings)
 
-    sz_target = os.environ.get("SZ_TARGET", "stringzilla")
-    if sz_target in ("stringzillas-cpus", "stringzillas-cuda"):
+    if _detect_target() in ("stringzillas-cpus", "stringzillas-cuda"):
         requirements.append("numpy")
     return requirements
 
@@ -68,8 +73,21 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 
 def build_sdist(sdist_directory, config_settings=None):
-    """Build source distribution."""
-    return _build_meta().build_sdist(sdist_directory, config_settings)
+    """Build source distribution and embed SZ_TARGET.env for installs from sdist."""
+    target = os.environ.get("SZ_TARGET", "stringzilla")
+    marker_path = Path("SZ_TARGET.env")
+    created = False
+    try:
+        if not marker_path.exists():
+            marker_path.write_text(f"{target}\n", encoding="utf-8")
+            created = True
+        return _build_meta().build_sdist(sdist_directory, config_settings)
+    finally:
+        if created and marker_path.exists():
+            try:
+                marker_path.unlink()
+            except OSError:
+                pass
 
 
 def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
@@ -83,7 +101,7 @@ def prepare_metadata_for_build_editable(metadata_directory, config_settings=None
     if hasattr(bm, "prepare_metadata_for_build_editable"):
         return bm.prepare_metadata_for_build_editable(metadata_directory, config_settings)
     raise RuntimeError(
-        "Editable installs require setuptools with PEP 660 support. "
+        "Editable installs require setuptools with PEP 660 support. "  #
         "Please upgrade setuptools (setuptools>=61)."
     )
 
@@ -94,7 +112,7 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
     if hasattr(bm, "build_editable"):
         return bm.build_editable(wheel_directory, config_settings, metadata_directory)
     raise RuntimeError(
-        "Editable installs require setuptools with PEP 660 support. "
+        "Editable installs require setuptools with PEP 660 support. "  #
         "Please upgrade setuptools (setuptools>=61)."
     )
 
@@ -103,9 +121,28 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
 # CLI utilities for cibuildwheel
 # ------------------------------
 
+
 def _is_parallel_target() -> bool:
-    t = os.environ.get("SZ_TARGET", "stringzilla")
-    return t in ("stringzillas-cpus", "stringzillas-cuda")
+    return _detect_target() in ("stringzillas-cpus", "stringzillas-cuda")
+
+
+def _build_sdist_for(target: str, outdir: str = "dist") -> None:
+    """Build a single sdist with the provided SZ_TARGET value."""
+    env = os.environ.copy()
+    env["SZ_TARGET"] = target
+    subprocess.check_call([sys.executable, "-m", "build", "--sdist", "--outdir", outdir], env=env)
+
+
+def cli_build_sdists(outdir: str = "dist") -> None:
+    """Build sdists for stringzilla, stringzillas-cpus, stringzillas-cuda.
+
+    Ensures the PKG-INFO Name matches the intended PyPI package by setting
+    SZ_TARGET for each build. Outputs to the provided directory (default: dist).
+    """
+    Path(outdir).mkdir(exist_ok=True)
+    for target in ("stringzilla", "stringzillas-cpus", "stringzillas-cuda"):
+        print(f"Building sdist for target: {target}")
+        _build_sdist_for(target, outdir)
 
 
 def cli_prepare_tests(project_dir: Optional[str] = None) -> None:
@@ -156,12 +193,18 @@ def _main(argv: List[str]) -> int:
     parser_run = sub.add_parser("run-tests", help="Run StringZilla test suites")
     parser_run.add_argument("project_dir", nargs="?", default=".")
 
+    parser_sdists = sub.add_parser("build-sdists", help="Build sdists for all targets with correct metadata")
+    parser_sdists.add_argument("--outdir", default="dist", help="Output directory for sdists (default: dist)")
+
     namespace = parser.parse_args(argv)
     if namespace.cmd == "pull-deps":
         cli_prepare_tests(namespace.project_dir)
         return 0
     if namespace.cmd == "run-tests":
         cli_run_tests(namespace.project_dir)
+        return 0
+    if namespace.cmd == "build-sdists":
+        cli_build_sdists(namespace.outdir)
         return 0
     return 2
 

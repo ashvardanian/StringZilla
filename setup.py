@@ -155,8 +155,23 @@ class CudaBuildExtension(NumpyBuildExt):
         # will compile C/C++ sources per-language and link everything.
 
 
+def sz_target_name() -> str:
+    # Prefer env var, then a simple marker file, else default
+    val = os.environ.get("SZ_TARGET")
+    if val:
+        return val
+    try:
+        with open("SZ_TARGET.env", "r", encoding="utf-8") as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except FileNotFoundError:
+        pass
+    return "stringzilla"
+
+
 using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
-sz_target: Final[str] = os.environ.get("SZ_TARGET", "stringzilla")
+sz_target: Final[str] = sz_target_name()
 
 
 def get_compiler() -> str:
