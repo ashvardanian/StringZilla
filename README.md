@@ -1,6 +1,6 @@
 # StringZilla 🦖
 
-![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla.png?raw=true)
+![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v4.jpg?raw=true)
 
 The world wastes a minimum of $100M annually due to inefficient string operations.
 A typical codebase processes strings character by character, resulting in too many branches and data-dependencies, neglecting 90% of modern CPU's potential.
@@ -2131,6 +2131,7 @@ If you are looking for more reading materials on this topic, consider the follow
 
 - [5x faster strings with SIMD & SWAR](https://ashvardanian.com/posts/stringzilla/).
 - [The Painful Pitfalls of C++ STL Strings](https://ashvardanian.com/posts/painful-strings/).
+- [StringWa.rs on GPUs: Databases & Bioinformatics](https://ashvardanian.com/posts/stringwars-on-gpus/).
 
 ## License 📜
 
