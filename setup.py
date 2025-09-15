@@ -170,7 +170,6 @@ def sz_target_name() -> str:
     return "stringzilla"
 
 
-using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
 sz_target: Final[str] = sz_target_name()
 
 
@@ -182,18 +181,30 @@ def get_compiler() -> str:
 
 
 def is_64bit_x86() -> bool:
-    if using_cibuildwheel:
-        if "SZ_IS_64BIT_X86_" in os.environ:
+    override = os.environ.get("SZ_IS_64BIT_X86_") if "SZ_IS_64BIT_X86_" in os.environ else None
+    if override is not None:
+        if override == "0":
+            return False
+        elif override == "1":
             return True
+        else:
+            raise ValueError("Invalid value for SZ_IS_64BIT_X86_: must be '0' or '1'")
+
     # Accept common 64-bit x86 identifiers and ensure the Python ABI is 64-bit.
     arch = platform.machine().lower()
     return (arch in ("x86_64", "x64", "amd64")) and (sys.maxsize > 2**32)
 
 
 def is_64bit_arm() -> bool:
-    if using_cibuildwheel:
-        if "SZ_IS_64BIT_ARM_" in os.environ:
+    override = os.environ.get("SZ_IS_64BIT_ARM_") if "SZ_IS_64BIT_ARM_" in os.environ else None
+    if override is not None:
+        if override == "0":
+            return False
+        elif override == "1":
             return True
+        else:
+            raise ValueError("Invalid value for SZ_IS_64BIT_ARM_: must be '0' or '1'")
+
     # Accept common 64-bit ARM identifiers and ensure the Python ABI is 64-bit.
     arch = platform.machine().lower()
     return (arch in ("arm64", "aarch64")) and (sys.maxsize > 2**32)
