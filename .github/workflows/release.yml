@@ -410,9 +410,6 @@ jobs:
     environment:
       name: pypi-stringzilla
       url: https://pypi.org/p/stringzilla
-    permissions:
-      id-token: write
-
     steps:
       - name: Prepare dist directory
         run: mkdir -p dist
@@ -435,6 +432,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
@@ -454,8 +453,7 @@ jobs:
     environment:
       name: pypi-stringzillas-cpus
       url: https://pypi.org/p/stringzillas-cpus
-    permissions:
-      id-token: write
+    permissions: {}
 
     steps:
       - name: Prepare dist directory
@@ -479,6 +477,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
@@ -492,9 +492,6 @@ jobs:
     environment:
       name: pypi-stringzillas-cuda
       url: https://pypi.org/p/stringzillas-cuda
-    permissions:
-      id-token: write
-
     steps:
       - name: Prepare dist directory
         run: mkdir -p dist
@@ -517,6 +514,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
