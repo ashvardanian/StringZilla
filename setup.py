@@ -185,16 +185,18 @@ def is_64bit_x86() -> bool:
     if using_cibuildwheel:
         if "SZ_IS_64BIT_X86_" in os.environ:
             return True
-    arch = platform.machine()
-    return arch in ["x86_64", "x64", "AMD64"]
+    # Accept common 64-bit x86 identifiers and ensure the Python ABI is 64-bit.
+    arch = platform.machine().lower()
+    return (arch in ("x86_64", "x64", "amd64")) and (sys.maxsize > 2**32)
 
 
 def is_64bit_arm() -> bool:
     if using_cibuildwheel:
         if "SZ_IS_64BIT_ARM_" in os.environ:
             return True
-    arch = platform.machine()
-    return arch in ["arm64", "aarch64", "ARM64"]
+    # Accept common 64-bit ARM identifiers and ensure the Python ABI is 64-bit.
+    arch = platform.machine().lower()
+    return (arch in ("arm64", "aarch64")) and (sys.maxsize > 2**32)
 
 
 def is_big_endian() -> bool:
