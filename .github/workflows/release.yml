@@ -276,7 +276,7 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  build_wheels_stringzillas_cuda:
+  build_wheels_stringzillas_cuda_linux:
     name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: versioning
@@ -486,7 +486,7 @@ jobs:
 
   publish_pypi_stringzillas_cuda:
     name: Publish StringZillas-CUDA to PyPI
-    needs: [build_wheels_stringzillas_cuda, build_sdist_stringzillas_cuda]
+    needs: [build_wheels_stringzillas_cuda_linux, build_sdist_stringzillas_cuda]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:
@@ -740,7 +740,7 @@ jobs:
     needs:
       - build_wheels_stringzilla_linux
       - build_wheels_stringzillas_cpus_linux
-      - build_wheels_stringzillas_cuda
+      - build_wheels_stringzillas_cuda_linux
       - create_linux_deb_package
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -750,11 +750,11 @@ jobs:
           echo "Linux job results:"
           echo "build_wheels_stringzilla_linux: ${{ needs.build_wheels_stringzilla_linux.result }}"
           echo "build_wheels_stringzillas_cpus_linux: ${{ needs.build_wheels_stringzillas_cpus_linux.result }}"
-          echo "build_wheels_stringzillas_cuda: ${{ needs.build_wheels_stringzillas_cuda.result }}"
+          echo "build_wheels_stringzillas_cuda_linux: ${{ needs.build_wheels_stringzillas_cuda_linux.result }}"
           echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
           if [ "${{ needs.build_wheels_stringzilla_linux.result }}" != "success" ] || \
              [ "${{ needs.build_wheels_stringzillas_cpus_linux.result }}" != "success" ] || \
-             [ "${{ needs.build_wheels_stringzillas_cuda.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cuda_linux.result }}" != "success" ] || \
              [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
             echo "One or more Linux dependencies failed.";
             exit 1;
