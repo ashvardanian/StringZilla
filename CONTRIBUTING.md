@@ -449,10 +449,16 @@ uv pip install setuptools wheel         # to pull the latest build tools
 uv pip install -e . --force-reinstall   # to build locally from source
 ```
 
+To check the installed version and capabilities, try:
+
+```bash
+uv run --no-project python -c "import stringzilla as sz; print(sz.__capabilities__)"
+```
+
 To build parallel StringZillas CPUs & CUDA backends, try:
 
 ```bash
-uv pip install numpy
+uv pip install setuptools wheel numpy
 SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
 SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
 ```

@@ -1808,6 +1808,13 @@ StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
+Where vectorization stops being effective, parallelism takes over with the new layered cake architecture:
+
+- StringZilla C library w/out dependencies
+- StringZillas parallel extensions:
+  - Parallel C++ algorithms built with [Fork Union](https://github.com/ashvardanian/fork_union)
+  - Parallel CUDA algorithms for Nvidia GPUs
+  - Parallel ROCm algorithms for AMD GPUs 🔜
 
 ### Exact Substring Search
 
@@ -1819,15 +1826,16 @@ StringZilla uses different exact substring search algorithms for different needl
 
 - When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
 - Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
-- SIMD algorithms are randomized to look at different parts of the needle.
+- SIMD backends compare characters at multiple strategically chosen offsets within the needle to reduce degeneracy.
 
 On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
 On mid-length needles, bit-parallel algorithms are effective, as the character masks fit into 32-bit or 64-bit words.
 Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch every CPU cache line.
 So the only way to improve performance is to reduce the number of comparisons.
-The snippet below shows how StringZilla accomplishes that for needles of length two.
 
-https://github.com/ashvardanian/StringZilla/blob/266c01710dddf71fc44800f36c2f992ca9735f87/include/stringzilla/stringzilla.h#L1585-L1637
+> For 2-byte needles, see `sz_find_2byte_serial_` in `include/stringzilla/find.h`:
+
+https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L422-L463
 
 Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice.
 It has two tables: the good-suffix shift and the bad-character shift.
@@ -1835,7 +1843,9 @@ Common choice is to use the simplified BMH algorithm, which only uses the bad-ch
 We do the same for mid-length needles up to 256 bytes long.
 That way the stack-allocated shift table remains small.
 
-https://github.com/ashvardanian/StringZilla/blob/46e957cd4f9ecd4945318dd3c48783dd11323f37/include/stringzilla/stringzilla.h#L1774-L1825
+> For mid-length needles (≤256 bytes), see `sz_find_horspool_upto_256bytes_serial_` in `include/stringzilla/find.h`:
+
+https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L620-L667
 
 In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
 Before comparing the entire string, it matches the first, last, and the middle character.
@@ -1843,7 +1853,9 @@ Very practical, but can be slow for repetitive characters.
 Both SWAR and SIMD backends of StringZilla have a cheap pre-processing step, where we locate unique characters.
 This makes the library a lot more practical when dealing with non-English corpora.
 
-https://github.com/ashvardanian/StringZilla/blob/46e957cd4f9ecd4945318dd3c48783dd11323f37/include/stringzilla/stringzilla.h#L1398-L1431
+> The offset selection heuristic is implemented in `sz_locate_needle_anomalies_` in `include/stringzilla/find.h`:
+
+https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L244-L305
 
 All those, still, have $O(hn)$ worst case complexity.
 To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
@@ -1899,11 +1911,6 @@ The approach doesn't change the number of trivial operations, but performs them 
 This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
 Moreover, it's easy to generalize to weighted edit-distances, where the cost of a substitution between two characters may not be the same for all pairs, often used in bioinformatics.
 
-Next design goals:
-
-- [x] Generalize fast traversals to non-square matrices.
-- [ ] Port x86 AVX-512 solution to Arm NEON.
-
 > § Reading materials.
 > [Faster Levenshtein Distances with a SIMD-friendly Traversal Order](https://ashvardanian.com/posts/levenshtein-diagonal).
 
@@ -1923,9 +1930,8 @@ Meaning that the cost of a substitution between two characters may not be the sa
 
 StringZilla adapts the fairly efficient two-row Wagner-Fisher algorithm as a baseline serial implementation of the Needleman-Wunsch score.
 It supports arbitrary alphabets up to 256 characters, and can be used with either [BLOSUM][faq-blosum], [PAM][faq-pam], or other substitution matrices.
-It also uses SIMD for hardware acceleration of the substitution lookups.
-This however, does not __yet__ break the data-dependency for insertion costs, where 80% of the time is wasted.
-With that solved, the SIMD implementation will become 5x faster than the serial one.
+It also uses SIMD for hardware acceleration of the substitution lookups on CPUs.
+On GPUs it exploits the same evaluation order as for Levenshtein distance, to minimize data dependencies and maximize parallelism.
 
 [faq-dna]: https://en.wikipedia.org/wiki/DNA
 [faq-rna]: https://en.wikipedia.org/wiki/RNA
@@ -1956,97 +1962,115 @@ That's a topic for future research, as the performance gains are not yet satisfa
 > [`memset` benchmarks](https://github.com/nadavrot/memset_benchmark?tab=readme-ov-file) by Nadav Rotem.
 > [Cache Associativity](https://en.algorithmica.org/hpc/cpu-cache/associativity/) by Sergey Slotin.
 
+
+### Hashing
+
+StringZilla implements a high-performance 64-bit hash function inspired by the "AquaHash", "aHash", and "GxHash" design and optimized for modern CPU architectures.
+The algorithm utilizes AES encryption rounds combined with shuffle-and-add operations to achieve exceptional mixing properties while maintaining consistent output across platforms.
+It passes the rigorous SMHasher test suite, including the `--extra` flag with no collisions.
+
+The core algorithm operates on a dual-state design:
+
+- __AES State__: Initialized with seed `XOR`-ed against π constants.
+- __Sum State__: Accumulates shuffled input data with a permutation.
+
+For strings ≤64 bytes, a minimal state processes data in 16-byte blocks.
+Longer strings employ a 4× wider state (512 bits) that processes 64-byte chunks, maximizing throughput on modern superscalar CPUs.
+The algorithm can be expressed in pseudocode as:
+
+```
+function sz_hash(text: u8[], length: usize, seed: u64) -> u64:
+    # 1024 bits worth of π constants
+    pi: u64[16] = [
+        0x243F6A8885A308D3, 0x13198A2E03707344, 0xA4093822299F31D0, 0x082EFA98EC4E6C89,
+        0x452821E638D01377, 0xBE5466CF34E90C6C, 0xC0AC29B7C97C50DD, 0x3F84D5B5B5470917,
+        0x9216D5D98979FB1B, 0xD1310BA698DFB5AC, 0x2FFD72DBD01ADFB7, 0xB8E1AFED6A267E96,
+        0xBA7C9045F12C7F99, 0x24A19947B3916CF7, 0x0801F2E2858EFC16, 0x636920D871574E69]
+
+    # Permutation order for the sum state
+    shuffle_pattern: u8[16] = [
+        0x04, 0x0b, 0x09, 0x06, 0x08, 0x0d, 0x0f, 0x05,
+        0x0e, 0x03, 0x01, 0x0c, 0x00, 0x07, 0x0a, 0x02]
+
+    # Initialize key and states
+    keys_u64s: u64[2] = [seed, seed]
+    aes_u64s: u64[2] = [seed ⊕ pi[0], seed ⊕ pi[1]]
+    sum_u64s: u64[2] = [seed ⊕ pi[8], seed ⊕ pi[9]]
+
+    if length ≤ 64:
+        # Small input: process 1-4 zero-padded blocks of 16 bytes each
+        blocks_u8s: u8[16][] = split_into_blocks(text, length, 16)
+        for each block_u8s: u8[16] in blocks_u8s:
+            aes_u64s = AESENC(aes_u64s, block_u8s)
+            sum_u64s = SHUFFLE(sum_u64s, shuffle_pattern) + block_u8s
+    else:
+        # Large input: use 4× wider 512-bits states
+        aes_u64s: u64[8] = [
+            seed ⊕ pi[0], seed ⊕ pi[1], seed ⊕ pi[2], seed ⊕ pi[3],
+            seed ⊕ pi[4], seed ⊕ pi[5], seed ⊕ pi[6], seed ⊕ pi[7]]
+        sum_u64s: u64[8] = [
+            seed ⊕ pi[8], seed ⊕ pi[9], seed ⊕ pi[10], seed ⊕ pi[11],
+            seed ⊕ pi[12], seed ⊕ pi[13], seed ⊕ pi[14], seed ⊕ pi[15]]
+
+        # Process 64-byte chunks (4×16-byte blocks)
+        for each chunk_u8s: u8[64] in text:
+            blocks_u8s: u8[16][4] = split_chunk_into_4_blocks(chunk_u8s)
+            for i in 0..3:
+                offset: usize = i * 2  # Each lane stores two u64s
+                aes_u64s[offset:offset+1] = AESENC(aes_u64s[offset:offset+1], blocks_u8s[i])
+                sum_u64s[offset:offset+1] = SHUFFLE(sum_u64s[offset:offset+1], shuffle_pattern) + blocks_u8s[i]
+
+        # Fold 8×u64 state back to 2×u64 for finalization
+        aes_u64s: u64[2] = fold_to_2u64(aes_u64s)
+        sum_u64s: u64[2] = fold_to_2u64(sum_u64s)
+
+    # Finalization: mix length into key
+    key_with_length: u64[2] = [keys_u64s[0] + length, keys_u64s[1]]
+
+    # Multiple AES rounds for SMHasher compliance
+    mixed_u64s: u64[2] = AESENC(sum_u64s, aes_u64s)
+    result_u64s: u64[2] = AESENC(AESENC(mixed_u64s, key_with_length), mixed_u64s)
+
+    return result_u64s[0]  # Extract low 64 bits
+```
+
+This allows us to balance several design trade-offs.
+First, it allows us to achieve a high port-level parallelism.
+Looking at AVX-512 capable CPUs and their ZMM instructions, on each cycle, we'll have at least 2 ports busy when dealing with long strings:
+
+- `VAESENC`: 5 cycles on port 0 on Intel Ice Lake, 4 cycles on ports 0/1 on AMD Zen4.
+- `VPSHUFB_Z`: 3 cycles on port 5 on Intel Ice Lake, 2 cycles on ports 1/2 on AMD Zen4.
+- `VPADDQ`: 1 cycle on ports 0/5 on Intel Ice Lake, 1 cycle on ports 0/1/2/3 on AMD Zen4.
+
+When dealing with smaller strings, we design our approach to avoid large registers and maintain the CPU at the same energy state, thereby avoiding downclocking and expensive power-state transitions.
+
+Unlike some AES-accelerated alternatives, the length of the input is not mixed into the AES block at the start to allow incremental construction, when the final length is not known in advance.
+Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads, we avoid expensive block-shuffling procedures on non-divisible-by-16 lengths.
+
 ### Random Generation
 
-Generating random strings from different alphabets is a very common operation.
-StringZilla accepts an arbitrary [Pseudorandom Number Generator][faq-prng] to produce noise, and an array of characters to sample from.
-Sampling is optimized to avoid integer division, a costly operation on modern CPUs.
-For that a 768-byte long lookup table is used to perform 2 lookups, 1 multiplication, 2 shifts, and 2 accumulations.
-
-https://github.com/ashvardanian/StringZilla/blob/266c01710dddf71fc44800f36c2f992ca9735f87/include/stringzilla/stringzilla.h#L2490-L2533
+StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.
+Unlike "NIST SP 800-90A" which uses multiple AES rounds, StringZilla uses only one round of AES mixing for performance while maintaining reproducible output across platforms.
+The generator operates in counter mode with `AESENC(nonce + lane_index, nonce ⊕ pi_constants)`, rotating through the first 512 bits of π for each 16-byte block.
+The only state required to reproduce an output is a 64-bit `nonce`, which is much cheaper than a Mersenne Twister.
 
 [faq-prng]: https://en.wikipedia.org/wiki/Pseudorandom_number_generator
 
 ### Sorting
 
-For lexicographic sorting of strings, StringZilla uses a "hybrid-hybrid" approach with $O(n * log(n))$ and.
+For lexicographic sorting of string collections, StringZilla exports pointer-sized n‑grams ("pgrams") into a contiguous buffer to improve locality, then recursively QuickSorts those pgrams with a 3‑way partition and dives into equal pgrams to compare deeper characters.
+Very small inputs fall back to insertion sort.
 
-1. Radix sort for first bytes exported into a continuous buffer for locality.
-2. IntroSort on partially ordered chunks to balance efficiency and worst-case performance.
-   1. IntroSort begins with a QuickSort.
-   2. If the recursion depth exceeds a certain threshold, it switches to a HeapSort.
-
-A better algorithm is in development.
-Check #173 for design goals and progress updates.
-
-### Hashing
-
-> [!WARNING]
-> Hash functions are not cryptographically safe and are currently under active development.
-> They may change in future __minor__ releases.
-
-Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
-In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints.
-Rolling hashes take the same amount of time to compute hashes with different window sizes, and are fast to update.
-Those are not however perfect hashes, and collisions are frequent.
-StringZilla attempts to use SIMD, but the performance is not __yet__ satisfactory.
-On Intel Sapphire Rapids, the following numbers can be expected for N-way parallel variants.
-
-- 4-way AVX2 throughput with 64-bit integer multiplication (no native support): 0.28 GB/s.
-- 4-way AVX2 throughput with 32-bit integer multiplication: 0.54 GB/s.
-- 4-way AVX-512DQ throughput with 64-bit integer multiplication: 0.46 GB/s.
-- 4-way AVX-512 throughput with 32-bit integer multiplication: 0.58 GB/s.
-- 8-way AVX-512 throughput with 32-bit integer multiplication: 0.11 GB/s.
-
-Next design goals:
-
-- [ ] Try gear-hash and other rolling approaches.
-
-#### Why not CRC32?
-
-Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
-It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
-The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
-In case of Arm more than one polynomial is supported.
-It is, however, somewhat limiting for Big Data usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
-Moreover, the existing SIMD approaches are tricky, combining general purpose computations with specialized instructions, to utilize more silicon in every cycle.
-
-> § Reading materials.
-> [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
-> [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
-> [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
-> Great open-source implementations.
-> [By Peter Cawley](https://github.com/corsix/fast-crc32)
-> [By Stephan Brumme](https://github.com/stbrumme/crc32)
-
-#### Other Modern Alternatives
-
-[MurmurHash](https://github.com/aappleby/smhasher/blob/master/README.md) from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
-It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
-The [CityHash](https://opensource.googleblog.com/2011/04/introducing-cityhash) from 2011 by Google and the [xxHash](https://github.com/Cyan4973/xxHash) improve on that, better leveraging the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
-
-Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
-Most of cryptographic hashes are based on the Merkle-Damgård construction, and aren't resistant to the length-extension attacks.
-Current state of the Art, might be the [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) algorithm.
-It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes with a very optimized official implementation for C and Rust.
-It has the same 128-bit security level as the BLAKE2, and achieves its performance gains by reducing the number of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings, but may result in poor performance on short ones.
-
-All mentioned libraries have undergone extensive testing and are considered production-ready.
-They can definitely accelerate your application, but so may the downstream mixer.
-For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
-If the mixer loses entropy, the performance gains from the hash function may be lost.
-An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
-One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
-Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
+- Average time complexity: O(n log n)
+- Worst-case time complexity: quadratic (due to QuickSort), mitigated in practice by 3‑way partitioning and the n‑gram staging
 
 ### Unicode, UTF-8, and Wide Characters
 
 Most StringZilla operations are byte-level, so they work well with ASCII and UTF-8 content out of the box.
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
-So StringZilla provides following functions to work with Unicode:
 
-- `szs_levenshtein_distance_utf8` - computes the Levenshtein distance between two UTF-8 strings.
-- `sz_hamming_distance_utf8` - computes the Hamming distance between two UTF-8 strings.
+- `szs_levenshtein_distances_utf8("αβγδ", "αγδ") == 1` — one unicode symbol.
+- `szs_levenshtein_distances("αβγδ", "αγδ") == 2` — one unicode symbol is two bytes long.
 
 Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF-32 or variable-length UTF-8.
 This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
