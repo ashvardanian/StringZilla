@@ -1840,14 +1840,24 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         __mmask8 negative_mask = _mm512_fpclass_pd_mask(results, 0x44); // Negative
         results = _mm512_mask_add_pd(results, negative_mask, results, modulos);
 
-        sz_assert_(modulos[0] == 0 || absolute_umod(xs[0], modulos[0]) == static_cast<u64_t>(results[0]));
-        sz_assert_(modulos[1] == 0 || absolute_umod(xs[1], modulos[1]) == static_cast<u64_t>(results[1]));
-        sz_assert_(modulos[2] == 0 || absolute_umod(xs[2], modulos[2]) == static_cast<u64_t>(results[2]));
-        sz_assert_(modulos[3] == 0 || absolute_umod(xs[3], modulos[3]) == static_cast<u64_t>(results[3]));
-        sz_assert_(modulos[4] == 0 || absolute_umod(xs[4], modulos[4]) == static_cast<u64_t>(results[4]));
-        sz_assert_(modulos[5] == 0 || absolute_umod(xs[5], modulos[5]) == static_cast<u64_t>(results[5]));
-        sz_assert_(modulos[6] == 0 || absolute_umod(xs[6], modulos[6]) == static_cast<u64_t>(results[6]));
-        sz_assert_(modulos[7] == 0 || absolute_umod(xs[7], modulos[7]) == static_cast<u64_t>(results[7]));
+#ifdef SZ_DEBUG
+        // Extract elements for assertions, as MSVC doesn't support [] operator on `__m512d`
+        alignas(64) f64_t xs_arr[8];
+        alignas(64) f64_t modulos_arr[8];
+        alignas(64) f64_t results_arr[8];
+        _mm512_store_pd(xs_arr, xs);
+        _mm512_store_pd(modulos_arr, modulos);
+        _mm512_store_pd(results_arr, results);
+        
+        sz_assert_(modulos_arr[0] == 0 || absolute_umod(xs_arr[0], modulos_arr[0]) == static_cast<u64_t>(results_arr[0]));
+        sz_assert_(modulos_arr[1] == 0 || absolute_umod(xs_arr[1], modulos_arr[1]) == static_cast<u64_t>(results_arr[1]));
+        sz_assert_(modulos_arr[2] == 0 || absolute_umod(xs_arr[2], modulos_arr[2]) == static_cast<u64_t>(results_arr[2]));
+        sz_assert_(modulos_arr[3] == 0 || absolute_umod(xs_arr[3], modulos_arr[3]) == static_cast<u64_t>(results_arr[3]));
+        sz_assert_(modulos_arr[4] == 0 || absolute_umod(xs_arr[4], modulos_arr[4]) == static_cast<u64_t>(results_arr[4]));
+        sz_assert_(modulos_arr[5] == 0 || absolute_umod(xs_arr[5], modulos_arr[5]) == static_cast<u64_t>(results_arr[5]));
+        sz_assert_(modulos_arr[6] == 0 || absolute_umod(xs_arr[6], modulos_arr[6]) == static_cast<u64_t>(results_arr[6]));
+        sz_assert_(modulos_arr[7] == 0 || absolute_umod(xs_arr[7], modulos_arr[7]) == static_cast<u64_t>(results_arr[7]));
+#endif
 
         return results;
     }

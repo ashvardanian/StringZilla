@@ -155,8 +155,23 @@ class CudaBuildExtension(NumpyBuildExt):
         # will compile C/C++ sources per-language and link everything.
 
 
+def sz_target_name() -> str:
+    # Prefer env var, then a simple marker file, else default
+    val = os.environ.get("SZ_TARGET")
+    if val:
+        return val
+    try:
+        with open("SZ_TARGET.env", "r", encoding="utf-8") as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except FileNotFoundError:
+        pass
+    return "stringzilla"
+
+
 using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
-sz_target: Final[str] = os.environ.get("SZ_TARGET", "stringzilla")
+sz_target: Final[str] = sz_target_name()
 
 
 def get_compiler() -> str:
@@ -168,14 +183,16 @@ def get_compiler() -> str:
 
 def is_64bit_x86() -> bool:
     if using_cibuildwheel:
-        return "SZ_IS_64BIT_X86_" in os.environ
+        if "SZ_IS_64BIT_X86_" in os.environ:
+            return True
     arch = platform.machine()
     return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
     if using_cibuildwheel:
-        return "SZ_IS_64BIT_ARM_" in os.environ
+        if "SZ_IS_64BIT_ARM_" in os.environ:
+            return True
     arch = platform.machine()
     return arch in ["arm64", "aarch64", "ARM64"]
 
@@ -276,8 +293,13 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
 def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
         "/std:c++17" if use_cpp else "/std:c11",  # use C++17 for StringZillas, C11 for StringZilla, as MSVC has no C99
-        "/Wall",  # stick close to the C language standard, avoid compiler extensions
+        "/W3",  # use W3 instead of /Wall to avoid excessive warnings
         "/O2",  # optimization level
+        "/wd4365",  # disable C4365: signed/unsigned mismatch
+        "/wd4820",  # disable C4820: padding added after data member
+        "/wd5027",  # disable C5027: move assignment operator implicitly defined as deleted
+        "/wd4626",  # disable C4626: assignment operator implicitly defined as deleted
+        "/wd4127",  # disable C4127: conditional expression is constant
     ]
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
@@ -370,14 +392,37 @@ this_directory = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f:
     long_description = f.read()
 
+# Different descriptions for different variants
+if sz_target == "stringzilla":
+    __description__ = "Search, hash, sort, and process strings faster via SWAR and SIMD"
+elif sz_target == "stringzillas-cpus":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, on multi-core CPUs"
+    )
+elif sz_target == "stringzillas-cuda":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and CUDA on Nvidia GPUs"
+    )
+elif sz_target == "stringzillas-rocm":
+    __description__ = (
+        "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and ROCm on AMD GPUs"
+    )
+else:
+    __description__ = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
+
+# Ensure multi-backend packages depend on the base CPython module
+install_requires = []
+if sz_target != "stringzilla":
+    # Keep versions in lockstep to ensure ABI compatibility
+    install_requires = [f"stringzilla=={__version__}"]
 
 setup(
     name=__lib_name__,
     version=__version__,
-    description="Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
+    description=__description__,
     author="Ash Vardanian",
     author_email="1983160+ashvardanian@users.noreply.github.com",
-    url="https://github.com/ashvardanian/stringzilla",
+    url="https://github.com/ashvardanian/StringZilla",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
@@ -411,4 +456,5 @@ setup(
     packages=find_packages(),
     entry_points=entry_points,
     cmdclass=command_class,
+    install_requires=install_requires,
 )

@@ -449,10 +449,16 @@ uv pip install setuptools wheel         # to pull the latest build tools
 uv pip install -e . --force-reinstall   # to build locally from source
 ```
 
+To check the installed version and capabilities, try:
+
+```bash
+uv run --no-project python -c "import stringzilla as sz; print(sz.__capabilities__)"
+```
+
 To build parallel StringZillas CPUs & CUDA backends, try:
 
 ```bash
-uv pip install numpy
+uv pip install setuptools wheel numpy
 SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
 SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
 ```
@@ -489,10 +495,16 @@ uv pip install -r scripts/requirements.txt
 
 ### Packaging
 
-For source distributions, make sure `MANIFEST.in` is up-to-date:
+For source distributions, make sure `MANIFEST.in` is up-to-date.
+When building `sdist`-s for the variant packages, you must set `SZ_TARGET` so the `sdist` metadata `Name` matches the package on PyPI.
+Use the backend helper to build all three correctly named `sdist`-s into `dist/`:
 
 ```bash
-uv build --sdist --out-dir dist
+uv pip install build
+uv build --sdist --out-dir dist # defaults to `stringzilla`
+SZ_TARGET=stringzilla uv run --no-project python build_backend.py build-sdists
+SZ_TARGET=stringzillas-cpus uv run --no-project python build_backend.py build-sdists
+SZ_TARGET=stringzillas-cuda uv run --no-project python build_backend.py build-sdists
 ```
 
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
@@ -532,28 +544,12 @@ All together, for one version of Python, OS, hardware platform:
 ```bash
 CIBW_BUILD=cp312-* CIBW_ARCHS_LINUX=x86_64 SZ_TARGET=stringzillas-cuda cibuildwheel --platform linux
 CIBW_BUILD=cp312-* CIBW_ARCHS_MACOS=arm64 SZ_TARGET=stringzillas-cpus python3 -m cibuildwheel --platform macos
+$env:CIBW_BUILD = "cp312-*"; $env:CIBW_ARCHS_WINDOWS = "AMD64"; $env:SZ_TARGET = "stringzillas-cpus"; python -m cibuildwheel --platform windows
 ```
 
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
 
-### Benchmarking
-
-For high-performance low-latency benchmarking, stick to C/C++ native benchmarks, as the CPython is likely to cause bottlenecks.
-Before running the benchmarks, pull dependencies:
-
-```sh
-uv pip install -r scripts/requirements.txt
-```
-
-For benchmarking, the following scripts are provided.
-
-```sh
-uv run --no-project scripts/bench_find.py --help
-uv run --no-project scripts/bench_sequence.py --help
-uv run --no-project scripts/bench_similarities.py --help
-```
-
-Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWa.rs`](https://github.com/ashvardanian/StringWa.rs/) repository.
 
 ## JavaScript
 
