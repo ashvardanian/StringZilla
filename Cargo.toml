@@ -1,6 +1,6 @@
 [package]
 name = "stringzilla"
-version = "4.0.7"
+version = "4.0.8"
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
 description = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 edition = "2021"
