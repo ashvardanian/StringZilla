@@ -119,7 +119,7 @@
  *          At this point we only provide optimized backends for x86_64 and ARM64.
  */
 #if !defined(SZ_IS_64BIT_X86_)
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if defined(__x86_64__) || defined(_M_X64)
 #define SZ_IS_64BIT_X86_ (1)
 #else
 #define SZ_IS_64BIT_X86_ (0)
