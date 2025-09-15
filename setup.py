@@ -238,6 +238,9 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
     # GCC is our primary compiler, so when packaging the library, even if the current machine
     # doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
+        ("SZ_IS_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
+        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
+        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
@@ -246,7 +249,6 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -291,6 +293,8 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
     # - x86_64: enable Haswell (AVX2) only
     # - arm64: enable NEON only
     macros_args = [
+        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
+        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
         ("SZ_USE_ICE", "0"),
@@ -317,6 +321,9 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
+        ("SZ_IS_BIG_ENDIAN_", "1" if is_big_endian() else "0"),
+        ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
+        ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
@@ -324,7 +331,6 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
-        ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
     link_args = []

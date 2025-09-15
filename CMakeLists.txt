@@ -337,14 +337,14 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     endif ()
 
-    # Define SZ_DETECT_BIG_ENDIAN macro based on system byte order
+    # Define SZ_IS_BIG_ENDIAN_ macro based on system byte order
     if (CMAKE_C_BYTE_ORDER STREQUAL "BIG_ENDIAN")
-        set(SZ_DETECT_BIG_ENDIAN 1)
+        set(SZ_IS_BIG_ENDIAN_ 1)
     else ()
-        set(SZ_DETECT_BIG_ENDIAN 0)
+        set(SZ_IS_BIG_ENDIAN_ 0)
     endif ()
 
-    target_compile_definitions(${target} PRIVATE "SZ_DETECT_BIG_ENDIAN=${SZ_DETECT_BIG_ENDIAN}")
+    target_compile_definitions(${target} PRIVATE "SZ_IS_BIG_ENDIAN_=${SZ_IS_BIG_ENDIAN_}")
 
     # Sanitizer options for Debug mode
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")

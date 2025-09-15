@@ -41,11 +41,11 @@ fn build_stringzilla() -> HashMap<String, bool> {
 
     // Set endian-specific macro
     if target_endian == "big" {
-        build.define("SZ_DETECT_BIG_ENDIAN", "1");
-        flags.insert("SZ_DETECT_BIG_ENDIAN".to_string(), true);
+        build.define("SZ_IS_BIG_ENDIAN_", "1");
+        flags.insert("SZ_IS_BIG_ENDIAN_".to_string(), true);
     } else {
-        build.define("SZ_DETECT_BIG_ENDIAN", "0");
-        flags.insert("SZ_DETECT_BIG_ENDIAN".to_string(), false);
+        build.define("SZ_IS_BIG_ENDIAN_", "0");
+        flags.insert("SZ_IS_BIG_ENDIAN_".to_string(), false);
     }
 
     if target_arch == "x86_64" && target_bits == "64" {

@@ -218,7 +218,7 @@
  *  All of those can be controlled by the user.
  */
 #if !defined(SZ_USE_HASWELL)
-#ifdef __AVX2__
+#if SZ_IS_64BIT_X86_ && defined(__AVX2__)
 #define SZ_USE_HASWELL (1)
 #else
 #define SZ_USE_HASWELL (0)
@@ -226,7 +226,7 @@
 #endif
 
 #if !defined(SZ_USE_SKYLAKE)
-#ifdef __AVX512F__
+#if SZ_IS_64BIT_X86_ && defined(__AVX512F__)
 #define SZ_USE_SKYLAKE (1)
 #else
 #define SZ_USE_SKYLAKE (0)
@@ -234,7 +234,7 @@
 #endif
 
 #if !defined(SZ_USE_ICE)
-#ifdef __AVX512BW__
+#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__)
 #define SZ_USE_ICE (1)
 #else
 #define SZ_USE_ICE (0)
@@ -242,7 +242,7 @@
 #endif
 
 #if !defined(SZ_USE_NEON)
-#ifdef __ARM_NEON
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON)
 #define SZ_USE_NEON (1)
 #else
 #define SZ_USE_NEON (0)
@@ -250,7 +250,7 @@
 #endif
 
 #if !defined(SZ_USE_SVE)
-#ifdef __ARM_FEATURE_SVE
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE)
 #define SZ_USE_SVE (1)
 #else
 #define SZ_USE_SVE (0)
@@ -258,7 +258,7 @@
 #endif
 
 #if !defined(SZ_USE_SVE2)
-#ifdef __ARM_FEATURE_SVE2
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2)
 #define SZ_USE_SVE2 (1)
 #else
 #define SZ_USE_SVE2 (0)
@@ -266,7 +266,7 @@
 #endif
 
 #if !defined(SZ_USE_NEON_AES)
-#ifdef __ARM_FEATURE_AES
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_AES)
 #define SZ_USE_NEON_AES (1)
 #else
 #define SZ_USE_NEON_AES (0)
@@ -274,7 +274,7 @@
 #endif
 
 #if !defined(SZ_USE_SVE2_AES)
-#ifdef __ARM_FEATURE_SVE2_AES
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2_AES)
 #define SZ_USE_SVE2_AES (1)
 #else
 #define SZ_USE_SVE2_AES (0)
