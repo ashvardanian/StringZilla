@@ -410,6 +410,104 @@ def test_unit_split_iterators():
         sz.rsplit_byteset_iter(big, "")
 
 
+def test_unit_strip():
+    # Test with whitespace (default behavior)
+    native_whitespace = "  \t\n hello world \r\f\v  "
+    big_whitespace = Str(native_whitespace)
+
+    # Test lstrip
+    assert native_whitespace.lstrip() == str(sz.lstrip(big_whitespace))
+    assert native_whitespace.lstrip() == str(big_whitespace.lstrip())
+
+    # Test rstrip
+    assert native_whitespace.rstrip() == str(sz.rstrip(big_whitespace))
+    assert native_whitespace.rstrip() == str(big_whitespace.rstrip())
+
+    # Test strip
+    assert native_whitespace.strip() == str(sz.strip(big_whitespace))
+    assert native_whitespace.strip() == str(big_whitespace.strip())
+
+    # Test with custom character set
+    native_custom = "aaabbbhello worldcccaaa"
+    big_custom = Str(native_custom)
+    chars = "abc"
+
+    # Test lstrip with custom chars
+    assert native_custom.lstrip(chars) == str(sz.lstrip(big_custom, chars))
+    assert native_custom.lstrip(chars) == str(big_custom.lstrip(chars))
+
+    # Test rstrip with custom chars
+    assert native_custom.rstrip(chars) == str(sz.rstrip(big_custom, chars))
+    assert native_custom.rstrip(chars) == str(big_custom.rstrip(chars))
+
+    # Test strip with custom chars
+    assert native_custom.strip(chars) == str(sz.strip(big_custom, chars))
+    assert native_custom.strip(chars) == str(big_custom.strip(chars))
+
+    # Test edge cases
+    # Empty string
+    empty = ""
+    big_empty = Str(empty)
+    assert empty.strip() == str(sz.strip(big_empty))
+    assert empty.strip() == str(big_empty.strip())
+
+    # String with only whitespace
+    only_whitespace = " \t\n\r\f\v "
+    big_only_whitespace = Str(only_whitespace)
+    assert only_whitespace.strip() == str(sz.strip(big_only_whitespace))
+    assert only_whitespace.strip() == str(big_only_whitespace.strip())
+
+    # String with only custom chars
+    only_custom = "aaabbbccc"
+    big_only_custom = Str(only_custom)
+    assert only_custom.strip("abc") == str(sz.strip(big_only_custom, "abc"))
+    assert only_custom.strip("abc") == str(big_only_custom.strip("abc"))
+
+    # String with no chars to strip
+    no_strip = "hello world"
+    big_no_strip = Str(no_strip)
+    assert no_strip.strip() == str(sz.strip(big_no_strip))
+    assert no_strip.strip() == str(big_no_strip.strip())
+
+    # Test with bytes
+    native_bytes = b"  hello world  "
+    big_bytes = Str(native_bytes)
+    assert native_bytes.strip() == bytes(sz.strip(big_bytes))
+    assert native_bytes.strip() == bytes(big_bytes.strip())
+
+    # Test asymmetric stripping
+    native_asymmetric = "aaahello worldbbb"
+    big_asymmetric = Str(native_asymmetric)
+
+    # Only strip 'a' from left
+    assert native_asymmetric.lstrip("a") == str(sz.lstrip(big_asymmetric, "a"))
+    assert native_asymmetric.lstrip("a") == str(big_asymmetric.lstrip("a"))
+
+    # Only strip 'b' from right
+    assert native_asymmetric.rstrip("b") == str(sz.rstrip(big_asymmetric, "b"))
+    assert native_asymmetric.rstrip("b") == str(big_asymmetric.rstrip("b"))
+
+    # Test with special characters
+    native_special = "!!!###hello world***!!!"
+    big_special = Str(native_special)
+    special_chars = "!#*"
+
+    assert native_special.strip(special_chars) == str(sz.strip(big_special, special_chars))
+    assert native_special.strip(special_chars) == str(big_special.strip(special_chars))
+
+    # Test with single character
+    native_single = "aaa"
+    big_single = Str(native_single)
+    assert native_single.strip("a") == str(sz.strip(big_single, "a"))
+    assert native_single.strip("a") == str(big_single.strip("a"))
+
+    # Test with no matching characters
+    native_no_match = "hello world"
+    big_no_match = Str(native_no_match)
+    assert native_no_match.strip("xyz") == str(sz.strip(big_no_match, "xyz"))
+    assert native_no_match.strip("xyz") == str(big_no_match.strip("xyz"))
+
+
 def test_unit_strs_sequence():
     native = "p3\np2\np1"
     big = Str(native)

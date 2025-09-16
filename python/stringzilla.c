@@ -3842,6 +3842,274 @@ static PyGetSetDef Str_getsetters[] = {
     {NULL} // Sentinel
 };
 
+static char const doc_lstrip[] = //
+    "Remove leading characters from a string.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  chars (str, optional): Characters to remove (default is whitespace).\n"
+    "Returns:\n"
+    "  Str: A new string with leading characters removed.";
+
+static PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    // Check arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t expected_min_args = !is_member;
+    Py_ssize_t expected_max_args = !is_member + 1;
+    if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
+        PyErr_SetString(PyExc_TypeError, "lstrip() takes at most 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *chars_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "chars") == 0 && !chars_obj) { chars_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+        }
+    }
+
+    sz_string_view_t text;
+    sz_string_view_t chars;
+
+    // Validate and convert text
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Default to whitespace if chars is not provided
+    char const *default_chars = " \t\n\r\f\v";
+    if (chars_obj) {
+        if (!sz_py_export_string_like(chars_obj, &chars.start, &chars.length)) {
+            wrap_current_exception("The chars argument must be string-like");
+            return NULL;
+        }
+    }
+    else {
+        chars.start = default_chars;
+        chars.length = 6;
+    }
+
+    // Create byteset from chars
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (sz_size_t i = 0; i < chars.length; ++i) sz_byteset_add(&set, chars.start[i]);
+    sz_byteset_invert(&set);
+
+    // Find first character NOT in the set (i.e., not to be stripped)
+    sz_cptr_t new_start = sz_find_byteset(text.start, text.length, &set);
+    if (!new_start) {
+        // Return empty string
+        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result == NULL && PyErr_NoMemory()) return NULL;
+        result->memory.start = NULL;
+        result->memory.length = 0;
+        result->parent = NULL;
+        return (PyObject *)result;
+    }
+
+    // Create a new Str object for the result
+    sz_size_t new_length = text.length - (new_start - text.start);
+    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result == NULL && PyErr_NoMemory()) return NULL;
+    result->memory.start = new_start;
+    result->memory.length = new_length;
+    result->parent = text_obj;
+    Py_INCREF(text_obj); // Keep the parent alive
+    return (PyObject *)result;
+}
+
+static char const doc_rstrip[] = //
+    "Remove trailing characters from a string.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  chars (str, optional): Characters to remove (default is whitespace).\n"
+    "Returns:\n"
+    "  Str: A new string with trailing characters removed.";
+
+static PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    // Check arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t expected_min_args = !is_member;
+    Py_ssize_t expected_max_args = !is_member + 1;
+    if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
+        PyErr_SetString(PyExc_TypeError, "rstrip() takes at most 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *chars_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "chars") == 0 && !chars_obj) { chars_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+        }
+    }
+
+    sz_string_view_t text;
+    sz_string_view_t chars;
+
+    // Validate and convert text
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Default to whitespace if chars is not provided
+    char const *default_chars = " \t\n\r\f\v";
+    if (chars_obj) {
+        if (!sz_py_export_string_like(chars_obj, &chars.start, &chars.length)) {
+            wrap_current_exception("The chars argument must be string-like");
+            return NULL;
+        }
+    }
+    else {
+        chars.start = default_chars;
+        chars.length = 6;
+    }
+
+    // Create byteset from chars
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (sz_size_t i = 0; i < chars.length; ++i) sz_byteset_add(&set, chars.start[i]);
+    sz_byteset_invert(&set);
+
+    // Find last character NOT in the set (i.e., not to be stripped)
+    sz_cptr_t new_end = sz_rfind_byteset(text.start, text.length, &set);
+    if (!new_end) {
+        // Return empty string
+        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result == NULL && PyErr_NoMemory()) return NULL;
+        result->memory.start = NULL;
+        result->memory.length = 0;
+        result->parent = NULL;
+        return (PyObject *)result;
+    }
+
+    // Create a new Str object for the result
+    sz_size_t new_length = new_end - text.start + 1;
+    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result == NULL && PyErr_NoMemory()) return NULL;
+    result->memory.start = text.start;
+    result->memory.length = new_length;
+    result->parent = text_obj;
+    Py_INCREF(text_obj); // Keep the parent alive
+    return (PyObject *)result;
+}
+
+static char const doc_strip[] = //
+    "Remove leading and trailing characters from a string.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  chars (str, optional): Characters to remove (default is whitespace).\n"
+    "Returns:\n"
+    "  Str: A new string with leading and trailing characters removed.";
+
+static PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    // Check arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t expected_min_args = !is_member;
+    Py_ssize_t expected_max_args = !is_member + 1;
+    if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
+        PyErr_SetString(PyExc_TypeError, "strip() takes at most 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *chars_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "chars") == 0 && !chars_obj) { chars_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+        }
+    }
+
+    sz_string_view_t text;
+    sz_string_view_t chars;
+
+    // Validate and convert text
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Default to whitespace if chars is not provided
+    char const *default_chars = " \t\n\r\f\v";
+    if (chars_obj) {
+        if (!sz_py_export_string_like(chars_obj, &chars.start, &chars.length)) {
+            wrap_current_exception("The chars argument must be string-like");
+            return NULL;
+        }
+    }
+    else {
+        chars.start = default_chars;
+        chars.length = 6;
+    }
+
+    // Create byteset from chars
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (sz_size_t i = 0; i < chars.length; ++i) sz_byteset_add(&set, chars.start[i]);
+    sz_byteset_invert(&set);
+
+    // Find first character NOT in the set (i.e., not to be stripped)
+    sz_cptr_t new_start = sz_find_byteset(text.start, text.length, &set);
+    if (!new_start) {
+        // Return empty string
+        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result == NULL && PyErr_NoMemory()) return NULL;
+        result->memory.start = NULL;
+        result->memory.length = 0;
+        result->parent = NULL;
+        return (PyObject *)result;
+    }
+
+    // Find last character NOT in the set from the new start position
+    sz_size_t remaining_length = text.length - (new_start - text.start);
+    sz_cptr_t new_end = sz_rfind_byteset(new_start, remaining_length, &set);
+    if (!new_end) {
+        // Return empty string
+        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result == NULL && PyErr_NoMemory()) return NULL;
+        result->memory.start = NULL;
+        result->memory.length = 0;
+        result->parent = NULL;
+        return (PyObject *)result;
+    }
+
+    // Create a new Str object for the result
+    sz_size_t new_length = new_end - new_start + 1;
+    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result == NULL && PyErr_NoMemory()) return NULL;
+    result->memory.start = new_start;
+    result->memory.length = new_length;
+    result->parent = text_obj;
+    Py_INCREF(text_obj); // Keep the parent alive
+    return (PyObject *)result;
+}
+
 #define SZ_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
@@ -3852,6 +4120,9 @@ static PyMethodDef Str_methods[] = {
     {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
     {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"lstrip", (PyCFunction)Str_like_lstrip, SZ_METHOD_FLAGS, doc_lstrip},
+    {"rstrip", (PyCFunction)Str_like_rstrip, SZ_METHOD_FLAGS, doc_rstrip},
+    {"strip", (PyCFunction)Str_like_strip, SZ_METHOD_FLAGS, doc_strip},
 
     // Bidirectional operations
     {"find", (PyCFunction)Str_like_find, SZ_METHOD_FLAGS, doc_find},
@@ -5838,6 +6109,9 @@ static PyMethodDef stringzilla_methods[] = {
     {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
     {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
+    {"lstrip", (PyCFunction)Str_like_lstrip, SZ_METHOD_FLAGS, doc_lstrip},
+    {"rstrip", (PyCFunction)Str_like_rstrip, SZ_METHOD_FLAGS, doc_rstrip},
+    {"strip", (PyCFunction)Str_like_strip, SZ_METHOD_FLAGS, doc_strip},
 
     // Bidirectional operations
     {"find", (PyCFunction)Str_like_find, SZ_METHOD_FLAGS, doc_find},
