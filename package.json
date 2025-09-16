@@ -1,6 +1,6 @@
 {
   "name": "stringzilla",
-  "version": "4.0.10",
+  "version": "4.0.11",
   "description": "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
   "author": "Ash Vardanian",
   "license": "Apache-2.0",
