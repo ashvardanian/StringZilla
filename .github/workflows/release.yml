@@ -291,13 +291,6 @@ jobs:
           ref: "main"
           submodules: recursive
 
-      # Install CUDA Toolkit
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.26
-        with:
-          cuda: "12.9.1"
-          method: "network"
-
       - name: Set up Python
         uses: actions/setup-python@v5.2.0
         with:
@@ -310,7 +303,14 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cuda # When emulating this will disable some tricky SIMD instructions
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cuda PATH=/usr/local/cuda-12.9/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH CUDA_HOME=/usr/local/cuda-12.9
+          CIBW_BEFORE_ALL_LINUX: |
+            yum update -y && yum install -y glibc-devel wget python3-devel &&
+            wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run &&
+            sh cuda_12.9.1_575.57.08_linux.run --silent --toolkit --override &&
+            rm cuda_12.9.1_575.57.08_linux.run &&
+            echo "CUDA installed successfully" &&
+            /usr/local/cuda-12.9/bin/nvcc --version
           SZ_TARGET: stringzillas-cuda
           CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
