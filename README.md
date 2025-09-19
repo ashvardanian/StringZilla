@@ -1619,6 +1619,27 @@ let engine = szs::SmithWatermanScores::new(&cpu_scope, &substitution_matrix, -3,
 let local_scores = engine.compute(&cpu_scope, &strings_a, &strings_b).unwrap();
 ```
 
+For high-performance applications, use the [StringTape](https://github.com/ashvardanian/StringTape) crate to pass strings to `compute_into` methods without extra memory allocations:
+
+```rust
+use stringzilla::{szs, StringTape};
+
+// Create StringTape from data (zero-copy compatible format)
+let tape_a = StringTape::from_strings(&["kitten", "sitting", "flaw"]);
+let tape_b = StringTape::from_strings(&["sitting", "kitten", "lawn"]);
+
+// Use unified memory vector for GPU compatibility, initialized with max values
+let mut distances = szs::UnifiedVec::<u32>::from_elem(u32::MAX, tape_a.len());
+
+let engine = szs::LevenshteinDistances::new(&gpu_scope, 0, 1, 1, 1).unwrap();
+engine.compute_into(&gpu_scope, &tape_a, &tape_b, &mut distances).unwrap();
+
+// Results computed directly into unified memory, accessible from both CPU/GPU
+assert_eq!(distances[0], 3);  // kitten -> sitting
+assert_eq!(distances[1], 3);  // sitting -> kitten
+assert_eq!(distances[2], 2);  // flaw -> lawn
+```
+
 ### Rolling Fingerprints
 
 MinHashing is a common technique for Information Retrieval, producing compact representations of large documents.
@@ -1645,6 +1666,28 @@ let engine = szs::Fingerprints::new(
 let (hashes, counts) = engine.compute(&cpu, &texts).unwrap();
 assert_eq!(hashes.len(), texts.len() * ndim);
 assert_eq!(counts.len(), texts.len() * ndim);
+```
+
+For zero-copy processing with [StringTape](https://github.com/ashvardanian/StringTape) format and unified memory:
+
+```rust
+use stringzilla::{szs, StringTape};
+
+let tape = StringTape::from_strings(&[
+    "quick brown fox jumps over the lazy dog",
+    "quick brown fox jumped over a very lazy dog",
+]);
+
+// Pre-allocate unified memory buffers
+let mut hashes = szs::UnifiedVec::<u32>::from_elem(u32::MAX, tape.len() * ndim);
+let mut counts = szs::UnifiedVec::<u32>::from_elem(u32::MAX, tape.len() * ndim);
+
+let engine = szs::Fingerprints::new(ndim, &window_widths, 256, &cpu).unwrap();
+engine.compute_into(&cpu, &tape, &mut hashes, &mut counts).unwrap();
+
+// Results computed directly into unified memory buffers
+assert!(hashes.iter().any(|&h| h != u32::MAX));  // Verify computation occurred
+assert!(counts.iter().any(|&c| c != u32::MAX));
 ```
 
 ## Quick Start: JavaScript 🟨
