@@ -788,10 +788,24 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     case STRS_FRAGMENTED: old_allocator = strs->data.fragmented.allocator; break;
     case STRS_U32_TAPE_VIEW:
     case STRS_U64_TAPE_VIEW:
-    default:
-        // Views don't own memory, use default allocator for comparison
-        sz_memory_allocator_init_default(&old_allocator);
+        // Traverse parent chain until we find an allocator
+        {
+            Strs *up = strs;
+            while (up && (up->layout == STRS_U32_TAPE_VIEW || up->layout == STRS_U64_TAPE_VIEW)) {
+                PyObject *parent =
+                    (up->layout == STRS_U32_TAPE_VIEW) ? up->data.u32_tape_view.parent : up->data.u64_tape_view.parent;
+                if (!parent || !PyObject_TypeCheck(parent, &StrsType)) break;
+                up = (Strs *)parent;
+            }
+
+            // Extract allocator from the owning layout we found
+            if (up && up->layout == STRS_U32_TAPE) { old_allocator = up->data.u32_tape.allocator; }
+            else if (up && up->layout == STRS_U64_TAPE) { old_allocator = up->data.u64_tape.allocator; }
+            else if (up && up->layout == STRS_FRAGMENTED) { old_allocator = up->data.fragmented.allocator; }
+            else { sz_memory_allocator_init_default(&old_allocator); } // Final fallback
+        }
         break;
+    default: sz_memory_allocator_init_default(&old_allocator); break;
     }
 
     // Check if the allocators are the same - no need to reallocate
