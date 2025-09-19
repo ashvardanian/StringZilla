@@ -539,6 +539,9 @@ gpu_scope = szs.DeviceScope(gpu_device=0)   # pick GPU 0 if available
 strings_a = sz.Strs(["kitten", "flaw"])
 strings_b = sz.Strs(["sitting", "lawn"])
 
+strings_a = szs.to_device(strings_a) # optional ahead of time transfer
+strings_b = szs.to_device(strings_b) # optional ahead of time transfer
+
 engine = szs.LevenshteinDistances(
     match=0, mismatch=2,        # costs don't have to be 1
     open=3, extend=1,           # may be different in Bio

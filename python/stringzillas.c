@@ -1838,6 +1838,19 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static char const doc_to_device[] = //
+    "to_device(strs: sz.Strs) -> sz.Strs\n\n"
+    "Converts a Strs object to use unified/device-accessible memory allocator.\n"
+    "This function forces the allocator swap that would normally happen during\n"
+    "GPU kernel execution. Useful for testing slice handling after re-allocation.";
+
+static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
+    if (!try_swap_to_unified_allocator(strs_obj)) return NULL;
+
+    Py_INCREF(strs_obj);
+    return strs_obj;
+}
+
 static void stringzillas_cleanup(PyObject *m) {
     sz_unused_(m);
     if (default_device_scope) {
@@ -1848,6 +1861,7 @@ static void stringzillas_cleanup(PyObject *m) {
 
 static PyMethodDef stringzillas_methods[] = {
     {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
+    {"to_device", (PyCFunction)module_to_device, METH_O, doc_to_device},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzillas_module = {

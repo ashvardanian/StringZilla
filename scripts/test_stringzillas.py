@@ -186,6 +186,40 @@ def test_device_scope():
         szs.DeviceScope(gpu_device="invalid")
 
 
+def test_to_device():
+    """Test to_device function with various Strs layouts, especially slices."""
+
+    # Create a Strs object with multiple strings
+    original_strs = sz.Strs(["hello", "world", "test", "slice", "data"])
+
+    # Test full object conversion
+    result = szs.to_device(original_strs)
+    assert result is original_strs  # Returns same object
+    assert len(result) == 5
+    assert list(result) == ["hello", "world", "test", "slice", "data"]
+
+    # Test with slices (non-owning views)
+    slice_strs = original_strs[1:4]  # Creates a view
+    result_slice = szs.to_device(slice_strs)
+    assert result_slice is slice_strs  # Returns same object
+    assert len(result_slice) == 3
+    assert list(result_slice) == ["world", "test", "slice"]
+
+    # Test with single element slice
+    single_strs = original_strs[2:3]
+    result_single = szs.to_device(single_strs)
+    assert result_single is single_strs
+    assert len(result_single) == 1
+    assert list(result_single) == ["test"]
+
+    # Test with empty slice
+    empty_strs = original_strs[3:3]
+    result_empty = szs.to_device(empty_strs)
+    assert result_empty is empty_strs
+    assert len(result_empty) == 0
+    assert list(result_empty) == []
+
+
 def test_parameter_validation():
     """Test parameter validation and error handling for all engine types."""
 
