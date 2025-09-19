@@ -199,9 +199,9 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cpus # When emulating this will disable some tricky SIMD instructions
           SZ_TARGET: stringzillas-cpus
-          CIBW_ARCHS_LINUX: x86_64 aarch64
+          CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -310,10 +310,9 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cuda # When emulating this will disable some tricky SIMD instructions
           SZ_TARGET: stringzillas-cuda
-          # Limit to 64-bit architectures only
-          CIBW_ARCHS_LINUX: x86_64 aarch64
+          CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
