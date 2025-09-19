@@ -595,7 +595,8 @@ static sz_bool_t sz_py_replace_u64_tape_allocator(Strs *strs, sz_memory_allocato
 static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_allocator_t *allocator) {
     // Convert view to tape by copying the data
     struct u32_tape_view_t *view = &strs->data.u32_tape_view;
-    sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+    sz_u32_t const slice_start_offset = view->offsets[0];
+    sz_size_t const string_data_size = (sz_size_t)(view->offsets[view->count] - slice_start_offset);
     sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u32_t);
 
     // Allocate new string data with new allocator
@@ -603,10 +604,10 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
     if (string_data_size > 0) {
         new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
         if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, view->data, string_data_size);
+        memcpy(new_string_data, view->data + slice_start_offset, string_data_size);
     }
 
-    // Allocate new offsets array
+    // Allocate new offsets array and adjust to be relative to slice start
     sz_u32_t *new_offsets = NULL;
     if (offsets_size > 0) {
         new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
@@ -614,7 +615,7 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
             if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
             return sz_false_k;
         }
-        memcpy(new_offsets, view->offsets, offsets_size);
+        for (sz_size_t i = 0; i <= view->count; ++i) new_offsets[i] = view->offsets[i] - slice_start_offset;
     }
 
     // Release parent reference if any
@@ -632,7 +633,8 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
 static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_allocator_t *allocator) {
     // Convert view to tape by copying the data
     struct u64_tape_view_t *view = &strs->data.u64_tape_view;
-    sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+    sz_u64_t const slice_start_offset = view->offsets[0];
+    sz_size_t const string_data_size = (sz_size_t)(view->offsets[view->count] - slice_start_offset);
     sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u64_t);
 
     // Allocate new string data with new allocator
@@ -640,10 +642,10 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
     if (string_data_size > 0) {
         new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
         if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, view->data, string_data_size);
+        memcpy(new_string_data, view->data + slice_start_offset, string_data_size);
     }
 
-    // Allocate new offsets array
+    // Allocate new offsets array and adjust to be relative to slice start
     sz_u64_t *new_offsets = NULL;
     if (offsets_size > 0) {
         new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
@@ -651,7 +653,7 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
             if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
             return sz_false_k;
         }
-        memcpy(new_offsets, view->offsets, offsets_size);
+        for (sz_size_t i = 0; i <= view->count; ++i) new_offsets[i] = view->offsets[i] - slice_start_offset;
     }
 
     // Release parent reference if any
@@ -1727,7 +1729,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // STRS_U32_TAPE_VIEW input yields STRS_U32_TAPE_VIEW for step=1
         result->layout = STRS_U32_TAPE_VIEW;
         result->data.u32_tape_view.count = result_count;
-        result->data.u32_tape_view.data = self->data.u32_tape_view.data + self->data.u32_tape_view.offsets[start];
+        result->data.u32_tape_view.data = self->data.u32_tape_view.data;
         result->data.u32_tape_view.offsets = self->data.u32_tape_view.offsets + start;
         result->data.u32_tape_view.parent = self->data.u32_tape_view.parent;
         Py_INCREF(result->data.u32_tape_view.parent);
@@ -1738,7 +1740,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // STRS_U64_TAPE_VIEW input yields STRS_U64_TAPE_VIEW for step=1
         result->layout = STRS_U64_TAPE_VIEW;
         result->data.u64_tape_view.count = result_count;
-        result->data.u64_tape_view.data = self->data.u64_tape_view.data + self->data.u64_tape_view.offsets[start];
+        result->data.u64_tape_view.data = self->data.u64_tape_view.data;
         result->data.u64_tape_view.offsets = self->data.u64_tape_view.offsets + start;
         result->data.u64_tape_view.parent = self->data.u64_tape_view.parent;
         Py_INCREF(result->data.u64_tape_view.parent);
@@ -1749,7 +1751,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // STRS_U32_TAPE input yields STRS_U32_TAPE_VIEW for step=1
         result->layout = STRS_U32_TAPE_VIEW;
         result->data.u32_tape_view.count = result_count;
-        result->data.u32_tape_view.data = self->data.u32_tape.data + self->data.u32_tape.offsets[start];
+        result->data.u32_tape_view.data = self->data.u32_tape.data;
         result->data.u32_tape_view.offsets = self->data.u32_tape.offsets + start;
         result->data.u32_tape_view.parent = (PyObject *)self;
         Py_INCREF((PyObject *)self);
@@ -1760,7 +1762,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // STRS_U64_TAPE input yields STRS_U64_TAPE_VIEW for step=1
         result->layout = STRS_U64_TAPE_VIEW;
         result->data.u64_tape_view.count = result_count;
-        result->data.u64_tape_view.data = self->data.u64_tape.data + self->data.u64_tape.offsets[start];
+        result->data.u64_tape_view.data = self->data.u64_tape.data;
         result->data.u64_tape_view.offsets = self->data.u64_tape.offsets + start;
         result->data.u64_tape_view.parent = (PyObject *)self;
         Py_INCREF((PyObject *)self);
@@ -5969,16 +5971,24 @@ static char const doc_Strs[] = //
     "\\n"
     "Space-efficient container for large collections of strings and their slices.\\n"
     "Optimized for memory efficiency and bulk operations on string collections.\\n"
+    "Compatible with StringTape format and Apache Arrow string arrays.\\n"
     "\\n"
     "Args:\\n"
     "  sequence (list | tuple | generator | pyarrow.Array): Collection of strings to store.\\n"
     "  view (bool): If True, create a view into the original data instead of copying it.\\n"
     "\\n"
+    "Storage Layouts:\\n"
+    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\\n"
+    "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\\n"
+    "  - FRAGMENTED: Non-contiguous strings with individual pointers\\n"
+    "\\n"
     "Features:\\n"
     "  - Memory-efficient storage with shared backing buffers\\n"
     "  - Zero-copy slicing and indexing operations\\n"
+    "  - StringTape format compatibility for interoperability\\n"
     "  - Bulk operations: sort(), shuffle(), sample()\\n"
     "  - Arrow integration: from_arrow() for zero-copy imports\\n"
+    "  - GPU kernel compatibility with automatic memory management\\n"
     "  - Fast comparison operations with native containers\\n"
     "\\n"
     "Methods:\\n"
@@ -5987,8 +5997,14 @@ static char const doc_Strs[] = //
     "  - shuffle(): Randomize element order\\n"
     "  - sample(): Get random subset of elements\\n"
     "\\n"
+    "Slicing Behavior:\\n"
+    "  Slicing creates lightweight views that reference the original data.\\n"
+    "  Views are automatically converted to owned layouts when needed for\\n"
+    "  GPU operations, maintaining StringTape format compatibility.\\n"
+    "\\n"
     "Example:\\n"
     "  >>> strs = sz.Strs(['apple', 'banana', 'cherry'])\\n"
+    "  >>> subset = strs[1:3]  # Zero-copy slice view\\n"
     "  >>> strs.sort()\\n"
     "  >>> list(strs)  # ['apple', 'banana', 'cherry']";
 

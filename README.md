@@ -694,6 +694,7 @@ arr = pa.Array.from_buffers(
 ```
 
 That means you can convert `Str` to `pyarrow.Buffer` and `Strs` to `pyarrow.Array` without extra copies.
+For more details on the tape-like layouts, refer to the [StringTape](https://github.com/ashvardanian/StringTape) repository.
 
 ## Quick Start: C/C++ 🛠️
 

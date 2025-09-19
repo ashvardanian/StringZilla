@@ -617,6 +617,43 @@ def test_unit_strs_sequence_slicing():
     assert big_sequence[1:][::-2] == ["6", "4", "2"]
     assert big_sequence[1:][::-3] == ["6", "3"]
 
+    # Edge cases: slices of length 1 and 0
+    # Test single element slices (length 1)
+    assert big_sequence[0:1] == ["1"], "Single element slice [0:1] failed"
+    assert big_sequence[1:2] == ["2"], "Single element slice [1:2] failed"
+    assert big_sequence[-1:] == ["6"], "Single element slice [-1:] failed"
+    assert big_sequence[-2:-1] == ["5"], "Single element slice [-2:-1] failed"
+
+    # Test empty slices (length 0)
+    assert big_sequence[0:0] == [], "Empty slice [0:0] failed"
+    assert big_sequence[1:1] == [], "Empty slice [1:1] failed"
+    assert big_sequence[5:5] == [], "Empty slice [5:5] failed"
+    assert big_sequence[10:10] == [], "Empty slice [10:10] out of bounds failed"
+    assert big_sequence[1:0] == [], "Empty slice [1:0] (start > end) failed"
+    assert big_sequence[3:1] == [], "Empty slice [3:1] (start > end) failed"
+
+    # Test edge cases with pre-constructed Strs objects passed as slices
+    single_slice = big_sequence[0:1]  # Length 1 slice
+    empty_slice = big_sequence[0:0]   # Length 0 slice
+
+    # Verify the slices work correctly when passed around
+    assert len(single_slice) == 1, "Single slice length incorrect"
+    assert len(empty_slice) == 0, "Empty slice length incorrect"
+    assert str(single_slice[0]) == "1", "Single slice element access failed"
+
+    # Test iteration over edge case slices
+    single_items = [str(item) for item in single_slice]
+    assert single_items == ["1"], "Single slice iteration failed"
+
+    empty_items = [str(item) for item in empty_slice]
+    assert empty_items == [], "Empty slice iteration failed"
+
+    # Test repr and str don't crash on edge cases
+    assert isinstance(repr(single_slice), str), "Single slice repr failed"
+    assert isinstance(repr(empty_slice), str), "Empty slice repr failed"
+    assert isinstance(str(single_slice), str), "Single slice str failed"
+    assert isinstance(str(empty_slice), str), "Empty slice str failed"
+
 
 def test_unit_globals():
     """Validates that the previously unit-tested member methods are also visible as global functions."""
