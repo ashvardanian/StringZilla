@@ -189,6 +189,10 @@ def test_device_scope():
 def test_to_device():
     """Test to_device function with various Strs layouts, especially slices."""
 
+    # Skip test if CUDA is not available
+    if "cuda" not in szs.__capabilities__:
+        pytest.skip("CUDA not available, skipping to_device test")
+
     # Create a Strs object with multiple strings, including edge cases
     original_strs = sz.Strs(["hello", "world", "test", "slice", "data", "", "café"])
 
@@ -222,6 +226,10 @@ def test_to_device():
 
 def test_to_device_unicode_complex():
     """Test to_device with complex Unicode bytes including RTL, emoji, and normalization forms."""
+
+    # Skip test if CUDA is not available
+    if "cuda" not in szs.__capabilities__:
+        pytest.skip("CUDA not available, skipping to_device test")
 
     # Complex Unicode test cases as raw byte literals
     unicode_bytes = [
