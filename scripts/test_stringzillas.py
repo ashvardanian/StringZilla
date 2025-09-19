@@ -189,14 +189,14 @@ def test_device_scope():
 def test_to_device():
     """Test to_device function with various Strs layouts, especially slices."""
 
-    # Create a Strs object with multiple strings
-    original_strs = sz.Strs(["hello", "world", "test", "slice", "data"])
+    # Create a Strs object with multiple strings, including edge cases
+    original_strs = sz.Strs(["hello", "world", "test", "slice", "data", "", "café"])
 
     # Test full object conversion
     result = szs.to_device(original_strs)
     assert result is original_strs  # Returns same object
-    assert len(result) == 5
-    assert list(result) == ["hello", "world", "test", "slice", "data"]
+    assert len(result) == 7
+    assert list(result) == ["hello", "world", "test", "slice", "data", "", "café"]
 
     # Test with slices (non-owning views)
     slice_strs = original_strs[1:4]  # Creates a view
@@ -218,6 +218,67 @@ def test_to_device():
     assert result_empty is empty_strs
     assert len(result_empty) == 0
     assert list(result_empty) == []
+
+
+def test_to_device_unicode_complex():
+    """Test to_device with complex Unicode bytes including RTL, emoji, and normalization forms."""
+
+    # Complex Unicode test cases as raw byte literals
+    unicode_bytes = [
+        b"Hello, \xe4\xb8\x96\xe7\x95\x8c!",  # Mixed ASCII + CJK (世界)
+        b"\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7 \xd8\xa8\xd8\xa7\xd9\x84\xd8\xb9\xd8\xa7\xd9\x84\xd9\x85",  # Arabic RTL
+        b"\xf0\x9f\xa6\x96\xf0\x9f\x94\xa5\xf0\x9f\x9a\x80\xf0\x9f\x92\xbb",  # Emoji sequence 🦖🔥🚀💻
+        b"caf\xc3\xa9",  # NFC normalized café
+        b"cafe\xcc\x81",  # NFD normalized café (e + combining acute)
+        b"\xf0\x9d\x95\xb3\xf0\x9d\x96\x8a\xf0\x9d\x96\x91\xf0\x9d\x96\x91\xf0\x9d\x96\x94",  # Mathematical script 𝕳𝖊𝖑𝖑𝖔
+        b"\xe2\x80\x8d\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x92\xbb\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x94\xac",  # ZWJ sequences
+        b"\xe1\xbc\x88\xcf\x81\xcf\x87\xce\xb9\xce\xbc\xce\xae\xce\xb4\xce\xb7\xcf\x82",  # Ancient Greek Ἀρχιμήδης
+        b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8\xf0\x9f\x87\xab\xf0\x9f\x87\xb7\xf0\x9f\x87\xaf\xf0\x9f\x87\xb5",  # Flag sequences 🇺🇸🇫🇷🇯🇵
+        b"",  # Empty bytes
+        b"\xe0\xa4\xa8\xe0\xa4\xae\xe0\xa4\xb8\xe0\xa5\x8d\xe0\xa4\xa4\xe0\xa5\x87",  # Devanagari नमस्ते
+        b"\xf0\x9f\xa7\xac\xe2\x9a\x9b\xef\xb8\x8f\xf0\x9f\x94\xac",  # Science emoji 🧬⚛️🔬
+    ]
+
+    original_strs = sz.Strs(unicode_bytes)
+
+    # Test full Unicode collection
+    result = szs.to_device(original_strs)
+    assert result is original_strs
+    assert len(result) == len(unicode_bytes)
+    assert list(result) == unicode_bytes
+
+    # Test Unicode slice containing various scripts
+    slice_strs = original_strs[1:6]  # Arabic, emoji, café forms, mathematical script
+    expected_slice = unicode_bytes[1:6]
+
+    result_slice = szs.to_device(slice_strs)
+    assert result_slice is slice_strs
+    assert len(result_slice) == 5
+    assert list(result_slice) == expected_slice
+
+    # Verify byte-level integrity of complex Unicode
+    for original, converted in zip(expected_slice, result_slice):
+        assert bytes(converted) == original
+
+    # Test edge cases: first element, last element, middle elements
+    assert list(szs.to_device(original_strs[0:1])) == [unicode_bytes[0]]  # First element
+    assert list(szs.to_device(original_strs[-1:])) == [unicode_bytes[-1]]  # Last element
+    assert list(szs.to_device(original_strs[9:10])) == [unicode_bytes[9]]  # Empty bytes
+
+    # Test that NFC and NFD forms are preserved as different byte sequences
+    nfc_nfd_slice = original_strs[3:5]  # Both café forms
+    result_forms = szs.to_device(nfc_nfd_slice)
+    assert len(result_forms) == 2
+    assert bytes(result_forms[0]) == unicode_bytes[3]  # NFC form preserved
+    assert bytes(result_forms[1]) == unicode_bytes[4]  # NFD form preserved
+
+    # Test nested slice (slice of slice)
+    nested_slice = slice_strs[1:3]  # Take middle 2 elements from existing slice
+    result_nested = szs.to_device(nested_slice)
+    assert len(result_nested) == 2
+    # slice_strs is [1:6], so slice_strs[1:3] is elements [2:4] from original
+    assert bytes(result_nested[0]) == unicode_bytes[2]  # Emoji sequence
+    assert bytes(result_nested[1]) == unicode_bytes[3]  # NFC café
 
 
 def test_parameter_validation():
