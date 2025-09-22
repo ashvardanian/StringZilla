@@ -1020,7 +1020,7 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 #pragma region Helper Types
 
 #if !SZ_AVOID_STL
-void raise(status_t status) noexcept(false) {
+inline void raise(status_t status) noexcept(false) {
     switch (status) {
     case status_t::bad_alloc_k: throw std::bad_alloc();
     case status_t::invalid_utf8_k: throw std::invalid_argument("Invalid UTF-8 string");
