@@ -1133,25 +1133,37 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         sz_hash_state_init_haswell(&state, seed);
 
         // Shuffle with the same mask
-        __m256i const order = _mm256_load_si256((__m256i const *)sz_hash_u8x16x4_shuffle_());
+        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            state.ins.ymms[0] = _mm256_lddqu_si256((__m256i const *)(start + state.ins_length + 0));
-            state.ins.ymms[1] = _mm256_lddqu_si256((__m256i const *)(start + state.ins_length + 32));
-            state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-            state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-            state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-            state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+            state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 0));
+            state.ins.xmms[1] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 16));
+            state.ins.xmms[2] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 32));
+            state.ins.xmms[3] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 48));
+            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         }
         // Handle the tail, resetting the registers to zero first
         if (state.ins_length < length) {
-            state.ins.ymms[0] = _mm256_setzero_si256();
-            state.ins.ymms[1] = _mm256_setzero_si256();
+            state.ins.xmms[0] = _mm_setzero_si128();
+            state.ins.xmms[1] = _mm_setzero_si128();
+            state.ins.xmms[2] = _mm_setzero_si128();
+            state.ins.xmms[3] = _mm_setzero_si128();
             for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
                 state.ins.u8s[i] = start[state.ins_length];
-            state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-            state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-            state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-            state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
             state.ins_length = length;
         }
         return sz_hash_state_finalize_haswell_(&state);
@@ -1183,39 +1195,57 @@ SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state_ptr, sz_cptr_
 
     // Lets keep a local copy of the state for one or more updates.
     sz_align_(64) sz_hash_state_t state;
-    state.aes.ymms[0] = _mm256_lddqu_si256(&state_ptr->aes.ymms[0]);
-    state.aes.ymms[1] = _mm256_lddqu_si256(&state_ptr->aes.ymms[1]);
-    state.sum.ymms[0] = _mm256_lddqu_si256(&state_ptr->sum.ymms[0]);
-    state.sum.ymms[1] = _mm256_lddqu_si256(&state_ptr->sum.ymms[1]);
-    state.ins.ymms[0] = _mm256_lddqu_si256(&state_ptr->ins.ymms[0]);
-    state.ins.ymms[1] = _mm256_lddqu_si256(&state_ptr->ins.ymms[1]);
+    state.aes.xmms[0] = _mm_lddqu_si128(&state_ptr->aes.xmms[0]);
+    state.aes.xmms[1] = _mm_lddqu_si128(&state_ptr->aes.xmms[1]);
+    state.aes.xmms[2] = _mm_lddqu_si128(&state_ptr->aes.xmms[2]);
+    state.aes.xmms[3] = _mm_lddqu_si128(&state_ptr->aes.xmms[3]);
+    state.sum.xmms[0] = _mm_lddqu_si128(&state_ptr->sum.xmms[0]);
+    state.sum.xmms[1] = _mm_lddqu_si128(&state_ptr->sum.xmms[1]);
+    state.sum.xmms[2] = _mm_lddqu_si128(&state_ptr->sum.xmms[2]);
+    state.sum.xmms[3] = _mm_lddqu_si128(&state_ptr->sum.xmms[3]);
+    state.ins.xmms[0] = _mm_lddqu_si128(&state_ptr->ins.xmms[0]);
+    state.ins.xmms[1] = _mm_lddqu_si128(&state_ptr->ins.xmms[1]);
+    state.ins.xmms[2] = _mm_lddqu_si128(&state_ptr->ins.xmms[2]);
+    state.ins.xmms[3] = _mm_lddqu_si128(&state_ptr->ins.xmms[3]);
     state.ins_length = state_ptr->ins_length;
 
     // Handle the head first, filling up the current block
-    __m256i const order = _mm256_load_si256((__m256i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     if (head_length) {
         sz_ptr_t local_ptr = (sz_ptr_t)&state.ins.u8s[progress_in_block];
         sz_ptr_t const local_end = (sz_ptr_t)&state.ins.u8s[64];
         for (; local_ptr < local_end; ++local_ptr, ++text) *local_ptr = *text;
-        state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-        state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-        state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-        state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         state.ins_length += head_length;
         length -= head_length;
     }
 
     // Now handle the body
     for (; length >= 64; state.ins_length += 64, text += 64, length -= 64) {
-        state.ins.ymms[0] = _mm256_loadu_epi8(text);
-        state.ins.ymms[1] = _mm256_loadu_epi8(text + 32);
-        state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-        state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-        state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-        state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+        state.ins.xmms[0] = _mm_loadu_si128((__m128i const *)(text + 0));
+        state.ins.xmms[1] = _mm_loadu_si128((__m128i const *)(text + 16));
+        state.ins.xmms[2] = _mm_loadu_si128((__m128i const *)(text + 32));
+        state.ins.xmms[3] = _mm_loadu_si128((__m128i const *)(text + 48));
+        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
     }
-    state.ins.ymms[0] = _mm256_setzero_si256();
-    state.ins.ymms[1] = _mm256_setzero_si256();
+    state.ins.xmms[0] = _mm_setzero_si128();
+    state.ins.xmms[1] = _mm_setzero_si128();
+    state.ins.xmms[2] = _mm_setzero_si128();
+    state.ins.xmms[3] = _mm_setzero_si128();
 
     // The tail is the last part we need to handle
     if (tail_length) {
@@ -1226,12 +1256,18 @@ SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state_ptr, sz_cptr_
     }
 
     // Save the state back to the memory
-    _mm256_storeu_si256(&state_ptr->aes.ymms[0], state.aes.ymms[0]);
-    _mm256_storeu_si256(&state_ptr->aes.ymms[1], state.aes.ymms[1]);
-    _mm256_storeu_si256(&state_ptr->sum.ymms[0], state.sum.ymms[0]);
-    _mm256_storeu_si256(&state_ptr->sum.ymms[1], state.sum.ymms[1]);
-    _mm256_storeu_si256(&state_ptr->ins.ymms[0], state.ins.ymms[0]);
-    _mm256_storeu_si256(&state_ptr->ins.ymms[1], state.ins.ymms[1]);
+    _mm_storeu_si128(&state_ptr->aes.xmms[0], state.aes.xmms[0]);
+    _mm_storeu_si128(&state_ptr->aes.xmms[1], state.aes.xmms[1]);
+    _mm_storeu_si128(&state_ptr->aes.xmms[2], state.aes.xmms[2]);
+    _mm_storeu_si128(&state_ptr->aes.xmms[3], state.aes.xmms[3]);
+    _mm_storeu_si128(&state_ptr->sum.xmms[0], state.sum.xmms[0]);
+    _mm_storeu_si128(&state_ptr->sum.xmms[1], state.sum.xmms[1]);
+    _mm_storeu_si128(&state_ptr->sum.xmms[2], state.sum.xmms[2]);
+    _mm_storeu_si128(&state_ptr->sum.xmms[3], state.sum.xmms[3]);
+    _mm_storeu_si128(&state_ptr->ins.xmms[0], state.ins.xmms[0]);
+    _mm_storeu_si128(&state_ptr->ins.xmms[1], state.ins.xmms[1]);
+    _mm_storeu_si128(&state_ptr->ins.xmms[2], state.ins.xmms[2]);
+    _mm_storeu_si128(&state_ptr->ins.xmms[3], state.ins.xmms[3]);
     state_ptr->ins_length = state.ins_length;
 }
 
@@ -1582,21 +1618,29 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
         sz_hash_state_init_skylake(&state, seed);
 
         // Shuffle with the same mask
-        __m256i const order = _mm256_load_si256((__m256i const *)sz_hash_u8x16x4_shuffle_());
+        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.zmm = _mm512_loadu_epi8(start + state.ins_length);
-            state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-            state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-            state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-            state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         }
         if (state.ins_length < length) {
             state.ins.zmm = _mm512_maskz_loadu_epi8( //
                 sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
-            state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-            state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-            state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-            state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
             state.ins_length = length;
         }
         return sz_hash_state_finalize_haswell_(&state);
@@ -1634,14 +1678,18 @@ SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_
     state.ins_length = state_ptr->ins_length;
 
     // Handle the head first, to align to the next block boundary
-    __m256i const order = _mm256_load_si256((__m256i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     if (head_length) {
         __mmask64 progress_mask = _knot_mask64(sz_u64_mask_until_(progress_in_block));
         state.ins.zmm = _mm512_mask_loadu_epi8(state.ins.zmm, progress_mask, text - progress_in_block);
-        state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-        state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-        state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-        state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         state.ins_length += head_length;
         text += head_length;
         length -= head_length;
@@ -1650,10 +1698,14 @@ SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_
     // Now handle the body
     for (; length >= 64; state.ins_length += 64, text += 64, length -= 64) {
         state.ins.zmm = _mm512_loadu_epi8(text);
-        state.aes.ymms[0] = _mm256_aesenc_epi128(state.aes.ymms[0], state.ins.ymms[0]);
-        state.aes.ymms[1] = _mm256_aesenc_epi128(state.aes.ymms[1], state.ins.ymms[1]);
-        state.sum.ymms[0] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[0], order), state.ins.ymms[0]);
-        state.sum.ymms[1] = _mm256_add_epi64(_mm256_shuffle_epi8(state.sum.ymms[1], order), state.ins.ymms[1]);
+        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
+        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
+        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
+        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
+        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
+        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
+        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
+        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
     }
 
     // The tail is the last part we need to handle
