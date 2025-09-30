@@ -173,14 +173,14 @@
 #endif // SZ_DYNAMIC_DISPATCH
 
 /**
- *  @brief  Alignment macro for 64-byte alignment.
+ *  @brief  Alignment macro for N-byte alignment.
  */
 #if defined(_MSC_VER)
-#define SZ_ALIGN64 __declspec(align(64))
+#define sz_align_(n) __declspec(align(n))
 #elif defined(__GNUC__) || defined(__clang__)
-#define SZ_ALIGN64 __attribute__((aligned(64)))
+#define sz_align_(n) __attribute__((aligned(n)))
 #else
-#define SZ_ALIGN64
+#define sz_align_(n)
 #endif
 
 /**

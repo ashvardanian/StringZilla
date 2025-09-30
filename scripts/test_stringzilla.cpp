@@ -278,7 +278,7 @@ void test_hash_equivalence(                                               //
 
         // Let's also create an intentionally misaligned version of the state,
         // assuming some of the SIMD instructions may require alignment.
-        SZ_ALIGN64 char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
+        sz_align_(64) char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
         sz_hash_state_t &state_misaligned = *reinterpret_cast<sz_hash_state_t *>(state_misaligned_buffer + 1);
         init_simd(&state_misaligned, seed);
         assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
