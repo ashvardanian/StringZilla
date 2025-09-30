@@ -1848,15 +1848,23 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         _mm512_store_pd(xs_arr, xs);
         _mm512_store_pd(modulos_arr, modulos);
         _mm512_store_pd(results_arr, results);
-        
-        sz_assert_(modulos_arr[0] == 0 || absolute_umod(xs_arr[0], modulos_arr[0]) == static_cast<u64_t>(results_arr[0]));
-        sz_assert_(modulos_arr[1] == 0 || absolute_umod(xs_arr[1], modulos_arr[1]) == static_cast<u64_t>(results_arr[1]));
-        sz_assert_(modulos_arr[2] == 0 || absolute_umod(xs_arr[2], modulos_arr[2]) == static_cast<u64_t>(results_arr[2]));
-        sz_assert_(modulos_arr[3] == 0 || absolute_umod(xs_arr[3], modulos_arr[3]) == static_cast<u64_t>(results_arr[3]));
-        sz_assert_(modulos_arr[4] == 0 || absolute_umod(xs_arr[4], modulos_arr[4]) == static_cast<u64_t>(results_arr[4]));
-        sz_assert_(modulos_arr[5] == 0 || absolute_umod(xs_arr[5], modulos_arr[5]) == static_cast<u64_t>(results_arr[5]));
-        sz_assert_(modulos_arr[6] == 0 || absolute_umod(xs_arr[6], modulos_arr[6]) == static_cast<u64_t>(results_arr[6]));
-        sz_assert_(modulos_arr[7] == 0 || absolute_umod(xs_arr[7], modulos_arr[7]) == static_cast<u64_t>(results_arr[7]));
+
+        sz_assert_(modulos_arr[0] == 0 ||
+                   absolute_umod(xs_arr[0], modulos_arr[0]) == static_cast<u64_t>(results_arr[0]));
+        sz_assert_(modulos_arr[1] == 0 ||
+                   absolute_umod(xs_arr[1], modulos_arr[1]) == static_cast<u64_t>(results_arr[1]));
+        sz_assert_(modulos_arr[2] == 0 ||
+                   absolute_umod(xs_arr[2], modulos_arr[2]) == static_cast<u64_t>(results_arr[2]));
+        sz_assert_(modulos_arr[3] == 0 ||
+                   absolute_umod(xs_arr[3], modulos_arr[3]) == static_cast<u64_t>(results_arr[3]));
+        sz_assert_(modulos_arr[4] == 0 ||
+                   absolute_umod(xs_arr[4], modulos_arr[4]) == static_cast<u64_t>(results_arr[4]));
+        sz_assert_(modulos_arr[5] == 0 ||
+                   absolute_umod(xs_arr[5], modulos_arr[5]) == static_cast<u64_t>(results_arr[5]));
+        sz_assert_(modulos_arr[6] == 0 ||
+                   absolute_umod(xs_arr[6], modulos_arr[6]) == static_cast<u64_t>(results_arr[6]));
+        sz_assert_(modulos_arr[7] == 0 ||
+                   absolute_umod(xs_arr[7], modulos_arr[7]) == static_cast<u64_t>(results_arr[7]));
 #endif
 
         return results;
@@ -1892,7 +1900,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         else {
             last_states_vec.zmm_pd = _mm512_loadu_pd(&last_states[first_dim]);
             rolling_minimums_vec.zmm_pd = _mm512_loadu_pd(&rolling_minimums[first_dim]);
-            rolling_counts_vec.ymm = _mm256_loadu_si256(reinterpret_cast<__m256i const *>(&rolling_counts[first_dim]));
+            rolling_counts_vec.ymm = _mm256_lddqu_si256(reinterpret_cast<__m256i const *>(&rolling_counts[first_dim]));
         }
 
         // Temporary variables for the rolling state

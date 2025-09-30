@@ -1359,7 +1359,7 @@ static PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_
 
     sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
     if (alphabet_obj) {
-        SZ_ALIGN64 char look_up_table[256];
+        sz_align_(64) char look_up_table[256];
         for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
         sz_lookup((sz_ptr_t)buf.start, buf.length, (sz_cptr_t)buf.start, look_up_table);
     }
@@ -1443,7 +1443,7 @@ static PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t
         return NULL;
     }
 
-    SZ_ALIGN64 char look_up_table[256];
+    sz_align_(64) char look_up_table[256];
     for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
     sz_ptr_t buf_ptr = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
     sz_lookup(buf_ptr, length, buf_ptr, look_up_table);
@@ -2958,7 +2958,7 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
     }
 
     sz_string_view_t look_up_table_str;
-    SZ_ALIGN64 char look_up_table[256];
+    sz_align_(64) char look_up_table[256];
     if (PyDict_Check(look_up_table_obj)) {
 
         // If any character is not defined, it will be replaced with itself:

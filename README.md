@@ -1953,8 +1953,56 @@ Several optimizations are known:
 The last approach is quite powerful and performant, and is used by the great [RapidFuzz][rapidfuzz] library.
 It's less known, than the others, derived from the Baeza-Yates-Gonnet algorithm, extended to bounded edit-distance search by Manber and Wu in 1990s, and further extended by Gene Myers in 1999 and Heikki Hyyro between 2002 and 2004.
 
-StringZilla introduces a different approach, extensively used in Unum's internal combinatorial optimization libraries.
-The approach doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
+StringZilla focuses on a different approach, extensively used in Unum's internal combinatorial optimization libraries.
+It doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
+StringZilla __evaluates diagonals instead of rows__, exploiting the fact that all cells within a diagonal are independent, and can be computed in parallel.
+We'll store 3 diagonals instead of the 2 rows, and each consecutive diagonal will be computed from the previous two.
+Substitution costs will come from the sooner diagonal, while insertion and deletion costs will come from the later diagonal.
+
+<table>
+<tr>
+<td>
+<strong>Row-by-Row Algorithm</strong><br>
+Computing row 4:
+
+<pre>
+    ∅  A  B  C  D  E
+ ∅  0  1  2  3  4  5
+ P  1  ░  ░  ░  ░  ░
+ Q  2  ■  ■  ■  ■  ■
+ R  3  ■  ■  □  →  .
+ S  4  .  .  .  .  .
+ T  5  .  .  .  .  .
+</pre>
+</td>
+<td>
+<strong>Anti-Diagonal Algorithm</strong><br>
+Computing diagonal 5:
+
+<pre>
+    ∅  A  B  C  D  E
+ ∅  0  1  2  3  4  5
+ P  1  ░  ░  ■  ■  □
+ Q  2  ░  ■  ■  □  ↘
+ R  3  ■  ■  □  ↘  .
+ S  4  ■  □  ↘  .  .
+ T  5  □  ↘  .  .  .
+</pre>
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<strong>Legend:</strong><br>
+<code>0,1,2,3...</code> = initialization constants &nbsp;&nbsp;
+<code>░</code> = cells processed and forgotten &nbsp;&nbsp;
+<code>■</code> = stored cells &nbsp;&nbsp;
+<code>□</code> = computing in parallel &nbsp;&nbsp;
+<code>→ ↘</code> = movement direction &nbsp;&nbsp;
+<code>.</code> = cells to compute later
+</td>
+</tr>
+</table>
+
 This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
 Moreover, it's easy to generalize to weighted edit-distances, where the cost of a substitution between two characters may not be the same for all pairs, often used in bioinformatics.
 
