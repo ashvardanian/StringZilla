@@ -85,10 +85,58 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  */
 SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
+/**
+ *  @brief  Compares two strings alphabetically. Case-insensitive, punctuation-insensitive, number-aware.
+ *
+ *  This function implements natural sort order (similar to ICU's `kn-true` numeric collation with `ka-shifted`
+ *  alternate handling), normalizing characters on-the-fly. The comparison is performed in multiple levels:
+ *
+ *  Level 1 (Primary): Base alphanumeric comparison, case-insensitive, punctuation-ignored, numeric-aware.
+ *  - Numbers are compared by numeric value: "file2" < "file10"
+ *  - Leading zeros are preserved and significant: "file01" < "file1" < "file02"
+ *  - Letters are case-insensitive: "abc" ≈ "ABC" at primary level
+ *  - Punctuation and whitespace are ignored: "no-punct" ≈ "no punct" ≈ "nopunct" at primary level
+ *
+ *  Level 2 (Secondary): Case distinctions for letters (when primary comparison yields equality).
+ *  - Uppercase before lowercase: "ABC" < "abc" (or configurable)
+ *
+ *  Level 3 (Tertiary): Punctuation presence (when primary and secondary yield equality).
+ *  - Strings without punctuation come before strings with punctuation: "nopunct" < "no-punct"
+ *
+ *  Example orderings:
+ *  @code
+ *      // Numeric ordering with leading zeros preserved:
+ *      "file0" < "file00" < "file1" < "file01" < "file2" < "file10" < "file100"
+ *
+ *      // Case-insensitive primary, case-sensitive secondary:
+ *      "abc" < "ABC" < "aBc" < "Abc"
+ *
+ *      // Punctuation-insensitive primary, punctuation-sensitive tertiary:
+ *      "nopunct" < "no punct" < "no-punct" < "no_punct"
+ *  @endcode
+ *
+ *  @param[in] a First string to compare.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Second string to compare.
+ *  @param[in] b_length Number of bytes in the second string.
+ *
+ *  @retval `sz_less_k` if @p a is alphabetically smaller than @p b.
+ *  @retval `sz_greater_k` if @p a is alphabetically greater than @p b.
+ *  @retval `sz_equal_k` if strings @p a and @p b are identical.
+ *
+ *  @note   This is an ASCII-only implementation. For full Unicode support, use `sz_alphabetical_utf8`.
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_alphabetical_ascii_serial, sz_order, sz_lookup_init_lower
+ */
+SZ_DYNAMIC sz_ordering_t sz_alphabetical_ascii(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_alphabetical_ascii */
+SZ_PUBLIC sz_ordering_t sz_alphabetical_ascii_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_equal */
