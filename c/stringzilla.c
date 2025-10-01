@@ -63,6 +63,7 @@ typedef struct sz_implementations_t {
 
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
+    sz_sequence_hashes_t sequence_hashes;
     sz_pgrams_sort_t pgrams_sort;
 
 } sz_implementations_t;
@@ -100,6 +101,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
+    impl->sequence_hashes = sz_sequence_hashes_serial;
     impl->pgrams_sort = sz_pgrams_sort_serial;
 
 #if SZ_USE_HASWELL
@@ -169,6 +171,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->fill_random = sz_fill_random_ice;
 
         impl->sequence_intersect = sz_sequence_intersect_ice;
+        impl->sequence_hashes = sz_sequence_hashes_ice;
     }
 #endif
 
@@ -220,6 +223,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->sequence_argsort = sz_sequence_argsort_sve;
         impl->sequence_intersect = sz_sequence_intersect_sve;
+        impl->sequence_hashes = sz_sequence_hashes_sve;
         impl->pgrams_sort = sz_pgrams_sort_sve;
     }
 #endif
@@ -383,6 +387,11 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
                                              sz_size_t *first_positions, sz_size_t *second_positions) {
     return sz_dispatch_table.sequence_intersect(first_array, second_array, alloc, seed, intersection_size,
                                                 first_positions, second_positions);
+}
+
+SZ_DYNAMIC void sz_sequence_hashes(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                  sz_u64_t *hashes) {
+    sz_dispatch_table.sequence_hashes(starts, lengths, count, seed, hashes);
 }
 
 // Provide overrides for the libc mem* functions
