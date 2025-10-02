@@ -102,6 +102,24 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->sequence_intersect = sz_sequence_intersect_serial;
     impl->pgrams_sort = sz_pgrams_sort_serial;
 
+#if SZ_USE_WESTMERE
+    if (caps & sz_cap_westmere_k) {
+        impl->equal = sz_equal_westmere;
+        impl->order = sz_order_westmere;
+
+        impl->hash = sz_hash_westmere;
+        impl->hash_state_init = sz_hash_state_init_westmere;
+        impl->hash_state_update = sz_hash_state_update_westmere;
+        impl->hash_state_digest = sz_hash_state_digest_westmere;
+        impl->fill_random = sz_fill_random_westmere;
+
+        impl->find_byte = sz_find_byte_westmere;
+        impl->rfind_byte = sz_rfind_byte_westmere;
+        impl->find = sz_find_westmere;
+        impl->rfind = sz_rfind_westmere;
+    }
+#endif
+
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->equal = sz_equal_haswell;
@@ -113,11 +131,6 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->lookup = sz_lookup_haswell;
 
         impl->bytesum = sz_bytesum_haswell;
-        impl->hash = sz_hash_haswell;
-        impl->hash_state_init = sz_hash_state_init_haswell;
-        impl->hash_state_update = sz_hash_state_update_haswell;
-        impl->hash_state_digest = sz_hash_state_digest_haswell;
-        impl->fill_random = sz_fill_random_haswell;
 
         impl->find_byte = sz_find_byte_haswell;
         impl->rfind_byte = sz_rfind_byte_haswell;

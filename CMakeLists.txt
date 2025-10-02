@@ -19,6 +19,7 @@
 # Tests for different SIMD architectures:
 #
 # * stringzilla_test_cpp20_serial: A test executable for serial execution.
+# * stringzilla_test_cpp20_westmere: A test executable for SSE4.2.
 # * stringzilla_test_cpp20_haswell: A test executable for AVX2.
 # * stringzilla_test_cpp20_ice: A test executable for AVX-512.
 # * stringzilla_test_cpp20_neon: A test executable for ARM Neon.
@@ -440,19 +441,23 @@ if (STRINGZILLA_BUILD_TEST)
         # x86 specific backends
         if (MSVC)
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
+            define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "SSE4.2")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "AVX512")
             if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "AVX")
+                define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "SSE4.2")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "AVX2")
                 define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "AVX512")
             endif ()
         else ()
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
+            define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "westmere")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "sapphirerapids")
             if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "ivybridge")
+                define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "westmere")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "haswell")
                 define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "sapphirerapids")
             endif ()
@@ -504,15 +509,15 @@ if (STRINGZILLA_BUILD_SHARED)
             endif ()
 
             target_compile_definitions(
-                ${target} PRIVATE "SZ_USE_HASWELL=1" "SZ_USE_SKYLAKE=1" "SZ_USE_ICE=1" "SZ_USE_NEON=0" "SZ_USE_SVE=0"
-                                  "SZ_USE_SVE2=0"
+                ${target} PRIVATE "SZ_USE_WESTMERE=1" "SZ_USE_HASWELL=1" "SZ_USE_SKYLAKE=1" "SZ_USE_ICE=1"
+                                  "SZ_USE_NEON=0" "SZ_USE_SVE=0" "SZ_USE_SVE2=0"
             )
         elseif (SZ_PLATFORM_ARM)
             set_compiler_flags(${target} "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
 
             target_compile_definitions(
-                ${target} PRIVATE "SZ_USE_HASWELL=0" "SZ_USE_SKYLAKE=0" "SZ_USE_ICE=0" "SZ_USE_NEON=1" "SZ_USE_SVE=1"
-                                  "SZ_USE_SVE2=1"
+                ${target} PRIVATE "SZ_USE_WESTMERE=0" "SZ_USE_HASWELL=0" "SZ_USE_SKYLAKE=0" "SZ_USE_ICE=0" "SZ_USE_NEON=1"
+                                  "SZ_USE_SVE=1" "SZ_USE_SVE2=1"
             )
         endif ()
 

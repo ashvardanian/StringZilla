@@ -217,6 +217,16 @@
 /*  Compile-time hardware features detection.
  *  All of those can be controlled by the user.
  */
+#if !defined(SZ_USE_WESTMERE)
+#if SZ_IS_64BIT_X86_ && defined(__SSE4_2__) && defined(__AES__)
+#define SZ_USE_WESTMERE (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX__)
+#define SZ_USE_WESTMERE (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
+#else
+#define SZ_USE_WESTMERE (0)
+#endif
+#endif
+
 #if !defined(SZ_USE_HASWELL)
 #if SZ_IS_64BIT_X86_ && defined(__AVX2__)
 #define SZ_USE_HASWELL (1)
@@ -234,21 +244,27 @@
 #endif
 
 #if !defined(SZ_USE_ICE)
-#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__)
+#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__) && defined(__VAES__)
 #define SZ_USE_ICE (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX512BW__)
+#define SZ_USE_ICE (1) // ! MSVC doesn't expose `__VAES__` macros
 #else
 #define SZ_USE_ICE (0)
 #endif
 #endif
 
+/*  NEON support is optional in Armv7/AArch32, but mandatory from 8.0 onwards. */
 #if !defined(SZ_USE_NEON)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON)
 #define SZ_USE_NEON (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__ARM_ARCH) && __ARM_ARCH >= 800
+#define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros
 #else
 #define SZ_USE_NEON (0)
 #endif
 #endif
 
+/*  SVE is optional since Armv8.2-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE)
 #define SZ_USE_SVE (1)
@@ -257,6 +273,7 @@
 #endif
 #endif
 
+/*  SVE2 is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2)
 #define SZ_USE_SVE2 (1)
@@ -265,6 +282,7 @@
 #endif
 #endif
 
+/*  AES is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_AES)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_AES)
 #define SZ_USE_NEON_AES (1)
@@ -273,6 +291,7 @@
 #endif
 #endif
 
+/*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2_AES)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2_AES)
 #define SZ_USE_SVE2_AES (1)
@@ -315,9 +334,9 @@
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #include <immintrin.h>
-#endif // SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#endif // SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #if SZ_USE_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
@@ -526,9 +545,10 @@ typedef enum sz_capability_t {
     sz_cap_parallel_k = 1 << 2, ///< Multi-threading via Fork Union or other OpenMP-like engines
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
 
-    sz_cap_haswell_k = 1 << 5, ///< x86 AVX2 capability with FMA and F16C extensions
-    sz_cap_skylake_k = 1 << 6, ///< x86 AVX512 baseline capability
-    sz_cap_ice_k = 1 << 7,     ///< x86 AVX512 capability with advanced integer algos and AES extensions
+    sz_cap_haswell_k = 1 << 5,  ///< x86 AVX2 capability with FMA and F16C extensions
+    sz_cap_skylake_k = 1 << 6,  ///< x86 AVX512 baseline capability
+    sz_cap_ice_k = 1 << 7,      ///< x86 AVX512 capability with advanced integer algos and AES extensions
+    sz_cap_westmere_k = 1 << 8, ///< x86 SSE4.2 + AES-NI capability
 
     sz_cap_neon_k = 1 << 10,     ///< ARM NEON baseline capability
     sz_cap_neon_aes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
@@ -550,7 +570,8 @@ typedef enum sz_capability_t {
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
-                     sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
+                     sz_cap_westmere_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k |
+                     sz_cap_sve2_aes_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -815,7 +836,7 @@ typedef union sz_u64_vec_t {
  *          as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
-#if SZ_USE_HASWELL
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
@@ -848,6 +869,8 @@ typedef union sz_u256_vec_t {
     __m256i ymm;
     __m256d ymm_pd;
     __m256 ymm_ps;
+#endif
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
@@ -881,6 +904,8 @@ typedef union sz_u512_vec_t {
 #endif
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m256i ymms[2];
+#endif
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m128i xmms[4];
 #endif
 #if SZ_USE_NEON

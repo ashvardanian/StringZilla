@@ -142,8 +142,8 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
         bench_unary(env, "map<sz_order_haswell>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<
-            std::string_view, unsigned, hash_from_sz<sz_hash_haswell>, equal_to_from_sz<sz_equal_haswell>>>(env);
-        bench_unary(env, "unordered_map<sz_hash_haswell, sz_equal_haswell>::find", callable_no_op_t(), callable_umap,
+            std::string_view, unsigned, hash_from_sz<sz_hash_westmere>, equal_to_from_sz<sz_equal_haswell>>>(env);
+        bench_unary(env, "unordered_map<sz_hash_westmere, sz_equal_haswell>::find", callable_no_op_t(), callable_umap,
                     callable_umap.preprocessor())
             .log(base_umap);
     }

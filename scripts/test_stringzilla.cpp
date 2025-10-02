@@ -24,6 +24,7 @@
  *  ! but they come handy during development, if you want to validate
  *  ! different ISA-specific implementations.
 
+ #define SZ_USE_WESTMERE 0
  #define SZ_USE_HASWELL 0
  #define SZ_USE_SKYLAKE 0
  #define SZ_USE_ICE 0
@@ -351,13 +352,13 @@ void test_equivalence() {
     assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
     assert(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
 
-#if SZ_USE_HASWELL
+#if SZ_USE_WESTMERE
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_haswell, sz_hash_state_init_haswell,              //
-        sz_hash_state_update_haswell, sz_hash_state_digest_haswell);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_haswell);
+        sz_hash_westmere, sz_hash_state_init_westmere,            //
+        sz_hash_state_update_westmere, sz_hash_state_digest_westmere);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_westmere);
 #endif
 #if SZ_USE_SKYLAKE
     test_hash_equivalence(                                        //
@@ -2004,6 +2005,7 @@ int main(int argc, char const **argv) {
     // Let's greet the user nicely
     sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
+    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");

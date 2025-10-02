@@ -455,6 +455,7 @@ inline environment_t build_environment(                                        /
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
 
     std::printf("Compile-time capabilities:\n");
+    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");

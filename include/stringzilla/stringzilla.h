@@ -51,6 +51,7 @@
  *
  *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
  *
+ *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 & AES-NI instructions on x86_64.
  *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
  *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
@@ -114,6 +115,7 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
         {sz_cap_serial_k, "serial"},
         {sz_cap_parallel_k, "parallel"},
         //
+        {sz_cap_westmere_k, "westmere"},
         {sz_cap_haswell_k, "haswell"},
         {sz_cap_skylake_k, "skylake"},
         {sz_cap_ice_k, "ice"},
@@ -156,6 +158,7 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
     if (sz_equal_null_terminated_serial(name, "serial") == sz_true_k) return sz_cap_serial_k;
     if (sz_equal_null_terminated_serial(name, "parallel") == sz_true_k) return sz_cap_parallel_k;
     // x86
+    if (sz_equal_null_terminated_serial(name, "westmere") == sz_true_k) return sz_cap_westmere_k;
     if (sz_equal_null_terminated_serial(name, "haswell") == sz_true_k) return sz_cap_haswell_k;
     if (sz_equal_null_terminated_serial(name, "skylake") == sz_true_k) return sz_cap_skylake_k;
     if (sz_equal_null_terminated_serial(name, "ice") == sz_true_k) return sz_cap_ice_k;
@@ -315,7 +318,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
 SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
@@ -367,10 +370,15 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
     unsigned supports_avx512vbmi2 = os_avx512_enabled && ((info7.named.ecx & 0x00000040u) != 0);
     unsigned supports_vaes = os_avx512_enabled && ((info7.named.ecx & 0x00000200u) != 0);
 
-    return (sz_capability_t)(                                                                                //
-        (sz_cap_haswell_k * supports_avx2) |                                                                 //
-        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw && supports_vaes)) | //
-        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2)) |                                     //
+    // Check for SSE4.2 and AES-NI (Function ID 1), masked by OS state
+    unsigned supports_sse42 = ((info1.named.ecx & 0x00100000u) != 0);
+    unsigned supports_aesni = ((info1.named.ecx & 0x02000000) != 0);
+
+    return (sz_capability_t)(                                                               //
+        (sz_cap_westmere_k * (supports_sse42 && supports_aesni)) |                          //
+        (sz_cap_haswell_k * supports_avx2) |                                                //
+        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) | //
+        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) |   //
         (sz_cap_serial_k));
 #else
     return sz_cap_serial_k;
