@@ -24,6 +24,7 @@
  *  ! but they come handy during development, if you want to validate
  *  ! different ISA-specific implementations.
 
+ #define SZ_USE_NEHALEM 0
  #define SZ_USE_HASWELL 0
  #define SZ_USE_SKYLAKE 0
  #define SZ_USE_ICE 0
@@ -2004,6 +2005,7 @@ int main(int argc, char const **argv) {
     // Let's greet the user nicely
     sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
+    std::printf("- Uses Nehalem: %s \n", SZ_USE_NEHALEM ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");

@@ -15,6 +15,7 @@
 
 #define SZ_USE_NEON 0
 #define SZ_USE_SVE 0
+#define SZ_USE_NEHALEM 0
 #define SZ_USE_HASWELL 0
 #define SZ_USE_SKYLAKE 0
 #define SZ_USE_ICE 0

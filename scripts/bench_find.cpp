@@ -215,6 +215,14 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_haswell>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_NEHALEM
+    bench_unary(env, "sz_find_nehalem", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_nehalem>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_nehalem", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_nehalem>>(env))
+        .log(base_reverse);
+#endif
 #if SZ_USE_SVE
     bench_unary(env, "sz_find_sve", base_call,
                 callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_sve>>(env))
@@ -387,6 +395,14 @@ void bench_byte_search(environment_t const &env) {
         .log(base);
     bench_unary(env, "sz_rfind_byte_haswell", base_call,
                 callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_haswell>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_NEHALEM
+    bench_unary(env, "sz_find_byte_nehalem", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_nehalem>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_nehalem", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_nehalem>>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_NEON

@@ -745,6 +745,7 @@ sz_size_t substring_position = ptr ? (sz_size_t)(ptr - haystack.start) : SZ_SIZE
 // Backend-specific variants return pointers as well
 sz_cptr_t ptr = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
 sz_cptr_t ptr = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
+sz_cptr_t ptr = sz_find_nehalem(haystack.start, haystack.length, needle.start, needle.length);
 sz_cptr_t ptr = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings at once
@@ -1415,7 +1416,7 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
+__`SZ_USE_NEHALEM`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
@@ -2181,6 +2182,7 @@ Use it to guarantee constant performance, or to explore how different algorithms
 
 ```c
 sz_find(text, length, pattern, 3);          // Auto-dispatch
+sz_find_nehalem(text, length, pattern, 3);  // Intel Nehalem+ SSE4.2
 sz_find_haswell(text, length, pattern, 3);  // Intel Haswell+ AVX2
 sz_find_skylake(text, length, pattern, 3);  // Intel Skylake+ AVX-512
 sz_find_neon(text, length, pattern, 3);     // Arm NEON 128-bit
@@ -2191,7 +2193,7 @@ StringZilla automatically picks the most advanced backend for the given CPU.
 Similarly, in Python, you can log the auto-detected capabilities:
 
 ```python
-python -c "import stringzilla; print(stringzilla.__capabilities__)"         # ('serial', 'haswell', 'skylake', 'ice', 'neon', 'sve', 'sve2+aes')
+python -c "import stringzilla; print(stringzilla.__capabilities__)"         # ('serial', 'nehalem', 'haswell', 'skylake', 'ice', 'neon', 'sve', 'sve2+aes')
 python -c "import stringzilla; print(stringzilla.__capabilities_str__)"     # "haswell, skylake, ice, neon, sve, sve2+aes"
 ```
 

@@ -81,6 +81,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "SZ_USE_ICE",
             "SZ_USE_SKYLAKE",
             "SZ_USE_HASWELL",
+            "SZ_USE_NEHALEM",
         ],
         _ => vec![],
     };
