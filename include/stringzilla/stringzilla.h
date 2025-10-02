@@ -373,11 +373,11 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
     // Check for SSE4.2 (Function ID 1), masked by OS state
     unsigned supports_sse42 = ((info1.named.ecx & 0x00100000u) != 0);
 
-    return (sz_capability_t)(                                                                                //
-        (sz_cap_nehalem_k * supports_sse42) |                                                                //
-        (sz_cap_haswell_k * supports_avx2) |                                                                 //
-        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw && supports_vaes)) | //
-        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2)) |                                     //
+    return (sz_capability_t)(                                                               //
+        (sz_cap_nehalem_k * supports_sse42) |                                               //
+        (sz_cap_haswell_k * supports_avx2) |                                                //
+        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) | //
+        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) |   //
         (sz_cap_serial_k));
 #else
     return sz_cap_serial_k;
