@@ -2,16 +2,13 @@
 
 ![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v4.jpg?raw=true)
 
-The world wastes a minimum of $100M annually due to inefficient string operations.
-A typical codebase processes strings character by character, resulting in too many branches and data-dependencies, neglecting 90% of modern CPU's potential.
-LibC is different.
-It attempts to leverage SIMD instructions to boost some operations, and is often used by higher-level languages, runtimes, and databases.
-But it isn't perfect.
-1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's throughput.
-2️⃣ Second, SIMD coverage is inconsistent: acceleration in forward scans does not guarantee speed in the reverse-order search.
-3️⃣ At last, most high-level languages can't always use LibC, as the strings are often not NULL-terminated or may contain the Unicode "Zero" character in the middle of the string.
-That's why StringZilla was created.
-To provide predictably high performance, portable to any modern platform, operating system, and programming language.
+Strings are the first fundamental data type every programming language implements in software rather than hardware, so dedicated CPU instructions are rare - and the few that exist are hardly ideal.
+That's why most languages lean on the C standard library (libc) for their string operations, which, despite its name, ships its hottest code in hand-tuned assembly.
+It does exploit SIMD, but it isn't perfect.
+1️⃣ Even on ubiquitous hardware - over a billion 64-bit ARM CPUs - routines such as `strstr` and `memmem` top out at roughly one-third of available throughput.
+2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches.
+3️⃣ Many higher-level languages can't rely on libc at all because their strings aren't NUL-terminated - or may even contain embedded zeroes.
+That's why StringZilla exists: predictable, high performance on every modern platform, OS, and programming language.
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
@@ -20,14 +17,14 @@ To provide predictably high performance, portable to any modern platform, operat
 [![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
-StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs.
-It is up to __10x faster than the default and even other SIMD-accelerated string libraries__ in C, C++, Python, and other languages, while covering broad functionality.
-It __accelerates exact and fuzzy string matching, edit distance computations, sorting, lazily-evaluated ranges to avoid memory allocations, and even random-string generators__.
+StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs and GPUs.
+It delivers up to __10x higher CPU throughput in C, C++, and Python__ and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
+It __accelerates exact and fuzzy string matching, hashing, edit distance computations, sorting, provides allocation-free lazily-evaluated smart-iterators, and even random-string generators__.
 
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- 🐂 __[C](#basic-usage-with-c-99-and-newer) :__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
+- 🐂 __[C](#basic-usage-with-c-99-and-newer):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
 - 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
 - 🧮 __[CUDA](#cuda):__ Process in-bulk with `<stringzillas/stringzillas.cuh>` in CUDA C++ 17
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
@@ -277,9 +274,14 @@ __Who is this for?__
   </tr>
 </table>
 
-StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
-You can find those in the `./scripts` directory, with usage notes listed in the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
-Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
+Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
+Grab them from `./scripts`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md) for instructions.
+On CPUs that permit misaligned loads, even the 64-bit SWAR baseline outruns both libc and the STL.
+For wider head-to-heads against Rust and Python favorites, browse the __[StringWars][stringwars]__ repository.
+To inspect collision resistance and distribution shapes for our hashers, see __[HashEvals][hashevals]__.
+
+[stringwars]: https://github.com/ashvardanian/StringWars
+[hashevals]: https://github.com/ashvardanian/HashEvals
 
 > Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
@@ -1488,7 +1490,7 @@ stringzilla = { git = "https://github.com/ashvardanian/stringzilla", branch = "m
 ```
 
 Once installed, all of the functionality is available through the `stringzilla` namespace.
-Many interfaces will look familiar to the users of the `memchr` crate.
+Many interfaces will look familiar to the users of the `memchr` Rust crate.
 
 ```rust
 use stringzilla::sz;
@@ -1502,7 +1504,6 @@ sz::find_byte_from("Hello, world!", "world") // 2
 sz::rfind_byte_from("Hello, world!", "world") // 11
 ```
 
-Unlike `memchr`, the throughput of `stringzilla` is [high in both normal and reverse-order searches][memchr-benchmarks].
 It also provides no constraints on the size of the character set, while `memchr` allows only 1, 2, or 3 characters.
 In addition to global functions, `stringzilla` provides a `StringZilla` extension trait:
 
@@ -1525,23 +1526,6 @@ assert_eq!(my_string.sz_rfind_byte_not_from("world"), Some(12));
 assert_eq!(my_str.sz_find("world"), Some(7));
 assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
 ```
-
-The library also exposes Levenshtein and Hamming edit distances for byte arrays and UTF-8 strings, as well as Needleman-Wunsch alignment scores.
-
-```rust
-use stringzilla::sz;
-
-// Handling arbitrary byte arrays:
-sz::levenshtein_distance("Hello, world!", "Hello, world?"); // 1
-sz::hamming_distance("Hello, world!", "Hello, world?"); // 1
-sz::alignment_score("Hello, world!", "Hello, world?", sz::unary_substitution_costs(), -1); // -1
-
-// Handling UTF-8 strings:
-sz::hamming_distance_utf8("αβγδ", "αγγδ") // 1
-sz::levenshtein_distance_utf8("façade", "facade") // 1
-```
-
-[memchr-benchmarks]: https://github.com/ashvardanian/StringWa.rs
 
 ### Hash
 
@@ -2012,7 +1996,7 @@ Moreover, it's easy to generalize to weighted edit-distances, where the cost of 
 
 [rapidfuzz]: https://github.com/rapidfuzz/RapidFuzz
 
-### Needleman-Wunsch Alignment Score for Bioinformatics
+### Needleman-Wunsch and Smith-Waterman Scores for Bioinformatics
 
 The field of bioinformatics studies various representations of biological structures.
 The "primary" representations are generally strings over sparse alphabets:
@@ -2023,11 +2007,9 @@ The "primary" representations are generally strings over sparse alphabets:
 
 The shorter the representation, the more often researchers may want to use custom substitution matrices.
 Meaning that the cost of a substitution between two characters may not be the same for all pairs.
-
-StringZilla adapts the fairly efficient two-row Wagner-Fisher algorithm as a baseline serial implementation of the Needleman-Wunsch score.
-It supports arbitrary alphabets up to 256 characters, and can be used with either [BLOSUM][faq-blosum], [PAM][faq-pam], or other substitution matrices.
-It also uses SIMD for hardware acceleration of the substitution lookups on CPUs.
-On GPUs it exploits the same evaluation order as for Levenshtein distance, to minimize data dependencies and maximize parallelism.
+In the general case the serial algorithm is supposed to work for arbitrary substitution costs for each of 256×256 possible character pairs.
+That lookup table, however, is too large to fit into CPU registers, so instead, the upcoming design focuses on 32×32 substitution matrices, which fit into 1 KB with single-byte "error costs".
+That said, most [BLOSUM][faq-blosum] and [PAM][faq-pam] substitution matrices only contain 4-bit values, so they can be packed even further.
 
 [faq-dna]: https://en.wikipedia.org/wiki/DNA
 [faq-rna]: https://en.wikipedia.org/wiki/RNA
@@ -2143,6 +2125,9 @@ When dealing with smaller strings, we design our approach to avoid large registe
 Unlike some AES-accelerated alternatives, the length of the input is not mixed into the AES block at the start to allow incremental construction, when the final length is not known in advance.
 Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads, we avoid expensive block-shuffling procedures on non-divisible-by-16 lengths.
 
+> § Reading materials.
+> [Stress-testing hash functions for avalance behaviour, collision bias, and distribution](https://github.com/ashvardanian/HashEvals).
+
 ### Random Generation
 
 StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.
@@ -2223,12 +2208,14 @@ If you like strings and value efficiency, you may also enjoy the following proje
 - [hyperscan](https://github.com/intel/hyperscan) - regular expressions with SIMD acceleration.
 - [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) - Aho-Corasick algorithm in Python.
 - [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) - fast string matching in C++ and Python.
+- [memchr](https://github.com/BurntSushi/memchr) - fast string search in Rust.
 
 If you are looking for more reading materials on this topic, consider the following:
 
 - [5x faster strings with SIMD & SWAR](https://ashvardanian.com/posts/stringzilla/).
 - [The Painful Pitfalls of C++ STL Strings](https://ashvardanian.com/posts/painful-strings/).
-- [StringWa.rs on GPUs: Databases & Bioinformatics](https://ashvardanian.com/posts/stringwars-on-gpus/).
+- [Processing Strings 109x Faster than Nvidia on H100](https://ashvardanian.com/posts/stringwars-on-gpus/).
+- [How a String Library Beat OpenCV at Image Processing by 4x](https://ashvardanian.com/posts/image-processing-with-strings/).
 
 ## License 📜
 
