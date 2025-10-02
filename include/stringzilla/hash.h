@@ -126,7 +126,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *  @endcode
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_hash_serial, sz_hash_haswell, sz_hash_skylake, sz_hash_ice, sz_hash_neon, sz_hash_sve
+ *  @sa     sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_ice, sz_hash_neon, sz_hash_sve
  *
  *  @note   The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
  *  @sa     sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
@@ -163,7 +163,7 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *  @endcode
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_fill_random_serial, sz_fill_random_haswell, sz_fill_random_skylake, sz_fill_random_ice,
+ *  @sa     sz_fill_random_serial, sz_fill_random_westmere, sz_fill_random_skylake, sz_fill_random_ice,
  *          sz_fill_random_neon, sz_fill_random_sve
  */
 SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
@@ -229,25 +229,29 @@ SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t tex
 /** @copydoc sz_hash_state_digest */
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
 
+#if SZ_USE_WESTMERE
+
+/** @copydoc sz_hash */
+SZ_PUBLIC sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_update */
+SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_digest */
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state);
+
+#endif
+
 #if SZ_USE_HASWELL
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash */
-SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-
-/** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
-
-/** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed);
-
-/** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_haswell(sz_hash_state_t const *state);
 
 #endif
 
@@ -873,103 +877,19 @@ SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t n
 
 #pragma endregion // Serial Implementation
 
-/*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
- *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
+/*  SSE4.2 + AES-NI implementation of the string hashing algorithms for Westmere and newer CPUs.
+ *  Uses 128-bit AES instructions that debuted in Westmere (2010).
  */
-#pragma region Haswell Implementation
-#if SZ_USE_HASWELL
+#pragma region Westmere Implementation
+#if SZ_USE_WESTMERE
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2,aes"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("sse4.2,aes"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2", "aes")
+#pragma GCC target("sse4.2", "aes")
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
-    // The naive implementation of this function is very simple.
-    // It assumes the CPU is great at handling unaligned "loads".
-    //
-    // A typical AWS Skylake instance can have 32 KB x 2 blocks of L1 data cache per core,
-    // 1 MB x 2 blocks of L2 cache per core, and one shared L3 cache buffer.
-    // For now, let's avoid the cases beyond the L2 size.
-    int is_huge = length > 1ull * 1024ull * 1024ull;
-
-    // When the buffer is small, there isn't much to innovate.
-    if (length <= 32) { return sz_bytesum_serial(text, length); }
-    else if (!is_huge) {
-        sz_u256_vec_t text_vec, sums_vec;
-        sums_vec.ymm = _mm256_setzero_si256();
-        for (; length >= 32; text += 32, length -= 32) {
-            text_vec.ymm = _mm256_lddqu_si256((__m256i const *)text);
-            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-        }
-        // We can also avoid the final serial loop by fetching 32 bytes from end, in reverse direction,
-        // and shifting the data within the register to zero-out the duplicate bytes.
-
-        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
-        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
-        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
-        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
-        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
-        sz_u64_t result = low + high;
-        if (length) result += sz_bytesum_serial(text, length);
-        return result;
-    }
-    // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
-    // Most notably, we can avoid populating the cache with the entire buffer, and instead traverse it in 2 directions.
-    else {
-        sz_size_t head_length = (32 - ((sz_size_t)text % 32)) % 32; // 31 or less.
-        sz_size_t tail_length = (sz_size_t)(text + length) % 32;    // 31 or less.
-        sz_size_t body_length = length - head_length - tail_length; // Multiple of 32.
-        sz_u64_t result = 0;
-
-        // Handle the tail before we start updating the `text` pointer
-        while (tail_length) result += text[length - (tail_length--)];
-        // Handle the head
-        while (head_length--) result += *text++;
-
-        sz_u256_vec_t text_vec, sums_vec;
-        sums_vec.ymm = _mm256_setzero_si256();
-        // Fill the aligned body of the buffer.
-        if (!is_huge) {
-            for (; body_length >= 32; text += 32, body_length -= 32) {
-                text_vec.ymm = _mm256_stream_load_si256((__m256i const *)text);
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-            }
-        }
-        // When the buffer is huge, we can traverse it in 2 directions.
-        else {
-            sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
-            sums_reversed_vec.ymm = _mm256_setzero_si256();
-            for (; body_length >= 64; text += 32, body_length -= 64) {
-                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-                text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
-                sums_reversed_vec.ymm = _mm256_add_epi64(
-                    sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
-            }
-            if (body_length >= 32) {
-                sz_assert_(body_length == 32);
-                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-                text += 32;
-            }
-            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
-        }
-
-        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
-        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
-        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
-        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
-        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
-        result += low + high;
-        return result;
-    }
-}
-
-SZ_INTERNAL void sz_hash_minimal_init_haswell_aligned_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
+SZ_INTERNAL void sz_hash_minimal_init_westmere_aligned_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m128i seed_vec = _mm_set1_epi64x(seed);
@@ -987,12 +907,12 @@ SZ_INTERNAL void sz_hash_minimal_init_haswell_aligned_(sz_hash_minimal_t_ *state
     state->sum.xmm = k2;
 }
 
-SZ_INTERNAL void sz_hash_minimal_update_haswell_aligned_(sz_hash_minimal_t_ *state_ptr, __m128i block, __m128i order) {
+SZ_INTERNAL void sz_hash_minimal_update_westmere_aligned_(sz_hash_minimal_t_ *state_ptr, __m128i block, __m128i order) {
     state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block);
     state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order), block);
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_haswell_aligned_(sz_hash_minimal_t_ const *state, sz_size_t length) {
+SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_westmere_aligned_(sz_hash_minimal_t_ const *state, sz_size_t length) {
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
     // Combine the "sum" and the "AES" blocks
@@ -1004,7 +924,7 @@ SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_haswell_aligned_(sz_hash_minimal_t
     return _mm_cvtsi128_si64(mixed_in_register);
 }
 
-SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m128i seed_vec = _mm_set1_epi64x(seed);
 
@@ -1030,7 +950,7 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
     state->ins_length = 0;
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_haswell_(sz_hash_state_t const *state) {
+SZ_INTERNAL sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_t const *state) {
     // Mix the length into the key
     __m128i key_with_length =
         _mm_add_epi64(_mm_lddqu_si128((__m128i *)&state->key.u8s[0]), _mm_set_epi64x(0, state->ins_length));
@@ -1054,12 +974,12 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_haswell_(sz_hash_state_t const *stat
     return _mm_cvtsi128_si64(mixed_in_register);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+SZ_PUBLIC sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -1068,13 +988,13 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec;
@@ -1084,14 +1004,14 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -1102,15 +1022,15 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -1122,15 +1042,15 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data3_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else {
         sz_align_(64) sz_hash_state_t state;
-        sz_hash_state_init_haswell(&state, seed);
+        sz_hash_state_init_westmere(&state, seed);
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
@@ -1166,11 +1086,11 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
             state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
             state.ins_length = length;
         }
-        return sz_hash_state_finalize_haswell_(&state);
+        return sz_hash_state_finalize_westmere_(&state);
     }
 }
 
-SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
     // The worst usage pattern... that we should ironically handle first - is updating the state
     // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
@@ -1271,9 +1191,9 @@ SZ_PUBLIC void sz_hash_state_update_haswell(sz_hash_state_t *state_ptr, sz_cptr_
     state_ptr->ins_length = state.ins_length;
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_haswell(sz_hash_state_t const *state_ptr) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_ptr) {
     sz_size_t length = state_ptr->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_haswell_(state_ptr);
+    if (length >= 64) return sz_hash_state_finalize_westmere_(state_ptr);
 
     // Switch back to a smaller "minimal" state for small inputs
     sz_align_(16) sz_hash_minimal_t_ state;
@@ -1285,30 +1205,30 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_haswell(sz_hash_state_t const *state_ptr
     __m128i const *ins_xmms = (__m128i const *)&state_ptr->ins.xmms[0];
     __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     if (length <= 16) {
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[2]), order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[2]), order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else {
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[2]), order);
-        sz_hash_minimal_update_haswell_aligned_(&state, _mm_lddqu_si128(&ins_xmms[3]), order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[0]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[1]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[2]), order);
+        sz_hash_minimal_update_westmere_aligned_(&state, _mm_lddqu_si128(&ins_xmms[3]), order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
 }
 
-SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
     if (length <= 16) {
         __m128i input = _mm_set1_epi64x(nonce);
@@ -1399,6 +1319,110 @@ SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t 
             generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
             for (sz_size_t j = 0; i < length; ++i, ++j) text[i] = ((sz_u8_t *)generated)[j];
         }
+    }
+}
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_WESTMERE
+#pragma endregion // Westmere Implementation
+
+/*  AVX2 implementation of sz_bytesum for Haswell and newer CPUs.
+ *  Uses 256-bit YMM registers for byte accumulation.
+ */
+#pragma region Haswell Implementation
+#if SZ_USE_HASWELL
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx2")
+#endif
+
+SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "loads".
+    //
+    // A typical AWS Skylake instance can have 32 KB x 2 blocks of L1 data cache per core,
+    // 1 MB x 2 blocks of L2 cache per core, and one shared L3 cache buffer.
+    // For now, let's avoid the cases beyond the L2 size.
+    int is_huge = length > 1ull * 1024ull * 1024ull;
+
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= 32) { return sz_bytesum_serial(text, length); }
+    else if (!is_huge) {
+        sz_u256_vec_t text_vec, sums_vec;
+        sums_vec.ymm = _mm256_setzero_si256();
+        for (; length >= 32; text += 32, length -= 32) {
+            text_vec.ymm = _mm256_lddqu_si256((__m256i const *)text);
+            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+        }
+        // We can also avoid the final serial loop by fetching 32 bytes from end, in reverse direction,
+        // and shifting the data within the register to zero-out the duplicate bytes.
+
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
+        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
+        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
+        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        sz_u64_t result = low + high;
+        if (length) result += sz_bytesum_serial(text, length);
+        return result;
+    }
+    // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
+    // Most notably, we can avoid populating the cache with the entire buffer, and instead traverse it in 2 directions.
+    else {
+        sz_size_t head_length = (32 - ((sz_size_t)text % 32)) % 32; // 31 or less.
+        sz_size_t tail_length = (sz_size_t)(text + length) % 32;    // 31 or less.
+        sz_size_t body_length = length - head_length - tail_length; // Multiple of 32.
+        sz_u64_t result = 0;
+
+        // Handle the tail before we start updating the `text` pointer
+        while (tail_length) result += text[length - (tail_length--)];
+        // Handle the head
+        while (head_length--) result += *text++;
+
+        sz_u256_vec_t text_vec, sums_vec;
+        sums_vec.ymm = _mm256_setzero_si256();
+        // Fill the aligned body of the buffer.
+        if (!is_huge) {
+            for (; body_length >= 32; text += 32, body_length -= 32) {
+                text_vec.ymm = _mm256_stream_load_si256((__m256i const *)text);
+                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+            }
+        }
+        // When the buffer is huge, we can traverse it in 2 directions.
+        else {
+            sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
+            sums_reversed_vec.ymm = _mm256_setzero_si256();
+            for (; body_length >= 64; text += 32, body_length -= 64) {
+                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
+                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+                text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
+                sums_reversed_vec.ymm = _mm256_add_epi64(
+                    sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
+            }
+            if (body_length >= 32) {
+                sz_assert_(body_length == 32);
+                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
+                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+                text += 32;
+            }
+            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
+        }
+
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
+        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
+        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
+        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        result += low + high;
+        return result;
     }
 }
 
@@ -1548,7 +1572,7 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -1556,13 +1580,13 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
@@ -1571,14 +1595,14 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -1588,15 +1612,15 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -1607,11 +1631,11 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data3_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else {
         sz_align_(64) sz_hash_state_t state;
@@ -1643,7 +1667,7 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
             state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
             state.ins_length = length;
         }
-        return sz_hash_state_finalize_haswell_(&state);
+        return sz_hash_state_finalize_westmere_(&state);
     }
 }
 
@@ -1724,11 +1748,11 @@ SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_digest_haswell(state);
+    return sz_hash_state_digest_westmere(state);
 }
 
 SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_fill_random_haswell(text, length, nonce);
+    sz_fill_random_westmere(text, length, nonce);
 }
 
 #if defined(__clang__)
@@ -1890,7 +1914,7 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -1898,13 +1922,13 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
@@ -1913,14 +1937,14 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -1930,15 +1954,15 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_haswell_aligned_(&state, seed);
+        sz_hash_minimal_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -1949,11 +1973,11 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_haswell_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_minimal_update_haswell_aligned_(&state, data3_vec.xmm, order);
-        return sz_hash_minimal_finalize_haswell_aligned_(&state, length);
+        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        sz_hash_minimal_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
     }
     // This is where the logic differs from Skylake-X and other pre-Ice Lake CPUs:
     else {
@@ -1974,7 +1998,7 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
             state.sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state.sum.zmm, order), state.ins.zmm);
             state.ins_length = length;
         }
-        return sz_hash_state_finalize_haswell_(&state);
+        return sz_hash_state_finalize_westmere_(&state);
     }
 }
 
@@ -2047,7 +2071,7 @@ SZ_PUBLIC void sz_hash_state_update_ice(sz_hash_state_t *state_ptr, sz_cptr_t te
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_ice(sz_hash_state_t const *state) {
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_digest_haswell(state);
+    return sz_hash_state_digest_westmere(state);
 }
 
 SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
@@ -2838,8 +2862,8 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_hash_ice(text, length, seed);
 #elif SZ_USE_SKYLAKE
     return sz_hash_skylake(text, length, seed);
-#elif SZ_USE_HASWELL
-    return sz_hash_haswell(text, length, seed);
+#elif SZ_USE_WESTMERE
+    return sz_hash_westmere(text, length, seed);
 #elif SZ_USE_SVE2_AES
     return sz_hash_sve2(text, length, seed);
 #elif SZ_USE_NEON_AES
@@ -2854,8 +2878,8 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
     sz_fill_random_ice(text, length, nonce);
 #elif SZ_USE_SKYLAKE
     sz_fill_random_skylake(text, length, nonce);
-#elif SZ_USE_HASWELL
-    sz_fill_random_haswell(text, length, nonce);
+#elif SZ_USE_WESTMERE
+    sz_fill_random_westmere(text, length, nonce);
 #elif SZ_USE_SVE2_AES
     sz_fill_random_sve2(text, length, nonce);
 #elif SZ_USE_NEON_AES
@@ -2870,8 +2894,8 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_ice(state, seed);
 #elif SZ_USE_SKYLAKE
     sz_hash_state_init_skylake(state, seed);
-#elif SZ_USE_HASWELL
-    sz_hash_state_init_haswell(state, seed);
+#elif SZ_USE_WESTMERE
+    sz_hash_state_init_westmere(state, seed);
 #elif SZ_USE_SVE2_AES
     sz_hash_state_init_sve2(state, seed);
 #elif SZ_USE_NEON_AES
@@ -2886,8 +2910,8 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
     sz_hash_state_update_ice(state, text, length);
 #elif SZ_USE_SKYLAKE
     sz_hash_state_update_skylake(state, text, length);
-#elif SZ_USE_HASWELL
-    sz_hash_state_update_haswell(state, text, length);
+#elif SZ_USE_WESTMERE
+    sz_hash_state_update_westmere(state, text, length);
 #elif SZ_USE_SVE2_AES
     sz_hash_state_update_sve2(state, text, length);
 #elif SZ_USE_NEON_AES
@@ -2902,8 +2926,8 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_hash_state_digest_ice(state);
 #elif SZ_USE_SKYLAKE
     return sz_hash_state_digest_skylake(state);
-#elif SZ_USE_HASWELL
-    return sz_hash_state_digest_haswell(state);
+#elif SZ_USE_WESTMERE
+    return sz_hash_state_digest_westmere(state);
 #elif SZ_USE_SVE2_AES
     return sz_hash_state_digest_sve2(state);
 #elif SZ_USE_NEON_AES

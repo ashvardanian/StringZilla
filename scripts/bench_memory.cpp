@@ -289,10 +289,12 @@ void bench_fill(environment_t const &env) {
     auto random_call = fill_random_from_sz<sz_fill_random_serial> {env, o};
     bench_result_t random = bench_unary(env, "sz_fill_random_serial", random_call).log(zeros);
 
+#if SZ_USE_WESTMERE
+    bench_unary(env, "sz_fill_random_westmere", random_call, fill_random_from_sz<sz_fill_random_westmere> {env, o})
+        .log(zeros, random);
+#endif
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell> {env, o}).log(zeros);
-    bench_unary(env, "sz_fill_random_haswell", random_call, fill_random_from_sz<sz_fill_random_haswell> {env, o})
-        .log(zeros, random);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake> {env, o}).log(zeros);

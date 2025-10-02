@@ -169,8 +169,8 @@ void bench_hashing(environment_t const &env) {
     auto validator = hash_from_sz<sz_hash_serial> {env};
     bench_result_t base = bench_unary(env, "sz_hash_serial", validator).log();
     bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
-#if SZ_USE_HASWELL
-    bench_unary(env, "sz_hash_haswell", validator, hash_from_sz<sz_hash_haswell> {env}).log(base, base_stl);
+#if SZ_USE_WESTMERE
+    bench_unary(env, "sz_hash_westmere", validator, hash_from_sz<sz_hash_westmere> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_hash_skylake", validator, hash_from_sz<sz_hash_skylake> {env}).log(base, base_stl);
@@ -193,10 +193,10 @@ void bench_stream_hashing(environment_t const &env) {
     bench_result_t base = bench_unary(env, "sz_hash_stream_serial", validator).log();
     bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
 
-#if SZ_USE_HASWELL
+#if SZ_USE_WESTMERE
     bench_unary(
-        env, "sz_hash_stream_haswell", validator,
-        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_update_haswell, sz_hash_state_digest_haswell> {
+        env, "sz_hash_stream_westmere", validator,
+        hash_stream_from_sz<sz_hash_state_init_westmere, sz_hash_state_update_westmere, sz_hash_state_digest_westmere> {
             env})
         .log(base, base_stl);
 #endif

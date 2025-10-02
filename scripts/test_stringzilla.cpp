@@ -352,13 +352,13 @@ void test_equivalence() {
     assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
     assert(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
 
-#if SZ_USE_HASWELL
+#if SZ_USE_WESTMERE
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_haswell, sz_hash_state_init_haswell,              //
-        sz_hash_state_update_haswell, sz_hash_state_digest_haswell);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_haswell);
+        sz_hash_westmere, sz_hash_state_init_westmere,            //
+        sz_hash_state_update_westmere, sz_hash_state_digest_westmere);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_westmere);
 #endif
 #if SZ_USE_SKYLAKE
     test_hash_equivalence(                                        //

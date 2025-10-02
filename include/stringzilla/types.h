@@ -218,7 +218,7 @@
  *  All of those can be controlled by the user.
  */
 #if !defined(SZ_USE_WESTMERE)
-#if SZ_IS_64BIT_X86_ && defined(__SSE4_2__)
+#if SZ_IS_64BIT_X86_ && defined(__SSE4_2__) && defined(__AES__)
 #define SZ_USE_WESTMERE (1)
 #else
 #define SZ_USE_WESTMERE (0)
@@ -242,7 +242,7 @@
 #endif
 
 #if !defined(SZ_USE_ICE)
-#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__)
+#if SZ_IS_64BIT_X86_ && defined(__AVX512BW__) && defined(__VAES__)
 #define SZ_USE_ICE (1)
 #else
 #define SZ_USE_ICE (0)
@@ -825,7 +825,7 @@ typedef union sz_u64_vec_t {
  *          as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
-#if SZ_USE_HASWELL || SZ_USE_WESTMERE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
@@ -859,7 +859,7 @@ typedef union sz_u256_vec_t {
     __m256d ymm_pd;
     __m256 ymm_ps;
 #endif
-#if SZ_USE_HASWELL || SZ_USE_WESTMERE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
@@ -894,7 +894,7 @@ typedef union sz_u512_vec_t {
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m256i ymms[2];
 #endif
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE || SZ_USE_WESTMERE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m128i xmms[4];
 #endif
 #if SZ_USE_NEON

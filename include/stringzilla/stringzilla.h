@@ -51,7 +51,7 @@
  *
  *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
  *
- *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 instructions on x86_64.
+ *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 & AES-NI instructions on x86_64.
  *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
  *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
