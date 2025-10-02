@@ -220,6 +220,8 @@
 #if !defined(SZ_USE_WESTMERE)
 #if SZ_IS_64BIT_X86_ && defined(__SSE4_2__) && defined(__AES__)
 #define SZ_USE_WESTMERE (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX__)
+#define SZ_USE_WESTMERE (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
 #else
 #define SZ_USE_WESTMERE (0)
 #endif
@@ -244,19 +246,25 @@
 #if !defined(SZ_USE_ICE)
 #if SZ_IS_64BIT_X86_ && defined(__AVX512BW__) && defined(__VAES__)
 #define SZ_USE_ICE (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX512BW__)
+#define SZ_USE_ICE (1) // ! MSVC doesn't expose `__VAES__` macros
 #else
 #define SZ_USE_ICE (0)
 #endif
 #endif
 
+/*  NEON support is optional in Armv7/AArch32, but mandatory from 8.0 onwards. */
 #if !defined(SZ_USE_NEON)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON)
 #define SZ_USE_NEON (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__ARM_ARCH) && __ARM_ARCH >= 800
+#define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros
 #else
 #define SZ_USE_NEON (0)
 #endif
 #endif
 
+/*  SVE is optional since Armv8.2-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE)
 #define SZ_USE_SVE (1)
@@ -265,6 +273,7 @@
 #endif
 #endif
 
+/*  SVE2 is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2)
 #define SZ_USE_SVE2 (1)
@@ -273,6 +282,7 @@
 #endif
 #endif
 
+/*  AES is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_AES)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_AES)
 #define SZ_USE_NEON_AES (1)
@@ -281,6 +291,7 @@
 #endif
 #endif
 
+/*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2_AES)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2_AES)
 #define SZ_USE_SVE2_AES (1)
