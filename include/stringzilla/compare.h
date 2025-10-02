@@ -90,11 +90,11 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-#if SZ_USE_NEHALEM
+#if SZ_USE_WESTMERE
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_nehalem(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_nehalem(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_HASWELL
@@ -120,11 +120,11 @@ SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 
 #pragma endregion // Core API
 
-/* SSE implementation of the string search algorithms for Nehalem processors and newer.
+/* SSE implementation of the string search algorithms for Westmere processors and newer.
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
  */
-#pragma region Nehalem Implementation
-#if SZ_USE_NEHALEM
+#pragma region Westmere Implementation
+#if SZ_USE_WESTMERE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -132,13 +132,13 @@ SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 #pragma GCC target("sse4.2")
 #endif
 
-SZ_PUBLIC sz_ordering_t sz_order_nehalem(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_PUBLIC sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_nehalem(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_PUBLIC sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
         while (a != a_end && *a == *b) a++, b++;
@@ -188,8 +188,8 @@ SZ_PUBLIC sz_bool_t sz_equal_nehalem(sz_cptr_t a, sz_cptr_t b, sz_size_t length)
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif            // SZ_USE_NEHALEM
-#pragma endregion // Nehalem Implementation
+#endif            // SZ_USE_WESTMERE
+#pragma endregion // Westmere Implementation
 
 #pragma region Serial Implementation
 
