@@ -29,6 +29,7 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
@@ -42,6 +43,7 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=0",
                     "SZ_USE_HASWELL=0",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
@@ -64,6 +66,7 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
@@ -77,6 +80,7 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=0",
                     "SZ_USE_HASWELL=0",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
@@ -98,6 +102,7 @@
                 "target_arch=='x64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
@@ -111,6 +116,7 @@
                 "target_arch=='arm64'",
                 {
                   "defines": [
+                    "SZ_USE_NEHALEM=0",
                     "SZ_USE_HASWELL=0",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
