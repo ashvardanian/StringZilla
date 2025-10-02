@@ -85,6 +85,22 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence
                                              sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 /**
+ *  @brief  Computes 64-bit hashes for a batch of strings provided as pointer arrays.
+ *
+ *  @param[in] starts Array of pointers to the start of each string.
+ *  @param[in] lengths Array of lengths for each string.
+ *  @param[in] count Number of strings to hash.
+ *  @param[in] seed Optional seed for the hash function to avoid attacks.
+ *  @param[out] hashes Output array of 64-bit hashes (must fit `count` entries).
+ *
+ *  @note   The algorithm has linear time complexity and uses SIMD batching for short strings (≤16 bytes).
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_sequence_hashes_serial, sz_sequence_hashes_ice, sz_sequence_hashes_sve
+ */
+SZ_DYNAMIC void sz_sequence_hashes(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                   sz_u64_t *hashes);
+
+/**
  *  @brief  Defines various JOIN semantics for string sequences, including handling of duplicates.
  *  @sa     sz_join_inner_strict_k, sz_join_inner_k, sz_join_left_outer_k, sz_join_right_outer_k, sz_join_full_outer_k,
  *          sz_join_cross_k
@@ -237,6 +253,10 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                               /
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
+/** @copydoc sz_sequence_hashes */
+SZ_PUBLIC void sz_sequence_hashes_ice(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                      sz_u64_t *hashes);
+
 #endif
 
 #if SZ_USE_SVE
@@ -247,11 +267,20 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(                               /
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
+/** @copydoc sz_sequence_hashes */
+SZ_PUBLIC void sz_sequence_hashes_sve(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                      sz_u64_t *hashes);
+
 #endif
 
 #pragma endregion
 
 #pragma region Serial Implementation
+
+SZ_PUBLIC void sz_sequence_hashes_serial(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count,
+                                         sz_u64_t seed, sz_u64_t *hashes) {
+    for (sz_size_t i = 0; i < count; ++i) { hashes[i] = sz_hash(starts[i], lengths[i], seed); }
+}
 
 SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                                 //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
@@ -379,14 +408,74 @@ SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i v) {
     return mask;
 }
 
+SZ_PUBLIC void sz_sequence_hashes_ice(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                      sz_u64_t *hashes) {
+
+    // Conceptually the Ice Lake variant is similar to the serial one, except it takes advantage of:
+    // - computing 4x individual high-quality hashes with `_mm512_aesenc_epi128`.
+    sz_align_(64) sz_hash_minimal_x4_t_ batch_hashes_states_initial;
+    sz_hash_minimal_x4_init_ice_(&batch_hashes_states_initial, seed);
+
+    for (sz_size_t position = 0; position < count;) {
+        sz_string_view_t batch[4];
+        sz_size_t batch_indices[4];
+        sz_size_t batch_size = 0;
+
+        // Fill batch with up to 4 short strings (≤16 bytes)
+        for (; position < count && batch_size < 4; position++) {
+            sz_size_t length = lengths[position];
+            sz_cptr_t start = starts[position];
+
+            if (length <= 16) {
+                batch[batch_size].start = start;
+                batch[batch_size].length = length;
+                batch_indices[batch_size] = position;
+                batch_size++;
+            }
+            else {
+                // Long string: hash immediately and continue scanning
+                hashes[position] = sz_hash(start, length, seed);
+            }
+        }
+
+        // Process the batch if we collected any short strings
+        if (batch_size == 0) continue;
+
+        // For partial batches, use scalar fallback
+        if (batch_size < 4) {
+            for (sz_size_t i = 0; i < batch_size; i++)
+                hashes[batch_indices[i]] = sz_hash(batch[i].start, batch[i].length, seed);
+            continue;
+        }
+
+        // Vectorized path: exactly 4 short strings
+        sz_u256_vec_t batch_hashes;
+        sz_u512_vec_t batch_prefixes;
+        batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start);
+        batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start);
+        batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start);
+        batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
+
+        sz_align_(64) sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+        sz_hash_minimal_x4_update_ice_(&batch_hashes_states, batch_prefixes.zmm);
+        batch_hashes.ymm = sz_hash_minimal_x4_finalize_ice_(&batch_hashes_states, batch[0].length, batch[1].length,
+                                                            batch[2].length, batch[3].length);
+
+        hashes[batch_indices[0]] = batch_hashes.u64s[0];
+        hashes[batch_indices[1]] = batch_hashes.u64s[1];
+        hashes[batch_indices[2]] = batch_hashes.u64s[2];
+        hashes[batch_indices[3]] = batch_hashes.u64s[3];
+    }
+}
+
 SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                    //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
 
     // To join to unordered sets of strings, the simplest approach would be to hash them into a dynamically
-    // allocated hash table and then iterate over the second set, checking for the presence of each element in the
-    // hash table. This would require O(N) memory and O(N) time complexity, where N is the smaller set.
+    // allocated hash table and then iterate over the second set, checking for the presence of each element
+    // in the hash table. This would require O(N) memory and O(N) time complexity, where N is the smaller set.
     sz_sequence_t const *small_sequence, *large_sequence;
     sz_sorted_idx_t *small_positions, *large_positions;
     if (first_sequence->count <= second_sequence->count) {
@@ -431,7 +520,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     //
     // For larger entries, we will use a separate loop afterwards to decrease the likelihood of collisions
     // on the shorter entries, that can benefit from vectorized processing.
-    sz_hash_minimal_x4_t_ batch_hashes_states_initial;
+    sz_align_(64) sz_hash_minimal_x4_t_ batch_hashes_states_initial;
     sz_hash_minimal_x4_init_ice_(&batch_hashes_states_initial, seed);
     sz_size_t count_longer = 0;
     for (sz_size_t small_position = 0; small_position < small_sequence->count;) {
@@ -476,7 +565,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_align_(64) sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
             sz_hash_minimal_x4_update_ice_(&batch_hashes_states, batch_prefixes.zmm);
             batch_hashes.ymm = sz_hash_minimal_x4_finalize_ice_(&batch_hashes_states, batch[0].length, batch[1].length,
                                                                 batch[2].length, batch[3].length);
@@ -578,7 +667,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_align_(64) sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
             sz_hash_minimal_x4_update_ice_(&batch_hashes_states, batch_prefixes.zmm);
             batch_hashes.ymm = sz_hash_minimal_x4_finalize_ice_(&batch_hashes_states, batch[0].length, batch[1].length,
                                                                 batch[2].length, batch[3].length);
@@ -742,6 +831,12 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
 #pragma GCC target("arch=armv8.2-a+sve")
 #endif
 
+SZ_PUBLIC void sz_sequence_hashes_sve(sz_cptr_t const *starts, sz_size_t const *lengths, sz_size_t count, sz_u64_t seed,
+                                      sz_u64_t *hashes) {
+    // TODO: Finalize `sz_hash_sve2_upto16x16_` and integrate here
+    sz_sequence_hashes_serial(starts, lengths, count, seed, hashes);
+}
+
 SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_sequence,
                                                 sz_sequence_t const *second_sequence, //
                                                 sz_memory_allocator_t *alloc, sz_u64_t seed,
@@ -767,6 +862,16 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
  */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
+
+SZ_DYNAMIC sz_status_t sz_sequence_hashes(sz_sequence_t const *sequence, sz_u64_t seed, sz_u64_t *hashes) {
+#if SZ_USE_SKYLAKE
+    return sz_sequence_hashes_ice(sequence, seed, hashes);
+#elif SZ_USE_SVE
+    return sz_sequence_hashes_sve(sequence, seed, hashes);
+#else
+    return sz_sequence_hashes_serial(sequence, seed, hashes);
+#endif
+}
 
 SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
                                              sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
