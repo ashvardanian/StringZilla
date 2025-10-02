@@ -102,15 +102,15 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->sequence_intersect = sz_sequence_intersect_serial;
     impl->pgrams_sort = sz_pgrams_sort_serial;
 
-#if SZ_USE_NEHALEM
-    if (caps & sz_cap_nehalem_k) {
-        impl->equal = sz_equal_nehalem;
-        impl->order = sz_order_nehalem;
+#if SZ_USE_WESTMERE
+    if (caps & sz_cap_westmere_k) {
+        impl->equal = sz_equal_westmere;
+        impl->order = sz_order_westmere;
 
-        impl->find_byte = sz_find_byte_nehalem;
-        impl->rfind_byte = sz_rfind_byte_nehalem;
-        impl->find = sz_find_nehalem;
-        impl->rfind = sz_rfind_nehalem;
+        impl->find_byte = sz_find_byte_westmere;
+        impl->rfind_byte = sz_rfind_byte_westmere;
+        impl->find = sz_find_westmere;
+        impl->rfind = sz_rfind_westmere;
     }
 #endif
 

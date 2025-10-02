@@ -26,7 +26,7 @@ using namespace stringzilla;
 using namespace stringzilla::scripts;
 
 int log_environment() {
-    std::printf("- Uses Nehalem: %s \n", SZ_USE_NEHALEM ? "yes" : "no");
+    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
