@@ -325,7 +325,7 @@
  */
 #if SZ_USE_NEHALEM || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #include <immintrin.h>
-#endif // SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#endif // SZ_USE_NEHALEM || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #if SZ_USE_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
@@ -894,7 +894,7 @@ typedef union sz_u512_vec_t {
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m256i ymms[2];
 #endif
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE || SZ_USE_NEHALEM
     __m128i xmms[4];
 #endif
 #if SZ_USE_NEON
