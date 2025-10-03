@@ -2345,38 +2345,113 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_t const *state) 
     return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_in_register), 0);
 }
 
-SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    // This whole function is identical to Haswell.
-    while (length) {
-        // Append to the internal buffer until it's full
-        if (state->ins_length % 64 == 0 && length >= 64) {
-            state->ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + 0));
-            state->ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + 16));
-            state->ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)(text + 32));
-            state->ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)(text + 48));
-            sz_hash_state_update_neon_(state);
-            state->ins_length += 64;
-            text += 64;
-            length -= 64;
-        }
-        // If vectorization isn't that trivial - fall back to the serial implementation
-        else {
-            sz_size_t progress_in_block = state->ins_length % 64;
-            sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-            int const will_fill_block = progress_in_block + to_copy == 64;
-            // Update the metadata before we modify the `to_copy` variable
-            state->ins_length += to_copy;
-            length -= to_copy;
-            // Append to the internal buffer until it's full
-            while (to_copy--) state->ins.u8s[progress_in_block++] = *text++;
-            // If we've reached the end of the buffer, update the state
-            if (will_fill_block) {
-                sz_hash_state_update_neon_(state);
-                // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
-                for (int i = 0; i < 4; ++i) vst1q_u8(state->ins.u8s + i * 16, vdupq_n_u8(0));
-            }
-        }
+SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
+
+    // The worst usage pattern... that we should ironically handle first - is updating the state
+    // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
+    // even bother using NEON masked loads to avoid complexity.
+    sz_size_t const current_block_index = state_ptr->ins_length / 64;
+    sz_size_t const final_block_index = (state_ptr->ins_length + length) / 64;
+    int const stays_in_the_block = current_block_index == final_block_index;
+    int const fills_the_block = (state_ptr->ins_length + length) % 64 == 0;
+    if (stays_in_the_block && !fills_the_block) {
+        for (; length; --length, ++state_ptr->ins_length, ++text)
+            state_ptr->ins.u8s[state_ptr->ins_length % 64] = *text;
+        return;
     }
+
+    // Now we know that our "text" parts will end up in different blocks.
+    // It's a good idea to pull the state into registers, as well definitely mix them at block boundaries.
+    sz_size_t const progress_in_block = state_ptr->ins_length % 64;
+    sz_size_t const head_length = (64 - progress_in_block) % 64;
+    sz_size_t const tail_length = (state_ptr->ins_length + length) % 64;
+    sz_size_t const body_length = length - head_length - tail_length;
+    sz_assert_(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
+
+    // Lets keep a local copy of the state for one or more updates.
+    sz_align_(64) sz_hash_state_t state;
+    state.aes.u8x16s[0] = vld1q_u8((sz_u8_t const *)&state_ptr->aes.u8x16s[0]);
+    state.aes.u8x16s[1] = vld1q_u8((sz_u8_t const *)&state_ptr->aes.u8x16s[1]);
+    state.aes.u8x16s[2] = vld1q_u8((sz_u8_t const *)&state_ptr->aes.u8x16s[2]);
+    state.aes.u8x16s[3] = vld1q_u8((sz_u8_t const *)&state_ptr->aes.u8x16s[3]);
+    state.sum.u8x16s[0] = vld1q_u8((sz_u8_t const *)&state_ptr->sum.u8x16s[0]);
+    state.sum.u8x16s[1] = vld1q_u8((sz_u8_t const *)&state_ptr->sum.u8x16s[1]);
+    state.sum.u8x16s[2] = vld1q_u8((sz_u8_t const *)&state_ptr->sum.u8x16s[2]);
+    state.sum.u8x16s[3] = vld1q_u8((sz_u8_t const *)&state_ptr->sum.u8x16s[3]);
+    state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)&state_ptr->ins.u8x16s[0]);
+    state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)&state_ptr->ins.u8x16s[1]);
+    state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)&state_ptr->ins.u8x16s[2]);
+    state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)&state_ptr->ins.u8x16s[3]);
+    state.ins_length = state_ptr->ins_length;
+
+    // Handle the head first, filling up the current block
+    uint8x16_t const order = vld1q_u8(sz_hash_u8x16x4_shuffle_());
+    if (head_length) {
+        sz_ptr_t local_ptr = (sz_ptr_t)&state.ins.u8s[progress_in_block];
+        sz_ptr_t const local_end = (sz_ptr_t)&state.ins.u8s[64];
+        for (; local_ptr < local_end; ++local_ptr, ++text) *local_ptr = *text;
+        state.aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[0], state.ins.u8x16s[0]);
+        state.aes.u8x16s[1] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[1], state.ins.u8x16s[1]);
+        state.aes.u8x16s[2] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[2], state.ins.u8x16s[2]);
+        state.aes.u8x16s[3] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[3], state.ins.u8x16s[3]);
+        state.sum.u64x2s[0] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[0]), order)), state.ins.u64x2s[0]);
+        state.sum.u64x2s[1] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[1]), order)), state.ins.u64x2s[1]);
+        state.sum.u64x2s[2] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[2]), order)), state.ins.u64x2s[2]);
+        state.sum.u64x2s[3] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[3]), order)), state.ins.u64x2s[3]);
+        state.ins_length += head_length;
+        length -= head_length;
+    }
+
+    // Now handle the body
+    for (; length >= 64; state.ins_length += 64, text += 64, length -= 64) {
+        state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + 0));
+        state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + 16));
+        state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)(text + 32));
+        state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)(text + 48));
+        state.aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[0], state.ins.u8x16s[0]);
+        state.aes.u8x16s[1] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[1], state.ins.u8x16s[1]);
+        state.aes.u8x16s[2] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[2], state.ins.u8x16s[2]);
+        state.aes.u8x16s[3] = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16s[3], state.ins.u8x16s[3]);
+        state.sum.u64x2s[0] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[0]), order)), state.ins.u64x2s[0]);
+        state.sum.u64x2s[1] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[1]), order)), state.ins.u64x2s[1]);
+        state.sum.u64x2s[2] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[2]), order)), state.ins.u64x2s[2]);
+        state.sum.u64x2s[3] = vaddq_u64(
+            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state.sum.u64x2s[3]), order)), state.ins.u64x2s[3]);
+    }
+    state.ins.u8x16s[0] = vdupq_n_u8(0);
+    state.ins.u8x16s[1] = vdupq_n_u8(0);
+    state.ins.u8x16s[2] = vdupq_n_u8(0);
+    state.ins.u8x16s[3] = vdupq_n_u8(0);
+
+    // The tail is the last part we need to handle
+    if (tail_length) {
+        sz_ptr_t local_ptr = (sz_ptr_t)&state.ins.u8s[0];
+        sz_ptr_t const local_end = (sz_ptr_t)&state.ins.u8s[tail_length];
+        for (; local_ptr < local_end; ++local_ptr, ++text) *local_ptr = *text;
+        state.ins_length += tail_length;
+    }
+
+    // Save the state back to the memory
+    vst1q_u8((sz_u8_t *)&state_ptr->aes.u8x16s[0], state.aes.u8x16s[0]);
+    vst1q_u8((sz_u8_t *)&state_ptr->aes.u8x16s[1], state.aes.u8x16s[1]);
+    vst1q_u8((sz_u8_t *)&state_ptr->aes.u8x16s[2], state.aes.u8x16s[2]);
+    vst1q_u8((sz_u8_t *)&state_ptr->aes.u8x16s[3], state.aes.u8x16s[3]);
+    vst1q_u8((sz_u8_t *)&state_ptr->sum.u8x16s[0], state.sum.u8x16s[0]);
+    vst1q_u8((sz_u8_t *)&state_ptr->sum.u8x16s[1], state.sum.u8x16s[1]);
+    vst1q_u8((sz_u8_t *)&state_ptr->sum.u8x16s[2], state.sum.u8x16s[2]);
+    vst1q_u8((sz_u8_t *)&state_ptr->sum.u8x16s[3], state.sum.u8x16s[3]);
+    vst1q_u8((sz_u8_t *)&state_ptr->ins.u8x16s[0], state.ins.u8x16s[0]);
+    vst1q_u8((sz_u8_t *)&state_ptr->ins.u8x16s[1], state.ins.u8x16s[1]);
+    vst1q_u8((sz_u8_t *)&state_ptr->ins.u8x16s[2], state.ins.u8x16s[2]);
+    vst1q_u8((sz_u8_t *)&state_ptr->ins.u8x16s[3], state.ins.u8x16s[3]);
+    state_ptr->ins_length = state.ins_length;
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state) {
