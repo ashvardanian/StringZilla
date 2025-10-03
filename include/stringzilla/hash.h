@@ -211,8 +211,35 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
  */
 SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 
+/**
+ *  @brief  Computes the SHA-256 checksum of a string, producing a 256-bit (32-byte) hash.
+ *          Uses hardware acceleration when available (ARM SHA2 extensions).
+ *
+ *  @param[in] text String to hash.
+ *  @param[in] length Number of bytes in the text.
+ *  @param[out] checksum 32-byte buffer to receive the SHA-256 hash.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/hash.h>
+ *      int main() {
+ *          sz_u8_t hash[32];
+ *          sz_checksum("hello world", 11, hash);
+ *          return 0;
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_checksum_serial, sz_checksum_neon, sz_checksum_sve2
+ */
+SZ_DYNAMIC void sz_checksum(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]);
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_checksum */
+SZ_PUBLIC void sz_checksum_serial(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]);
 
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
@@ -304,6 +331,9 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_ice(sz_hash_state_t const *state);
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
 
+/** @copydoc sz_checksum */
+SZ_PUBLIC void sz_checksum_neon(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]);
+
 #endif
 
 #if SZ_USE_NEON_AES
@@ -355,6 +385,9 @@ SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state, sz_cptr_t text,
 
 /** @copydoc sz_hash_state_digest */
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state);
+
+/** @copydoc sz_checksum */
+SZ_PUBLIC void sz_checksum_sve2(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]);
 
 #endif
 
@@ -872,6 +905,163 @@ SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t n
         generated_vec = sz_emulate_aesenc_si128_serial_(input_vec, key_vec);
         // Export back to the user-supplied buffer
         for (int i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+    }
+}
+
+SZ_PUBLIC void sz_checksum_serial(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]) {
+    // SHA-256 initial hash values (first 32 bits of fractional parts of square roots of first 8 primes)
+    sz_u32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, //
+                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+
+    // SHA-256 round constants (first 32 bits of fractional parts of cube roots of first 64 primes)
+    static sz_u32_t const k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+    // Process message in 512-bit (64-byte) blocks
+    sz_u8_t const *data = (sz_u8_t const *)text;
+    sz_size_t blocks = length / 64;
+
+    for (sz_size_t block = 0; block < blocks; ++block) {
+        sz_u32_t w[64];
+        // Load 16 words (big-endian)
+        for (int i = 0; i < 16; ++i) {
+            w[i] = ((sz_u32_t)data[0] << 24) | ((sz_u32_t)data[1] << 16) | ((sz_u32_t)data[2] << 8) |
+                   ((sz_u32_t)data[3]);
+            data += 4;
+        }
+
+        // Extend to 64 words
+        for (int i = 16; i < 64; ++i) {
+            sz_u32_t s0 = ((w[i - 15] >> 7) | (w[i - 15] << 25)) ^ ((w[i - 15] >> 18) | (w[i - 15] << 14)) ^
+                          (w[i - 15] >> 3);
+            sz_u32_t s1 = ((w[i - 2] >> 17) | (w[i - 2] << 15)) ^ ((w[i - 2] >> 19) | (w[i - 2] << 13)) ^
+                          (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+
+        // Working variables
+        sz_u32_t a = h[0], b = h[1], c = h[2], d = h[3];
+        sz_u32_t e = h[4], f = h[5], g = h[6], h_var = h[7];
+
+        // Main loop
+        for (int i = 0; i < 64; ++i) {
+            sz_u32_t S1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+            sz_u32_t ch = (e & f) ^ (~e & g);
+            sz_u32_t temp1 = h_var + S1 + ch + k[i] + w[i];
+            sz_u32_t S0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+            sz_u32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            sz_u32_t temp2 = S0 + maj;
+
+            h_var = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+
+        // Add to hash
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += h_var;
+    }
+
+    // Handle remaining bytes and padding
+    sz_u8_t final_block[128]; // Two blocks max
+    sz_size_t remaining = length % 64;
+    sz_size_t total_bits = length * 8;
+
+    // Copy remaining bytes
+    for (sz_size_t i = 0; i < remaining; ++i) final_block[i] = data[i];
+
+    // Append '1' bit (0x80)
+    final_block[remaining] = 0x80;
+
+    // Calculate padding
+    sz_size_t pad_len = (remaining < 56) ? (56 - remaining - 1) : (120 - remaining - 1);
+    for (sz_size_t i = 0; i < pad_len; ++i) final_block[remaining + 1 + i] = 0;
+
+    // Append length (big-endian 64-bit)
+    sz_size_t len_offset = remaining + 1 + pad_len;
+    final_block[len_offset + 0] = (sz_u8_t)(total_bits >> 56);
+    final_block[len_offset + 1] = (sz_u8_t)(total_bits >> 48);
+    final_block[len_offset + 2] = (sz_u8_t)(total_bits >> 40);
+    final_block[len_offset + 3] = (sz_u8_t)(total_bits >> 32);
+    final_block[len_offset + 4] = (sz_u8_t)(total_bits >> 24);
+    final_block[len_offset + 5] = (sz_u8_t)(total_bits >> 16);
+    final_block[len_offset + 6] = (sz_u8_t)(total_bits >> 8);
+    final_block[len_offset + 7] = (sz_u8_t)(total_bits);
+
+    // Process final block(s)
+    sz_size_t final_blocks = (remaining < 56) ? 1 : 2;
+    data = final_block;
+    for (sz_size_t block = 0; block < final_blocks; ++block) {
+        sz_u32_t w[64];
+        for (int i = 0; i < 16; ++i) {
+            w[i] = ((sz_u32_t)data[0] << 24) | ((sz_u32_t)data[1] << 16) | ((sz_u32_t)data[2] << 8) |
+                   ((sz_u32_t)data[3]);
+            data += 4;
+        }
+
+        for (int i = 16; i < 64; ++i) {
+            sz_u32_t s0 = ((w[i - 15] >> 7) | (w[i - 15] << 25)) ^ ((w[i - 15] >> 18) | (w[i - 15] << 14)) ^
+                          (w[i - 15] >> 3);
+            sz_u32_t s1 = ((w[i - 2] >> 17) | (w[i - 2] << 15)) ^ ((w[i - 2] >> 19) | (w[i - 2] << 13)) ^
+                          (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+
+        sz_u32_t a = h[0], b = h[1], c = h[2], d = h[3];
+        sz_u32_t e = h[4], f = h[5], g = h[6], h_var = h[7];
+
+        for (int i = 0; i < 64; ++i) {
+            sz_u32_t S1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+            sz_u32_t ch = (e & f) ^ (~e & g);
+            sz_u32_t temp1 = h_var + S1 + ch + k[i] + w[i];
+            sz_u32_t S0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+            sz_u32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            sz_u32_t temp2 = S0 + maj;
+
+            h_var = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += h_var;
+    }
+
+    // Output hash (big-endian)
+    for (int i = 0; i < 8; ++i) {
+        checksum[i * 4 + 0] = (sz_u8_t)(h[i] >> 24);
+        checksum[i * 4 + 1] = (sz_u8_t)(h[i] >> 16);
+        checksum[i * 4 + 2] = (sz_u8_t)(h[i] >> 8);
+        checksum[i * 4 + 3] = (sz_u8_t)(h[i]);
     }
 }
 
@@ -2223,6 +2413,197 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
+SZ_PUBLIC void sz_checksum_neon(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]) {
+    // SHA-256 initial hash values
+    uint32x4_t state0 = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a};
+    uint32x4_t state1 = {0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+
+    sz_u8_t const *data = (sz_u8_t const *)text;
+    sz_size_t blocks = length / 64;
+
+    // Check if SHA2 hardware acceleration is available
+#if defined(__ARM_FEATURE_CRYPTO)
+    // SHA-256 round constants
+    static sz_u32_t const k0_3[4] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5};
+    static sz_u32_t const k4_7[4] = {0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5};
+    static sz_u32_t const k8_11[4] = {0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3};
+    static sz_u32_t const k12_15[4] = {0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174};
+    static sz_u32_t const k16_19[4] = {0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc};
+    static sz_u32_t const k20_23[4] = {0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da};
+    static sz_u32_t const k24_27[4] = {0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7};
+    static sz_u32_t const k28_31[4] = {0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967};
+    static sz_u32_t const k32_35[4] = {0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13};
+    static sz_u32_t const k36_39[4] = {0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85};
+    static sz_u32_t const k40_43[4] = {0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3};
+    static sz_u32_t const k44_47[4] = {0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070};
+    static sz_u32_t const k48_51[4] = {0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5};
+    static sz_u32_t const k52_55[4] = {0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3};
+    static sz_u32_t const k56_59[4] = {0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208};
+    static sz_u32_t const k60_63[4] = {0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+    // Process 64-byte blocks with hardware SHA-256
+    for (sz_size_t block = 0; block < blocks; ++block) {
+        uint32x4_t msg0, msg1, msg2, msg3;
+        uint32x4_t tmp0, tmp2;
+        uint32x4_t abcd_save = state0;
+        uint32x4_t efgh_save = state1;
+
+        // Load message (reverse bytes for big-endian)
+        msg0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data)));
+        msg1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data + 16)));
+        msg2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data + 32)));
+        msg3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data + 48)));
+        data += 64;
+
+        // Rounds 0-3
+        tmp0 = vaddq_u32(msg0, vld1q_u32(k0_3));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg0 = vsha256su0q_u32(msg0, msg1);
+
+        // Rounds 4-7
+        tmp0 = vaddq_u32(msg1, vld1q_u32(k4_7));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        msg1 = vsha256su0q_u32(msg1, msg2);
+
+        // Rounds 8-11
+        tmp0 = vaddq_u32(msg2, vld1q_u32(k8_11));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        msg2 = vsha256su0q_u32(msg2, msg3);
+
+        // Rounds 12-15
+        tmp0 = vaddq_u32(msg3, vld1q_u32(k12_15));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        msg3 = vsha256su0q_u32(msg3, msg0);
+
+        // Rounds 16-19
+        tmp0 = vaddq_u32(msg0, vld1q_u32(k16_19));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+        msg0 = vsha256su0q_u32(msg0, msg1);
+
+        // Rounds 20-23
+        tmp0 = vaddq_u32(msg1, vld1q_u32(k20_23));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        msg1 = vsha256su0q_u32(msg1, msg2);
+
+        // Rounds 24-27
+        tmp0 = vaddq_u32(msg2, vld1q_u32(k24_27));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        msg2 = vsha256su0q_u32(msg2, msg3);
+
+        // Rounds 28-31
+        tmp0 = vaddq_u32(msg3, vld1q_u32(k28_31));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        msg3 = vsha256su0q_u32(msg3, msg0);
+
+        // Rounds 32-35
+        tmp0 = vaddq_u32(msg0, vld1q_u32(k32_35));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+        msg0 = vsha256su0q_u32(msg0, msg1);
+
+        // Rounds 36-39
+        tmp0 = vaddq_u32(msg1, vld1q_u32(k36_39));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        msg1 = vsha256su0q_u32(msg1, msg2);
+
+        // Rounds 40-43
+        tmp0 = vaddq_u32(msg2, vld1q_u32(k40_43));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        msg2 = vsha256su0q_u32(msg2, msg3);
+
+        // Rounds 44-47
+        tmp0 = vaddq_u32(msg3, vld1q_u32(k44_47));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        msg3 = vsha256su0q_u32(msg3, msg0);
+
+        // Rounds 48-51
+        tmp0 = vaddq_u32(msg0, vld1q_u32(k48_51));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+
+        // Rounds 52-55
+        tmp0 = vaddq_u32(msg1, vld1q_u32(k52_55));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+
+        // Rounds 56-59
+        tmp0 = vaddq_u32(msg2, vld1q_u32(k56_59));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+
+        // Rounds 60-63
+        tmp0 = vaddq_u32(msg3, vld1q_u32(k60_63));
+        tmp2 = state1;
+        state1 = vsha256hq_u32(state1, state0, tmp0);
+        state0 = vsha256h2q_u32(state0, tmp2, tmp0);
+
+        // Add back to state
+        state0 = vaddq_u32(state0, abcd_save);
+        state1 = vaddq_u32(state1, efgh_save);
+    }
+
+    // Handle padding using serial implementation for tail
+    sz_size_t processed = blocks * 64;
+    if (processed < length) {
+        sz_u8_t temp_checksum[32];
+        sz_checksum_serial(text, length, temp_checksum);
+        for (int i = 0; i < 32; ++i) checksum[i] = temp_checksum[i];
+        return;
+    }
+
+    // Store result (reverse bytes back to big-endian)
+    uint8x16_t result0 = vrev32q_u8(vreinterpretq_u8_u32(state0));
+    uint8x16_t result1 = vrev32q_u8(vreinterpretq_u8_u32(state1));
+    vst1q_u8(checksum, result0);
+    vst1q_u8(checksum + 16, result1);
+#else
+    // No hardware SHA-256, fall back to serial
+    (void)state0; // Suppress unused variable warnings
+    (void)state1;
+    (void)data;
+    (void)blocks;
+    sz_checksum_serial(text, length, checksum);
+#endif
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -2902,6 +3283,11 @@ SZ_PUBLIC void sz_hash_sve2_upto16x16_(char texts[16][16], sz_size_t length[16],
 }
 #endif
 
+SZ_PUBLIC void sz_checksum_sve2(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]) {
+    // SVE2 doesn't have specialized SHA-256 instructions, fall back to NEON
+    sz_checksum_neon(text, length, checksum);
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -3011,6 +3397,16 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_hash_state_digest_neon(state);
 #else
     return sz_hash_state_digest_serial(state);
+#endif
+}
+
+SZ_DYNAMIC void sz_checksum(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]) {
+#if SZ_USE_SVE2_AES
+    sz_checksum_sve2(text, length, checksum);
+#elif SZ_USE_NEON
+    sz_checksum_neon(text, length, checksum);
+#else
+    sz_checksum_serial(text, length, checksum);
 #endif
 }
 
