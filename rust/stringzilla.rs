@@ -168,7 +168,7 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
 }
 
 use core::fmt::{self, Write};
-use core::{ffi::c_void, ffi::CStr};
+use core::ffi::{c_char, c_void, CStr};
 
 // Import the functions from the StringZillable C library.
 extern "C" {
@@ -461,7 +461,7 @@ pub type SmallCString = FixedCString<256>;
 pub(crate) fn capabilities_from_enum(caps: u32) -> SmallCString {
     let caps_ptr = unsafe { sz_capabilities_to_string(caps) };
     // Assume that the external function returns a valid null-terminated C string.
-    let cstr = unsafe { CStr::from_ptr(caps_ptr as *const i8) };
+    let cstr = unsafe { CStr::from_ptr(caps_ptr as *const c_char) };
     let bytes = cstr.to_bytes();
 
     let mut buf = SmallCString::new();
