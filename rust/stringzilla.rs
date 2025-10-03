@@ -333,7 +333,7 @@ impl core::hash::Hasher for Hasher {
     }
     #[inline]
     fn write_i8(&mut self, i: i8) {
-        self.write(&[i as u8]);
+        self.write(&i.to_le_bytes());
     }
     #[inline]
     fn write_i16(&mut self, i: i16) {
@@ -499,8 +499,7 @@ where
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
     let text_length = text_ref.len();
-    let result = unsafe { sz_bytesum(text_pointer, text_length) };
-    return result;
+    unsafe { sz_bytesum(text_pointer, text_length) }
 }
 
 /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
@@ -657,8 +656,7 @@ where
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
     let text_length = text_ref.len();
-    let result = unsafe { sz_hash(text_pointer, text_length, seed) };
-    return result;
+    unsafe { sz_hash(text_pointer, text_length, seed) }
 }
 
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
@@ -710,7 +708,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -744,7 +742,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -774,7 +772,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -803,7 +801,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 

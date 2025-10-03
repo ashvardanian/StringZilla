@@ -615,6 +615,14 @@ export RUST_BACKTRACE=full
 cargo test -- --test-threads=1 --nocapture
 ```
 
+To polish code before pushing:
+
+```bash
+cargo clippy --lib                  # check the library code
+cargo clippy --lib -- -D warnings   # to fail on warnings
+cargo clean && cargo build --lib    # to force a clean build
+```
+
 If you are updating the package contents, you can validate the list of included files using the following command:
 
 ```bash
