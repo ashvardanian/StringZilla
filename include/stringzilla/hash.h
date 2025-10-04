@@ -2827,8 +2827,27 @@ SZ_PUBLIC sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64
 
 SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_neon(state, seed); }
 
-SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    sz_hash_state_update_neon(state, text, length);
+SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
+
+#if 0
+    // Handle small updates that stay within the current block using SVE predication
+    sz_size_t const current_block_index = state_ptr->ins_length / 64;
+    sz_size_t const final_block_index = (state_ptr->ins_length + length) / 64;
+    int const stays_in_the_block = current_block_index == final_block_index;
+    int const fills_the_block = (state_ptr->ins_length + length) % 64 == 0;
+    if (stays_in_the_block && !fills_the_block) {
+        // Single predicated load and store - beautiful!
+        sz_size_t offset = state_ptr->ins_length % 64;
+        svbool_t mask = svwhilelt_b8(0, length);
+        svuint8_t data = svld1_u8(mask, (sz_u8_t const *)text);
+        svst1_u8(mask, state_ptr->ins.u8s + offset, data);
+        state_ptr->ins_length += length;
+        return;
+    }
+#endif
+
+    // For everything else, fall back to NEON
+    sz_hash_state_update_neon(state_ptr, text, length);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state) { //
@@ -2837,7 +2856,122 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state) { //
 
 SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) { return sz_hash_sve2_upto16_(text, length, seed); }
-    else { return sz_hash_neon(text, length, seed); }
+    else if (length <= 32) {
+        // Use SVE predicated non-temporal loads - no shifting needed!
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_neon_(&state, seed);
+
+        sz_u128_vec_t data0_vec, data1_vec;
+        svbool_t ptrue = svptrue_b8();
+        sz_size_t tail_len = length - 16;
+        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
+
+        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
+        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 16)));
+
+        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
+        return sz_hash_minimal_finalize_neon_(&state, length);
+    }
+    else if (length <= 48) {
+        // Use SVE predicated non-temporal loads
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_neon_(&state, seed);
+
+        sz_u128_vec_t data0_vec, data1_vec, data2_vec;
+        svbool_t ptrue = svptrue_b8();
+        sz_size_t tail_len = length - 32;
+        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
+
+        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
+        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 16)));
+        data2_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 32)));
+
+        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
+        return sz_hash_minimal_finalize_neon_(&state, length);
+    }
+    else if (length <= 64) {
+        // Use SVE predicated non-temporal loads
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_neon_(&state, seed);
+
+        sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
+        svbool_t ptrue = svptrue_b8();
+        sz_size_t tail_len = length - 48;
+        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
+
+        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
+        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 16)));
+        data2_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 32)));
+        data3_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 48)));
+
+        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
+        sz_hash_minimal_update_neon_(&state, data3_vec.u8x16);
+        return sz_hash_minimal_finalize_neon_(&state, length);
+    }
+    else {
+        // For large hashes (>64 bytes), use SVE non-temporal loads with NEON AES processing
+        sz_align_(64) sz_hash_state_t state;
+        sz_hash_state_init_neon(&state, seed);
+
+        // Align pointer to 16-byte boundary for optimal performance
+        sz_u8_t const *data_ptr = (sz_u8_t const *)text;
+        sz_size_t misalignment = (sz_size_t)data_ptr & 15;
+
+        svbool_t ptrue = svptrue_b8();
+
+        // Create index vector for table lookup (0..15 + offset for extraction)
+        sz_u8_t indices[16];
+        for (sz_size_t i = 0; i < 16; ++i) { indices[i] = (sz_u8_t)(misalignment + i); }
+        svuint8_t idx_low = svld1_u8(ptrue, indices);
+
+        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+            // Load 5 aligned 16-byte chunks (80 bytes total)
+            sz_u8_t const *aligned_ptr = (sz_u8_t const *)((sz_size_t)(data_ptr + state.ins_length) & ~15);
+            svuint8_t sve_vec0 = svld1_u8(ptrue, aligned_ptr + 0);
+            svuint8_t sve_vec1 = svld1_u8(ptrue, aligned_ptr + 16);
+            svuint8_t sve_vec2 = svld1_u8(ptrue, aligned_ptr + 32);
+            svuint8_t sve_vec3 = svld1_u8(ptrue, aligned_ptr + 48);
+            svuint8_t sve_vec4 = svld1_u8(ptrue, aligned_ptr + 64);
+
+            // Extract 4 aligned 16-byte chunks using svtbl2 (2-register table lookup)
+            svuint8x2_t table01 = svcreate2_u8(sve_vec0, sve_vec1);
+            svuint8x2_t table12 = svcreate2_u8(sve_vec1, sve_vec2);
+            svuint8x2_t table23 = svcreate2_u8(sve_vec2, sve_vec3);
+            svuint8x2_t table34 = svcreate2_u8(sve_vec3, sve_vec4);
+
+            svuint8_t extracted0 = svtbl2_u8(table01, idx_low);
+            svuint8_t extracted1 = svtbl2_u8(table12, idx_low);
+            svuint8_t extracted2 = svtbl2_u8(table23, idx_low);
+            svuint8_t extracted3 = svtbl2_u8(table34, idx_low);
+
+            // Convert to NEON for AES processing
+            state.ins.u8x16s[0] = svget_neonq_u8(extracted0);
+            state.ins.u8x16s[1] = svget_neonq_u8(extracted1);
+            state.ins.u8x16s[2] = svget_neonq_u8(extracted2);
+            state.ins.u8x16s[3] = svget_neonq_u8(extracted3);
+
+            sz_hash_state_update_neon_(&state);
+        }
+
+        // Handle the tail, resetting the registers to zero first
+        if (state.ins_length < length) {
+            state.ins.u8x16s[0] = vdupq_n_u8(0);
+            state.ins.u8x16s[1] = vdupq_n_u8(0);
+            state.ins.u8x16s[2] = vdupq_n_u8(0);
+            state.ins.u8x16s[3] = vdupq_n_u8(0);
+            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
+                state.ins.u8s[i] = text[state.ins_length];
+            sz_hash_state_update_neon_(&state);
+            state.ins_length = length;
+        }
+
+        return sz_hash_state_finalize_neon_(&state);
+    }
 }
 
 SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
