@@ -2771,82 +2771,24 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 #endif
 
 /**
- *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
- *  @see    "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
- *          https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ *  @brief  SVE2 hash functions currently delegate to NEON for optimal performance.
+ *  @see    draft/hash.h for experimental SVE2 implementations.
+ *
+ *  Vanilla SVE could have helped optimized loads & stores with predicated instructions,
+ *  but the `mov` between Z and Q registers isn't free. Moreover, those "bridge" moving
+ *  instructions are designed for the bottom 128 bits of the state. Using "stores" for
+ *  larger 256-bit registers isn't fast either.
+ *
+ *  SVE2 comes with optional AES extensions, but they don't yield absolutely any performance
+ *  improvements even for wider registers due to the added cost and complexity of dealing with
+ *  predicates.
  */
-SZ_INTERNAL svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_vec, svuint8_t round_key_vec) {
-    return sveor_u8_x(svptrue_b8(), svaesmc_u8(svaese_u8(state_vec, svdup_n_u8(0))), round_key_vec);
+
+SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { //
+    sz_hash_state_init_neon(state, seed);
 }
-
-SZ_INTERNAL svuint64_t sz_emulate_aesenc_u64x2_sve2_(svuint64_t state_vec, svuint64_t round_key_vec) {
-    return svreinterpret_u64_u8(sz_emulate_aesenc_u8x16_sve2_( //
-        svreinterpret_u8_u64(state_vec),                       //
-        svreinterpret_u8_u64(round_key_vec)));
-}
-
-/** @brief A variant of `sz_hash_sve2` for strings up to 16 bytes long - smallest SVE register size. */
-SZ_PUBLIC sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
-    svuint8_t state_aes, state_sum, state_key;
-
-    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
-    state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
-    svbool_t const all64 = svptrue_b64();
-    svbool_t const all8 = svptrue_b8();
-
-    // XOR the user-supplied keys with the two "pi" constants
-    sz_u64_t const *pi = sz_hash_pi_constants_();
-    svuint64_t pi0 = svld1_u64(all64, pi);
-    svuint64_t pi1 = svld1_u64(all64, pi + 8);
-    state_aes = sveor_u8_x(all8, state_key, svreinterpret_u8_u64(pi0));
-    state_sum = sveor_u8_x(all8, state_key, svreinterpret_u8_u64(pi1));
-
-    // We will only use the first 128 bits of the shuffle mask
-    svuint8_t const order = svld1_u8(all8, sz_hash_u8x16x4_shuffle_());
-
-    // This is our best case for SVE2 dominance over NEON - we can load the data in one go with a predicate.
-    svuint8_t block = svld1_u8(svwhilelt_b8((sz_u64_t)0, (sz_u64_t)length), (sz_u8_t const *)text);
-    // One round of hashing logic
-    state_aes = sz_emulate_aesenc_u8x16_sve2_(state_aes, block);
-    svuint8_t sum_shuffled = svtbl_u8(state_sum, order);
-    state_sum =
-        svreinterpret_u8_u64(svadd_u64_x(all64, svreinterpret_u64_u8(sum_shuffled), svreinterpret_u64_u8(block)));
-
-    // Now mix, folding the length into the key
-    svuint64_t key_with_length = svadd_u64_x(all64, svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
-    // Combine the "sum" and the "AES" blocks
-    svuint8_t mixed = sz_emulate_aesenc_u8x16_sve2_(state_sum, state_aes);
-    // Make sure the "key" mixes enough with the state,
-    // as with less than 2 rounds - SMHasher fails
-    svuint8_t mixed_in_register = sz_emulate_aesenc_u8x16_sve2_(
-        sz_emulate_aesenc_u8x16_sve2_(mixed, svreinterpret_u8_u64(key_with_length)), mixed);
-    // Extract the low 64 bits
-    svuint64_t mixed_in_register_u64 = svreinterpret_u64_u8(mixed_in_register);
-    return svlasta_u64(all64, mixed_in_register_u64); // Extract the first element
-}
-
-SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_neon(state, seed); }
 
 SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
-
-#if 0
-    // Handle small updates that stay within the current block using SVE predication
-    sz_size_t const current_block_index = state_ptr->ins_length / 64;
-    sz_size_t const final_block_index = (state_ptr->ins_length + length) / 64;
-    int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->ins_length + length) % 64 == 0;
-    if (stays_in_the_block && !fills_the_block) {
-        // Single predicated load and store - beautiful!
-        sz_size_t offset = state_ptr->ins_length % 64;
-        svbool_t mask = svwhilelt_b8(0, length);
-        svuint8_t data = svld1_u8(mask, (sz_u8_t const *)text);
-        svst1_u8(mask, state_ptr->ins.u8s + offset, data);
-        state_ptr->ins_length += length;
-        return;
-    }
-#endif
-
-    // For everything else, fall back to NEON
     sz_hash_state_update_neon(state_ptr, text, length);
 }
 
@@ -2855,186 +2797,12 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state) { //
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
-    if (length <= 16) { return sz_hash_sve2_upto16_(text, length, seed); }
-    else if (length <= 32) {
-        // Use SVE predicated non-temporal loads - no shifting needed!
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_neon_(&state, seed);
-
-        sz_u128_vec_t data0_vec, data1_vec;
-        svbool_t ptrue = svptrue_b8();
-        sz_size_t tail_len = length - 16;
-        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
-
-        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
-        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 16)));
-
-        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
-        return sz_hash_minimal_finalize_neon_(&state, length);
-    }
-    else if (length <= 48) {
-        // Use SVE predicated non-temporal loads
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_neon_(&state, seed);
-
-        sz_u128_vec_t data0_vec, data1_vec, data2_vec;
-        svbool_t ptrue = svptrue_b8();
-        sz_size_t tail_len = length - 32;
-        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
-
-        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
-        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 16)));
-        data2_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 32)));
-
-        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
-        return sz_hash_minimal_finalize_neon_(&state, length);
-    }
-    else if (length <= 64) {
-        // Use SVE predicated non-temporal loads
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_neon_(&state, seed);
-
-        sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
-        svbool_t ptrue = svptrue_b8();
-        sz_size_t tail_len = length - 48;
-        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)tail_len);
-
-        data0_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 0)));
-        data1_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 16)));
-        data2_vec.u8x16 = svget_neonq_u8(svldnt1_u8(ptrue, (sz_u8_t const *)(text + 32)));
-        data3_vec.u8x16 = svget_neonq_u8(svldnt1_u8(tail_mask, (sz_u8_t const *)(text + 48)));
-
-        sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
-        sz_hash_minimal_update_neon_(&state, data3_vec.u8x16);
-        return sz_hash_minimal_finalize_neon_(&state, length);
-    }
-    else {
-        // For large hashes (>64 bytes), use SVE non-temporal loads with NEON AES processing
-        sz_align_(64) sz_hash_state_t state;
-        sz_hash_state_init_neon(&state, seed);
-
-        // Align pointer to 16-byte boundary for optimal performance
-        sz_u8_t const *data_ptr = (sz_u8_t const *)text;
-        sz_size_t misalignment = (sz_size_t)data_ptr & 15;
-
-        svbool_t ptrue = svptrue_b8();
-
-        // Create index vector for table lookup (0..15 + offset for extraction)
-        sz_u8_t indices[16];
-        for (sz_size_t i = 0; i < 16; ++i) { indices[i] = (sz_u8_t)(misalignment + i); }
-        svuint8_t idx_low = svld1_u8(ptrue, indices);
-
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            // Load 5 aligned 16-byte chunks (80 bytes total)
-            sz_u8_t const *aligned_ptr = (sz_u8_t const *)((sz_size_t)(data_ptr + state.ins_length) & ~15);
-            svuint8_t sve_vec0 = svld1_u8(ptrue, aligned_ptr + 0);
-            svuint8_t sve_vec1 = svld1_u8(ptrue, aligned_ptr + 16);
-            svuint8_t sve_vec2 = svld1_u8(ptrue, aligned_ptr + 32);
-            svuint8_t sve_vec3 = svld1_u8(ptrue, aligned_ptr + 48);
-            svuint8_t sve_vec4 = svld1_u8(ptrue, aligned_ptr + 64);
-
-            // Extract 4 aligned 16-byte chunks using svtbl2 (2-register table lookup)
-            svuint8x2_t table01 = svcreate2_u8(sve_vec0, sve_vec1);
-            svuint8x2_t table12 = svcreate2_u8(sve_vec1, sve_vec2);
-            svuint8x2_t table23 = svcreate2_u8(sve_vec2, sve_vec3);
-            svuint8x2_t table34 = svcreate2_u8(sve_vec3, sve_vec4);
-
-            svuint8_t extracted0 = svtbl2_u8(table01, idx_low);
-            svuint8_t extracted1 = svtbl2_u8(table12, idx_low);
-            svuint8_t extracted2 = svtbl2_u8(table23, idx_low);
-            svuint8_t extracted3 = svtbl2_u8(table34, idx_low);
-
-            // Convert to NEON for AES processing
-            state.ins.u8x16s[0] = svget_neonq_u8(extracted0);
-            state.ins.u8x16s[1] = svget_neonq_u8(extracted1);
-            state.ins.u8x16s[2] = svget_neonq_u8(extracted2);
-            state.ins.u8x16s[3] = svget_neonq_u8(extracted3);
-
-            sz_hash_state_update_neon_(&state);
-        }
-
-        // Handle the tail, resetting the registers to zero first
-        if (state.ins_length < length) {
-            state.ins.u8x16s[0] = vdupq_n_u8(0);
-            state.ins.u8x16s[1] = vdupq_n_u8(0);
-            state.ins.u8x16s[2] = vdupq_n_u8(0);
-            state.ins.u8x16s[3] = vdupq_n_u8(0);
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins.u8s[i] = text[state.ins_length];
-            sz_hash_state_update_neon_(&state);
-            state.ins_length = length;
-        }
-
-        return sz_hash_state_finalize_neon_(&state);
-    }
+    return sz_hash_neon(text, length, seed);
 }
 
 SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_fill_random_neon(text, length, nonce);
 }
-
-#if 0
-/**
- *  @brief  A helper function for computing 16x packed string hashes for strings up to 16 bytes long.
- *          The number 16 is derived from 2048 bits (256 bytes) being the maximum size of the SVE register
- *          and the AES block size being 128 bits (16 bytes). So in the largest SVE register, we can fit
- *          16 such individual AES blocks.
- *          It's relevant for set intersection operations and is faster than hashing each string individually.
- */
-SZ_PUBLIC void sz_hash_sve2_upto16x16_(char texts[16][16], sz_size_t length[16], sz_u64_t seed, sz_u64_t hashes[16]) {
-    svuint8_t state_aes, state_sum, state_key;
-
-    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
-    state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
-
-    // XOR the user-supplied keys with the two "pi" constants
-    sz_u64_t const *pi = sz_hash_pi_constants_();
-    svuint64_t pi0 = svdupq_n_u64(pi[0], pi[1]);
-    svuint64_t pi1 = svdupq_n_u64(pi[8], pi[9]);
-    state_aes = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi0));
-    state_sum = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi1));
-
-    // We will only use the first 128 bits of the shuffle mask
-    sz_u8_t const *order = sz_hash_u8x16x4_shuffle_();
-    svuint8_t const order = svreinterpret_u8_u64(svdupq_n_u64( //
-        *(sz_u64_t const *)(order + 0),                        //
-        *(sz_u64_t const *)(order + 8)));
-    svuint8_t const sum_shuffled = svtbl_u8(state_sum, order);
-
-    // Loop throughthe input until we process all the bytes
-    sz_size_t const bytes_per_register = svcntb();
-    sz_size_t const texts_per_register = bytes_per_register / 16;
-    for (sz_size_t progress_bytes = 0; progress_bytes < 256; progress_bytes += bytes_per_register) {
-        svuint8_t blocks =
-            svld1_u8(svwhilelt_b8((sz_u64_t)progress_bytes, (sz_u64_t)256), (sz_u8_t const *)(&texts[0][0] + progress_bytes));
-
-        // One round of hashing logic for multiple blocks
-        svuint8_t blocks_aes = sz_emulate_aesenc_u8x16_sve2_(state_aes, blocks);
-        svuint8_t blocks_sum = svreinterpret_u8_u64(
-            svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(sum_shuffled), svreinterpret_u64_u8(blocks)));
-
-        // Now mix, folding the length into the key
-        svuint64_t key_with_lengths =
-            svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
-
-        // Combine the "sum" and the "AES" blocks
-        svuint8_t mixed = sz_emulate_aesenc_u8x16_sve2_(blocks_sum, blocks_aes);
-
-        // Make sure the "key" mixes enough with the state,
-        // as with less than 2 rounds - SMHasher fails
-        svuint8_t mixed_in_register = sz_emulate_aesenc_u8x16_sve2_(
-            sz_emulate_aesenc_u8x16_sve2_(mixed, svreinterpret_u8_u64(key_with_lengths)), mixed);
-
-        // Extract the low 64 bits from each lane
-        svuint64_t mixed_in_register_u64 = svreinterpret_u64_u8(mixed_in_register);
-    }
-}
-#endif
 
 #if defined(__clang__)
 #pragma clang attribute pop
