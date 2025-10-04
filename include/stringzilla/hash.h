@@ -187,6 +187,17 @@ typedef struct sz_hash_minimal_t_ {
 } sz_hash_minimal_t_;
 
 /**
+ *  @brief  The state for incremental construction of a SHA256 hash.
+ *  @see    sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest.
+ */
+typedef struct sz_sha256_state_t {
+    sz_u256_vec_t hash;     ///< Current hash state: 8x 32-bit values (h0-h7)
+    sz_u512_vec_t block;    ///< 64-byte message block buffer
+    sz_size_t block_length; ///< Current bytes in block (0-63)
+    sz_u64_t total_length;  ///< Total message length in bytes
+} sz_sha256_state_t;
+
+/**
  *  @brief  Initializes the state for incremental construction of a hash.
  *
  *  @param[out] state The state to initialize.
@@ -210,6 +221,30 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
  *  @return The 64-bit hash value.
  */
 SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
+
+/**
+ *  @brief  Initializes the state for incremental SHA256 hashing.
+ *
+ *  @param[out] state The state to initialize.
+ */
+SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state);
+
+/**
+ *  @brief  Updates the SHA256 state with new data.
+ *
+ *  @param[inout] state The state to update.
+ *  @param[in] data The new data to hash.
+ *  @param[in] length The number of bytes in the new data.
+ */
+SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+
+/**
+ *  @brief  Finalizes the SHA256 state and returns the hash.
+ *
+ *  @param[in] state The state to finalize.
+ *  @param[out] digest Output buffer for the 32-byte (256-bit) hash.
+ */
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest);
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
@@ -559,6 +594,46 @@ SZ_INTERNAL sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
     return &shuffle[0];
 }
 
+/**
+ *  @brief  SHA256 initial hash values: first 32 bits of fractional parts of square roots of first 8 primes.
+ *  @return Pointer to 8x 32-bit constants, aligned to 64 bytes.
+ *  @see    FIPS 180-4 Section 5.3.3
+ */
+SZ_INTERNAL sz_u32_t const *sz_sha256_initial_hash_(void) {
+    static sz_align_(64) sz_u32_t const h[8] = {
+        0x6a09e667ul, 0xbb67ae85ul, 0x3c6ef372ul, 0xa54ff53aul, //
+        0x510e527ful, 0x9b05688cul, 0x1f83d9abul, 0x5be0cd19ul, //
+    };
+    return &h[0];
+}
+
+/**
+ *  @brief  SHA256 round constants: first 32 bits of fractional parts of cube roots of first 64 primes.
+ *  @return Pointer to 64x 32-bit constants, aligned to 64 bytes.
+ *  @see    FIPS 180-4 Section 4.2.2
+ */
+SZ_INTERNAL sz_u32_t const *sz_sha256_round_constants_(void) {
+    static sz_align_(64) sz_u32_t const k[64] = {
+        0x428a2f98ul, 0x71374491ul, 0xb5c0fbcful, 0xe9b5dba5ul, //
+        0x3956c25bul, 0x59f111f1ul, 0x923f82a4ul, 0xab1c5ed5ul, //
+        0xd807aa98ul, 0x12835b01ul, 0x243185beul, 0x550c7dc3ul, //
+        0x72be5d74ul, 0x80deb1feul, 0x9bdc06a7ul, 0xc19bf174ul, //
+        0xe49b69c1ul, 0xefbe4786ul, 0x0fc19dc6ul, 0x240ca1ccul, //
+        0x2de92c6ful, 0x4a7484aaul, 0x5cb0a9dcul, 0x76f988daul, //
+        0x983e5152ul, 0xa831c66dul, 0xb00327c8ul, 0xbf597fc7ul, //
+        0xc6e00bf3ul, 0xd5a79147ul, 0x06ca6351ul, 0x14292967ul, //
+        0x27b70a85ul, 0x2e1b2138ul, 0x4d2c6dfcul, 0x53380d13ul, //
+        0x650a7354ul, 0x766a0abbul, 0x81c2c92eul, 0x92722c85ul, //
+        0xa2bfe8a1ul, 0xa81a664bul, 0xc24b8b70ul, 0xc76c51a3ul, //
+        0xd192e819ul, 0xd6990624ul, 0xf40e3585ul, 0x106aa070ul, //
+        0x19a4c116ul, 0x1e376c08ul, 0x2748774cul, 0x34b0bcb5ul, //
+        0x391c0cb3ul, 0x4ed8aa4aul, 0x5b9cca4ful, 0x682e6ff3ul, //
+        0x748f82eeul, 0x78a5636ful, 0x84c87814ul, 0x8cc70208ul, //
+        0x90befffaul, 0xa4506cebul, 0xbef9a3f7ul, 0xc67178f2ul, //
+    };
+    return &k[0];
+}
+
 SZ_INTERNAL void sz_hash_minimal_init_serial_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
@@ -858,6 +933,205 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state) {
         return sz_hash_minimal_finalize_serial_(&minimal_state, length);
     }
 }
+
+#pragma region Serial SHA256 Implementation
+
+/**
+ *  @brief  SHA256 rotate right operation.
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_rotr_(sz_u32_t value, sz_u32_t count) {
+    return (value >> count) | (value << (32 - count));
+}
+
+/**
+ *  @brief  SHA256 Ch (choose) function: (x AND y) XOR (NOT x AND z).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_ch_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (~x & z); }
+
+/**
+ *  @brief  SHA256 Maj (majority) function: (x AND y) XOR (x AND z) XOR (y AND z).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_maj_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
+
+/**
+ *  @brief  SHA256 Sigma0 function: ROTR(x,2) XOR ROTR(x,13) XOR ROTR(x,22).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_sigma0_(sz_u32_t x) {
+    return sz_sha256_rotr_(x, 2) ^ sz_sha256_rotr_(x, 13) ^ sz_sha256_rotr_(x, 22);
+}
+
+/**
+ *  @brief  SHA256 Sigma1 function: ROTR(x,6) XOR ROTR(x,11) XOR ROTR(x,25).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_sigma1_(sz_u32_t x) {
+    return sz_sha256_rotr_(x, 6) ^ sz_sha256_rotr_(x, 11) ^ sz_sha256_rotr_(x, 25);
+}
+
+/**
+ *  @brief  SHA256 sigma0 function: ROTR(x,7) XOR ROTR(x,18) XOR SHR(x,3).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_sigma0_lower_(sz_u32_t x) {
+    return sz_sha256_rotr_(x, 7) ^ sz_sha256_rotr_(x, 18) ^ (x >> 3);
+}
+
+/**
+ *  @brief  SHA256 sigma1 function: ROTR(x,17) XOR ROTR(x,19) XOR SHR(x,10).
+ */
+SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
+    return sz_sha256_rotr_(x, 17) ^ sz_sha256_rotr_(x, 19) ^ (x >> 10);
+}
+
+/**
+ *  @brief  Process a single 512-bit (64-byte) block of data using SHA256.
+ *  @param  hash    Pointer to 8x 32-bit hash values (h0-h7), modified in place.
+ *  @param  block   Pointer to 64-byte message block.
+ */
+SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+    sz_u32_t const *round_constants = sz_sha256_round_constants_();
+    sz_u32_t message_schedule[64];
+    sz_u32_t a, b, c, d, e, f, g, h, temp1, temp2;
+
+    // Prepare the message schedule (W0-W63)
+    for (sz_size_t i = 0; i < 16; ++i) {
+        // Read big-endian 32-bit words from the block
+        message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
+                              ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
+    }
+    for (sz_size_t i = 16; i < 64; ++i) {
+        message_schedule[i] = sz_sha256_sigma1_lower_(message_schedule[i - 2]) + message_schedule[i - 7] +
+                              sz_sha256_sigma0_lower_(message_schedule[i - 15]) + message_schedule[i - 16];
+    }
+
+    // Initialize working variables
+    a = hash[0];
+    b = hash[1];
+    c = hash[2];
+    d = hash[3];
+    e = hash[4];
+    f = hash[5];
+    g = hash[6];
+    h = hash[7];
+
+    // Main compression loop (64 rounds)
+    for (sz_size_t i = 0; i < 64; ++i) {
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i];
+        temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
+        h = g;
+        g = f;
+        f = e;
+        e = d + temp1;
+        d = c;
+        c = b;
+        b = a;
+        a = temp1 + temp2;
+    }
+
+    // Add compressed chunk to current hash value
+    hash[0] += a;
+    hash[1] += b;
+    hash[2] += c;
+    hash[3] += d;
+    hash[4] += e;
+    hash[5] += f;
+    hash[6] += g;
+    hash[7] += h;
+}
+
+/**
+ *  @brief  Initialize SHA256 state with standard initial hash values.
+ *  @param  state   Pointer to SHA256 state structure.
+ */
+SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state) {
+    sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
+    for (sz_size_t i = 0; i < 8; ++i) state->hash.u32s[i] = initial_hash[i];
+    state->block_length = 0;
+    state->total_length = 0;
+}
+
+/**
+ *  @brief  Update SHA256 state with new data.
+ *  @param  state   Pointer to SHA256 state structure.
+ *  @param  data    Pointer to input data.
+ *  @param  length  Length of input data in bytes.
+ */
+SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+    sz_u8_t const *input = (sz_u8_t const *)data;
+    state->total_length += length;
+
+    // If there's data in the block buffer, try to fill it
+    if (state->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state->block_length;
+        if (bytes_to_copy > length) bytes_to_copy = length;
+        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+        state->block_length += bytes_to_copy;
+        input += bytes_to_copy;
+        length -= bytes_to_copy;
+
+        // If we filled the block, process it
+        if (state->block_length == 64) {
+            sz_sha256_process_block_serial_(state->hash.u32s, state->block.u8s);
+            state->block_length = 0;
+        }
+    }
+
+    // Process complete 64-byte blocks from input
+    while (length >= 64) {
+        sz_sha256_process_block_serial_(state->hash.u32s, input);
+        input += 64;
+        length -= 64;
+    }
+
+    // Store remaining bytes in block buffer
+    for (sz_size_t i = 0; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+    state->block_length += length;
+}
+
+/**
+ *  @brief  Finalize SHA256 computation and produce 256-bit digest.
+ *  @param  state   Pointer to SHA256 state structure (not modified).
+ *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
+ */
+SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state, sz_u8_t *digest) {
+    // Create a copy of the state for padding
+    sz_sha256_state_t final_state = *state;
+
+    // Append the '1' bit (0x80 byte) after the message
+    final_state.block.u8s[final_state.block_length++] = 0x80;
+
+    // If there's not enough room for the 64-bit length, pad this block and process it
+    if (final_state.block_length > 56) {
+        while (final_state.block_length < 64) final_state.block.u8s[final_state.block_length++] = 0x00;
+        sz_sha256_process_block_serial_(final_state.hash.u32s, final_state.block.u8s);
+        final_state.block_length = 0;
+    }
+
+    // Pad with zeros until we have 56 bytes
+    while (final_state.block_length < 56) final_state.block.u8s[final_state.block_length++] = 0x00;
+
+    // Append the message length in bits as a 64-bit big-endian integer
+    sz_u64_t bit_length = final_state.total_length * 8;
+    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+
+    // Process the final block
+    sz_sha256_process_block_serial_(final_state.hash.u32s, final_state.block.u8s);
+
+    // Produce the final hash digest in big-endian format
+    for (sz_size_t i = 0; i < 8; ++i) {
+        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+    }
+}
+
+#pragma endregion // Serial SHA256 Implementation
 
 SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
@@ -2670,6 +2944,239 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
+/**
+ *  @brief  Process a single 512-bit (64-byte) block of data using NEON SHA256 crypto extensions.
+ *  @param  hash    Pointer to 8x 32-bit hash values (h0-h7), modified in place.
+ *  @param  block   Pointer to 64-byte message block.
+ */
+SZ_INTERNAL void sz_sha256_process_block_neon_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+    sz_u32_t const *round_constants = sz_sha256_round_constants_();
+
+    // Load current hash state
+    uint32x4_t state0 = vld1q_u32(&hash[0]); // a, b, c, d
+    uint32x4_t state1 = vld1q_u32(&hash[4]); // e, f, g, h
+    uint32x4_t state0_saved = state0;
+    uint32x4_t state1_saved = state1;
+
+    // Load message schedule (big-endian)
+    uint32x4_t msg0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(&block[0])));
+    uint32x4_t msg1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(&block[16])));
+    uint32x4_t msg2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(&block[32])));
+    uint32x4_t msg3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(&block[48])));
+
+    uint32x4_t tmp0, tmp1;
+
+    // Rounds 0-3
+    tmp0 = vaddq_u32(msg0, vld1q_u32(&round_constants[0]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 4-7
+    tmp0 = vaddq_u32(msg1, vld1q_u32(&round_constants[4]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 8-11
+    tmp0 = vaddq_u32(msg2, vld1q_u32(&round_constants[8]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 12-15
+    tmp0 = vaddq_u32(msg3, vld1q_u32(&round_constants[12]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 16-19
+    msg0 = vsha256su1q_u32(vsha256su0q_u32(msg0, msg1), msg2, msg3);
+    tmp0 = vaddq_u32(msg0, vld1q_u32(&round_constants[16]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 20-23
+    msg1 = vsha256su1q_u32(vsha256su0q_u32(msg1, msg2), msg3, msg0);
+    tmp0 = vaddq_u32(msg1, vld1q_u32(&round_constants[20]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 24-27
+    msg2 = vsha256su1q_u32(vsha256su0q_u32(msg2, msg3), msg0, msg1);
+    tmp0 = vaddq_u32(msg2, vld1q_u32(&round_constants[24]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 28-31
+    msg3 = vsha256su1q_u32(vsha256su0q_u32(msg3, msg0), msg1, msg2);
+    tmp0 = vaddq_u32(msg3, vld1q_u32(&round_constants[28]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 32-35
+    msg0 = vsha256su1q_u32(vsha256su0q_u32(msg0, msg1), msg2, msg3);
+    tmp0 = vaddq_u32(msg0, vld1q_u32(&round_constants[32]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 36-39
+    msg1 = vsha256su1q_u32(vsha256su0q_u32(msg1, msg2), msg3, msg0);
+    tmp0 = vaddq_u32(msg1, vld1q_u32(&round_constants[36]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 40-43
+    msg2 = vsha256su1q_u32(vsha256su0q_u32(msg2, msg3), msg0, msg1);
+    tmp0 = vaddq_u32(msg2, vld1q_u32(&round_constants[40]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 44-47
+    msg3 = vsha256su1q_u32(vsha256su0q_u32(msg3, msg0), msg1, msg2);
+    tmp0 = vaddq_u32(msg3, vld1q_u32(&round_constants[44]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 48-51
+    msg0 = vsha256su1q_u32(vsha256su0q_u32(msg0, msg1), msg2, msg3);
+    tmp0 = vaddq_u32(msg0, vld1q_u32(&round_constants[48]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 52-55
+    msg1 = vsha256su1q_u32(vsha256su0q_u32(msg1, msg2), msg3, msg0);
+    tmp0 = vaddq_u32(msg1, vld1q_u32(&round_constants[52]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 56-59
+    msg2 = vsha256su1q_u32(vsha256su0q_u32(msg2, msg3), msg0, msg1);
+    tmp0 = vaddq_u32(msg2, vld1q_u32(&round_constants[56]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Rounds 60-63
+    msg3 = vsha256su1q_u32(vsha256su0q_u32(msg3, msg0), msg1, msg2);
+    tmp0 = vaddq_u32(msg3, vld1q_u32(&round_constants[60]));
+    tmp1 = state0;
+    state0 = vsha256hq_u32(state0, state1, tmp0);
+    state1 = vsha256h2q_u32(state1, tmp1, tmp0);
+
+    // Add compressed chunk to current hash value
+    state0 = vaddq_u32(state0, state0_saved);
+    state1 = vaddq_u32(state1, state1_saved);
+
+    // Store result back
+    vst1q_u32(&hash[0], state0);
+    vst1q_u32(&hash[4], state1);
+}
+
+/**
+ *  @brief  Initialize SHA256 state with standard initial hash values.
+ *  @param  state   Pointer to SHA256 state structure.
+ */
+SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state) {
+    sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
+    for (sz_size_t i = 0; i < 8; ++i) state->hash.u32s[i] = initial_hash[i];
+    state->block_length = 0;
+    state->total_length = 0;
+}
+
+/**
+ *  @brief  Update SHA256 state with new data using NEON acceleration.
+ *  @param  state   Pointer to SHA256 state structure.
+ *  @param  data    Pointer to input data.
+ *  @param  length  Length of input data in bytes.
+ */
+SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+    sz_u8_t const *input = (sz_u8_t const *)data;
+    state->total_length += length;
+
+    // If there's data in the block buffer, try to fill it
+    if (state->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state->block_length;
+        if (bytes_to_copy > length) bytes_to_copy = length;
+        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+        state->block_length += bytes_to_copy;
+        input += bytes_to_copy;
+        length -= bytes_to_copy;
+
+        // If we filled the block, process it
+        if (state->block_length == 64) {
+            sz_sha256_process_block_neon_(state->hash.u32s, state->block.u8s);
+            state->block_length = 0;
+        }
+    }
+
+    // Process complete 64-byte blocks from input
+    while (length >= 64) {
+        sz_sha256_process_block_neon_(state->hash.u32s, input);
+        input += 64;
+        length -= 64;
+    }
+
+    // Store remaining bytes in block buffer
+    for (sz_size_t i = 0; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+    state->block_length += length;
+}
+
+/**
+ *  @brief  Finalize SHA256 computation and produce 256-bit digest using NEON.
+ *  @param  state   Pointer to SHA256 state structure (not modified).
+ *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
+ */
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t *digest) {
+    // Create a copy of the state for padding
+    sz_sha256_state_t final_state = *state;
+
+    // Append the '1' bit (0x80 byte) after the message
+    final_state.block.u8s[final_state.block_length++] = 0x80;
+
+    // If there's not enough room for the 64-bit length, pad this block and process it
+    if (final_state.block_length > 56) {
+        while (final_state.block_length < 64) final_state.block.u8s[final_state.block_length++] = 0x00;
+        sz_sha256_process_block_neon_(final_state.hash.u32s, final_state.block.u8s);
+        final_state.block_length = 0;
+    }
+
+    // Pad with zeros until we have 56 bytes
+    while (final_state.block_length < 56) final_state.block.u8s[final_state.block_length++] = 0x00;
+
+    // Append the message length in bits as a 64-bit big-endian integer
+    sz_u64_t bit_length = final_state.total_length * 8;
+    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+
+    // Process the final block
+    sz_sha256_process_block_neon_(final_state.hash.u32s, final_state.block.u8s);
+
+    // Produce the final hash digest in big-endian format
+    for (sz_size_t i = 0; i < 8; ++i) {
+        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+    }
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -2913,6 +3420,30 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_hash_state_digest_neon(state);
 #else
     return sz_hash_state_digest_serial(state);
+#endif
+}
+
+SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
+#if SZ_USE_NEON_AES
+    sz_sha256_state_init_neon(state);
+#else
+    sz_sha256_state_init_serial(state);
+#endif
+}
+
+SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+#if SZ_USE_NEON_AES
+    sz_sha256_state_update_neon(state, data, length);
+#else
+    sz_sha256_state_update_serial(state, data, length);
+#endif
+}
+
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
+#if SZ_USE_NEON_AES
+    sz_sha256_state_digest_neon(state, digest);
+#else
+    sz_sha256_state_digest_serial(state, digest);
 #endif
 }
 

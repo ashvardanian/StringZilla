@@ -63,6 +63,38 @@ pub struct Hasher {
     ins_length: usize, // Ignored in comparisons
 }
 
+/// Incremental SHA256 hasher state for cryptographic hashing.
+///
+/// # Examples
+///
+/// One-shot hashing:
+///
+/// ```
+/// use stringzilla::stringzilla::Sha256;
+/// let digest = Sha256::hash(b"Hello, world!");
+/// assert_eq!(digest.len(), 32); // 256 bits = 32 bytes
+/// ```
+///
+/// Incremental hashing:
+///
+/// ```
+/// use stringzilla::stringzilla::Sha256;
+/// let mut hasher = Sha256::new();
+/// hasher.update(b"Hello, ");
+/// hasher.update(b"world!");
+/// let digest = hasher.digest();
+/// assert_eq!(digest, Sha256::hash(b"Hello, world!"));
+/// ```
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[repr(align(64))] // For optimal performance we align to 64 bytes.
+pub struct Sha256 {
+    hash: [u32; 8],      // Current hash state (h0-h7)
+    block: [u8; 64],     // 64-byte message block buffer
+    block_length: usize, // Current bytes in block (0-63)
+    total_length: u64,   // Total message length in bytes
+}
+
 pub type SortedIdx = usize;
 
 /// A trait for types that support indexed lookup.
@@ -167,8 +199,8 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
     }
 }
 
-use core::fmt::{self, Write};
 use core::ffi::{c_char, c_void, CStr};
+use core::fmt::{self, Write};
 
 // Import the functions from the StringZillable C library.
 extern "C" {
@@ -221,6 +253,9 @@ extern "C" {
     pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
     pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
     pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
+    pub(crate) fn sz_sha256_state_init(state: *const c_void);
+    pub(crate) fn sz_sha256_state_update(state: *const c_void, data: *const c_void, length: usize);
+    pub(crate) fn sz_sha256_state_digest(state: *const c_void, digest: *mut u8);
 
     pub(crate) fn sz_sequence_argsort(
         //
@@ -291,6 +326,57 @@ impl Default for Hasher {
     #[inline]
     fn default() -> Self {
         Hasher::new(0)
+    }
+}
+
+impl Sha256 {
+    /// Creates a new SHA256 hasher with the initial state.
+    pub fn new() -> Self {
+        let mut state = Sha256 {
+            hash: [0; 8],
+            block: [0; 64],
+            block_length: 0,
+            total_length: 0,
+        };
+        unsafe {
+            sz_sha256_state_init(&mut state as *mut _ as *mut c_void);
+        }
+        state
+    }
+
+    /// Updates the hasher with more data.
+    pub fn update(&mut self, data: &[u8]) -> &mut Self {
+        unsafe {
+            sz_sha256_state_update(
+                self as *mut _ as *mut c_void,
+                data.as_ptr() as *const c_void,
+                data.len(),
+            );
+        }
+        self
+    }
+
+    /// Returns the current SHA256 hash digest as a 32-byte array.
+    pub fn digest(&self) -> [u8; 32] {
+        let mut digest = [0u8; 32];
+        unsafe {
+            sz_sha256_state_digest(self as *const _ as *const c_void, digest.as_mut_ptr());
+        }
+        digest
+    }
+
+    /// Convenience method to hash data in one call.
+    pub fn hash(data: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hasher.digest()
+    }
+}
+
+impl Default for Sha256 {
+    #[inline]
+    fn default() -> Self {
+        Sha256::new()
     }
 }
 
@@ -2267,5 +2353,49 @@ mod tests {
         println!("Intersection found {} common elements", n);
         assert!(n == 2);
         println!("Test passed!");
+    }
+
+    #[test]
+    fn sha256_empty() {
+        let hash = sz::Sha256::hash(b"");
+        let expected = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae,
+            0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_abc() {
+        let hash = sz::Sha256::hash(b"abc");
+        let expected = [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03,
+            0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_incremental() {
+        let mut hasher = sz::Sha256::new();
+        hasher.update(b"ab");
+        hasher.update(b"c");
+        let hash = hasher.digest();
+        let expected = [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03,
+            0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_long() {
+        let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        let hash = sz::Sha256::hash(msg);
+        let expected = [
+            0x24, 0x8d, 0x6a, 0x61, 0xd2, 0x06, 0x38, 0xb8, 0xe5, 0xc0, 0x26, 0x93, 0x0c, 0x3e, 0x60, 0x39, 0xa3, 0x3c,
+            0xe4, 0x59, 0x64, 0xff, 0x21, 0x67, 0xf6, 0xec, 0xed, 0xd4, 0x19, 0xdb, 0x06, 0xc1,
+        ];
+        assert_eq!(hash, expected);
     }
 }

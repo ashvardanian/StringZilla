@@ -54,6 +54,10 @@ typedef struct sz_implementations_t {
     sz_hash_state_digest_t hash_state_digest;
     sz_fill_random_t fill_random;
 
+    sz_sha256_state_init_t sha256_state_init;
+    sz_sha256_state_update_t sha256_state_update;
+    sz_sha256_state_digest_t sha256_state_digest;
+
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
     sz_find_t find;
@@ -90,6 +94,10 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->hash_state_update = sz_hash_state_update_serial;
     impl->hash_state_digest = sz_hash_state_digest_serial;
     impl->fill_random = sz_fill_random_serial;
+
+    impl->sha256_state_init = sz_sha256_state_init_serial;
+    impl->sha256_state_update = sz_sha256_state_update_serial;
+    impl->sha256_state_digest = sz_sha256_state_digest_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
@@ -212,6 +220,10 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_neon;
         impl->hash_state_digest = sz_hash_state_digest_neon;
         impl->fill_random = sz_fill_random_neon;
+
+        impl->sha256_state_init = sz_sha256_state_init_neon;
+        impl->sha256_state_update = sz_sha256_state_update_neon;
+        impl->sha256_state_digest = sz_sha256_state_digest_neon;
     }
 #endif
 
@@ -332,6 +344,16 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 
 SZ_DYNAMIC void sz_fill_random(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {
     sz_dispatch_table.fill_random(result, result_length, nonce);
+}
+
+SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) { sz_dispatch_table.sha256_state_init(state); }
+
+SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+    sz_dispatch_table.sha256_state_update(state, data, length);
+}
+
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
+    sz_dispatch_table.sha256_state_digest(state, digest);
 }
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
