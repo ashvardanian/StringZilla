@@ -29,6 +29,7 @@ import sys
 import math
 import tempfile
 import platform
+import hashlib
 from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
@@ -634,7 +635,7 @@ def test_unit_strs_sequence_slicing():
 
     # Test edge cases with pre-constructed Strs objects passed as slices
     single_slice = big_sequence[0:1]  # Length 1 slice
-    empty_slice = big_sequence[0:0]   # Length 0 slice
+    empty_slice = big_sequence[0:0]  # Length 0 slice
 
     # Verify the slices work correctly when passed around
     assert len(single_slice) == 1, "Single slice length incorrect"
@@ -1023,6 +1024,51 @@ def test_bytesum_random(length: int, seed_value: int):
     seed_random_generators(seed_value)
     body = get_random_string(length=length)
     assert sum_bytes(body) == sz.bytesum(body)
+
+
+@pytest.mark.parametrize("length", [0, 1, 3, 7, 15, 31, 63, 64, 65, 127, 128, 129, 255, 256, 1000, 4096, 10000])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_sha256(length: int, seed_value: int):
+
+    seed_random_generators(seed_value)
+    text = get_random_string(length=length)
+    expected = hashlib.sha256(text.encode()).digest()
+
+    # One-shot: standalone function
+    assert sz.sha256(text) == expected
+
+    # One-shot: Str method
+    assert Str(text).sha256() == expected
+
+    # One-shot: bytes input
+    assert sz.sha256(text.encode()) == expected
+
+    # Progressive: single update
+    h = sz.Sha256()
+    h.update(text)
+    assert h.digest() == expected
+    assert h.hexdigest() == expected.hex()
+
+    # Progressive: chunked updates
+    if length > 0:
+        h = sz.Sha256()
+        chunk_size = max(1, length // 3)
+        for i in range(0, length, chunk_size):
+            h.update(text[i : i + chunk_size])
+        assert h.digest() == expected
+        assert h.hexdigest() == expected.hex()
+
+    # Reset
+    h.reset().update(text)
+    assert h.digest() == expected
+
+    # Copy
+    mid = length // 2
+    h1 = sz.Sha256().update(text[:mid])
+    h2 = h1.copy()
+    h1.update(text[mid:])
+    h2.update(text[mid:])
+    assert h1.digest() == h2.digest() == expected
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
