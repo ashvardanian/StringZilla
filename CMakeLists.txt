@@ -584,16 +584,6 @@ function (define_stringzilla_shared target)
     # Set architecture-specific SIMD flags using shared helper function
     set_architecture_simd_definitions(${target})
 
-    if (MSVC)
-        # Add dependencies for necessary runtime libraries in case of static linking. This ensures that basic runtime
-        # functions are available:
-        #
-        # * msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
-        # * vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
-        # * ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
-        target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
-    endif ()
-
 endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
@@ -614,10 +604,9 @@ if (STRINGZILLA_BUILD_SHARED)
         target_compile_options(stringzilla_shared PRIVATE "-mllvm" "-inline-threshold=2000" "-finline-functions")
     endif ()
 
-    # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
-    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
-    # they have linker issues with bare builds.
-    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS machines !
+    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
+    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
         define_stringzilla_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
@@ -630,9 +619,11 @@ if (STRINGZILLA_BUILD_SHARED)
             target_compile_options(stringzilla_bare PRIVATE "-pedantic")
         endif ()
 
-        # Avoid built-ins on GCC and Clang compilers
-        target_compile_options(stringzilla_bare PRIVATE "-fno-builtin;-nostdlib")
-        target_link_options(stringzilla_bare PRIVATE "-nostdlib")
+        # Avoid built-ins
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>")
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
     endif ()
 endif ()
 
