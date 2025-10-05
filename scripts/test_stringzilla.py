@@ -30,6 +30,7 @@ import math
 import tempfile
 import platform
 import hashlib
+import hmac
 from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
@@ -1069,6 +1070,27 @@ def test_sha256(length: int, seed_value: int):
     h1.update(text[mid:])
     h2.update(text[mid:])
     assert h1.digest() == h2.digest() == expected
+
+
+@pytest.mark.parametrize("key_length", [0, 1, 16, 32, 64, 65, 128])
+@pytest.mark.parametrize("message_length", [0, 1, 63, 64, 65, 127, 128, 1000])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_hmac_sha256(key_length: int, message_length: int, seed_value: int):
+
+    seed_random_generators(seed_value)
+    key = get_random_string(length=key_length).encode()
+    message = get_random_string(length=message_length).encode()
+
+    # Test against Python's hmac module
+    expected = hmac.new(key, message, hashlib.sha256).digest()
+    result = sz.hmac_sha256(key, message)
+    assert result == expected
+
+    # Test with string inputs
+    key_str = key.decode("latin1")
+    message_str = message.decode("latin1")
+    result_str = sz.hmac_sha256(key_str, message_str)
+    assert result_str == expected
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])

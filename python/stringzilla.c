@@ -1527,6 +1527,74 @@ static PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize
     return PyBytes_FromStringAndSize((char const *)digest, 32);
 }
 
+static char const doc_hmac_sha256[] = //
+    "Compute HMAC-SHA256 authentication code.\n"
+    "\n"
+    "Args:\n"
+    "  key (str or bytes): The secret key.\n"
+    "  message (str or bytes): The message to authenticate.\n"
+    "Returns:\n"
+    "  bytes: The 32-byte (256-bit) HMAC-SHA256 digest.\n"
+    "Raises:\n"
+    "  TypeError: If arguments are not string-like or incorrect number provided.";
+
+static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    sz_unused_(self);
+    if (positional_args_count != 2 || args_names_tuple) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly two positional arguments");
+        return NULL;
+    }
+
+    sz_string_view_t key, message;
+    if (!sz_py_export_string_like(args[0], &key.start, &key.length)) {
+        wrap_current_exception("Key must be string-like");
+        return NULL;
+    }
+    if (!sz_py_export_string_like(args[1], &message.start, &message.length)) {
+        wrap_current_exception("Message must be string-like");
+        return NULL;
+    }
+
+    // Prepare key: hash if > 64 bytes, zero-pad to 64 bytes
+    sz_u8_t key_pad[64];
+    if (key.length > 64) {
+        sz_sha256_state_t key_state;
+        sz_sha256_state_init(&key_state);
+        sz_sha256_state_update(&key_state, key.start, key.length);
+        sz_u8_t key_hash[32];
+        sz_sha256_state_digest(&key_state, key_hash);
+        for (int i = 0; i < 32; ++i) key_pad[i] = key_hash[i];
+        for (int i = 32; i < 64; ++i) key_pad[i] = 0;
+    }
+    else {
+        for (sz_size_t i = 0; i < key.length; ++i) key_pad[i] = ((sz_u8_t const *)key.start)[i];
+        for (sz_size_t i = key.length; i < 64; ++i) key_pad[i] = 0;
+    }
+
+    // Compute inner hash: SHA256((key ^ 0x36) || message)
+    sz_sha256_state_t inner_state;
+    sz_sha256_state_init(&inner_state);
+    sz_u8_t inner_pad[64];
+    for (int i = 0; i < 64; ++i) inner_pad[i] = key_pad[i] ^ 0x36;
+    sz_sha256_state_update(&inner_state, (sz_cptr_t)inner_pad, 64);
+    sz_sha256_state_update(&inner_state, message.start, message.length);
+    sz_u8_t inner_hash[32];
+    sz_sha256_state_digest(&inner_state, inner_hash);
+
+    // Compute outer hash: SHA256((key ^ 0x5c) || inner_hash)
+    sz_sha256_state_t outer_state;
+    sz_sha256_state_init(&outer_state);
+    sz_u8_t outer_pad[64];
+    for (int i = 0; i < 64; ++i) outer_pad[i] = key_pad[i] ^ 0x5c;
+    sz_sha256_state_update(&outer_state, (sz_cptr_t)outer_pad, 64);
+    sz_sha256_state_update(&outer_state, (sz_cptr_t)inner_hash, 32);
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&outer_state, digest);
+
+    return PyBytes_FromStringAndSize((char const *)digest, 32);
+}
+
 static char const doc_like_equal[] = //
     "Check if two strings are equal.\n"
     "\n"
@@ -6327,6 +6395,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
     {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
+    {"hmac_sha256", (PyCFunction)hmac_sha256, SZ_METHOD_FLAGS, doc_hmac_sha256},
     {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     // Module-level functionality

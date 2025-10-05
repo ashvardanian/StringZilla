@@ -380,6 +380,57 @@ impl Default for Sha256 {
     }
 }
 
+/// Computes HMAC-SHA256 (Hash-based Message Authentication Code) for the given key and message.
+///
+/// # Arguments
+///
+/// * `key` - The secret key (can be any length, will be hashed if > 64 bytes)
+/// * `message` - The message to authenticate
+///
+/// # Returns
+///
+/// A 32-byte HMAC-SHA256 digest
+///
+/// # Example
+///
+/// ```
+/// use stringzilla::stringzilla::hmac_sha256;
+/// let key = b"secret_key";
+/// let message = b"important message";
+/// let mac = hmac_sha256(key, message);
+/// assert_eq!(mac.len(), 32);
+/// ```
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    // Prepare key: hash if > 64 bytes, zero-pad to 64 bytes
+    let mut key_pad = [0u8; 64];
+    if key.len() > 64 {
+        let key_hash = Sha256::hash(key);
+        key_pad[..32].copy_from_slice(&key_hash);
+    } else {
+        key_pad[..key.len()].copy_from_slice(key);
+    }
+
+    // Compute inner hash: SHA256((key ^ 0x36) || message)
+    let mut inner_hasher = Sha256::new();
+    let mut inner_pad = [0u8; 64];
+    for i in 0..64 {
+        inner_pad[i] = key_pad[i] ^ 0x36;
+    }
+    inner_hasher.update(&inner_pad);
+    inner_hasher.update(message);
+    let inner_hash = inner_hasher.digest();
+
+    // Compute outer hash: SHA256((key ^ 0x5c) || inner_hash)
+    let mut outer_hasher = Sha256::new();
+    let mut outer_pad = [0u8; 64];
+    for i in 0..64 {
+        outer_pad[i] = key_pad[i] ^ 0x5c;
+    }
+    outer_hasher.update(&outer_pad);
+    outer_hasher.update(&inner_hash);
+    outer_hasher.digest()
+}
+
 /// Standard Hasher trait to interoperate with `std::collections`.
 impl core::hash::Hasher for Hasher {
     #[inline]
@@ -2397,5 +2448,47 @@ mod tests {
             0xe4, 0x59, 0x64, 0xff, 0x21, 0x67, 0xf6, 0xec, 0xed, 0xd4, 0x19, 0xdb, 0x06, 0xc1,
         ];
         assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_basic() {
+        // Test vector from RFC 4231 (HMAC-SHA256 test case 1)
+        let key = b"";
+        let message = b"";
+        let mac = sz::hmac_sha256(key, message);
+        // HMAC-SHA256("", "") = b613...
+        let expected = [
+            0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec, 0x77, 0x2f, 0x95, 0xd7, 0x78, 0xc3, 0x5f, 0xc5, 0xff, 0x16,
+            0x97, 0xc4, 0x93, 0x71, 0x56, 0x53, 0xc6, 0xc7, 0x12, 0x14, 0x42, 0x92, 0xc5, 0xad,
+        ];
+        assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_short_key() {
+        // Test with short key and message
+        let key = b"key";
+        let message = b"The quick brown fox jumps over the lazy dog";
+        let mac = sz::hmac_sha256(key, message);
+        // HMAC-SHA256("key", "The quick brown fox jumps over the lazy dog")
+        let expected = [
+            0xf7, 0xbc, 0x83, 0xf4, 0x30, 0x53, 0x84, 0x24, 0xb1, 0x32, 0x98, 0xe6, 0xaa, 0x6f, 0xb1, 0x43, 0xef, 0x4d,
+            0x59, 0xa1, 0x49, 0x46, 0x17, 0x59, 0x97, 0x47, 0x9d, 0xbc, 0x2d, 0x1a, 0x3c, 0xd8,
+        ];
+        assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_long_key() {
+        // Test with key longer than block size (> 64 bytes)
+        let key = b"this is a very long key that exceeds the SHA256 block size of 64 bytes for testing purposes";
+        let message = b"message";
+        let mac = sz::hmac_sha256(key, message);
+        // Expected value computed with Python: hmac.new(key, message, hashlib.sha256).digest()
+        let expected = [
+            0xd1, 0x3f, 0xdb, 0x7b, 0xe0, 0x9a, 0x9e, 0x07, 0x04, 0xc6, 0x5b, 0xd7, 0x85, 0xa6, 0x33, 0xbb, 0xc0, 0xee,
+            0x2b, 0x99, 0xef, 0xd6, 0x32, 0x2c, 0xa9, 0x4c, 0xd3, 0x2c, 0x1e, 0x45, 0x09, 0xfd,
+        ];
+        assert_eq!(mac, expected);
     }
 }
