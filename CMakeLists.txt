@@ -576,16 +576,6 @@ if (STRINGZILLA_BUILD_SHARED)
             )
         endif ()
 
-        if (MSVC)
-            # Add dependencies for necessary runtime libraries in case of static linking. This ensures that basic
-            # runtime functions are available:
-            #
-            # * msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
-            # * vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
-            # * ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
-            target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
-        endif ()
-
     endfunction ()
 
     define_stringzilla_shared(stringzilla_shared)
@@ -613,9 +603,11 @@ if (STRINGZILLA_BUILD_SHARED)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(stringzilla_bare PUBLIC include)
 
-        # Avoid built-ins on GCC and Clang compilers
-        target_compile_options(stringzilla_bare PRIVATE "-fno-builtin;-nostdlib")
-        target_link_options(stringzilla_bare PRIVATE "-nostdlib")
+        # Avoid built-ins
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>")
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
     endif ()
 endif ()
 
