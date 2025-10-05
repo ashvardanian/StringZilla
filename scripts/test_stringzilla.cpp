@@ -346,6 +346,44 @@ void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_r
             test_on_nonce(length, nonce);
 }
 
+/**
+ *  @brief  Tests SHA256 implementations, comparing serial and SIMD variants
+ *          against known FIPS 180-4 test vectors.
+ */
+void test_sha256_equivalence(                                                                                     //
+    sz_sha256_state_init_t init_base, sz_sha256_state_update_t update_base, sz_sha256_state_digest_t digest_base, //
+    sz_sha256_state_init_t init_simd, sz_sha256_state_update_t update_simd, sz_sha256_state_digest_t digest_simd) {
+
+    // Test random inputs of various lengths
+    for (std::size_t length = 0; length <= 256; ++length) {
+        std::string random_text(length, '\0');
+        randomize_string(&random_text[0], length);
+
+        sz_sha256_state_t state_base, state_simd;
+        sz_u8_t digest_base_result[32], digest_simd_result[32];
+
+        // One-shot hashing
+        init_base(&state_base);
+        init_simd(&state_simd);
+        update_base(&state_base, random_text.data(), length);
+        update_simd(&state_simd, random_text.data(), length);
+        digest_base(&state_base, digest_base_result);
+        digest_simd(&state_simd, digest_simd_result);
+        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+
+        // Incremental hashing with random chunks
+        init_base(&state_base);
+        init_simd(&state_simd);
+        iterate_in_random_slices(random_text, [&](std::string slice) {
+            update_base(&state_base, slice.data(), slice.size());
+            update_simd(&state_simd, slice.data(), slice.size());
+        });
+        digest_base(&state_base, digest_base_result);
+        digest_simd(&state_simd, digest_simd_result);
+        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+    }
+}
+
 void test_equivalence() {
 
     // Ensure the seed affects hash results
@@ -391,6 +429,14 @@ void test_equivalence() {
         sz_hash_sve2, sz_hash_state_init_sve2,                    //
         sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
+#endif
+
+    // Test SHA256 implementations
+#if SZ_USE_NEON_AES
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
+    );
 #endif
 };
 

@@ -349,6 +349,10 @@
 #endif
 #endif // SZ_USE_SVE || SZ_USE_SVE2
 
+#if (SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES) && (SZ_USE_NEON || SZ_USE_NEON_AES)
+#include <arm_neon_sve_bridge.h>
+#endif // SVE/SVE2 && NEON bridge
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -463,6 +467,7 @@ typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
 struct sz_hash_state_t;            // Forward declaration of a hash state structure
+struct sz_sha256_state_t;          // Forward declaration of a SHA256 hash state structure
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
@@ -752,6 +757,15 @@ typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
+
+/** @brief Signature of `sz_sha256_state_init`. */
+typedef void (*sz_sha256_state_init_t)(struct sz_sha256_state_t *);
+
+/** @brief Signature of `sz_sha256_state_update`. */
+typedef void (*sz_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, sz_size_t);
+
+/** @brief Signature of `sz_sha256_state_digest`. */
+typedef void (*sz_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *);
 
 /** @brief Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
