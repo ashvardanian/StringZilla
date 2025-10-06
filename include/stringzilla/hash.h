@@ -366,6 +366,19 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state);
 
 #endif
 
+#if SZ_USE_NEON_SHA
+
+/** @copydoc sz_sha256_state_init */
+SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state);
+
+/** @copydoc sz_sha256_state_update */
+SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+
+/** @copydoc sz_sha256_state_digest */
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t *digest);
+
+#endif
+
 #if SZ_USE_SVE
 
 /** @copydoc sz_bytesum */
@@ -3937,6 +3950,23 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_NEON_AES
+#pragma endregion // NEON AES Implementation
+
+#pragma region NEON SHA Implementation
+#if SZ_USE_NEON_SHA
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+sha2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+simd+crypto+sha2")
+#endif
+
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
@@ -4212,8 +4242,8 @@ SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif            // SZ_USE_NEON
-#pragma endregion // NEON AES Implementation
+#endif            // SZ_USE_NEON_SHA
+#pragma endregion // NEON SHA Implementation
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
@@ -4308,7 +4338,55 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 #endif
 
 /**
- *  @brief  SVE2 hash functions currently delegate to NEON for optimal performance.
+ *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
+ *  @see    "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
+ *          https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ */
+SZ_INTERNAL svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_vec, svuint8_t round_key_vec) {
+    return sveor_u8_x(svptrue_b8(), svaesmc_u8(svaese_u8(state_vec, svdup_n_u8(0))), round_key_vec);
+}
+
+/** @brief A variant of `sz_hash_sve2` for strings up to 16 bytes long - smallest SVE register size. */
+SZ_PUBLIC sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    svuint8_t state_aes, state_sum, state_key;
+
+    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
+    state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
+    svbool_t const all64 = svptrue_b64();
+    svbool_t const all8 = svptrue_b8();
+
+    // XOR the user-supplied keys with the two "pi" constants
+    sz_u64_t const *pi = sz_hash_pi_constants_();
+    svuint64_t pi0 = svld1_u64(all64, pi);
+    svuint64_t pi1 = svld1_u64(all64, pi + 8);
+    state_aes = sveor_u8_x(all8, state_key, svreinterpret_u8_u64(pi0));
+    state_sum = sveor_u8_x(all8, state_key, svreinterpret_u8_u64(pi1));
+
+    // We will only use the first 128 bits of the shuffle mask
+    svuint8_t const order = svld1_u8(all8, sz_hash_u8x16x4_shuffle_());
+
+    // This is our best case for SVE2 dominance over NEON - we can load the data in one go with a predicate.
+    svuint8_t block = svld1_u8(svwhilelt_b8((sz_u64_t)0, (sz_u64_t)length), (sz_u8_t const *)text);
+    // One round of hashing logic
+    state_aes = sz_emulate_aesenc_u8x16_sve2_(state_aes, block);
+    svuint8_t sum_shuffled = svtbl_u8(state_sum, order);
+    state_sum =
+        svreinterpret_u8_u64(svadd_u64_x(all64, svreinterpret_u64_u8(sum_shuffled), svreinterpret_u64_u8(block)));
+
+    // Now mix, folding the length into the key
+    svuint64_t key_with_length = svadd_u64_x(all64, svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
+    // Combine the "sum" and the "AES" blocks
+    svuint8_t mixed = sz_emulate_aesenc_u8x16_sve2_(state_sum, state_aes);
+    // Make sure the "key" mixes enough with the state,
+    // as with less than 2 rounds - SMHasher fails
+    svuint8_t mixed_in_register = sz_emulate_aesenc_u8x16_sve2_(
+        sz_emulate_aesenc_u8x16_sve2_(mixed, svreinterpret_u8_u64(key_with_length)), mixed);
+    // Extract the low 64 bits
+    svuint64_t mixed_in_register_u64 = svreinterpret_u64_u8(mixed_in_register);
+    return svlasta_u64(all64, mixed_in_register_u64); // Extract the first element
+}
+
+/*  @brief  SVE2 increment hash functions currently mostly delegate to NEON for optimal performance.
  *  @see    draft/hash.h for experimental SVE2 implementations.
  *
  *  Vanilla SVE could have helped optimized loads & stores with predicated instructions,
@@ -4334,6 +4412,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state) { //
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    if (length <= 16) return sz_hash_sve2_upto16_(text, length, seed);
     return sz_hash_neon(text, length, seed);
 }
 
@@ -4454,7 +4533,7 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 }
 
 SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_init_neon(state);
 #elif SZ_USE_ICE
     sz_sha256_state_init_ice(state);
@@ -4466,7 +4545,7 @@ SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
 }
 
 SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_update_neon(state, data, length);
 #elif SZ_USE_ICE
     sz_sha256_state_update_ice(state, data, length);
@@ -4478,7 +4557,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
 }
 
 SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_digest_neon(state, digest);
 #elif SZ_USE_ICE
     sz_sha256_state_digest_ice(state, digest);

@@ -301,6 +301,15 @@
 #endif
 #endif
 
+/*  SHA2 is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
+#if !defined(SZ_USE_NEON_SHA)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SHA2)
+#define SZ_USE_NEON_SHA (1)
+#else
+#define SZ_USE_NEON_SHA (0)
+#endif
+#endif
+
 /*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2_AES)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2_AES)
@@ -358,10 +367,6 @@
 #include <arm_sve.h>
 #endif
 #endif // SZ_USE_SVE || SZ_USE_SVE2
-
-#if (SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES) && (SZ_USE_NEON || SZ_USE_NEON_AES)
-#include <arm_neon_sve_bridge.h>
-#endif // SVE/SVE2 && NEON bridge
 
 #ifdef __cplusplus
 extern "C" {
@@ -568,6 +573,7 @@ typedef enum sz_capability_t {
 
     sz_cap_neon_k = 1 << 10,     ///< ARM NEON baseline capability
     sz_cap_neon_aes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
+    sz_cap_neon_sha_k = 1 << 15, ///< ARM NEON baseline capability with SHA2 extensions
     sz_cap_sve_k = 1 << 12,      ///< ARM SVE baseline capability
     sz_cap_sve2_k = 1 << 13,     ///< ARM SVE2 capability
     sz_cap_sve2_aes_k = 1 << 14, ///< ARM SVE2 capability with AES extensions
@@ -586,8 +592,8 @@ typedef enum sz_capability_t {
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
-                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k |
-                     sz_cap_sve2_k | sz_cap_sve2_aes_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_neon_sha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -596,7 +602,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 15
+#define SZ_CAPABILITIES_COUNT 16
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.

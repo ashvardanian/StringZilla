@@ -434,18 +434,18 @@ void test_equivalence() {
 
     // Test SHA256 implementations
 #if SZ_USE_ICE
-    test_sha256_equivalence(                                                                   //
+    test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice           //
     );
 #endif
 #if SZ_USE_GOLDMONT
-    test_sha256_equivalence(                                                                           //
-        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,     //
+    test_sha256_equivalence(                                                                            //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,      //
         sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, sz_sha256_state_digest_goldmont //
     );
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
@@ -1903,6 +1903,25 @@ void test_sorting_algorithms() {
     assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
     assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
     assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+
+    // Single character vs multi-character strings
+    assert_scoped(strs_t x({"aa", "a", "aaa", "aa"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+
+    // Mix of short and long strings with common prefixes
+    assert_scoped(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}), (void)0,
+                  sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+
+    // Single character vs multi-character strings with varied patterns
+    assert_scoped(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
+                  (void)0, sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+
+    // Numeric-like strings of varying lengths
+    assert_scoped(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}), (void)0,
+                  sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+
+    // Real names with varied lengths and prefixes (this one is already correct)
+    assert_scoped(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}), (void)0,
+                  sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {

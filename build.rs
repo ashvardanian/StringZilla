@@ -73,6 +73,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "SZ_USE_SVE2_AES",
             "SZ_USE_SVE2",
             "SZ_USE_SVE",
+            "SZ_USE_NEON_SHA",
             "SZ_USE_NEON_AES",
             "SZ_USE_NEON",
         ],

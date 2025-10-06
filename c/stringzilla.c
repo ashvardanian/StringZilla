@@ -220,7 +220,11 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_neon;
         impl->hash_state_digest = sz_hash_state_digest_neon;
         impl->fill_random = sz_fill_random_neon;
+    }
+#endif
 
+#if SZ_USE_NEON_SHA
+    if (caps & sz_cap_neon_sha_k) {
         impl->sha256_state_init = sz_sha256_state_init_neon;
         impl->sha256_state_update = sz_sha256_state_update_neon;
         impl->sha256_state_digest = sz_sha256_state_digest_neon;
