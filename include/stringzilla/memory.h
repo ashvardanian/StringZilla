@@ -1345,8 +1345,8 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
             svuint8_t data = svld1_u8(mask, (sz_u8_t *)source);
             svst1_u8(mask, (sz_u8_t *)target, data);
             body_length -= vec_len;
-            source += body_length;
-            target += body_length;
+            source += vec_len;
+            target += vec_len;
         }
         if (body_length) {
             svbool_t mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)body_length);
