@@ -26,6 +26,7 @@
 
  #define SZ_USE_WESTMERE 0
  #define SZ_USE_HASWELL 0
+ #define SZ_USE_GOLDMONT 0
  #define SZ_USE_SKYLAKE 0
  #define SZ_USE_ICE 0
  #define SZ_USE_NEON 0
@@ -432,6 +433,18 @@ void test_equivalence() {
 #endif
 
     // Test SHA256 implementations
+#if SZ_USE_ICE
+    test_sha256_equivalence(                                                                   //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice           //
+    );
+#endif
+#if SZ_USE_GOLDMONT
+    test_sha256_equivalence(                                                                           //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,     //
+        sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, sz_sha256_state_digest_goldmont //
+    );
+#endif
 #if SZ_USE_NEON_AES
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
@@ -2053,6 +2066,7 @@ int main(int argc, char const **argv) {
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");

@@ -235,6 +235,16 @@
 #endif
 #endif
 
+#if !defined(SZ_USE_GOLDMONT)
+#if SZ_IS_64BIT_X86_ && defined(__SHA__)
+#define SZ_USE_GOLDMONT (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX2__)
+#define SZ_USE_GOLDMONT (1) // ! MSVC doesn't expose `__SHA__` macros
+#else
+#define SZ_USE_GOLDMONT (0)
+#endif
+#endif
+
 #if !defined(SZ_USE_SKYLAKE)
 #if SZ_IS_64BIT_X86_ && defined(__AVX512F__)
 #define SZ_USE_SKYLAKE (1)
@@ -554,6 +564,7 @@ typedef enum sz_capability_t {
     sz_cap_skylake_k = 1 << 6,  ///< x86 AVX512 baseline capability
     sz_cap_ice_k = 1 << 7,      ///< x86 AVX512 capability with advanced integer algos and AES extensions
     sz_cap_westmere_k = 1 << 8, ///< x86 SSE4.2 + AES-NI capability
+    sz_cap_goldmont_k = 1 << 9, ///< x86 SHA-NI capability for accelerated SHA-256 hashing
 
     sz_cap_neon_k = 1 << 10,     ///< ARM NEON baseline capability
     sz_cap_neon_aes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
@@ -575,8 +586,8 @@ typedef enum sz_capability_t {
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
-                     sz_cap_westmere_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k |
-                     sz_cap_sve2_aes_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k |
+                     sz_cap_sve2_k | sz_cap_sve2_aes_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -585,7 +596,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 14
+#define SZ_CAPABILITIES_COUNT 15
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.

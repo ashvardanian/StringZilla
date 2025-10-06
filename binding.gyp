@@ -30,6 +30,7 @@
                 {
                   "defines": [
                     "SZ_USE_WESTMERE=1",
+                    "SZ_USE_GOLDMONT=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
@@ -103,6 +104,7 @@
                 {
                   "defines": [
                     "SZ_USE_WESTMERE=1",
+                    "SZ_USE_GOLDMONT=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
