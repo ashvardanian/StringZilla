@@ -349,10 +349,6 @@
 #endif
 #endif // SZ_USE_SVE || SZ_USE_SVE2
 
-#if (SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES) && (SZ_USE_NEON || SZ_USE_NEON_AES)
-#include <arm_neon_sve_bridge.h>
-#endif // SVE/SVE2 && NEON bridge
-
 #ifdef __cplusplus
 extern "C" {
 #endif
