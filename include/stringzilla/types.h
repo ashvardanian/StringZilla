@@ -235,6 +235,16 @@
 #endif
 #endif
 
+#if !defined(SZ_USE_GOLDMONT)
+#if SZ_IS_64BIT_X86_ && defined(__SHA__)
+#define SZ_USE_GOLDMONT (1)
+#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX2__)
+#define SZ_USE_GOLDMONT (1) // ! MSVC doesn't expose `__SHA__` macros
+#else
+#define SZ_USE_GOLDMONT (0)
+#endif
+#endif
+
 #if !defined(SZ_USE_SKYLAKE)
 #if SZ_IS_64BIT_X86_ && defined(__AVX512F__)
 #define SZ_USE_SKYLAKE (1)
@@ -288,6 +298,15 @@
 #define SZ_USE_NEON_AES (1)
 #else
 #define SZ_USE_NEON_AES (0)
+#endif
+#endif
+
+/*  SHA2 is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
+#if !defined(SZ_USE_NEON_SHA)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SHA2)
+#define SZ_USE_NEON_SHA (1)
+#else
+#define SZ_USE_NEON_SHA (0)
 #endif
 #endif
 
@@ -463,6 +482,7 @@ typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
 struct sz_hash_state_t;            // Forward declaration of a hash state structure
+struct sz_sha256_state_t;          // Forward declaration of a SHA256 hash state structure
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
@@ -549,9 +569,11 @@ typedef enum sz_capability_t {
     sz_cap_skylake_k = 1 << 6,  ///< x86 AVX512 baseline capability
     sz_cap_ice_k = 1 << 7,      ///< x86 AVX512 capability with advanced integer algos and AES extensions
     sz_cap_westmere_k = 1 << 8, ///< x86 SSE4.2 + AES-NI capability
+    sz_cap_goldmont_k = 1 << 9, ///< x86 SHA-NI capability for accelerated SHA-256 hashing
 
     sz_cap_neon_k = 1 << 10,     ///< ARM NEON baseline capability
     sz_cap_neon_aes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
+    sz_cap_neon_sha_k = 1 << 15, ///< ARM NEON baseline capability with SHA2 extensions
     sz_cap_sve_k = 1 << 12,      ///< ARM SVE baseline capability
     sz_cap_sve2_k = 1 << 13,     ///< ARM SVE2 capability
     sz_cap_sve2_aes_k = 1 << 14, ///< ARM SVE2 capability with AES extensions
@@ -570,8 +592,8 @@ typedef enum sz_capability_t {
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
-                     sz_cap_westmere_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k |
-                     sz_cap_sve2_aes_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_neon_sha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -580,7 +602,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 14
+#define SZ_CAPABILITIES_COUNT 16
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
@@ -752,6 +774,15 @@ typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
+
+/** @brief Signature of `sz_sha256_state_init`. */
+typedef void (*sz_sha256_state_init_t)(struct sz_sha256_state_t *);
+
+/** @brief Signature of `sz_sha256_state_update`. */
+typedef void (*sz_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, sz_size_t);
+
+/** @brief Signature of `sz_sha256_state_digest`. */
+typedef void (*sz_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *);
 
 /** @brief Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);

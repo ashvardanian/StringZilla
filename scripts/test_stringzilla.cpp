@@ -26,6 +26,7 @@
 
  #define SZ_USE_WESTMERE 0
  #define SZ_USE_HASWELL 0
+ #define SZ_USE_GOLDMONT 0
  #define SZ_USE_SKYLAKE 0
  #define SZ_USE_ICE 0
  #define SZ_USE_NEON 0
@@ -346,6 +347,44 @@ void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_r
             test_on_nonce(length, nonce);
 }
 
+/**
+ *  @brief  Tests SHA256 implementations, comparing serial and SIMD variants
+ *          against known FIPS 180-4 test vectors.
+ */
+void test_sha256_equivalence(                                                                                     //
+    sz_sha256_state_init_t init_base, sz_sha256_state_update_t update_base, sz_sha256_state_digest_t digest_base, //
+    sz_sha256_state_init_t init_simd, sz_sha256_state_update_t update_simd, sz_sha256_state_digest_t digest_simd) {
+
+    // Test random inputs of various lengths
+    for (std::size_t length = 0; length <= 256; ++length) {
+        std::string random_text(length, '\0');
+        randomize_string(&random_text[0], length);
+
+        sz_sha256_state_t state_base, state_simd;
+        sz_u8_t digest_base_result[32], digest_simd_result[32];
+
+        // One-shot hashing
+        init_base(&state_base);
+        init_simd(&state_simd);
+        update_base(&state_base, random_text.data(), length);
+        update_simd(&state_simd, random_text.data(), length);
+        digest_base(&state_base, digest_base_result);
+        digest_simd(&state_simd, digest_simd_result);
+        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+
+        // Incremental hashing with random chunks
+        init_base(&state_base);
+        init_simd(&state_simd);
+        iterate_in_random_slices(random_text, [&](std::string slice) {
+            update_base(&state_base, slice.data(), slice.size());
+            update_simd(&state_simd, slice.data(), slice.size());
+        });
+        digest_base(&state_base, digest_base_result);
+        digest_simd(&state_simd, digest_simd_result);
+        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+    }
+}
+
 void test_equivalence() {
 
     // Ensure the seed affects hash results
@@ -391,6 +430,26 @@ void test_equivalence() {
         sz_hash_sve2, sz_hash_state_init_sve2,                    //
         sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
+#endif
+
+    // Test SHA256 implementations
+#if SZ_USE_ICE
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice           //
+    );
+#endif
+#if SZ_USE_GOLDMONT
+    test_sha256_equivalence(                                                                            //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,      //
+        sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, sz_sha256_state_digest_goldmont //
+    );
+#endif
+#if SZ_USE_NEON_SHA
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
+    );
 #endif
 };
 
@@ -1845,6 +1904,25 @@ void test_sorting_algorithms() {
     assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
     assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
+    // Single character vs multi-character strings
+    assert_scoped(strs_t x({"aa", "a", "aaa", "aa"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+
+    // Mix of short and long strings with common prefixes
+    assert_scoped(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}), (void)0,
+                  sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+
+    // Single character vs multi-character strings with varied patterns
+    assert_scoped(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
+                  (void)0, sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+
+    // Numeric-like strings of varying lengths
+    assert_scoped(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}), (void)0,
+                  sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+
+    // Real names with varied lengths and prefixes (this one is already correct)
+    assert_scoped(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}), (void)0,
+                  sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
         for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
@@ -2007,6 +2085,7 @@ int main(int argc, char const **argv) {
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");

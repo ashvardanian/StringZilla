@@ -217,6 +217,56 @@ void bench_stream_hashing(environment_t const &env) {
 #endif
 }
 
+/** @brief Wraps SHA256 state initialization, streaming, and digesting for streaming benchmarks. */
+template <sz_sha256_state_init_t init_, sz_sha256_state_update_t stream_, sz_sha256_state_digest_t fold_>
+struct sha256_stream_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    call_result_t operator()(std::string_view s) const noexcept {
+        sz_sha256_state_t state;
+        init_(&state);
+        stream_(&state, s.data(), s.size());
+        sz_u8_t digest[32];
+        fold_(&state, digest);
+        // Use first 8 bytes of digest as check value
+        sz_u64_t check = 0;
+        std::memcpy(&check, digest, sizeof(sz_u64_t));
+        do_not_optimize(check);
+        return {s.size(), static_cast<check_value_t>(check)};
+    }
+};
+
+void bench_sha256(environment_t const &env) {
+
+    auto validator = sha256_stream_from_sz<sz_sha256_state_init_serial, sz_sha256_state_update_serial,
+                                           sz_sha256_state_digest_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_sha256_serial", validator).log();
+
+#if SZ_USE_ICE
+    bench_unary(
+        env, "sz_sha256_ice", validator,
+        sha256_stream_from_sz<sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice> {env})
+        .log(base);
+#endif
+#if SZ_USE_GOLDMONT
+    bench_unary(env, "sz_sha256_goldmont", validator,
+                sha256_stream_from_sz<sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont,
+                                      sz_sha256_state_digest_goldmont> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON_SHA
+    bench_unary(
+        env, "sz_sha256_neon", validator,
+        sha256_stream_from_sz<sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon> {
+            env})
+        .log(base);
+#endif
+}
+
 #pragma endregion
 
 #pragma region Binary Functions
@@ -386,6 +436,7 @@ int main(int argc, char const **argv) {
     bench_checksums(env);
     bench_hashing(env);
     bench_stream_hashing(env);
+    bench_sha256(env);
 
     // Binary operations
     bench_comparing_equality(env);
