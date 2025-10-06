@@ -49,6 +49,7 @@
                     "SZ_USE_ICE=0",
                     "SZ_USE_NEON=1",
                     "SZ_USE_NEON_AES=1",
+                    "SZ_USE_NEON_SHA=1",
                     "SZ_USE_SVE=1",
                     "SZ_USE_SVE2=1",
                     "SZ_USE_SVE2_AES=1"
@@ -86,6 +87,7 @@
                     "SZ_USE_ICE=0",
                     "SZ_USE_NEON=1",
                     "SZ_USE_NEON_AES=1",
+                    "SZ_USE_NEON_SHA=1",
                     "SZ_USE_SVE=0",
                     "SZ_USE_SVE2=0"
                   ]
@@ -122,6 +124,7 @@
                     "SZ_USE_ICE=0",
                     "SZ_USE_NEON=1",
                     "SZ_USE_NEON_AES=1",
+                    "SZ_USE_NEON_SHA=1",
                     "SZ_USE_SVE=0",
                     "SZ_USE_SVE2=0"
                   ]

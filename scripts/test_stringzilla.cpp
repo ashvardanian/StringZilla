@@ -432,7 +432,7 @@ void test_equivalence() {
 #endif
 
     // Test SHA256 implementations
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //

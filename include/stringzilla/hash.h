@@ -366,6 +366,19 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state);
 
 #endif
 
+#if SZ_USE_NEON_SHA
+
+/** @copydoc sz_sha256_state_init */
+SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state);
+
+/** @copydoc sz_sha256_state_update */
+SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+
+/** @copydoc sz_sha256_state_digest */
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t *digest);
+
+#endif
+
 #if SZ_USE_SVE
 
 /** @copydoc sz_bytesum */
@@ -3327,6 +3340,23 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_NEON_AES
+#pragma endregion // NEON AES Implementation
+
+#pragma region NEON SHA Implementation
+#if SZ_USE_NEON_SHA
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+sha2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+simd+crypto+sha2")
+#endif
+
 /**
  *  @brief  Process a single 512-bit (64-byte) block of data using NEON SHA256 crypto extensions.
  *  @param  hash    Pointer to 8x 32-bit hash values (h0-h7), modified in place.
@@ -3612,8 +3642,8 @@ SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif            // SZ_USE_NEON
-#pragma endregion // NEON AES Implementation
+#endif            // SZ_USE_NEON_SHA
+#pragma endregion // NEON SHA Implementation
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
@@ -3903,7 +3933,7 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 }
 
 SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_init_neon(state);
 #else
     sz_sha256_state_init_serial(state);
@@ -3911,7 +3941,7 @@ SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
 }
 
 SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_update_neon(state, data, length);
 #else
     sz_sha256_state_update_serial(state, data, length);
@@ -3919,7 +3949,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
 }
 
 SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEON_SHA
     sz_sha256_state_digest_neon(state, digest);
 #else
     sz_sha256_state_digest_serial(state, digest);

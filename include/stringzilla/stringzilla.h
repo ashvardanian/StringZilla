@@ -122,6 +122,7 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
         //
         {sz_cap_neon_k, "neon"},
         {sz_cap_neon_aes_k, "neon+aes"},
+        {sz_cap_neon_sha_k, "neon+sha"},
         {sz_cap_sve_k, "sve"},
         {sz_cap_sve2_k, "sve2"},
         {sz_cap_sve2_aes_k, "sve2+aes"},
@@ -169,6 +170,9 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
     if (sz_equal_null_terminated_serial(name, "neon_aes") == sz_true_k ||
         sz_equal_null_terminated_serial(name, "neon+aes") == sz_true_k)
         return sz_cap_neon_aes_k;
+    if (sz_equal_null_terminated_serial(name, "neon_sha") == sz_true_k ||
+        sz_equal_null_terminated_serial(name, "neon+sha") == sz_true_k)
+        return sz_cap_neon_sha_k;
     if (sz_equal_null_terminated_serial(name, "sve2_aes") == sz_true_k ||
         sz_equal_null_terminated_serial(name, "sve2+aes") == sz_true_k)
         return sz_cap_sve2_aes_k;
@@ -238,26 +242,30 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
     uint32_t supports_neon_aes = 0;
+    uint32_t supports_neon_sha = 0;
     size_t size = sizeof(supports_neon);
     if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
     if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neon_aes, &size, NULL, 0) != 0) supports_neon_aes = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neon_sha, &size, NULL, 0) != 0) supports_neon_sha = 0;
 
     return (sz_capability_t)(                       //
         (sz_cap_neon_k * (supports_neon)) |         //
         (sz_cap_neon_aes_k * (supports_neon_aes)) | //
+        (sz_cap_neon_sha_k * (supports_neon_sha)) | //
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_LINUX_)
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
-    unsigned supports_neon = 0, supports_neon_aes = 0, supports_sve = 0, supports_sve2 = 0, supports_sve2_aes = 0;
+    unsigned supports_neon = 0, supports_neon_aes = 0, supports_neon_sha = 0, supports_sve = 0, supports_sve2 = 0,
+             supports_sve2_aes = 0;
     sz_unused_(id_aa64isar0_el1);
     sz_unused_(id_aa64isar1_el1);
     sz_unused_(id_aa64pfr0_el1);
     sz_unused_(id_aa64zfr0_el1);
 
-#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEON_AES || SZ_USE_SVE2_AES
+#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEON_AES || SZ_USE_NEON_SHA || SZ_USE_SVE2_AES
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
@@ -276,7 +284,10 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // That's a really weird way to encode lack of NEON support, but it's important to
     // check in case we are running on R-profile CPUs.
     supports_neon = ((id_aa64pfr0_el1 >> 20) & 0xF) != 0xF;
+    // AES, bits [7:4] of ID_AA64ISAR0_EL1
     supports_neon_aes = ((id_aa64isar0_el1 >> 4) & 0xF) >= 1;
+    // SHA2, bits [15:12] of ID_AA64ISAR0_EL1
+    supports_neon_sha = ((id_aa64isar0_el1 >> 12) & 0xF) >= 1;
 
 #if SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES
     // SVE, bits [35:32] of ID_AA64PFR0_EL1
@@ -296,6 +307,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     return (sz_capability_t)(                       //
         (sz_cap_neon_k * (supports_neon)) |         //
         (sz_cap_neon_aes_k * (supports_neon_aes)) | //
+        (sz_cap_neon_sha_k * (supports_neon_sha)) | //
         (sz_cap_sve_k * (supports_sve)) |           //
         (sz_cap_sve2_k * (supports_sve2)) |         //
         (sz_cap_sve2_aes_k * (supports_sve2_aes)) | //

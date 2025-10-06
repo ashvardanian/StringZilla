@@ -247,6 +247,7 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
@@ -302,6 +303,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         ("SZ_USE_ICE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -332,6 +334,7 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
