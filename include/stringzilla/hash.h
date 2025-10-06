@@ -3314,8 +3314,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
 
 SZ_PUBLIC void sz_checksum_neon(sz_cptr_t text, sz_size_t length, sz_u8_t checksum[32]) {
     // SHA-256 initial hash values
-    uint32x4_t state0 = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a};
-    uint32x4_t state1 = {0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    sz_u32_t const init0[4] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a};
+    sz_u32_t const init1[4] = {0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    uint32x4_t state0 = vld1q_u32(init0);
+    uint32x4_t state1 = vld1q_u32(init1);
 
     sz_u8_t const *data = (sz_u8_t const *)text;
     sz_size_t blocks = length / 64;
