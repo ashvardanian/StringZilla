@@ -1090,11 +1090,6 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t
     state->block_length += length;
 }
 
-/**
- *  @brief  Finalize SHA256 computation and produce 256-bit digest.
- *  @param  state   Pointer to SHA256 state structure (not modified).
- *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
- */
 SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state, sz_u8_t *digest) {
     // Create a copy of the state for padding
     sz_sha256_state_t final_state = *state;
@@ -2014,11 +2009,6 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr
     state->block_length += length;
 }
 
-/**
- *  @brief  Finalize SHA256 computation and produce 256-bit digest.
- *  @param  state   Pointer to SHA256 state structure (not modified).
- *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
- */
 SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t *digest) {
     // Create a copy of the state for padding
     sz_sha256_state_t final_state = *state;
@@ -2935,11 +2925,9 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_ice_(sz_hash_minimal_x4_t_ *state, __
 }
 
 /**
- *  @brief  Process a single 512-bit (64-byte) block through the SHA-256 compression function.
- *          Uses SHA-NI for compression with AVX-512 for efficient data loading.
- *          Requires SHA extensions and AVX-512.
- *  @param  hash    8x 32-bit hash state (A-H), updated in-place.
- *  @param  block   64-byte input block to process.
+ *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
+ *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in] block Pointer to 64-byte message block.
  */
 SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const block[64]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
@@ -3322,8 +3310,6 @@ SZ_PUBLIC void sz_checksum_neon(sz_cptr_t text, sz_size_t length, sz_u8_t checks
     sz_u8_t const *data = (sz_u8_t const *)text;
     sz_size_t blocks = length / 64;
 
-    // Check if SHA2 hardware acceleration is available
-#if defined(__ARM_FEATURE_CRYPTO)
     // SHA-256 round constants
     static sz_u32_t const k0_3[4] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5};
     static sz_u32_t const k4_7[4] = {0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5};
@@ -3495,14 +3481,6 @@ SZ_PUBLIC void sz_checksum_neon(sz_cptr_t text, sz_size_t length, sz_u8_t checks
     uint8x16_t result1 = vrev32q_u8(vreinterpretq_u8_u32(state1));
     vst1q_u8(checksum, result0);
     vst1q_u8(checksum + 16, result1);
-#else
-    // No hardware SHA-256, fall back to serial
-    (void)state0; // Suppress unused variable warnings
-    (void)state1;
-    (void)data;
-    (void)blocks;
-    sz_checksum_serial(text, length, checksum);
-#endif
 }
 
 #if defined(__clang__)
@@ -4349,7 +4327,7 @@ SZ_INTERNAL svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_vec, svuint8
 }
 
 /** @brief A variant of `sz_hash_sve2` for strings up to 16 bytes long - smallest SVE register size. */
-SZ_PUBLIC sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_INTERNAL sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     svuint8_t state_aes, state_sum, state_key;
 
     // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.

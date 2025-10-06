@@ -181,6 +181,9 @@ void bench_hashing(environment_t const &env) {
 #if SZ_USE_NEON_AES
     bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon> {env}).log(base, base_stl);
 #endif
+#if SZ_USE_SVE2_AES
+    bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
+#endif
 }
 
 void bench_stream_hashing(environment_t const &env) {

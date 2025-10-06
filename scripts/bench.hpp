@@ -775,29 +775,33 @@ bench_result_t bench_unary(    //
     for (auto running_seconds : repeat_up_to(env.benchmark_seconds - first_call_duration)) {
         std::uint64_t t0 = cpu_cycle_counter();
         call_result_t r0 = callable((result.profiled_calls + 0) & lookup_mask);
-        std::uint64_t t1 = cpu_cycle_counter();
         call_result_t r1 = callable((result.profiled_calls + 1) & lookup_mask);
-        std::uint64_t t2 = cpu_cycle_counter();
         call_result_t r2 = callable((result.profiled_calls + 2) & lookup_mask);
-        std::uint64_t t3 = cpu_cycle_counter();
         call_result_t r3 = callable((result.profiled_calls + 3) & lookup_mask);
-        std::uint64_t t4 = cpu_cycle_counter();
+        call_result_t r4 = callable((result.profiled_calls + 4) & lookup_mask);
+        call_result_t r5 = callable((result.profiled_calls + 5) & lookup_mask);
+        call_result_t r6 = callable((result.profiled_calls + 6) & lookup_mask);
+        call_result_t r7 = callable((result.profiled_calls + 7) & lookup_mask);
+        std::uint64_t t7 = cpu_cycle_counter();
 
         // Aggregate all of them:
         result.operations += r0.operations, result.operations += r1.operations,                           //
-            result.operations += r2.operations, result.operations += r3.operations;                       //
+            result.operations += r2.operations, result.operations += r3.operations,                       //
+            result.operations += r4.operations, result.operations += r5.operations,                       //
+            result.operations += r6.operations, result.operations += r7.operations;                       //
         result.bytes_passed += r0.bytes_passed, result.bytes_passed += r1.bytes_passed,                   //
-            result.bytes_passed += r2.bytes_passed, result.bytes_passed += r3.bytes_passed;               //
+            result.bytes_passed += r2.bytes_passed, result.bytes_passed += r3.bytes_passed,               //
+            result.bytes_passed += r4.bytes_passed, result.bytes_passed += r5.bytes_passed,               //
+            result.bytes_passed += r6.bytes_passed, result.bytes_passed += r7.bytes_passed;               //
         result.profiled_inputs += r0.inputs_processed, result.profiled_inputs += r1.inputs_processed,     //
-            result.profiled_inputs += r2.inputs_processed, result.profiled_inputs += r3.inputs_processed; //
-        result.profiled_calls += 4;
+            result.profiled_inputs += r2.inputs_processed, result.profiled_inputs += r3.inputs_processed, //
+            result.profiled_inputs += r4.inputs_processed, result.profiled_inputs += r5.inputs_processed, //
+            result.profiled_inputs += r6.inputs_processed, result.profiled_inputs += r7.inputs_processed; //
+        result.profiled_calls += 8;
 
         result.profiled_seconds = running_seconds;
-        result.profiled_cpu_cycles += t4 - t0;
-        result.cpu_cycles_histogram[static_cast<double>(t1 - t0)] += 1;
-        result.cpu_cycles_histogram[static_cast<double>(t2 - t1)] += 1;
-        result.cpu_cycles_histogram[static_cast<double>(t3 - t2)] += 1;
-        result.cpu_cycles_histogram[static_cast<double>(t4 - t3)] += 1;
+        result.profiled_cpu_cycles += t7 - t0;
+        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += 8;
     }
 
     result.profiled_seconds += first_call_duration;
