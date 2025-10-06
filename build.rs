@@ -87,9 +87,23 @@ fn build_stringzilla() -> HashMap<String, bool> {
         ],
         _ => vec![],
     };
+
+    // Check environment variables to allow users to disable specific backends
+    // Example: SZ_USE_NEON=0 SZ_USE_SVE=0 cargo build
     for flag in flags_to_try.iter() {
-        build.define(flag, "1");
-        flags.insert(flag.to_string(), true);
+        let enabled = match env::var(flag) {
+            Ok(val) => val != "0" && val.to_lowercase() != "false",
+            Err(_) => true, // Default to enabled if not specified
+        };
+
+        if enabled {
+            build.define(flag, "1");
+            flags.insert(flag.to_string(), true);
+        } else {
+            build.define(flag, "0");
+            flags.insert(flag.to_string(), false);
+            println!("cargo:warning=Disabled {} via environment variable", flag);
+        }
     }
 
     // If that fails, we will try disabling them one by one
@@ -124,6 +138,12 @@ fn build_stringzilla() -> HashMap<String, bool> {
     println!("cargo:rerun-if-changed=include/stringzilla/small_string.h");
     println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
     println!("cargo:rerun-if-changed=include/stringzilla/types.h");
+
+    // Rerun if SIMD backend environment variables change
+    for flag in flags_to_try.iter() {
+        println!("cargo:rerun-if-env-changed={}", flag);
+    }
+
     flags
 }
 
