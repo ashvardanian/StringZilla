@@ -242,11 +242,13 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
         ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_WESTMERE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
@@ -291,17 +293,19 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
     ]
 
     # We only support single-arch macOS wheels, but not the Universal builds:
-    # - x86_64: enable Westmere (SSE4.2) and Haswell (AVX2) only
+    # - x86_64: enable Westmere (SSE4.2), Goldmont (SHA-NI), and Haswell (AVX2) only
     # - arm64: enable NEON only
     macros_args = [
         ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
         ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_WESTMERE", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
+        ("SZ_USE_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
         ("SZ_USE_ICE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -327,11 +331,13 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_IS_64BIT_X86_", "1" if is_64bit_x86() else "0"),
         ("SZ_IS_64BIT_ARM_", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_WESTMERE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]

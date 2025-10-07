@@ -62,9 +62,13 @@ musllinux-s390x-image = "musllinux_1_2"
 musllinux-ppc64le-image = "musllinux_1_2"
 musllinux-i686-image = "musllinux_1_2"
 
-# On CentOS we have to use `yum`.
-# The healthy version would be: `apt-get update && apt-get install -y libc6-dev wget python3-dev`.
-before-all = ["yum update -y && yum install -y glibc-devel wget python3-devel"]
+# Different manylinux images use different package managers.
+# Try yum (CentOS/RHEL), dnf (Fedora), or apt-get (Debian/Ubuntu).
+before-all = ["""
+    (yum update -y && yum install -y glibc-devel wget python3-devel) || \
+    (dnf update -y && dnf install -y glibc-devel wget python3-devel) || \
+    (apt-get update && apt-get install -y libc6-dev wget python3-dev)
+    """]
 
 # With `musl` builds, we obviously don't need the `glibc` and can't use `yum`.
 # This may also be handy for using custom dependencies for different Python versions:

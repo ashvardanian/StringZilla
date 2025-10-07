@@ -39,4 +39,20 @@ allocator-api2 = { version = "0.3.0", optional = true }
 stringtape = { version = "2.0.3", optional = true }
 
 [build-dependencies]
-cc = "1.2.35"
+cc = "1.2.40"
+
+[lints.clippy]
+# Catch platform-specific type issues like `c_char` differences
+cast-sign-loss = "warn"
+# Catch potential FFI issues
+not-unsafe-ptr-arg-deref = "warn"
+# Catch undefined behavior with pointers
+invalid_null_ptr_usage = "warn"
+# Catch transmute issues
+transmute_ptr_to_ptr = "warn"
+
+[lints.rust]
+# Catch ABI mismatches in FFI
+improper_ctypes = "warn"
+# Catch platform-specific code that might fail on other targets
+unexpected_cfgs = "warn"

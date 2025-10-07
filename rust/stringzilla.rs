@@ -63,6 +63,38 @@ pub struct Hasher {
     ins_length: usize, // Ignored in comparisons
 }
 
+/// Incremental SHA256 hasher state for cryptographic hashing.
+///
+/// # Examples
+///
+/// One-shot hashing:
+///
+/// ```
+/// use stringzilla::stringzilla::Sha256;
+/// let digest = Sha256::hash(b"Hello, world!");
+/// assert_eq!(digest.len(), 32); // 256 bits = 32 bytes
+/// ```
+///
+/// Incremental hashing:
+///
+/// ```
+/// use stringzilla::stringzilla::Sha256;
+/// let mut hasher = Sha256::new();
+/// hasher.update(b"Hello, ");
+/// hasher.update(b"world!");
+/// let digest = hasher.digest();
+/// assert_eq!(digest, Sha256::hash(b"Hello, world!"));
+/// ```
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[repr(align(64))] // For optimal performance we align to 64 bytes.
+pub struct Sha256 {
+    hash: [u32; 8],      // Current hash state (h0-h7)
+    block: [u8; 64],     // 64-byte message block buffer
+    block_length: usize, // Current bytes in block (0-63)
+    total_length: u64,   // Total message length in bytes
+}
+
 pub type SortedIdx = usize;
 
 /// A trait for types that support indexed lookup.
@@ -167,8 +199,8 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
     }
 }
 
+use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
-use core::{ffi::c_void, ffi::CStr};
 
 // Import the functions from the StringZillable C library.
 extern "C" {
@@ -221,6 +253,9 @@ extern "C" {
     pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
     pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
     pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
+    pub(crate) fn sz_sha256_state_init(state: *const c_void);
+    pub(crate) fn sz_sha256_state_update(state: *const c_void, data: *const c_void, length: usize);
+    pub(crate) fn sz_sha256_state_digest(state: *const c_void, digest: *mut u8);
 
     pub(crate) fn sz_sequence_argsort(
         //
@@ -294,6 +329,108 @@ impl Default for Hasher {
     }
 }
 
+impl Sha256 {
+    /// Creates a new SHA256 hasher with the initial state.
+    pub fn new() -> Self {
+        let mut state = Sha256 {
+            hash: [0; 8],
+            block: [0; 64],
+            block_length: 0,
+            total_length: 0,
+        };
+        unsafe {
+            sz_sha256_state_init(&mut state as *mut _ as *mut c_void);
+        }
+        state
+    }
+
+    /// Updates the hasher with more data.
+    pub fn update(&mut self, data: &[u8]) -> &mut Self {
+        unsafe {
+            sz_sha256_state_update(
+                self as *mut _ as *mut c_void,
+                data.as_ptr() as *const c_void,
+                data.len(),
+            );
+        }
+        self
+    }
+
+    /// Returns the current SHA256 hash digest as a 32-byte array.
+    pub fn digest(&self) -> [u8; 32] {
+        let mut digest = [0u8; 32];
+        unsafe {
+            sz_sha256_state_digest(self as *const _ as *const c_void, digest.as_mut_ptr());
+        }
+        digest
+    }
+
+    /// Convenience method to hash data in one call.
+    pub fn hash(data: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hasher.digest()
+    }
+}
+
+impl Default for Sha256 {
+    #[inline]
+    fn default() -> Self {
+        Sha256::new()
+    }
+}
+
+/// Computes HMAC-SHA256 (Hash-based Message Authentication Code) for the given key and message.
+///
+/// # Arguments
+///
+/// * `key` - The secret key (can be any length, will be hashed if > 64 bytes)
+/// * `message` - The message to authenticate
+///
+/// # Returns
+///
+/// A 32-byte HMAC-SHA256 digest
+///
+/// # Example
+///
+/// ```
+/// use stringzilla::stringzilla::hmac_sha256;
+/// let key = b"secret_key";
+/// let message = b"important message";
+/// let mac = hmac_sha256(key, message);
+/// assert_eq!(mac.len(), 32);
+/// ```
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    // Prepare key: hash if > 64 bytes, zero-pad to 64 bytes
+    let mut key_pad = [0u8; 64];
+    if key.len() > 64 {
+        let key_hash = Sha256::hash(key);
+        key_pad[..32].copy_from_slice(&key_hash);
+    } else {
+        key_pad[..key.len()].copy_from_slice(key);
+    }
+
+    // Compute inner hash: SHA256((key ^ 0x36) || message)
+    let mut inner_hasher = Sha256::new();
+    let mut inner_pad = [0u8; 64];
+    for i in 0..64 {
+        inner_pad[i] = key_pad[i] ^ 0x36;
+    }
+    inner_hasher.update(&inner_pad);
+    inner_hasher.update(message);
+    let inner_hash = inner_hasher.digest();
+
+    // Compute outer hash: SHA256((key ^ 0x5c) || inner_hash)
+    let mut outer_hasher = Sha256::new();
+    let mut outer_pad = [0u8; 64];
+    for i in 0..64 {
+        outer_pad[i] = key_pad[i] ^ 0x5c;
+    }
+    outer_hasher.update(&outer_pad);
+    outer_hasher.update(&inner_hash);
+    outer_hasher.digest()
+}
+
 /// Standard Hasher trait to interoperate with `std::collections`.
 impl core::hash::Hasher for Hasher {
     #[inline]
@@ -333,7 +470,7 @@ impl core::hash::Hasher for Hasher {
     }
     #[inline]
     fn write_i8(&mut self, i: i8) {
-        self.write(&[i as u8]);
+        self.write(&i.to_le_bytes());
     }
     #[inline]
     fn write_i16(&mut self, i: i16) {
@@ -461,7 +598,7 @@ pub type SmallCString = FixedCString<256>;
 pub(crate) fn capabilities_from_enum(caps: u32) -> SmallCString {
     let caps_ptr = unsafe { sz_capabilities_to_string(caps) };
     // Assume that the external function returns a valid null-terminated C string.
-    let cstr = unsafe { CStr::from_ptr(caps_ptr as *const i8) };
+    let cstr = unsafe { CStr::from_ptr(caps_ptr as *const c_char) };
     let bytes = cstr.to_bytes();
 
     let mut buf = SmallCString::new();
@@ -499,8 +636,7 @@ where
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
     let text_length = text_ref.len();
-    let result = unsafe { sz_bytesum(text_pointer, text_length) };
-    return result;
+    unsafe { sz_bytesum(text_pointer, text_length) }
 }
 
 /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
@@ -657,8 +793,7 @@ where
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
     let text_length = text_ref.len();
-    let result = unsafe { sz_hash(text_pointer, text_length, seed) };
-    return result;
+    unsafe { sz_hash(text_pointer, text_length, seed) }
 }
 
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
@@ -710,7 +845,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -744,7 +879,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -774,7 +909,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -803,7 +938,7 @@ where
     if result.is_null() {
         None
     } else {
-        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
+        Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
 }
 
@@ -2269,5 +2404,91 @@ mod tests {
         println!("Intersection found {} common elements", n);
         assert!(n == 2);
         println!("Test passed!");
+    }
+
+    #[test]
+    fn sha256_empty() {
+        let hash = sz::Sha256::hash(b"");
+        let expected = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae,
+            0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_abc() {
+        let hash = sz::Sha256::hash(b"abc");
+        let expected = [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03,
+            0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_incremental() {
+        let mut hasher = sz::Sha256::new();
+        hasher.update(b"ab");
+        hasher.update(b"c");
+        let hash = hasher.digest();
+        let expected = [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03,
+            0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn sha256_long() {
+        let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        let hash = sz::Sha256::hash(msg);
+        let expected = [
+            0x24, 0x8d, 0x6a, 0x61, 0xd2, 0x06, 0x38, 0xb8, 0xe5, 0xc0, 0x26, 0x93, 0x0c, 0x3e, 0x60, 0x39, 0xa3, 0x3c,
+            0xe4, 0x59, 0x64, 0xff, 0x21, 0x67, 0xf6, 0xec, 0xed, 0xd4, 0x19, 0xdb, 0x06, 0xc1,
+        ];
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_basic() {
+        // Test vector from RFC 4231 (HMAC-SHA256 test case 1)
+        let key = b"";
+        let message = b"";
+        let mac = sz::hmac_sha256(key, message);
+        // HMAC-SHA256("", "") = b613...
+        let expected = [
+            0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec, 0x77, 0x2f, 0x95, 0xd7, 0x78, 0xc3, 0x5f, 0xc5, 0xff, 0x16,
+            0x97, 0xc4, 0x93, 0x71, 0x56, 0x53, 0xc6, 0xc7, 0x12, 0x14, 0x42, 0x92, 0xc5, 0xad,
+        ];
+        assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_short_key() {
+        // Test with short key and message
+        let key = b"key";
+        let message = b"The quick brown fox jumps over the lazy dog";
+        let mac = sz::hmac_sha256(key, message);
+        // HMAC-SHA256("key", "The quick brown fox jumps over the lazy dog")
+        let expected = [
+            0xf7, 0xbc, 0x83, 0xf4, 0x30, 0x53, 0x84, 0x24, 0xb1, 0x32, 0x98, 0xe6, 0xaa, 0x6f, 0xb1, 0x43, 0xef, 0x4d,
+            0x59, 0xa1, 0x49, 0x46, 0x17, 0x59, 0x97, 0x47, 0x9d, 0xbc, 0x2d, 0x1a, 0x3c, 0xd8,
+        ];
+        assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_long_key() {
+        // Test with key longer than block size (> 64 bytes)
+        let key = b"this is a very long key that exceeds the SHA256 block size of 64 bytes for testing purposes";
+        let message = b"message";
+        let mac = sz::hmac_sha256(key, message);
+        // Expected value computed with Python: hmac.new(key, message, hashlib.sha256).digest()
+        let expected = [
+            0xd1, 0x3f, 0xdb, 0x7b, 0xe0, 0x9a, 0x9e, 0x07, 0x04, 0xc6, 0x5b, 0xd7, 0x85, 0xa6, 0x33, 0xbb, 0xc0, 0xee,
+            0x2b, 0x99, 0xef, 0xd6, 0x32, 0x2c, 0xa9, 0x4c, 0xd3, 0x2c, 0x1e, 0x45, 0x09, 0xfd,
+        ];
+        assert_eq!(mac, expected);
     }
 }

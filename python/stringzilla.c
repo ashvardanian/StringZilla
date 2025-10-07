@@ -111,6 +111,7 @@ static PyTypeObject StrType;
 static PyTypeObject StrsType;
 static PyTypeObject SplitIteratorType;
 static PyTypeObject HasherType;
+static PyTypeObject Sha256Type;
 
 static sz_string_view_t temporary_memory = {NULL, 0};
 
@@ -1483,6 +1484,117 @@ static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssiz
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
+static char const doc_like_sha256[] = //
+    "Compute SHA256 cryptographic hash of the input data.\n"
+    "\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The input data to hash.\n"
+    "Returns:\n"
+    "  bytes: The 32-byte (256-bit) SHA256 digest.\n"
+    "Raises:\n"
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+
+static PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 1 || args_names_tuple) {
+        PyErr_SetString(PyExc_TypeError, "sha256() expects exactly one positional argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    sz_string_view_t text;
+
+    // Validate and convert `text`
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Initialize SHA256 state
+    sz_sha256_state_t state;
+    sz_sha256_state_init(&state);
+
+    // Update with data
+    sz_sha256_state_update(&state, text.start, text.length);
+
+    // Compute final digest
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&state, digest);
+
+    return PyBytes_FromStringAndSize((char const *)digest, 32);
+}
+
+static char const doc_hmac_sha256[] = //
+    "Compute HMAC-SHA256 authentication code.\n"
+    "\n"
+    "Args:\n"
+    "  key (str or bytes): The secret key.\n"
+    "  message (str or bytes): The message to authenticate.\n"
+    "Returns:\n"
+    "  bytes: The 32-byte (256-bit) HMAC-SHA256 digest.\n"
+    "Raises:\n"
+    "  TypeError: If arguments are not string-like or incorrect number provided.";
+
+static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    sz_unused_(self);
+    if (positional_args_count != 2 || args_names_tuple) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly two positional arguments");
+        return NULL;
+    }
+
+    sz_string_view_t key, message;
+    if (!sz_py_export_string_like(args[0], &key.start, &key.length)) {
+        wrap_current_exception("Key must be string-like");
+        return NULL;
+    }
+    if (!sz_py_export_string_like(args[1], &message.start, &message.length)) {
+        wrap_current_exception("Message must be string-like");
+        return NULL;
+    }
+
+    // Prepare key: hash if > 64 bytes, zero-pad to 64 bytes
+    sz_u8_t key_pad[64];
+    if (key.length > 64) {
+        sz_sha256_state_t key_state;
+        sz_sha256_state_init(&key_state);
+        sz_sha256_state_update(&key_state, key.start, key.length);
+        sz_u8_t key_hash[32];
+        sz_sha256_state_digest(&key_state, key_hash);
+        for (int i = 0; i < 32; ++i) key_pad[i] = key_hash[i];
+        for (int i = 32; i < 64; ++i) key_pad[i] = 0;
+    }
+    else {
+        for (sz_size_t i = 0; i < key.length; ++i) key_pad[i] = ((sz_u8_t const *)key.start)[i];
+        for (sz_size_t i = key.length; i < 64; ++i) key_pad[i] = 0;
+    }
+
+    // Compute inner hash: SHA256((key ^ 0x36) || message)
+    sz_sha256_state_t inner_state;
+    sz_sha256_state_init(&inner_state);
+    sz_u8_t inner_pad[64];
+    for (int i = 0; i < 64; ++i) inner_pad[i] = key_pad[i] ^ 0x36;
+    sz_sha256_state_update(&inner_state, (sz_cptr_t)inner_pad, 64);
+    sz_sha256_state_update(&inner_state, message.start, message.length);
+    sz_u8_t inner_hash[32];
+    sz_sha256_state_digest(&inner_state, inner_hash);
+
+    // Compute outer hash: SHA256((key ^ 0x5c) || inner_hash)
+    sz_sha256_state_t outer_state;
+    sz_sha256_state_init(&outer_state);
+    sz_u8_t outer_pad[64];
+    for (int i = 0; i < 64; ++i) outer_pad[i] = key_pad[i] ^ 0x5c;
+    sz_sha256_state_update(&outer_state, (sz_cptr_t)outer_pad, 64);
+    sz_sha256_state_update(&outer_state, (sz_cptr_t)inner_hash, 32);
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&outer_state, digest);
+
+    return PyBytes_FromStringAndSize((char const *)digest, 32);
+}
+
 static char const doc_like_equal[] = //
     "Check if two strings are equal.\n"
     "\n"
@@ -2636,7 +2748,7 @@ static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_
     sz_string_view_t haystack;
     sz_string_view_t needle;
     Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
-    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : (Py_ssize_t)PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
     if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
@@ -3236,7 +3348,7 @@ static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, P
 
     // Parse slice bounds
     Py_ssize_t start_idx = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
-    Py_ssize_t end_idx = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    Py_ssize_t end_idx = end_obj ? PyLong_AsSsize_t(end_obj) : (Py_ssize_t)PY_SSIZE_T_MAX;
     if ((start_idx == -1 || end_idx == -1) && PyErr_Occurred()) return NULL;
 
     // Normalize slice indices
@@ -4136,6 +4248,7 @@ static PyMethodDef Str_methods[] = {
     {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
     {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
     {"lstrip", (PyCFunction)Str_like_lstrip, SZ_METHOD_FLAGS, doc_lstrip},
     {"rstrip", (PyCFunction)Str_like_rstrip, SZ_METHOD_FLAGS, doc_rstrip},
     {"strip", (PyCFunction)Str_like_strip, SZ_METHOD_FLAGS, doc_strip},
@@ -4432,6 +4545,108 @@ static PyTypeObject HasherType = {
     .tp_init = (initproc)Hasher_init,
     .tp_dealloc = (destructor)Hasher_dealloc,
     .tp_methods = Hasher_methods,
+};
+
+#pragma endregion
+
+#pragma region Sha256
+
+typedef struct {
+    PyObject ob_base;
+    sz_sha256_state_t state;
+} Sha256;
+
+static void Sha256_dealloc(Sha256 *self) { Py_TYPE(self)->tp_free((PyObject *)self); }
+
+static PyObject *Sha256_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    (void)args;
+    (void)kwds;
+    Sha256 *self = (Sha256 *)type->tp_alloc(type, 0);
+    if (!self) return NULL;
+    sz_sha256_state_init(&self->state);
+    return (PyObject *)self;
+}
+
+static int Sha256_init(Sha256 *self, PyObject *args, PyObject *kwargs) {
+    // No arguments expected
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 0) {
+        PyErr_SetString(PyExc_TypeError, "Sha256() takes no positional arguments");
+        return -1;
+    }
+    if (kwargs && PyDict_Size(kwargs) > 0) {
+        PyErr_SetString(PyExc_TypeError, "Sha256() takes no keyword arguments");
+        return -1;
+    }
+    sz_sha256_state_init(&self->state);
+    return 0;
+}
+
+static PyObject *Sha256_update(PyObject *self_obj, PyObject *arg) {
+    Sha256 *self = (Sha256 *)self_obj;
+    sz_string_view_t text;
+    if (!sz_py_export_string_like(arg, &text.start, &text.length)) {
+        wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+    sz_sha256_state_update(&self->state, text.start, text.length);
+    Py_INCREF(self_obj);
+    return self_obj;
+}
+
+static PyObject *Sha256_digest(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Sha256 *self = (Sha256 *)self_obj;
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&self->state, digest);
+    return PyBytes_FromStringAndSize((char const *)digest, 32);
+}
+
+static PyObject *Sha256_hexdigest(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Sha256 *self = (Sha256 *)self_obj;
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&self->state, digest);
+    char buf[65]; // 64 hex digits + null terminator
+    for (int i = 0; i < 32; ++i) snprintf(buf + i * 2, 3, "%02x", digest[i]);
+    return PyUnicode_FromString(buf);
+}
+
+static PyObject *Sha256_reset(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Sha256 *self = (Sha256 *)self_obj;
+    sz_sha256_state_init(&self->state);
+    Py_INCREF(self_obj);
+    return self_obj;
+}
+
+static PyObject *Sha256_copy(PyObject *self_obj, PyObject *noargs) {
+    sz_unused_(noargs);
+    Sha256 *self = (Sha256 *)self_obj;
+    Sha256 *copy = (Sha256 *)Sha256_new(&Sha256Type, NULL, NULL);
+    if (!copy) return NULL;
+    copy->state = self->state;
+    return (PyObject *)copy;
+}
+
+static PyMethodDef Sha256_methods[] = {
+    {"update", (PyCFunction)Sha256_update, METH_O, "Update with more data; returns self."},
+    {"digest", (PyCFunction)Sha256_digest, METH_NOARGS, "Return current hash as bytes (does not consume)."},
+    {"hexdigest", (PyCFunction)Sha256_hexdigest, METH_NOARGS, "Return current hash as lowercase hex (64 digits)."},
+    {"reset", (PyCFunction)Sha256_reset, METH_NOARGS, "Reset to initial state; returns self."},
+    {"copy", (PyCFunction)Sha256_copy, METH_NOARGS, "Return a copy of the hash object."},
+    {NULL, NULL, 0, NULL},
+};
+
+static PyTypeObject Sha256Type = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Sha256",
+    .tp_basicsize = sizeof(Sha256),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = Sha256_new,
+    .tp_init = (initproc)Sha256_init,
+    .tp_dealloc = (destructor)Sha256_dealloc,
+    .tp_methods = Sha256_methods,
 };
 
 #pragma endregion
@@ -6179,6 +6394,8 @@ static PyMethodDef stringzilla_methods[] = {
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
+    {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
+    {"hmac_sha256", (PyCFunction)hmac_sha256, SZ_METHOD_FLAGS, doc_hmac_sha256},
     {"fill_random", (PyCFunction)Str_like_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     // Module-level functionality
@@ -6207,6 +6424,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&StrsType) < 0) return NULL;
     if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
+    if (PyType_Ready(&Sha256Type) < 0) return NULL;
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
@@ -6290,6 +6508,18 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&HasherType);
     if (PyModule_AddObject(m, "Hasher", (PyObject *)&HasherType) < 0) {
+        Py_XDECREF(&HasherType);
+        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&Sha256Type);
+    if (PyModule_AddObject(m, "Sha256", (PyObject *)&Sha256Type) < 0) {
+        Py_XDECREF(&Sha256Type);
         Py_XDECREF(&HasherType);
         Py_XDECREF(&SplitIteratorType);
         Py_XDECREF(&StrsType);

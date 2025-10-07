@@ -883,7 +883,8 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
     // Preserve the static capabilities
     static sz_capability_t static_caps = sz_caps_none_k;
     if (static_caps == sz_caps_none_k) {
-        sz_capability_t cpu_caps = sz_capabilities_implementation_();
+        sz_capability_t cpu_caps =
+            (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 #if SZ_USE_CUDA
         sz_capability_t gpu_caps = sz_caps_none_k;
         sz::gpu_specs_t first_gpu_specs;
