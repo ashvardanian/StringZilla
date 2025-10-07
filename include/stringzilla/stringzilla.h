@@ -219,6 +219,25 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
     return buf;
 }
 
+SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
+    return (sz_capability_t)(                   //
+        (sz_cap_neon_k * SZ_USE_NEON) |         //
+        (sz_cap_neon_aes_k * SZ_USE_NEON_AES) | //
+        (sz_cap_neon_sha_k * SZ_USE_NEON_SHA) | //
+        (sz_cap_sve_k * SZ_USE_SVE) |           //
+        (sz_cap_sve2_k * SZ_USE_SVE2) |         //
+        (sz_cap_sve2_aes_k * SZ_USE_SVE2_AES) | //
+        (sz_cap_westmere_k * SZ_USE_WESTMERE) | //
+        (sz_cap_goldmont_k * SZ_USE_GOLDMONT) | //
+        (sz_cap_haswell_k * SZ_USE_HASWELL) |   //
+        (sz_cap_skylake_k * SZ_USE_SKYLAKE) |   //
+        (sz_cap_ice_k * SZ_USE_ICE) |           //
+        (sz_cap_cuda_k * SZ_USE_CUDA) |         //
+        (sz_cap_kepler_k * SZ_USE_KEPLER) |     //
+        (sz_cap_hopper_k * SZ_USE_HOPPER) |     //
+        (sz_cap_serial_k));
+}
+
 #if SZ_IS_64BIT_ARM_
 
 /*  Compiling the next section one may get: selected processor does not support system register name 'id_aa64zfr0_el1'.
@@ -391,8 +410,8 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 
     return (sz_capability_t)(                                                               //
         (sz_cap_westmere_k * (supports_sse42 && supports_aesni)) |                          //
-        (sz_cap_goldmont_k * supports_shani) |                                              //
-        (sz_cap_haswell_k * supports_avx2) |                                                //
+        (sz_cap_goldmont_k * (supports_shani)) |                                            //
+        (sz_cap_haswell_k * (supports_avx2)) |                                              //
         (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) | //
         (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) |   //
         (sz_cap_serial_k));
@@ -403,11 +422,11 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 #endif // SZ_IS_64BIT_X86_
 
 /**
- *  @brief Function to determine the SIMD capabilities of the current 64-bit x86 machine at @b runtime.
+ *  @brief Function to determine the SIMD capabilities of the current CPU at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
  */
-SZ_PUBLIC sz_capability_t sz_capabilities_implementation_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_runtime_implementation_(void) {
 #if SZ_IS_64BIT_X86_
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
@@ -423,6 +442,8 @@ SZ_DYNAMIC int sz_dynamic_dispatch(void);
 SZ_DYNAMIC int sz_version_major(void);
 SZ_DYNAMIC int sz_version_minor(void);
 SZ_DYNAMIC int sz_version_patch(void);
+SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void);
+SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void);
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
 SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
@@ -433,7 +454,11 @@ SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 0; }
 SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_PUBLIC sz_capability_t sz_capabilities(void) { return sz_capabilities_implementation_(); }
+SZ_PUBLIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
+SZ_PUBLIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
+SZ_PUBLIC sz_capability_t sz_capabilities(void) {
+    return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
+}
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }

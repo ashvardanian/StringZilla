@@ -323,7 +323,11 @@ SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 1; }
 SZ_DYNAMIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_DYNAMIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_DYNAMIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_DYNAMIC sz_capability_t sz_capabilities(void) { return sz_capabilities_implementation_(); }
+SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
+SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
+SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
+    return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
+}
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
