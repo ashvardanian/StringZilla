@@ -2748,7 +2748,7 @@ static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_
     sz_string_view_t haystack;
     sz_string_view_t needle;
     Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
-    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : (Py_ssize_t)PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
     if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
@@ -3348,7 +3348,7 @@ static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, P
 
     // Parse slice bounds
     Py_ssize_t start_idx = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
-    Py_ssize_t end_idx = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    Py_ssize_t end_idx = end_obj ? PyLong_AsSsize_t(end_obj) : (Py_ssize_t)PY_SSIZE_T_MAX;
     if ((start_idx == -1 || end_idx == -1) && PyErr_Occurred()) return NULL;
 
     // Normalize slice indices
