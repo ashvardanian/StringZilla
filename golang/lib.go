@@ -187,12 +187,13 @@ func (h *Hasher) Digest() uint64 {
 
 // SHA256 computes the SHA-256 cryptographic hash of the input data.
 func Sha256(data []byte) [32]byte {
-	var digest [32]byte
-	if len(data) == 0 {
-		C.sz_checksum(nil, 0, (*C.uchar)(unsafe.Pointer(&digest[0])))
-	} else {
-		C.sz_checksum((*C.char)(unsafe.Pointer(&data[0])), C.ulong(len(data)), (*C.uchar)(unsafe.Pointer(&digest[0])))
+	var state C.sz_sha256_state_t
+	C.sz_sha256_state_init(&state)
+	if len(data) > 0 {
+		C.sz_sha256_state_update(&state, (*C.char)(unsafe.Pointer(&data[0])), C.ulong(len(data)))
 	}
+	var digest [32]byte
+	C.sz_sha256_state_digest(&state, (*C.uchar)(unsafe.Pointer(&digest[0])))
 	return digest
 }
 
