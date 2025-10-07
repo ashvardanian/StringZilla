@@ -209,4 +209,31 @@ class StringZillaTests: XCTestCase {
 
         XCTAssertEqual(hashWithEmptyUpdates, hashWithoutEmptyUpdates)
     }
+
+    // MARK: - SHA-256 Tests
+
+    func testSha256TestVectors() {
+        // NIST test vectors
+        let empty = "".sha256()
+        XCTAssertEqual(empty.map { String(format: "%02x", $0) }.joined(),
+                      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+        let abc = "abc".sha256()
+        XCTAssertEqual(abc.map { String(format: "%02x", $0) }.joined(),
+                      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+
+    func testSha256Streaming() {
+        let hasher = StringZillaSha256()
+        hasher.update("Hello, ").update("world!")
+        let progressive = hasher.digest()
+        let oneshot = "Hello, world!".sha256()
+        XCTAssertEqual(progressive, oneshot)
+
+        // Hexdigest and reset
+        XCTAssertEqual(hasher.hexdigest(), progressive.map { String(format: "%02x", $0) }.joined())
+        hasher.reset()
+        hasher.update("test")
+        XCTAssertEqual(hasher.digest().count, 32)
+    }
 }

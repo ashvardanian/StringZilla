@@ -85,6 +85,19 @@ export default {
      */
     Hasher: compiled.Hasher,
 
+    /**
+     *  Computes SHA-256 cryptographic hash of a buffer (zero-copy).
+     *
+     *  @param {Buffer} buffer - Buffer to hash
+     *  @returns {Buffer} 32-byte SHA-256 digest
+     */
+    sha256: compiled.sha256,
+
+    /**
+     *  Stateful SHA-256 hasher class for streaming hash computation.
+     *  Use this for hashing data that arrives in chunks.
+     */
+    Sha256: compiled.Sha256,
 
     /**
      *  Compares two buffers for equality (zero-copy).

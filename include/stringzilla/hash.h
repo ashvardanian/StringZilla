@@ -1031,11 +1031,11 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const
  *  @brief  Initialize SHA256 state with standard initial hash values.
  *  @param  state   Pointer to SHA256 state structure.
  */
-SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state) {
+SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    for (sz_size_t i = 0; i < 8; ++i) state->hash.u32s[i] = initial_hash[i];
-    state->block_length = 0;
-    state->total_length = 0;
+    for (sz_size_t i = 0; i < 8; ++i) state_ptr->hash.u32s[i] = initial_hash[i];
+    state_ptr->block_length = 0;
+    state_ptr->total_length = 0;
 }
 
 /**
@@ -1044,117 +1044,114 @@ SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state) {
  *  @param  data    Pointer to input data.
  *  @param  length  Length of input data in bytes.
  */
-SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    state->total_length += length;
+    state_ptr->total_length += length;
 
     // If there's data in the block buffer, try to fill it
-    if (state->block_length > 0) {
-        sz_size_t bytes_to_copy = 64 - state->block_length;
+    if (state_ptr->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state_ptr->block_length;
         if (bytes_to_copy > length) bytes_to_copy = length;
 
 #if SZ_USE_MISALIGNED_LOADS
         // Use word-sized copies for better performance when misaligned loads are supported
         sz_size_t word_bytes = (bytes_to_copy / 8) * 8;
         for (sz_size_t i = 0; i < word_bytes; i += 8)
-            *(sz_u64_t *)&state->block.u8s[state->block_length + i] = *(sz_u64_t *)&input[i];
-        for (sz_size_t i = word_bytes; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+            *(sz_u64_t *)&state_ptr->block.u8s[state_ptr->block_length + i] = *(sz_u64_t *)&input[i];
+        for (sz_size_t i = word_bytes; i < bytes_to_copy; ++i)
+            state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
 #else
         // Use byte-by-byte copy to avoid alignment issues on platforms like ARMv7
-        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
 #endif
 
-        state->block_length += bytes_to_copy;
+        state_ptr->block_length += bytes_to_copy;
         input += bytes_to_copy;
         length -= bytes_to_copy;
 
         // If we filled the block, process it
-        if (state->block_length == 64) {
-            sz_sha256_process_block_serial_(state->hash.u32s, state->block.u8s);
-            state->block_length = 0;
+        if (state_ptr->block_length == 64) {
+            sz_sha256_process_block_serial_(state_ptr->hash.u32s, state_ptr->block.u8s);
+            state_ptr->block_length = 0;
         }
     }
 
     // Process complete 64-byte blocks from input
-    while (length >= 64) {
-        sz_sha256_process_block_serial_(state->hash.u32s, input);
-        input += 64;
-        length -= 64;
-    }
+    for (; length >= 64; input += 64, length -= 64)
+        sz_sha256_process_block_serial_(state_ptr->hash.u32s, input);
 
 #if SZ_USE_MISALIGNED_LOADS
     // Use word-sized copies for better performance when misaligned loads are supported
     sz_size_t word_bytes = (length / 8) * 8;
     for (sz_size_t i = 0; i < word_bytes; i += 8)
-        *(sz_u64_t *)&state->block.u8s[state->block_length + i] = *(sz_u64_t *)&input[i];
-    for (sz_size_t i = word_bytes; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+        *(sz_u64_t *)&state_ptr->block.u8s[state_ptr->block_length + i] = *(sz_u64_t *)&input[i];
+    for (sz_size_t i = word_bytes; i < length; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
 #else
     // Use byte-by-byte copy to avoid alignment issues on platforms like ARMv7
-    for (sz_size_t i = 0; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+    for (sz_size_t i = 0; i < length; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
 #endif
 
-    state->block_length += length;
+    state_ptr->block_length += length;
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
     // Create a copy of the state for padding
-    sz_sha256_state_t final_state = *state;
+    sz_sha256_state_t state = *state_ptr;
 
     // Append the '1' bit (0x80 byte) after the message
-    final_state.block.u8s[final_state.block_length++] = 0x80;
+    state.block.u8s[state.block_length++] = 0x80;
 
     // If there's not enough room for the 64-bit length, pad this block and process it
-    if (final_state.block_length > 56) {
-        sz_size_t remaining = 64 - final_state.block_length;
+    if (state.block_length > 56) {
+        sz_size_t remaining = 64 - state.block_length;
 #if SZ_USE_MISALIGNED_LOADS
         // Use word-sized writes for better performance when misaligned stores are supported
         sz_size_t word_bytes = (remaining / 8) * 8;
-        for (sz_size_t i = 0; i < word_bytes; i += 8)
-            *(sz_u64_t *)&final_state.block.u8s[final_state.block_length + i] = 0;
-        for (sz_size_t i = word_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+        for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&state.block.u8s[state.block_length + i] = 0;
+        for (sz_size_t i = word_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
 #else
         // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-        for (sz_size_t i = 0; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+        for (sz_size_t i = 0; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
 #endif
-        sz_sha256_process_block_serial_(final_state.hash.u32s, final_state.block.u8s);
-        final_state.block_length = 0;
+        sz_sha256_process_block_serial_(state.hash.u32s, state.block.u8s);
+        state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes
-    sz_size_t remaining = 56 - final_state.block_length;
+    sz_size_t remaining = 56 - state.block_length;
 
 #if SZ_USE_MISALIGNED_LOADS
     // Use word-sized writes for better performance when misaligned stores are supported
     sz_size_t word_bytes = (remaining / 8) * 8;
-    for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&final_state.block.u8s[final_state.block_length + i] = 0;
-    for (sz_size_t i = word_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+    for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&state.block.u8s[state.block_length + i] = 0;
+    for (sz_size_t i = word_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
 #else
     // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-    for (sz_size_t i = 0; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+    for (sz_size_t i = 0; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
 #endif
 
-    final_state.block_length = 56;
+    state.block_length = 56;
 
     // Append the message length in bits as a 64-bit big-endian integer
-    sz_u64_t bit_length = final_state.total_length * 8;
-    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
-    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
-    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
-    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
-    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
-    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
-    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
-    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
 
     // Process the final block
-    sz_sha256_process_block_serial_(final_state.hash.u32s, final_state.block.u8s);
+    sz_sha256_process_block_serial_(state.hash.u32s, state.block.u8s);
 
     // Produce the final hash digest in big-endian format
     for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+        digest[i * 4 + 0] = (sz_u8_t)(state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(state.hash.u32s[i] >> 0);
     }
 }
 
@@ -1981,106 +1978,102 @@ SZ_INTERNAL void sz_sha256_process_block_goldmont_(sz_u32_t hash[8], sz_u8_t con
     _mm_storeu_si128((__m128i *)&hash[4], state1);
 }
 
-SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state) {
+SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    for (sz_size_t i = 0; i < 8; ++i) state->hash.u32s[i] = initial_hash[i];
-    state->block_length = 0;
-    state->total_length = 0;
+    for (sz_size_t i = 0; i < 8; ++i) state_ptr->hash.u32s[i] = initial_hash[i];
+    state_ptr->block_length = 0;
+    state_ptr->total_length = 0;
 }
 
-SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    state->total_length += length;
+    state_ptr->total_length += length;
 
     // If there's data in the block buffer, try to fill it
-    if (state->block_length > 0) {
-        sz_size_t bytes_to_copy = 64 - state->block_length;
+    if (state_ptr->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state_ptr->block_length;
         if (bytes_to_copy > length) bytes_to_copy = length;
 
         // Use 128-bit vectorized copies only (Goldmont doesn't have efficient 256-bit ops)
         sz_size_t xmm_bytes = (bytes_to_copy / 16) * 16;
         for (sz_size_t i = 0; i < xmm_bytes; i += 16)
-            _mm_storeu_si128((__m128i *)&state->block.u8s[state->block_length + i],
+            _mm_storeu_si128((__m128i *)&state_ptr->block.u8s[state_ptr->block_length + i],
                              _mm_loadu_si128((__m128i const *)&input[i]));
         // Copy remaining bytes
-        for (sz_size_t i = xmm_bytes; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+        for (sz_size_t i = xmm_bytes; i < bytes_to_copy; ++i)
+            state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
 
-        state->block_length += bytes_to_copy;
+        state_ptr->block_length += bytes_to_copy;
         input += bytes_to_copy;
         length -= bytes_to_copy;
 
         // If we filled the block, process it
-        if (state->block_length == 64) {
-            sz_sha256_process_block_goldmont_(state->hash.u32s, state->block.u8s);
-            state->block_length = 0;
+        if (state_ptr->block_length == 64) {
+            sz_sha256_process_block_goldmont_(state_ptr->hash.u32s, state_ptr->block.u8s);
+            state_ptr->block_length = 0;
         }
     }
 
     // Process complete 64-byte blocks from input
-    while (length >= 64) {
-        sz_sha256_process_block_goldmont_(state->hash.u32s, input);
-        input += 64;
-        length -= 64;
-    }
+    for (; length >= 64; input += 64, length -= 64)
+        sz_sha256_process_block_goldmont_(state_ptr->hash.u32s, input);
 
     // Store remaining bytes in block buffer using 128-bit vectorized copies
     sz_size_t xmm_bytes = (length / 16) * 16;
     for (sz_size_t i = 0; i < xmm_bytes; i += 16)
-        _mm_storeu_si128((__m128i *)&state->block.u8s[state->block_length + i],
+        _mm_storeu_si128((__m128i *)&state_ptr->block.u8s[state_ptr->block_length + i],
                          _mm_loadu_si128((__m128i const *)&input[i]));
-    for (sz_size_t i = xmm_bytes; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
-    state->block_length += length;
+    for (sz_size_t i = xmm_bytes; i < length; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
+    state_ptr->block_length += length;
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
     // Create a copy of the state for padding
-    sz_sha256_state_t final_state = *state;
+    sz_sha256_state_t state = *state_ptr;
 
     // Append the '1' bit (0x80 byte) after the message
-    final_state.block.u8s[final_state.block_length++] = 0x80;
+    state.block.u8s[state.block_length++] = 0x80;
 
     // If there's not enough room for the 64-bit length, pad this block and process it
-    if (final_state.block_length > 56) {
+    if (state.block_length > 56) {
         // Zero remaining bytes using 128-bit vectorized writes
-        sz_size_t remaining = 64 - final_state.block_length;
+        sz_size_t remaining = 64 - state.block_length;
         sz_size_t xmm_bytes = (remaining / 16) * 16;
-        for (sz_size_t i = 0; i < xmm_bytes; i += 16) {
-            _mm_storeu_si128((__m128i *)&final_state.block.u8s[final_state.block_length + i], _mm_setzero_si128());
-        }
-        for (sz_size_t i = xmm_bytes; i < remaining; ++i) { final_state.block.u8s[final_state.block_length + i] = 0; }
-        sz_sha256_process_block_goldmont_(final_state.hash.u32s, final_state.block.u8s);
-        final_state.block_length = 0;
+        for (sz_size_t i = 0; i < xmm_bytes; i += 16)
+            _mm_storeu_si128((__m128i *)&state.block.u8s[state.block_length + i], _mm_setzero_si128());
+        for (sz_size_t i = xmm_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
+        sz_sha256_process_block_goldmont_(state.hash.u32s, state.block.u8s);
+        state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes
-    sz_size_t remaining = 56 - final_state.block_length;
+    sz_size_t remaining = 56 - state.block_length;
     sz_size_t xmm_bytes = (remaining / 16) * 16;
-    for (sz_size_t i = 0; i < xmm_bytes; i += 16) {
-        _mm_storeu_si128((__m128i *)&final_state.block.u8s[final_state.block_length + i], _mm_setzero_si128());
-    }
-    for (sz_size_t i = xmm_bytes; i < remaining; ++i) { final_state.block.u8s[final_state.block_length + i] = 0; }
-    final_state.block_length = 56;
+    for (sz_size_t i = 0; i < xmm_bytes; i += 16)
+        _mm_storeu_si128((__m128i *)&state.block.u8s[state.block_length + i], _mm_setzero_si128());
+    for (sz_size_t i = xmm_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
+    state.block_length = 56;
 
     // Append the message length in bits as a 64-bit big-endian integer
-    sz_u64_t bit_length = final_state.total_length * 8;
-    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
-    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
-    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
-    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
-    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
-    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
-    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
-    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
 
     // Process the final block
-    sz_sha256_process_block_goldmont_(final_state.hash.u32s, final_state.block.u8s);
+    sz_sha256_process_block_goldmont_(state.hash.u32s, state.block.u8s);
 
     // Produce the final hash digest in big-endian format
     for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+        digest[i * 4 + 0] = (sz_u8_t)(state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(state.hash.u32s[i] >> 0);
     }
 }
 
@@ -3154,7 +3147,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
  *  @brief  Initialize SHA256 state with IV constants.
  *  @param  state   Pointer to SHA256 state structure to initialize.
  */
-SZ_PUBLIC void sz_sha256_state_init_ice(sz_sha256_state_t *state) { sz_sha256_state_init_serial(state); }
+SZ_PUBLIC void sz_sha256_state_init_ice(sz_sha256_state_t *state_ptr) { sz_sha256_state_init_serial(state_ptr); }
 
 /**
  *  @brief  Update SHA256 state with additional data.
@@ -3163,55 +3156,42 @@ SZ_PUBLIC void sz_sha256_state_init_ice(sz_sha256_state_t *state) { sz_sha256_st
  *  @param  data    Input data to process.
  *  @param  length  Number of bytes in input data.
  */
-SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    state->total_length += length;
+    state_ptr->total_length += length;
 
     // If there's data in the block buffer, try to fill it
-    if (state->block_length > 0) {
-        sz_size_t bytes_to_copy = 64 - state->block_length;
+    if (state_ptr->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state_ptr->block_length;
         if (bytes_to_copy > length) bytes_to_copy = length;
 
-        // Use AVX-512 vectorized copies for better performance
-        sz_size_t zmm_bytes = (bytes_to_copy / 64) * 64;
-        for (sz_size_t i = 0; i < zmm_bytes; i += 64)
-            _mm512_storeu_si512(&state->block.u8s[state->block_length + i], _mm512_loadu_si512(&input[i]));
-        sz_size_t ymm_bytes = ((bytes_to_copy - zmm_bytes) / 32) * 32;
-        for (sz_size_t i = 0; i < ymm_bytes; i += 32)
-            _mm256_storeu_si256((__m256i *)&state->block.u8s[state->block_length + zmm_bytes + i],
-                                _mm256_loadu_si256((__m256i const *)&input[zmm_bytes + i]));
-        // Copy remaining bytes
-        for (sz_size_t i = zmm_bytes + ymm_bytes; i < bytes_to_copy; ++i)
-            state->block.u8s[state->block_length + i] = input[i];
+        // Use AVX-512 masked load/store for partial copies
+        __mmask64 mask = sz_u64_clamp_mask_until_(bytes_to_copy);
+        _mm512_mask_storeu_epi8(&state_ptr->block.u8s[state_ptr->block_length], mask,
+                                _mm512_maskz_loadu_epi8(mask, input));
 
-        state->block_length += bytes_to_copy;
+        state_ptr->block_length += bytes_to_copy;
         input += bytes_to_copy;
         length -= bytes_to_copy;
 
         // If we filled the block, process it
-        if (state->block_length == 64) {
-            sz_sha256_process_block_ice_(state->hash.u32s, state->block.u8s);
-            state->block_length = 0;
+        if (state_ptr->block_length == 64) {
+            sz_sha256_process_block_ice_(state_ptr->hash.u32s, state_ptr->block.u8s);
+            state_ptr->block_length = 0;
         }
     }
 
     // Process complete 64-byte blocks from input
-    while (length >= 64) {
-        sz_sha256_process_block_ice_(state->hash.u32s, input);
-        input += 64;
-        length -= 64;
-    }
+    for (; length >= 64; input += 64, length -= 64)
+        sz_sha256_process_block_ice_(state_ptr->hash.u32s, input);
 
-    // Store remaining bytes in block buffer using AVX-512 vectorized copies
-    sz_size_t zmm_bytes = (length / 64) * 64;
-    for (sz_size_t i = 0; i < zmm_bytes; i += 64)
-        _mm512_storeu_si512(&state->block.u8s[state->block_length + i], _mm512_loadu_si512(&input[i]));
-    sz_size_t ymm_bytes = ((length - zmm_bytes) / 32) * 32;
-    for (sz_size_t i = 0; i < ymm_bytes; i += 32)
-        _mm256_storeu_si256((__m256i *)&state->block.u8s[state->block_length + zmm_bytes + i],
-                            _mm256_loadu_si256((__m256i const *)&input[zmm_bytes + i]));
-    for (sz_size_t i = zmm_bytes + ymm_bytes; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
-    state->block_length += length;
+    // Store remaining bytes in block buffer using AVX-512 masked load/store
+    if (length) {
+        __mmask64 mask = sz_u64_clamp_mask_until_(length);
+        _mm512_mask_storeu_epi8(&state_ptr->block.u8s[state_ptr->block_length], mask,
+                                _mm512_maskz_loadu_epi8(mask, input));
+        state_ptr->block_length += length;
+    }
 }
 
 /**
@@ -3220,68 +3200,48 @@ SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state, sz_cptr_t da
  *  @param  state   Pointer to SHA256 state structure (not modified).
  *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
  */
-SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
     // Create a copy of the state for padding
-    sz_sha256_state_t final_state = *state;
+    sz_sha256_state_t state = *state_ptr;
 
     // Append the '1' bit (0x80 byte) after the message
-    final_state.block.u8s[final_state.block_length++] = 0x80;
+    state.block.u8s[state.block_length++] = 0x80;
 
     // If there's not enough room for the 64-bit length, pad this block and process it
-    if (final_state.block_length > 56) {
-        // Zero remaining bytes using AVX-512 vectorized writes
-        sz_size_t remaining = 64 - final_state.block_length;
-        sz_size_t zmm_bytes = (remaining / 64) * 64;
-        for (sz_size_t i = 0; i < zmm_bytes; i += 64) {
-            _mm512_storeu_si512(&final_state.block.u8s[final_state.block_length + i], _mm512_setzero_si512());
-        }
-        sz_size_t vec_bytes = ((remaining - zmm_bytes) / 32) * 32;
-        for (sz_size_t i = 0; i < vec_bytes; i += 32) {
-            _mm256_storeu_si256((__m256i *)&final_state.block.u8s[final_state.block_length + zmm_bytes + i],
-                                _mm256_setzero_si256());
-        }
-        for (sz_size_t i = zmm_bytes + vec_bytes; i < remaining; ++i) {
-            final_state.block.u8s[final_state.block_length + i] = 0;
-        }
-        sz_sha256_process_block_ice_(final_state.hash.u32s, final_state.block.u8s);
-        final_state.block_length = 0;
+    if (state.block_length > 56) {
+        // Zero remaining bytes using AVX-512 masked store
+        sz_size_t remaining = 64 - state.block_length;
+        __mmask64 mask = sz_u64_clamp_mask_until_(remaining);
+        _mm512_mask_storeu_epi8(&state.block.u8s[state.block_length], mask, _mm512_setzero_si512());
+        sz_sha256_process_block_ice_(state.hash.u32s, state.block.u8s);
+        state.block_length = 0;
     }
 
-    // Pad with zeros until we have 56 bytes using AVX-512
-    sz_size_t remaining = 56 - final_state.block_length;
-    sz_size_t zmm_bytes = (remaining / 64) * 64;
-    for (sz_size_t i = 0; i < zmm_bytes; i += 64) {
-        _mm512_storeu_si512(&final_state.block.u8s[final_state.block_length + i], _mm512_setzero_si512());
-    }
-    sz_size_t vec_bytes = ((remaining - zmm_bytes) / 32) * 32;
-    for (sz_size_t i = 0; i < vec_bytes; i += 32) {
-        _mm256_storeu_si256((__m256i *)&final_state.block.u8s[final_state.block_length + zmm_bytes + i],
-                            _mm256_setzero_si256());
-    }
-    for (sz_size_t i = zmm_bytes + vec_bytes; i < remaining; ++i) {
-        final_state.block.u8s[final_state.block_length + i] = 0;
-    }
+    // Pad with zeros until we have 56 bytes using AVX-512 masked store
+    sz_size_t remaining = 56 - state.block_length;
+    __mmask64 mask = sz_u64_clamp_mask_until_(remaining);
+    _mm512_mask_storeu_epi8(&state.block.u8s[state.block_length], mask, _mm512_setzero_si512());
 
     // Append the 64-bit length in bits (big-endian)
-    sz_u64_t bit_length = final_state.total_length * 8;
-    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
-    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
-    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
-    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
-    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
-    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
-    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
-    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
 
     // Process the final block
-    sz_sha256_process_block_ice_(final_state.hash.u32s, final_state.block.u8s);
+    sz_sha256_process_block_ice_(state.hash.u32s, state.block.u8s);
 
     // Produce the final hash digest in big-endian format
     for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+        digest[i * 4 + 0] = (sz_u8_t)(state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(state.hash.u32s[i] >> 0);
     }
 }
 
@@ -4144,43 +4104,40 @@ SZ_INTERNAL void sz_sha256_process_block_neon_(sz_u32_t hash[8], sz_u8_t const b
     vst1q_u32(&hash[4], state1);
 }
 
-SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state) {
+SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state_ptr) {
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    for (sz_size_t i = 0; i < 8; ++i) state->hash.u32s[i] = initial_hash[i];
-    state->block_length = 0;
-    state->total_length = 0;
+    for (sz_size_t i = 0; i < 8; ++i) state_ptr->hash.u32s[i] = initial_hash[i];
+    state_ptr->block_length = 0;
+    state_ptr->total_length = 0;
 }
 
-SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    state->total_length += length;
+    state_ptr->total_length += length;
 
     // If there's data in the block buffer, try to fill it
-    if (state->block_length > 0) {
-        sz_size_t bytes_to_copy = 64 - state->block_length;
+    if (state_ptr->block_length > 0) {
+        sz_size_t bytes_to_copy = 64 - state_ptr->block_length;
         if (bytes_to_copy > length) bytes_to_copy = length;
-        for (sz_size_t i = 0; i < bytes_to_copy; ++i) { state->block.u8s[state->block_length + i] = input[i]; }
-        state->block_length += bytes_to_copy;
+        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
+        state_ptr->block_length += bytes_to_copy;
         input += bytes_to_copy;
         length -= bytes_to_copy;
 
         // If we filled the block, process it
-        if (state->block_length == 64) {
-            sz_sha256_process_block_neon_(state->hash.u32s, state->block.u8s);
-            state->block_length = 0;
+        if (state_ptr->block_length == 64) {
+            sz_sha256_process_block_neon_(state_ptr->hash.u32s, state_ptr->block.u8s);
+            state_ptr->block_length = 0;
         }
     }
 
     // Process complete 64-byte blocks
-    while (length >= 64) {
-        sz_sha256_process_block_neon_(state->hash.u32s, input);
-        input += 64;
-        length -= 64;
-    }
+    for (; length >= 64; input += 64, length -= 64)
+        sz_sha256_process_block_neon_(state_ptr->hash.u32s, input);
 
     // Store remaining bytes in block buffer
-    for (sz_size_t i = 0; i < length; ++i) { state->block.u8s[state->block_length + i] = input[i]; }
-    state->block_length += length;
+    for (sz_size_t i = 0; i < length; ++i) state_ptr->block.u8s[state_ptr->block_length + i] = input[i];
+    state_ptr->block_length += length;
 }
 
 /**
@@ -4188,55 +4145,53 @@ SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t d
  *  @param  state   Pointer to SHA256 state structure (not modified).
  *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
  */
-SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
     // Create a copy of the state for padding
-    sz_sha256_state_t final_state = *state;
+    sz_sha256_state_t state = *state_ptr;
 
     // Append the '1' bit (0x80 byte) after the message
-    final_state.block.u8s[final_state.block_length++] = 0x80;
+    state.block.u8s[state.block_length++] = 0x80;
 
     // If there's not enough room for the 64-bit length, pad this block and process it
-    if (final_state.block_length > 56) {
+    if (state.block_length > 56) {
         // Zero remaining bytes using vectorized writes
-        sz_size_t remaining = 64 - final_state.block_length;
+        sz_size_t remaining = 64 - state.block_length;
         sz_size_t vec_bytes = (remaining / 16) * 16;
         uint8x16_t zero_vec = vdupq_n_u8(0);
-        for (sz_size_t i = 0; i < vec_bytes; i += 16)
-            vst1q_u8(&final_state.block.u8s[final_state.block_length + i], zero_vec);
-        for (sz_size_t i = vec_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
-        sz_sha256_process_block_neon_(final_state.hash.u32s, final_state.block.u8s);
-        final_state.block_length = 0;
+        for (sz_size_t i = 0; i < vec_bytes; i += 16) vst1q_u8(&state.block.u8s[state.block_length + i], zero_vec);
+        for (sz_size_t i = vec_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
+        sz_sha256_process_block_neon_(state.hash.u32s, state.block.u8s);
+        state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes
-    sz_size_t remaining = 56 - final_state.block_length;
+    sz_size_t remaining = 56 - state.block_length;
     sz_size_t vec_bytes = (remaining / 16) * 16;
     uint8x16_t zero_vec = vdupq_n_u8(0);
-    for (sz_size_t i = 0; i < vec_bytes; i += 16)
-        vst1q_u8(&final_state.block.u8s[final_state.block_length + i], zero_vec);
-    for (sz_size_t i = vec_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
-    final_state.block_length = 56;
+    for (sz_size_t i = 0; i < vec_bytes; i += 16) vst1q_u8(&state.block.u8s[state.block_length + i], zero_vec);
+    for (sz_size_t i = vec_bytes; i < remaining; ++i) state.block.u8s[state.block_length + i] = 0;
+    state.block_length = 56;
 
     // Append the message length in bits as a 64-bit big-endian integer
-    sz_u64_t bit_length = final_state.total_length * 8;
-    final_state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
-    final_state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
-    final_state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
-    final_state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
-    final_state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
-    final_state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
-    final_state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
-    final_state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block.u8s[56] = (sz_u8_t)(bit_length >> 56);
+    state.block.u8s[57] = (sz_u8_t)(bit_length >> 48);
+    state.block.u8s[58] = (sz_u8_t)(bit_length >> 40);
+    state.block.u8s[59] = (sz_u8_t)(bit_length >> 32);
+    state.block.u8s[60] = (sz_u8_t)(bit_length >> 24);
+    state.block.u8s[61] = (sz_u8_t)(bit_length >> 16);
+    state.block.u8s[62] = (sz_u8_t)(bit_length >> 8);
+    state.block.u8s[63] = (sz_u8_t)(bit_length >> 0);
 
     // Process the final block
-    sz_sha256_process_block_neon_(final_state.hash.u32s, final_state.block.u8s);
+    sz_sha256_process_block_neon_(state.hash.u32s, state.block.u8s);
 
     // Produce the final hash digest in big-endian format
     for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(final_state.hash.u32s[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(final_state.hash.u32s[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(final_state.hash.u32s[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(final_state.hash.u32s[i] >> 0);
+        digest[i * 4 + 0] = (sz_u8_t)(state.hash.u32s[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(state.hash.u32s[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(state.hash.u32s[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(state.hash.u32s[i] >> 0);
     }
 }
 

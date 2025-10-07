@@ -39,7 +39,10 @@ package sz
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
 // Contains reports whether `substr` is within `str`.
 // https://pkg.go.dev/strings#Contains
@@ -180,6 +183,56 @@ func (h *Hasher) Write(p []byte) *Hasher {
 // Digest returns the current 64-bit hash without consuming the state.
 func (h *Hasher) Digest() uint64 {
 	return uint64(C.sz_hash_state_digest(&h.state))
+}
+
+// SHA256 computes the SHA-256 cryptographic hash of the input data.
+func Sha256(data []byte) [32]byte {
+	var digest [32]byte
+	if len(data) == 0 {
+		C.sz_checksum(nil, 0, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	} else {
+		C.sz_checksum((*C.char)(unsafe.Pointer(&data[0])), C.ulong(len(data)), (*C.uchar)(unsafe.Pointer(&digest[0])))
+	}
+	return digest
+}
+
+// Sha256Hasher is a streaming SHA-256 hasher.
+type Sha256Hasher struct {
+	state C.sz_sha256_state_t
+}
+
+// NewSha256 creates a new streaming SHA-256 hasher.
+func NewSha256() *Sha256Hasher {
+	h := &Sha256Hasher{}
+	C.sz_sha256_state_init(&h.state)
+	return h
+}
+
+// Write adds data to the streaming SHA-256 hasher.
+func (h *Sha256Hasher) Write(p []byte) *Sha256Hasher {
+	if len(p) == 0 {
+		return h
+	}
+	C.sz_sha256_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
+	return h
+}
+
+// Digest returns the current SHA-256 hash without consuming the state.
+func (h *Sha256Hasher) Digest() [32]byte {
+	var digest [32]byte
+	C.sz_sha256_state_digest(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	return digest
+}
+
+// Hexdigest returns the current SHA-256 hash as a lowercase hexadecimal string.
+func (h *Sha256Hasher) Hexdigest() string {
+	digest := h.Digest()
+	return fmt.Sprintf("%x", digest)
+}
+
+// Reset resets the hasher to its initial state.
+func (h *Sha256Hasher) Reset() {
+	C.sz_sha256_state_init(&h.state)
 }
 
 // Count returns the number of overlapping or non-overlapping instances of `substr` in `str`.
