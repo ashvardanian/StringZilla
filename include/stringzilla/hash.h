@@ -1053,13 +1053,16 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t
         sz_size_t bytes_to_copy = 64 - state->block_length;
         if (bytes_to_copy > length) bytes_to_copy = length;
 
-        // Use word-sized copies for better performance
+#if SZ_USE_MISALIGNED_LOADS
+        // Use word-sized copies for better performance when misaligned loads are supported
         sz_size_t word_bytes = (bytes_to_copy / 8) * 8;
         for (sz_size_t i = 0; i < word_bytes; i += 8)
             *(sz_u64_t *)&state->block.u8s[state->block_length + i] = *(sz_u64_t *)&input[i];
-
-        // Copy remaining bytes
         for (sz_size_t i = word_bytes; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+#else
+        // Use byte-by-byte copy to avoid alignment issues on platforms like ARMv7
+        for (sz_size_t i = 0; i < bytes_to_copy; ++i) state->block.u8s[state->block_length + i] = input[i];
+#endif
 
         state->block_length += bytes_to_copy;
         input += bytes_to_copy;
@@ -1079,14 +1082,17 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t
         length -= 64;
     }
 
-    // Store remaining bytes in block buffer
-    // Use word-sized copies for better performance
+#if SZ_USE_MISALIGNED_LOADS
+    // Use word-sized copies for better performance when misaligned loads are supported
     sz_size_t word_bytes = (length / 8) * 8;
     for (sz_size_t i = 0; i < word_bytes; i += 8)
         *(sz_u64_t *)&state->block.u8s[state->block_length + i] = *(sz_u64_t *)&input[i];
-
-    // Copy remaining bytes
     for (sz_size_t i = word_bytes; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+#else
+    // Use byte-by-byte copy to avoid alignment issues on platforms like ARMv7
+    for (sz_size_t i = 0; i < length; ++i) state->block.u8s[state->block_length + i] = input[i];
+#endif
+
     state->block_length += length;
 }
 
@@ -1099,24 +1105,34 @@ SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state, sz_
 
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (final_state.block_length > 56) {
-        // Zero remaining bytes using word-sized writes
         sz_size_t remaining = 64 - final_state.block_length;
+#if SZ_USE_MISALIGNED_LOADS
+        // Use word-sized writes for better performance when misaligned stores are supported
         sz_size_t word_bytes = (remaining / 8) * 8;
-        for (sz_size_t i = 0; i < word_bytes; i += 8) {
+        for (sz_size_t i = 0; i < word_bytes; i += 8)
             *(sz_u64_t *)&final_state.block.u8s[final_state.block_length + i] = 0;
-        }
-        for (sz_size_t i = word_bytes; i < remaining; ++i) { final_state.block.u8s[final_state.block_length + i] = 0; }
+        for (sz_size_t i = word_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+#else
+        // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
+        for (sz_size_t i = 0; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+#endif
         sz_sha256_process_block_serial_(final_state.hash.u32s, final_state.block.u8s);
         final_state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes
     sz_size_t remaining = 56 - final_state.block_length;
+
+#if SZ_USE_MISALIGNED_LOADS
+    // Use word-sized writes for better performance when misaligned stores are supported
     sz_size_t word_bytes = (remaining / 8) * 8;
-    for (sz_size_t i = 0; i < word_bytes; i += 8) {
-        *(sz_u64_t *)&final_state.block.u8s[final_state.block_length + i] = 0;
-    }
-    for (sz_size_t i = word_bytes; i < remaining; ++i) { final_state.block.u8s[final_state.block_length + i] = 0; }
+    for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&final_state.block.u8s[final_state.block_length + i] = 0;
+    for (sz_size_t i = word_bytes; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+#else
+    // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
+    for (sz_size_t i = 0; i < remaining; ++i) final_state.block.u8s[final_state.block_length + i] = 0;
+#endif
+
     final_state.block_length = 56;
 
     // Append the message length in bits as a 64-bit big-endian integer
@@ -1249,10 +1265,17 @@ SZ_PUBLIC void sz_checksum_serial(sz_cptr_t text, sz_size_t length, sz_u8_t chec
 
     // Append length (big-endian 64-bit)
     sz_size_t len_offset = remaining + 1 + pad_len;
+#if SZ_IS_64BIT_
     final_block[len_offset + 0] = (sz_u8_t)(total_bits >> 56);
     final_block[len_offset + 1] = (sz_u8_t)(total_bits >> 48);
     final_block[len_offset + 2] = (sz_u8_t)(total_bits >> 40);
     final_block[len_offset + 3] = (sz_u8_t)(total_bits >> 32);
+#else
+    final_block[len_offset + 0] = 0;
+    final_block[len_offset + 1] = 0;
+    final_block[len_offset + 2] = 0;
+    final_block[len_offset + 3] = 0;
+#endif
     final_block[len_offset + 4] = (sz_u8_t)(total_bits >> 24);
     final_block[len_offset + 5] = (sz_u8_t)(total_bits >> 16);
     final_block[len_offset + 6] = (sz_u8_t)(total_bits >> 8);
