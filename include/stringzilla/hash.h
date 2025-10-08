@@ -1090,9 +1090,8 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
 
     // Copy hash to aligned local buffer
     sz_align_(32) sz_u32_t hash[8];
-    sz_u64_t const *src = (sz_u64_t const *)state_ptr->hash;
-    sz_u64_t *dst = (sz_u64_t *)hash;
-    dst[0] = src[0], dst[1] = src[1], dst[2] = src[2], dst[3] = src[3];
+    hash[0] = state_ptr->hash[0], hash[1] = state_ptr->hash[1], hash[2] = state_ptr->hash[2], hash[3] = state_ptr->hash[3];
+    hash[4] = state_ptr->hash[4], hash[5] = state_ptr->hash[5], hash[6] = state_ptr->hash[6], hash[7] = state_ptr->hash[7];
 
     // Process head to complete the current block
     if (head_length) {
@@ -1111,9 +1110,8 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
     state_ptr->block_length = tail_length;
 
     // Copy hash back
-    src = (sz_u64_t const *)hash;
-    dst = (sz_u64_t *)state_ptr->hash;
-    dst[0] = src[0], dst[1] = src[1], dst[2] = src[2], dst[3] = src[3];
+    state_ptr->hash[0] = hash[0], state_ptr->hash[1] = hash[1], state_ptr->hash[2] = hash[2], state_ptr->hash[3] = hash[3];
+    state_ptr->hash[4] = hash[4], state_ptr->hash[5] = hash[5], state_ptr->hash[6] = hash[6], state_ptr->hash[7] = hash[7];
 }
 
 SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
@@ -2022,8 +2020,8 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_
 
     // Copy hash to aligned local buffer
     sz_align_(16) sz_u32_t hash[8];
-    _mm_storeu_si128((__m128i *)&hash[0], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[0]));
-    _mm_storeu_si128((__m128i *)&hash[4], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[4]));
+    _mm_store_si128((__m128i *)&hash[0], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[0]));
+    _mm_store_si128((__m128i *)&hash[4], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[4]));
 
     // Process head to complete the current block
     if (head_length) {
@@ -2042,8 +2040,8 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_
     state_ptr->block_length = tail_length;
 
     // Copy hash back
-    _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_lddqu_si128((__m128i const *)&hash[0]));
-    _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_lddqu_si128((__m128i const *)&hash[4]));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_load_si128((__m128i const *)&hash[0]));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_load_si128((__m128i const *)&hash[4]));
 }
 
 SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
@@ -3202,7 +3200,7 @@ SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state_ptr, sz_cptr_
 
     // Copy hash to aligned local buffer
     sz_align_(32) sz_u32_t hash[8];
-    _mm256_storeu_si256((__m256i *)hash, _mm256_lddqu_si256((__m256i const *)state_ptr->hash));
+    _mm256_store_si256((__m256i *)hash, _mm256_lddqu_si256((__m256i const *)state_ptr->hash));
 
     // Process head to complete the current block
     if (head_length) {
@@ -3226,7 +3224,7 @@ SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state_ptr, sz_cptr_
     }
 
     // Copy hash back
-    _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_lddqu_si256((__m256i const *)hash));
+    _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_load_si256((__m256i const *)hash));
 }
 
 /**
