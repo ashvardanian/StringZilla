@@ -12,8 +12,8 @@
 // binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
 package sz
 
-// #cgo CFLAGS: -O3 -I../include
-// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_release -L../build_shared -lstringzilla_shared
+// #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
+// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
 // #cgo noescape sz_find_byte
@@ -50,6 +50,14 @@ import (
 	"io"
 	"unsafe"
 )
+
+// Explicitly initialize the dynamic dispatch table.
+func init() {
+	// The `__attribute__((constructor))` in the C library may not be called
+	// by CGO's internal linker (see golang/go#28909), so we call it manually
+	// to ensure the dispatch table is populated before any functions are used.
+	C.sz_dispatch_table_init()
+}
 
 // Contains reports whether `substr` is within `str`.
 // https://pkg.go.dev/strings#Contains
