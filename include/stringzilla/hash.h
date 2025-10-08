@@ -1812,10 +1812,10 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
 #pragma region Goldmont Implementation
 #if SZ_USE_GOLDMONT
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("sha"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("sse3,ssse3,sse4.1,sha"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("sha")
+#pragma GCC target("sse3", "ssse3", "sse4.1", "sha")
 #endif
 
 /**
