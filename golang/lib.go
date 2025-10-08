@@ -10,9 +10,14 @@
 //
 // Unlike the native Go `strings` package, StringZilla primarily targets byte-level
 // binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
+//
+// For some functions we are avoiding `noescape` and `nocallback`, assuming they use
+// too much stack space:
+// - sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
+// - sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest
 package sz
 
-// #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
+// #cgo CFLAGS: -O3 -mno-red-zone -I../include -DSZ_DYNAMIC_DISPATCH=1
 // #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
@@ -30,18 +35,6 @@ package sz
 // #cgo nocallback sz_bytesum
 // #cgo noescape sz_hash
 // #cgo nocallback sz_hash
-// #cgo noescape sz_hash_state_init
-// #cgo nocallback sz_hash_state_init
-// #cgo noescape sz_hash_state_update
-// #cgo nocallback sz_hash_state_update
-// #cgo noescape sz_hash_state_digest
-// #cgo nocallback sz_hash_state_digest
-// #cgo noescape sz_sha256_state_init
-// #cgo nocallback sz_sha256_state_init
-// #cgo noescape sz_sha256_state_update
-// #cgo nocallback sz_sha256_state_update
-// #cgo noescape sz_sha256_state_digest
-// #cgo nocallback sz_sha256_state_digest
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
