@@ -1939,35 +1939,64 @@ func main() {
 
 ### Hash
 
-Single-shot and incremental hashing are both supported:
+Single-shot and incremental hashing are both supported.
+The `Hasher` type implements Go's standard `hash.Hash64` and `io.Writer` interfaces:
 
 ```go
+import (
+    "io"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+// One-shot hashing
 one := sz.Hash("Hello, world!", 42)
 
+// Streaming hasher (implements hash.Hash64 and io.Writer)
 hasher := sz.NewHasher(42)
 hasher.Write([]byte("Hello, "))
 hasher.Write([]byte("world!"))
-streamed := hasher.Digest()
-fmt.Println(one == streamed) // true
+streamed := hasher.Digest()         // or hasher.Sum64()
+fmt.Println(one == streamed)        // true
+
+// Works with io.Copy and any io.Reader
+file, _ := os.Open("data.txt")
+hasher.Reset()
+io.Copy(hasher, file)
+fileHash := hasher.Sum64()
 ```
 
 ### SHA-256 Checksums
 
-SHA-256 cryptographic checksums are available:
+SHA-256 cryptographic checksums are available.
+The `Sha256` type implements Go's standard `hash.Hash` and `io.Writer` interfaces:
 
 ```go
-import sz "github.com/ashvardanian/stringzilla/golang"
+import (
+    "io"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
 
 // One-shot SHA-256
-digest := sz.SHA256([]byte("Hello, world!"))
-fmt.Printf("%x\n", digest) // prints 32-byte hash in hex
+digest := sz.HashSha256([]byte("Hello, world!"))
+fmt.Printf("%x\n", digest)          // prints 32-byte hash in hex
 
-// Incremental SHA-256
-hasher := sz.NewSHA256Hasher()
+// Streaming SHA-256 (implements hash.Hash and io.Writer)
+hasher := sz.NewSha256()
 hasher.Write([]byte("Hello, "))
 hasher.Write([]byte("world!"))
-digestBytes := hasher.Digest()     // [32]byte
-digestHex := hasher.Hexdigest()    // string (64 hex chars)
+digestBytes := hasher.Digest()      // [32]byte
+digestHex := hasher.Hexdigest()     // string (64 hex chars)
+
+// Works with io.Copy and any io.Reader
+file, _ := os.Open("data.bin")
+hasher.Reset()
+io.Copy(hasher, file)
+fileDigest := hasher.Digest()
+
+// Standard hash.Hash interface methods
+sum := hasher.Sum(nil)              // []byte with 32 bytes
+size := hasher.Size()               // 32
+blockSize := hasher.BlockSize()     // 64
 ```
 
 ## Algorithms & Design Decisions 📚

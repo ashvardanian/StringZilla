@@ -187,9 +187,31 @@ func TestHashing(t *testing.T) {
 
 	// Streaming equals one-shot
 	h := sz.NewHasher(42)
-	h.Write([]byte("Hello, ")).Write([]byte("world!"))
+	h.Write([]byte("Hello, "))
+	h.Write([]byte("world!"))
 	if a != h.Digest() {
 		t.Fatalf("Streaming digest mismatch: %d != %d", a, h.Digest())
+	}
+
+	// Test hash.Hash64 interface compliance
+	if h.Size() != 8 {
+		t.Fatalf("Size() should return 8")
+	}
+	if h.Sum64() != a {
+		t.Fatalf("Sum64() mismatch: %d != %d", h.Sum64(), a)
+	}
+
+	// Test Sum() method
+	sum := h.Sum(nil)
+	if len(sum) != 8 {
+		t.Fatalf("Sum(nil) should return 8 bytes")
+	}
+
+	// Test Reset()
+	h.Reset()
+	h.Write([]byte("test"))
+	if h.Sum64() == a {
+		t.Fatalf("After reset, hash should be different")
 	}
 
 	// Bytesum should be monotonic with appended byte (sanity check)
