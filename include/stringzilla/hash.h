@@ -1009,17 +1009,8 @@ SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
  */
 SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const block[64]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
-    sz_u32_t message_schedule[64];
+    sz_u32_t message_schedule[16];
     sz_u32_t a, b, c, d, e, f, g, h, temp1, temp2;
-
-    // Prepare the message schedule (W0-W63)
-    for (sz_size_t i = 0; i < 16; ++i)
-        // Read big-endian 32-bit words from the block
-        message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
-                              ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
-    for (sz_size_t i = 16; i < 64; ++i)
-        message_schedule[i] = sz_sha256_sigma1_lower_(message_schedule[i - 2]) + message_schedule[i - 7] +
-                              sz_sha256_sigma0_lower_(message_schedule[i - 15]) + message_schedule[i - 16];
 
     // Initialize working variables
     a = hash[0], b = hash[1], c = hash[2], d = hash[3];
@@ -1027,6 +1018,16 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const
 
     // Main compression loop (64 rounds)
     for (sz_size_t i = 0; i < 64; ++i) {
+        // Prepare the message schedule (W0-W63)
+        if (i < 16) {
+            // Read big-endian 32-bit words from the block
+            message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
+                                  ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
+        }
+        else {
+            message_schedule[(i) % 16] = sz_sha256_sigma1_lower_(message_schedule[(i - 2) % 16]) + message_schedule[(i - 7) % 16] +
+                                  sz_sha256_sigma0_lower_(message_schedule[(i - 15) % 16]) + message_schedule[(i - 16) % 16];
+        }
         temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i];
         temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
