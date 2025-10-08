@@ -128,6 +128,14 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     }
 #endif
 
+#if SZ_USE_GOLDMONT
+    if (caps & sz_cap_goldmont_k) {
+        impl->sha256_state_init = sz_sha256_state_init_goldmont;
+        impl->sha256_state_update = sz_sha256_state_update_goldmont;
+        impl->sha256_state_digest = sz_sha256_state_digest_goldmont;
+    }
+#endif
+
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->equal = sz_equal_haswell;
@@ -188,6 +196,10 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_ice;
         impl->hash_state_digest = sz_hash_state_digest_ice;
         impl->fill_random = sz_fill_random_ice;
+
+        impl->sha256_state_init = sz_sha256_state_init_ice;
+        impl->sha256_state_update = sz_sha256_state_update_ice;
+        impl->sha256_state_digest = sz_sha256_state_digest_ice;
 
         impl->sequence_intersect = sz_sequence_intersect_ice;
     }
