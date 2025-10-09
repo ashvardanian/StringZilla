@@ -52,6 +52,14 @@ func init() {
 	C.sz_dispatch_table_init()
 }
 
+// Capabilities returns a string describing the detected CPU features.
+// This can be used for debugging to understand which SIMD backend is being used.
+func Capabilities() string {
+	caps := C.sz_capabilities()
+	capsStr := C.sz_capabilities_to_string(caps)
+	return C.GoString(capsStr)
+}
+
 // Contains reports whether `substr` is within `str`.
 // https://pkg.go.dev/strings#Contains
 func Contains(str string, substr string) bool {

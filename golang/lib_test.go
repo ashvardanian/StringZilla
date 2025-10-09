@@ -8,6 +8,16 @@ import (
 	sz "github.com/ashvardanian/stringzilla/golang"
 )
 
+// TestCapabilities logs the detected CPU features for debugging.
+// This test should run first to help diagnose SIMD backend issues.
+func TestCapabilities(t *testing.T) {
+	caps := sz.Capabilities()
+	t.Logf("StringZilla detected capabilities: %s", caps)
+	if caps == "" {
+		t.Error("No capabilities detected - this may indicate a problem with dynamic dispatch")
+	}
+}
+
 // TestContains verifies that the Contains function behaves as expected.
 func TestContains(t *testing.T) {
 	tests := []struct {
