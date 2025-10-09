@@ -687,14 +687,14 @@ jobs:
         run: |
           cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release
-          tar -cvf "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_shared.dll" "build_release/stringzilla_shared.lib" "./include/stringzilla/stringzilla.h"
+          tar -cvf "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_bare.dll" "build_release/stringzilla_bare.lib" "./include/stringzilla/stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          file: "stringzilla_shared_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
+          file: "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
           update_latest_release: true
 
   create_macos_library:
