@@ -1016,18 +1016,24 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const
     a = hash[0], b = hash[1], c = hash[2], d = hash[3];
     e = hash[4], f = hash[5], g = hash[6], h = hash[7];
 
-    // Main compression loop (64 rounds)
-    for (sz_size_t i = 0; i < 64; ++i) {
-        // Prepare the message schedule (W0-W63)
-        if (i < 16) {
-            // Read big-endian 32-bit words from the block
-            message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
-                                  ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
-        }
-        else {
-            message_schedule[(i) % 16] = sz_sha256_sigma1_lower_(message_schedule[(i - 2) % 16]) + message_schedule[(i - 7) % 16] +
-                                  sz_sha256_sigma0_lower_(message_schedule[(i - 15) % 16]) + message_schedule[(i - 16) % 16];
-        }
+    // Main compression loop - rounds until 16th
+    for (sz_size_t i = 0; i < 16; ++i) {
+        // Read big-endian 32-bit words from the block
+        message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
+                              ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i % 16];
+        temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
+        h = g, g = f, f = e;
+        e = d + temp1;
+        d = c, c = b, b = a;
+        a = temp1 + temp2;
+    }
+
+    // Main compression loop - rounds from 16th to 64th
+    for (sz_size_t i = 16; i < 64; ++i) {
+        message_schedule[(i) % 16] =
+            sz_sha256_sigma1_lower_(message_schedule[(i - 2) % 16]) + message_schedule[(i - 7) % 16] +
+            sz_sha256_sigma0_lower_(message_schedule[(i - 15) % 16]) + message_schedule[(i - 16) % 16];
         temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i % 16];
         temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
