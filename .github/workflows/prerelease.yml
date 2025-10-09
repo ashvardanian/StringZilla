@@ -56,6 +56,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
         # the standard output.
@@ -77,8 +88,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "GCC Version:"
             gcc-12 --version
             echo "G++ Version:"
@@ -134,13 +143,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
-      - name: Log CPU and Python capabilities (StringZilla)
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== StringZilla capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -178,6 +182,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
       - name: Install dependencies
@@ -201,8 +216,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "Clang Version:"
             clang-16 --version
             echo "Clang++ Version:"
@@ -247,13 +260,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
-      - name: Log CPU and Python capabilities (StringZilla)
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== StringZilla capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -294,6 +302,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
       - name: Install dependencies
         run: |
@@ -313,8 +332,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "GCC Version:"
             gcc-12 --version
             echo "G++ Version:"
@@ -337,13 +354,8 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
-      - name: Log CPU and Python capabilities
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== Python capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -375,6 +387,21 @@ jobs:
           cuda: "12.9.1"
           method: "network"
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo ""
+          echo "GPU Info:"
+          nvcc --version 2>/dev/null || echo "nvcc not yet installed"
+          nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
       - name: Install dependencies
         run: |
@@ -396,8 +423,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "CUDA Version:"
             nvcc --version
             echo "GCC Version:"
@@ -422,16 +447,8 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
-      - name: Log CPU/GPU and Python capabilities
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== nvcc/nvidia-smi ===="
-          nvcc --version || true
-          nvidia-smi || true
-          echo "==== Python capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -454,6 +471,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu || true
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
       - name: Test Swift
         run: swift test
 
@@ -480,6 +509,19 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo ""
+          echo "Cross-compiling for: ${{ matrix.arch }} (${{ matrix.target }})"
+          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
         # We need to install the cross-compilation toolchain for ARM64 and ARMHF
@@ -522,6 +564,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          sysctl -a | grep machdep.cpu || true
+          echo ""
+          echo "System Info:"
+          system_profiler SPHardwareDataType || true
+          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Install dependencies
@@ -591,6 +644,15 @@ jobs:
           submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Log hardware capabilities
+        shell: powershell
+        run: |
+          Write-Host "────────────────────────────────────────────────────────────────"
+          Write-Host "Hardware Capabilities"
+          Write-Host "────────────────────────────────────────────────────────────────"
+          Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
+          Write-Host "────────────────────────────────────────────────────────────────"
+
       - name: Build C/C++
         shell: cmd
         run: |
@@ -605,9 +667,6 @@ jobs:
             type build_artifacts\logs.txt
             echo "The original compilation commands:"
             type build_artifacts\compile_commands.json
-            echo:
-            echo "CPU Features:"
-            wmic cpu list /format:list
             exit 1
           )
       - name: Test C++
@@ -655,6 +714,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu || true
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Build C/C++
