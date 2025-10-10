@@ -223,7 +223,10 @@ napi_value sha256API(napi_env env, napi_callback_info info) {
 
     // Compute SHA-256 using StringZilla
     sz_u8_t digest[32];
-    sz_checksum((sz_cptr_t)buffer_data, buffer_length, digest);
+    sz_sha256_state_t state;
+    sz_sha256_state_init(&state);
+    sz_sha256_state_update(&state, (sz_cptr_t)buffer_data, buffer_length);
+    sz_sha256_state_digest(&state, digest);
 
     // Convert result to JavaScript Buffer
     napi_value js_result;

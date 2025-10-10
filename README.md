@@ -813,9 +813,6 @@ sz_u64_t streamed_hash = sz_hash_state_digest(&state);
 
 // SHA-256 cryptographic checksums
 sz_u8_t digest[32];
-sz_checksum(haystack.start, haystack.length, digest);
-
-// SHA-256 incrementally with "init", "update", and "digest":
 sz_sha256_state_t sha_state;
 sz_sha256_state_init(&sha_state);
 sz_sha256_state_update(&sha_state, haystack.start, haystack.length);
