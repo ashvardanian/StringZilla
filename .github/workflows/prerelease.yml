@@ -108,7 +108,6 @@ jobs:
         working-directory: golang
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-          CGO_CFLAGS_ALLOW: "-mno-red-zone"
         run: go test -v
       - name: Test on Real World Data
         run: |
@@ -236,7 +235,6 @@ jobs:
         working-directory: golang
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-          CGO_CFLAGS_ALLOW: "-mno-red-zone"
         run: go test -v
       - name: Test on Real World Data
         run: |

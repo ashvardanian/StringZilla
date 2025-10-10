@@ -127,6 +127,14 @@ sudo apt-get install g++-12 gcc-12      # You may already have a newer version o
 sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
 ```
 
+On Linux, after that, if you want to compile the mninmal set of tests:
+
+```bash
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
+cmake --build build_release --config Release --target stringzilla_test_cpp20
+build_release/stringzilla_test_cpp20
+```
+
 On macOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
 Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
 

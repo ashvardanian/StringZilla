@@ -554,6 +554,17 @@ if (STRINGZILLA_BUILD_SHARED)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(stringzilla_shared PUBLIC include)
 
+    # Force aggressive inlining for SHA-256 functions to avoid stack overflow in Go CGO (-mno-red-zone) The SHA-256
+    # block processor has ~200-350 instructions and must be inlined to avoid nested stack frames
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(
+            stringzilla_shared PRIVATE "--param=max-inline-insns-single=2000" "--param=max-inline-insns-auto=2000"
+                                       "-finline-functions" "-fno-inline-functions-called-once"
+        )
+    elseif (CMAKE_C_COMPILER_ID MATCHES "Clang")
+        target_compile_options(stringzilla_shared PRIVATE "-mllvm" "-inline-threshold=2000" "-finline-functions")
+    endif ()
+
     # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
     # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
     # they have linker issues with bare builds.

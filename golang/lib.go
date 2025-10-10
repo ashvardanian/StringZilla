@@ -17,7 +17,7 @@
 // - sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest
 package sz
 
-// #cgo CFLAGS: -O3 -mno-red-zone -I../include -DSZ_DYNAMIC_DISPATCH=1
+// #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
 // #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find

@@ -2815,10 +2815,11 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     block_vec.zmm = _mm512_loadu_si512(block);
 
     // Byte-swap using 512-bit shuffle (reverse byte order within each 32-bit word)
-    __m512i const bswap_mask_512 =
-        _mm512_set_epi8(60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, 44, 45, 46, 47, 40, 41, 42, 43,
-                        36, 37, 38, 39, 32, 33, 34, 35, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19,
-                        12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+    __m512i const bswap_mask_512 = _mm512_set_epi8(                     //
+        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
+        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
+        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, //
+        12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
     block_vec.zmm = _mm512_shuffle_epi8(block_vec.zmm, bswap_mask_512);
 
     // Extract 128-bit message words (SHA-NI operates on 128-bit registers)
@@ -3072,12 +3073,6 @@ SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state_ptr, sz_cptr_
     _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_load_si256((__m256i const *)hash));
 }
 
-/**
- *  @brief  Finalize SHA256 computation and produce 256-bit digest.
- *          Uses AVX-512 for efficient zeroing operations.
- *  @param  state   Pointer to SHA256 state structure (not modified).
- *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
- */
 SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
