@@ -98,6 +98,11 @@
 #include <signal.h>
 #endif
 
+/* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
+#if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
+#include <processthreadsapi.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -376,8 +381,24 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_sve2_aes_k * (supports_sve2_aes)) | //
         (sz_cap_serial_k));
 
-#else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
+#elif defined(SZ_IS_WINDOWS_)
+
+    // On Windows ARM, use the `IsProcessorFeaturePresent` API for capability detection.
+    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent
+    unsigned supports_neon = IsProcessorFeaturePresent(PF_ARM_V8_INSTRUCTIONS_AVAILABLE);
+    unsigned supports_crypto = IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE);
+
+    return (sz_capability_t)(                     //
+        (sz_cap_neon_k * (supports_neon)) |       //
+        (sz_cap_neon_aes_k * (supports_crypto)) | //
+        (sz_cap_neon_sha_k * (supports_crypto)) | //
+        (sz_cap_serial_k));
+
+#else // Unknown platform
+
+    // Conservative fallback for unknown platforms: NEON is mandatory in ARMv8-A (ARM64)
     return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+
 #endif
 }
 
