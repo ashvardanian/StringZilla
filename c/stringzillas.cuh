@@ -1075,6 +1075,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
     szs_levenshtein_distances_t *engine_punned, char const **error_message) {
 
     sz_unused_(alloc); // Custom allocator not yet implemented, using default
+    sz_unused_(capabilities); // Optional backends may be compiled out
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // If the gap opening and extension costs are identical we can use less memory
@@ -1361,6 +1362,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
     szs_needleman_wunsch_scores_t *engine_punned, char const **error_message) {
 
     sz_unused_(alloc); // Custom allocator not yet implemented, using default
+    sz_unused_(capabilities); // Optional backends may be compiled out
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // If the gap opening and extension costs are identical we can use less memory
@@ -1516,6 +1518,7 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
     szs_smith_waterman_scores_t *engine_punned, char const **error_message) {
 
     sz_unused_(alloc); // Custom allocator not yet implemented, using default
+    sz_unused_(capabilities); // Optional backends may be compiled out
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // If the gap opening and extension costs are identical we can use less memory
@@ -1672,6 +1675,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
     szs_fingerprints_t *engine_punned, char const **error_message) {
 
     sz_unused_(alloc); // Custom allocator not yet implemented, using default
+    sz_unused_(capabilities); // Optional backends may be compiled out
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
     // Use some default window widths if none are provided
