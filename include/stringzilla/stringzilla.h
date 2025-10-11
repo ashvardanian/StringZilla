@@ -92,6 +92,12 @@
 #include <sys/sysctl.h>
 #endif
 
+/* On Linux ARM, we need signal handling to safely test MRS instruction availability */
+#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && !SZ_AVOID_LIBC
+#include <setjmp.h>
+#include <signal.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -251,6 +257,15 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #pragma GCC target("arch=armv8.5-a+sve")
 #endif
 
+#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && !SZ_AVOID_LIBC
+/** @brief SIGILL handler for MRS instruction testing on Linux ARM */
+static sigjmp_buf sz_mrs_test_jump_buffer_;
+static void sz_mrs_test_sigill_handler_(int sig) {
+    sz_unused_(sig);
+    siglongjmp(sz_mrs_test_jump_buffer_, 1);
+}
+#endif
+
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
@@ -276,6 +291,33 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_LINUX_)
+
+    // Depending on the environment, reading system registers may cause SIGILL.
+    // One option to avoid the crash is to use `getauxval(AT_HWCAP)` and `getauxval(AT_HWCAP2)`,
+    // Linux APIs, but those aren't as informative as reading the registers directly.
+    // So before reading the ID registers, we set up a signal handler to catch SIGILL
+    // and probe one of the registers, reverting back to the old signal handler afterwards.
+    //
+    // This issue was originally observed in SimSIMD: https://github.com/ashvardanian/SimSIMD/issues/279
+#if !SZ_AVOID_LIBC
+    struct sigaction action_new, action_old;
+    action_new.sa_handler = sz_mrs_test_sigill_handler_;
+    sigemptyset(&action_new.sa_mask);
+    action_new.sa_flags = 0;
+
+    int mrs_works = 0;
+    if (sigaction(SIGILL, &action_new, &action_old) == 0) {
+        if (sigsetjmp(sz_mrs_test_jump_buffer_, 1) == 0) {
+            unsigned long midr_value;
+            __asm__ __volatile__("mrs %0, MIDR_EL1" : "=r"(midr_value));
+            mrs_works = 1;
+        }
+        sigaction(SIGILL, &action_old, NULL);
+    }
+
+    // Early exit if MRS doesn't work - return conservative NEON-only capabilities
+    if (!mrs_works) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+#endif // !SZ_AVOID_LIBC
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -335,7 +377,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_serial_k));
 
 #else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
-    return sz_cap_serial_k;
+    return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
 #endif
 }
 
