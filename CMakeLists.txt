@@ -94,12 +94,15 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif ()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-    set(SZ_PLATFORM_X86 TRUE)
-    message(STATUS "Platform: x86")
+# Detect target architecture from `CMAKE_SYSTEM_PROCESSOR`... safer for cross-compilation!
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64|amd64")
+    set(SZ_IS_64BIT_X86_ TRUE)
+    message(STATUS "Platform: x86_64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
-    set(SZ_PLATFORM_ARM TRUE)
-    message(STATUS "Platform: ARM")
+    set(SZ_IS_64BIT_ARM_ TRUE)
+    message(STATUS "Platform: ARM64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+else ()
+    message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
@@ -438,7 +441,7 @@ if (STRINGZILLA_BUILD_TEST)
 
     # Check system architecture to avoid complex cross-compilation workflows, but compile multiple backends: disabling
     # all SIMD, enabling only AVX2, only AVX-512, only Arm Neon.
-    if (SZ_PLATFORM_X86)
+    if (SZ_IS_64BIT_X86_)
         # x86 specific backends
         if (MSVC)
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
@@ -465,7 +468,7 @@ if (STRINGZILLA_BUILD_TEST)
                 define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "sapphirerapids")
             endif ()
         endif ()
-    elseif (SZ_PLATFORM_ARM)
+    elseif (SZ_IS_64BIT_ARM_)
         # ARM specific backends
         define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
         define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
@@ -493,7 +496,7 @@ target_include_directories(
 
 if (STRINGZILLA_BUILD_SHARED)
 
-    function (define_shared target)
+    function (define_stringzilla_shared target)
         add_library(${target} SHARED c/stringzilla.c)
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
@@ -504,7 +507,7 @@ if (STRINGZILLA_BUILD_SHARED)
                        POSITION_INDEPENDENT_CODE ON
         )
 
-        if (SZ_PLATFORM_X86)
+        if (SZ_IS_64BIT_X86_)
             if (MSVC)
                 set_compiler_flags(${target} "" "SSE2" "${CMAKE_CXX_COMPILER_ID}")
             else ()
@@ -513,27 +516,63 @@ if (STRINGZILLA_BUILD_SHARED)
 
             target_compile_definitions(
                 ${target}
-                PRIVATE "SZ_USE_WESTMERE=1"
+                PRIVATE "SZ_IS_64BIT_X86_=1"
+                        "SZ_IS_64BIT_ARM_=0"
+                        "SZ_USE_WESTMERE=1"
                         "SZ_USE_GOLDMONT=1"
                         "SZ_USE_HASWELL=1"
                         "SZ_USE_SKYLAKE=1"
                         "SZ_USE_ICE=1"
                         "SZ_USE_NEON=0"
+                        "SZ_USE_NEON_AES=0"
+                        "SZ_USE_NEON_SHA=0"
                         "SZ_USE_SVE=0"
                         "SZ_USE_SVE2=0"
+                        "SZ_USE_SVE2_AES=0"
             )
-        elseif (SZ_PLATFORM_ARM)
+        elseif (SZ_IS_64BIT_ARM_)
             set_compiler_flags(${target} "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
 
             target_compile_definitions(
                 ${target}
-                PRIVATE "SZ_USE_WESTMERE=0"
+                PRIVATE "SZ_IS_64BIT_ARM_=1"
+                        "SZ_IS_64BIT_X86_=0"
+                        "SZ_USE_WESTMERE=0"
+                        "SZ_USE_GOLDMONT=0"
                         "SZ_USE_HASWELL=0"
                         "SZ_USE_SKYLAKE=0"
                         "SZ_USE_ICE=0"
                         "SZ_USE_NEON=1"
+                        "SZ_USE_NEON_AES=1"
+                        "SZ_USE_NEON_SHA=1"
                         "SZ_USE_SVE=1"
                         "SZ_USE_SVE2=1"
+                        "SZ_USE_SVE2_AES=1"
+            )
+        else ()
+            # Fallback: disable all SIMD and use serial execution only This happens when SZ_IS_64BIT_X86_ and
+            # SZ_IS_64BIT_ARM_ are both FALSE
+            message(
+                WARNING
+                    "Neither SZ_IS_64BIT_X86_ nor SZ_IS_64BIT_ARM_ is set for ${target}, falling back to serial execution"
+            )
+            set_compiler_flags(${target} "" "" "${CMAKE_CXX_COMPILER_ID}")
+
+            target_compile_definitions(
+                ${target}
+                PRIVATE "SZ_IS_64BIT_X86_=0"
+                        "SZ_IS_64BIT_ARM_=0"
+                        "SZ_USE_WESTMERE=0"
+                        "SZ_USE_GOLDMONT=0"
+                        "SZ_USE_HASWELL=0"
+                        "SZ_USE_SKYLAKE=0"
+                        "SZ_USE_ICE=0"
+                        "SZ_USE_NEON=0"
+                        "SZ_USE_NEON_AES=0"
+                        "SZ_USE_NEON_SHA=0"
+                        "SZ_USE_SVE=0"
+                        "SZ_USE_SVE2=0"
+                        "SZ_USE_SVE2_AES=0"
             )
         endif ()
 
@@ -549,7 +588,7 @@ if (STRINGZILLA_BUILD_SHARED)
 
     endfunction ()
 
-    define_shared(stringzilla_shared)
+    define_stringzilla_shared(stringzilla_shared)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(stringzilla_shared PUBLIC include)
@@ -569,7 +608,7 @@ if (STRINGZILLA_BUILD_SHARED)
     # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
     # they have linker issues with bare builds.
     if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-        define_shared(stringzilla_bare)
+        define_stringzilla_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(stringzilla_bare PUBLIC include)
@@ -612,18 +651,24 @@ if (STRINGZILLAS_BUILD_SHARED)
             ${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O3;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
         )
 
-        # Dynamic dispatch for SIMD on different architectures
-        if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        if (SZ_IS_64BIT_X86_)
             target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
-        elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        elseif (SZ_IS_64BIT_ARM_)
             target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=1")
+        else ()
+            # Fallback: disable architecture-specific optimizations
+            message(
+                WARNING
+                    "Unknown architecture for ${target}: CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}, disabling SIMD"
+            )
+            target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
         endif ()
 
         # Link threading libraries for CPU backend
         find_package(Threads REQUIRED)
         target_link_libraries(${target} PRIVATE Threads::Threads)
 
-        # Platform-specific runtime libraries (similar to define_shared)
+        # Platform-specific runtime libraries (similar to define_stringzilla_shared)
         if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
             target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
         endif ()
