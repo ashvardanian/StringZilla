@@ -498,9 +498,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - arch: x86_64
             target: x86_64-linux-gnu
-          - arch: arm64
+          - arch: aarch64
             target: aarch64-linux-gnu
 
     steps:
@@ -534,12 +534,16 @@ jobs:
 
         # Skip CMake's compiler test phase for cross-compilation
         # The tests fail because the linker can't find libraries during the test,
-        # but the actual build works fine. This is standard practice for cross-compilation.
+        # but the actual build works fine. We provide the properties CMake would
+        # normally detect (pointer size, thread library) explicitly.
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
             -DCMAKE_C_COMPILER_WORKS=1 \
             -DCMAKE_CXX_COMPILER_WORKS=1 \
+            -DCMAKE_SIZEOF_VOID_P=8 \
+            -DCMAKE_THREAD_LIBS_INIT=-lpthread \
+            -DCMAKE_HAVE_THREADS_LIBRARY=1 \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
             -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
