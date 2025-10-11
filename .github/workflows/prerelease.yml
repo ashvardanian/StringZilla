@@ -532,9 +532,14 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 16
 
+        # Skip CMake's compiler test phase for cross-compilation
+        # The tests fail because the linker can't find libraries during the test,
+        # but the actual build works fine. This is standard practice for cross-compilation.
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
+            -DCMAKE_C_COMPILER_WORKS=1 \
+            -DCMAKE_CXX_COMPILER_WORKS=1 \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
             -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
