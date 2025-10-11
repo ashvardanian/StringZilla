@@ -108,7 +108,7 @@ jobs:
         working-directory: golang
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-        run: go test -v
+        run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
