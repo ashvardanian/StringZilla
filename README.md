@@ -329,6 +329,7 @@ Consider contributing if you need a feature that's not yet implemented.
 | Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| SHA-256 Checksums              |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
 | Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
@@ -461,6 +462,55 @@ hasher.update(b"Hello, ").update(b"world!")
 streamed = hasher.digest() # or `hexdigest()` for a string
 assert one == streamed
 ```
+
+### SHA-256 Checksums
+
+SHA-256 cryptographic checksums are also available for single-shot and incremental hashing:
+
+```py
+import stringzilla as sz
+
+# One-shot SHA-256
+digest_bytes = sz.sha256(b"Hello, world!")
+assert len(digest_bytes) == 32
+
+# Incremental SHA-256
+hasher = sz.Sha256()
+hasher.update(b"Hello, ").update(b"world!")
+digest_bytes = hasher.digest()
+digest_hex = hasher.hexdigest()  # 64 character lowercase hex string
+
+# HMAC-SHA256 for message authentication
+mac = sz.hmac_sha256(key=b"secret", message=b"Hello, world!")
+```
+
+StringZilla integrates seamlessly with memory-mapped files for efficient large file processing.
+The traditional approach with `hashlib`:
+
+```python
+import hashlib
+
+with open("xlsum.csv", "rb") as streamed_file:
+    hasher = hashlib.sha256()
+    while chunk := streamed_file.read(4096):
+        hasher.update(chunk)
+    checksum = hasher.hexdigest()
+```
+
+Can be simplified with StringZilla:
+
+```python
+from stringzilla import Sha256, File
+
+mapped_file = File("xlsum.csv")
+checksum = Sha256().update(mapped_file).hexdigest()
+```
+
+Both output the same digest: `7278165ce01a4ac1e8806c97f32feae908036ca3d910f5177d2cf375e20aeae1`.
+OpenSSL (powering `hashlib`) has faster Assembly kernels, but StringZilla avoids file I/O overhead with memory mapping and skips Python's abstraction layers:
+
+- OpenSSL-backed `hashlib.sha256`: 12.6s
+- StringZilla end-to-end: 4.0s — __3× faster!__
 
 ### Collection-Level Operations
 
@@ -755,11 +805,18 @@ sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42);    // 42 is the se
 sz_u64_t checksum = sz_bytesum(haystack.start, haystack.length); // or accumulate byte values
 
 // Hash strings incrementally with "init", "update", and "digest":
-sz_hash_state_t state; 
+sz_hash_state_t state;
 sz_hash_state_init(&state, 42);
 sz_hash_state_update(&state, haystack.start, 1);                        // first char
 sz_hash_state_update(&state, haystack.start + 1, haystack.length - 1);  // rest of the string
 sz_u64_t streamed_hash = sz_hash_state_digest(&state);
+
+// SHA-256 cryptographic checksums
+sz_u8_t digest[32];
+sz_sha256_state_t sha_state;
+sz_sha256_state_init(&sha_state);
+sz_sha256_state_update(&sha_state, haystack.start, haystack.length);
+sz_sha256_state_digest(&sha_state, digest);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
@@ -1418,7 +1475,7 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
+__`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_NEON_SHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
@@ -1550,6 +1607,27 @@ let mut map: HashMap<&str, i32, sz::BuildSzHasher> =
     HashMap::with_hasher(sz::BuildSzHasher::with_seed(42));
 map.insert("a", 1);
 assert_eq!(map.get("a"), Some(&1));
+```
+
+### SHA-256 Checksums
+
+SHA-256 cryptographic checksums are available:
+
+```rs
+use stringzilla::sz;
+
+// One-shot SHA-256
+let digest = sz::Sha256::hash(b"Hello, world!");
+assert_eq!(digest.len(), 32);
+
+// Incremental SHA-256
+let mut hasher = sz::Sha256::new();
+hasher.update(b"Hello, ");
+hasher.update(b"world!");
+let digest = hasher.digest();
+
+// HMAC-SHA256 for message authentication
+let mac = sz::hmac_sha256(b"secret", b"Hello, world!");
 ```
 
 ### Similarity Scores
@@ -1730,6 +1808,24 @@ const streamedHash = hasher.digest(); // returns BigInt
 console.assert(hash === streamedHash);
 ```
 
+### SHA-256 Checksums
+
+SHA-256 cryptographic checksums are available:
+
+```js
+import sz from 'stringzilla';
+
+// One-shot SHA-256
+const digest = sz.sha256(Buffer.from('Hello, world!')); // returns Buffer (32 bytes)
+
+// Incremental SHA-256
+const hasher = new sz.Sha256();
+hasher.update(Buffer.from('Hello, '));
+hasher.update(Buffer.from('world!'));
+const digestBuffer = hasher.digest();     // returns Buffer (32 bytes)
+const digestHex = hasher.hexdigest();     // returns string (64 hex chars)
+```
+
 ## Quick Start: Swift 🍏
 
 StringZilla can be added as a dependency in the Swift Package Manager.
@@ -1763,11 +1859,29 @@ import StringZilla
 let hash = "Hello, world!".hash(seed: 42)
 
 // Incremental hashing for streaming data
-var hasher = SZHasher(seed: 42)
+var hasher = StringZillaHasher(seed: 42)
 hasher.update("Hello, ")
 hasher.update("world!")
 let streamedHash = hasher.digest()
 assert(hash == streamedHash)
+```
+
+### SHA-256 Checksums
+
+SHA-256 cryptographic checksums are available:
+
+```swift
+import StringZilla
+
+// One-shot SHA-256
+let digest = "Hello, world!".sha256() // returns [UInt8] (32 bytes)
+
+// Incremental SHA-256
+var hasher = StringZillaSha256Hasher()
+hasher.update("Hello, ")
+hasher.update("world!")
+let digestBytes = hasher.digest()     // [UInt8] (32 bytes)
+let digestHex = hasher.hexdigest()    // String (64 hex chars)
 ```
 
 ## Quick Start: GoLang 🦫
@@ -1822,16 +1936,64 @@ func main() {
 
 ### Hash
 
-Single-shot and incremental hashing are both supported:
+Single-shot and incremental hashing are both supported.
+The `Hasher` type implements Go's standard `hash.Hash64` and `io.Writer` interfaces:
 
 ```go
+import (
+    "io"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+// One-shot hashing
 one := sz.Hash("Hello, world!", 42)
 
+// Streaming hasher (implements hash.Hash64 and io.Writer)
 hasher := sz.NewHasher(42)
 hasher.Write([]byte("Hello, "))
 hasher.Write([]byte("world!"))
-streamed := hasher.Digest()
-fmt.Println(one == streamed) // true
+streamed := hasher.Digest()         // or hasher.Sum64()
+fmt.Println(one == streamed)        // true
+
+// Works with io.Copy and any io.Reader
+file, _ := os.Open("data.txt")
+hasher.Reset()
+io.Copy(hasher, file)
+fileHash := hasher.Sum64()
+```
+
+### SHA-256 Checksums
+
+SHA-256 cryptographic checksums are available.
+The `Sha256` type implements Go's standard `hash.Hash` and `io.Writer` interfaces:
+
+```go
+import (
+    "io"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+// One-shot SHA-256
+digest := sz.HashSha256([]byte("Hello, world!"))
+fmt.Printf("%x\n", digest)          // prints 32-byte hash in hex
+
+// Streaming SHA-256 (implements hash.Hash and io.Writer)
+hasher := sz.NewSha256()
+hasher.Write([]byte("Hello, "))
+hasher.Write([]byte("world!"))
+digestBytes := hasher.Digest()      // [32]byte
+digestHex := hasher.Hexdigest()     // string (64 hex chars)
+
+// Works with io.Copy and any io.Reader
+file, _ := os.Open("data.bin")
+hasher.Reset()
+io.Copy(hasher, file)
+fileDigest := hasher.Digest()
+
+// Standard hash.Hash interface methods
+sum := hasher.Sum(nil)              // []byte with 32 bytes
+size := hasher.Size()               // 32
+blockSize := hasher.BlockSize()     // 64
 ```
 
 ## Algorithms & Design Decisions 📚
@@ -2128,6 +2290,11 @@ Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads
 > § Reading materials.
 > [Stress-testing hash functions for avalance behaviour, collision bias, and distribution](https://github.com/ashvardanian/HashEvals).
 
+### SHA-256 Checksums
+
+In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic checksums.
+The implementation follows the [FIPS 180-4 specification](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) and provides multiple backends.
+
 ### Random Generation
 
 StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.
@@ -2216,6 +2383,7 @@ If you are looking for more reading materials on this topic, consider the follow
 - [The Painful Pitfalls of C++ STL Strings](https://ashvardanian.com/posts/painful-strings/).
 - [Processing Strings 109x Faster than Nvidia on H100](https://ashvardanian.com/posts/stringwars-on-gpus/).
 - [How a String Library Beat OpenCV at Image Processing by 4x](https://ashvardanian.com/posts/image-processing-with-strings/).
+- [2x Faster Hashes on AWS Graviton: NEON → SVE2](https://ashvardanian.com/posts/aws-graviton-checksums-on-neon-vs-sve/).
 
 ## License 📜
 

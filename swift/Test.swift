@@ -209,4 +209,39 @@ class StringZillaTests: XCTestCase {
 
         XCTAssertEqual(hashWithEmptyUpdates, hashWithoutEmptyUpdates)
     }
+
+    // MARK: - SHA-256 Tests
+
+    func testSha256TestVectors() {
+        // Helper to convert bytes to hex
+        func toHex(_ bytes: [UInt8]) -> String {
+            let hexDigits = "0123456789abcdef"
+            var result = ""
+            for byte in bytes {
+                result.append(hexDigits[hexDigits.index(hexDigits.startIndex, offsetBy: Int(byte >> 4))])
+                result.append(hexDigits[hexDigits.index(hexDigits.startIndex, offsetBy: Int(byte & 0x0F))])
+            }
+            return result
+        }
+
+        // NIST test vectors
+        XCTAssertEqual(toHex("".sha256()),
+                      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        XCTAssertEqual(toHex("abc".sha256()),
+                      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+
+    func testSha256Streaming() {
+        let hasher = StringZillaSha256()
+        hasher.update("Hello, ").update("world!")
+        let progressive = hasher.digest()
+        let oneshot = "Hello, world!".sha256()
+        XCTAssertEqual(progressive, oneshot)
+
+        // Hexdigest and reset
+        XCTAssertEqual(hasher.hexdigest().count, 64)
+        hasher.reset()
+        hasher.update("test")
+        XCTAssertEqual(hasher.digest().count, 32)
+    }
 }

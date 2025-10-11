@@ -84,6 +84,12 @@ namespace stringzillas {
 struct error_costs_256x256_t;
 struct error_costs_26x26ascii_t;
 
+constexpr sz_capability_t serialize_capability(sz_capability_t capability) noexcept {
+    sz_capability_t without_parallel = static_cast<sz_capability_t>(capability & ~sz_cap_parallel_k);
+    sz_capability_t without_serial = static_cast<sz_capability_t>(without_parallel & ~sz_cap_serial_k);
+    return without_serial != 0 ? without_serial : without_parallel;
+}
+
 template <sz_similarity_objective_t objective_, typename score_type_>
 constexpr score_type_ min_or_max(score_type_ a, score_type_ b) noexcept {
     if constexpr (objective_ == sz_minimize_distance_k) { return sz_min_of_two(a, b); }
@@ -1639,7 +1645,7 @@ struct levenshtein_distance {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+    static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using horizontal_u8_t =                                                                        //
         horizontal_walker<char_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, allocator_t, //
@@ -1758,7 +1764,7 @@ struct levenshtein_distance_utf8 {
     using rune_allocator_t = typename allocator_traits_t::template rebind_alloc<sz_rune_t>;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+    static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using horizontal_u8_t =                                                                           //
         horizontal_walker<sz_rune_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, allocator_t, //
@@ -1911,7 +1917,7 @@ struct needleman_wunsch_score {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+    static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using horizontal_i16_t =                                                         //
         horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, allocator_t, //
@@ -2006,7 +2012,7 @@ struct smith_waterman_score {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+    static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using horizontal_i16_t =                                                         //
         horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, allocator_t, //
@@ -2590,7 +2596,7 @@ struct error_costs_26x26ascii_t {
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -2738,7 +2744,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 template <sz_capability_t capability_>
 struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -2884,7 +2890,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3027,7 +3033,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 template <sz_capability_t capability_>
 struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3174,7 +3180,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3320,7 +3326,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3437,7 +3443,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3555,7 +3561,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 template <sz_capability_t capability_>
 struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, capability_,
-                   std::enable_if_t<capability_ & sz_cap_ice_k>>
+                   std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>>
     : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
@@ -3679,7 +3685,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distance<char, gap_costs_type_, allocator_type_, capability_,
-                            std::enable_if_t<capability_ & sz_cap_ice_k>> {
+                            std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>> {
 
     using char_t = char;
     using gap_costs_t = gap_costs_type_;
@@ -3766,7 +3772,7 @@ struct levenshtein_distance<char, gap_costs_type_, allocator_type_, capability_,
  */
 template <typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capability_,
-                                 std::enable_if_t<capability_ & sz_cap_ice_k>> {
+                                 std::enable_if_t<(capability_ & sz_cap_ice_k) != 0>> {
 
     using char_t = char;
     using gap_costs_t = linear_gap_costs_t;
@@ -4275,7 +4281,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_t
     using base_t = horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_type_, allocator_type_,
                                      objective_, locality_, sz_cap_serial_k, void>;
 
-    using base_t::horizontal_walker;
+    using base_t::base_t;
     using base_t::operator();
 };
 

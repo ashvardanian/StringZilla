@@ -4,12 +4,12 @@
  *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *          validating the SIMD-accelerated backends against the serial baselines.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
+ *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
- *  Unlike StringWa.rs, the following additional environment variables are supported:
+ *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
  *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
  *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
@@ -35,7 +35,7 @@
  *  build_release/stringzillas_bench_fingerprints_cpp20
  *  @endcode
  *
- *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
+ *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
  *  This file is a sibling of `bench_similarities.cpp`.
  */
 #include "bench_fingerprints.cuh"

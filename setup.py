@@ -342,6 +342,12 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_SVE2", "0"),
     ]
 
+    # MSVC requires architecture-specific macros for `winnt.h` to work correctly
+    if is_64bit_arm():
+        macros_args.append(("_ARM64_", "1"))
+    elif is_64bit_x86():
+        macros_args.append(("_AMD64_", "1"))
+
     link_args = []
     return compile_args, link_args, macros_args
 
