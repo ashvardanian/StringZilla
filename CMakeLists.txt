@@ -180,11 +180,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
 
     # Set output directory for single-configuration generators (like Make)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
+    set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
 
     # Set output directory for multi-configuration generators (like Visual Studio)
     foreach (config IN LISTS CMAKE_CONFIGURATION_TYPES)
         string(TOUPPER ${config} config_upper)
         set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
+        set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
     endforeach ()
 
     # Set the C++ standard
