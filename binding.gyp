@@ -35,8 +35,11 @@
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
                     "SZ_USE_NEON=0",
+                    "SZ_USE_NEON_AES=0",
+                    "SZ_USE_NEON_SHA=0",
                     "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2=0",
+                    "SZ_USE_SVE2_AES=0"
                   ]
                 }
               ],
@@ -69,12 +72,16 @@
                 {
                   "defines": [
                     "SZ_USE_WESTMERE=1",
+                    "SZ_USE_GOLDMONT=1",
                     "SZ_USE_HASWELL=1",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
                     "SZ_USE_NEON=0",
+                    "SZ_USE_NEON_AES=0",
+                    "SZ_USE_NEON_SHA=0",
                     "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2=0",
+                    "SZ_USE_SVE2_AES=0"
                   ]
                 }
               ],
@@ -83,6 +90,7 @@
                 {
                   "defines": [
                     "SZ_USE_WESTMERE=0",
+                    "SZ_USE_GOLDMONT=0",
                     "SZ_USE_HASWELL=0",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
@@ -90,7 +98,8 @@
                     "SZ_USE_NEON_AES=1",
                     "SZ_USE_NEON_SHA=1",
                     "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2=0",
+                    "SZ_USE_SVE2_AES=0"
                   ]
                 }
               ]
@@ -111,8 +120,11 @@
                     "SZ_USE_SKYLAKE=1",
                     "SZ_USE_ICE=1",
                     "SZ_USE_NEON=0",
+                    "SZ_USE_NEON_AES=0",
+                    "SZ_USE_NEON_SHA=0",
                     "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2=0",
+                    "SZ_USE_SVE2_AES=0"
                   ]
                 }
               ],
@@ -121,6 +133,7 @@
                 {
                   "defines": [
                     "SZ_USE_WESTMERE=0",
+                    "SZ_USE_GOLDMONT=0",
                     "SZ_USE_HASWELL=0",
                     "SZ_USE_SKYLAKE=0",
                     "SZ_USE_ICE=0",
@@ -128,7 +141,8 @@
                     "SZ_USE_NEON_AES=1",
                     "SZ_USE_NEON_SHA=1",
                     "SZ_USE_SVE=0",
-                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2=0",
+                    "SZ_USE_SVE2_AES=0"
                   ]
                 }
               ]

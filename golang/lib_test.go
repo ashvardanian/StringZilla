@@ -7,6 +7,16 @@ import (
 	sz "github.com/ashvardanian/stringzilla/golang"
 )
 
+// TestCapabilities logs the detected CPU features for debugging.
+// This test should run first to help diagnose SIMD backend issues.
+func TestCapabilities(t *testing.T) {
+	caps := sz.Capabilities()
+	t.Logf("StringZilla detected capabilities: %s", caps)
+	if caps == "" {
+		t.Error("No capabilities detected - this may indicate a problem with dynamic dispatch")
+	}
+}
+
 // TestContains verifies that the Contains function behaves as expected.
 func TestContains(t *testing.T) {
 	tests := []struct {
@@ -186,9 +196,31 @@ func TestHashing(t *testing.T) {
 
 	// Streaming equals one-shot
 	h := sz.NewHasher(42)
-	h.Write([]byte("Hello, ")).Write([]byte("world!"))
+	h.Write([]byte("Hello, "))
+	h.Write([]byte("world!"))
 	if a != h.Digest() {
 		t.Fatalf("Streaming digest mismatch: %d != %d", a, h.Digest())
+	}
+
+	// Test hash.Hash64 interface compliance
+	if h.Size() != 8 {
+		t.Fatalf("Size() should return 8")
+	}
+	if h.Sum64() != a {
+		t.Fatalf("Sum64() mismatch: %d != %d", h.Sum64(), a)
+	}
+
+	// Test Sum() method
+	sum := h.Sum(nil)
+	if len(sum) != 8 {
+		t.Fatalf("Sum(nil) should return 8 bytes")
+	}
+
+	// Test Reset()
+	h.Reset()
+	h.Write([]byte("test"))
+	if h.Sum64() == a {
+		t.Fatalf("After reset, hash should be different")
 	}
 
 	// Bytesum should be monotonic with appended byte (sanity check)

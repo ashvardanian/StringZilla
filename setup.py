@@ -217,7 +217,6 @@ def is_big_endian() -> bool:
 def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
-        "-pedantic",  # stick close to the C language standard, avoid compiler extensions
         "-O2",  # optimization level
         "-fdiagnostics-color=always",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
@@ -271,7 +270,6 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
 
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
-        "-pedantic",  # stick close to the C language standard, avoid compiler extensions
         "-O2",  # optimization level
         "-fcolor-diagnostics",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
@@ -341,6 +339,12 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
+
+    # MSVC requires architecture-specific macros for `winnt.h` to work correctly
+    if is_64bit_arm():
+        macros_args.append(("_ARM64_", "1"))
+    elif is_64bit_x86():
+        macros_args.append(("_AMD64_", "1"))
 
     link_args = []
     return compile_args, link_args, macros_args

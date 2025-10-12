@@ -127,6 +127,14 @@ sudo apt-get install g++-12 gcc-12      # You may already have a newer version o
 sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
 ```
 
+On Linux, after that, if you want to compile the mninmal set of tests:
+
+```bash
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
+cmake --build build_release --config Release --target stringzilla_test_cpp20
+build_release/stringzilla_test_cpp20
+```
+
 On macOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
 Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
 
@@ -164,7 +172,7 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug      # Which will produce the following targets:
+cmake --build build_debug --config Debug -j   # Which will produce the following targets:
 build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
 build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
 build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
@@ -549,7 +557,7 @@ $env:CIBW_BUILD = "cp312-*"; $env:CIBW_ARCHS_WINDOWS = "AMD64"; $env:SZ_TARGET =
 
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
 
-If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWa.rs`](https://github.com/ashvardanian/StringWa.rs/) repository.
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWars`](https://github.com/ashvardanian/StringWars/) repository.
 
 ## JavaScript
 
@@ -629,7 +637,7 @@ If you are updating the package contents, you can validate the list of included 
 cargo package --list --allow-dirty
 ```
 
-If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWa.rs`](https://github.com/ashvardanian/StringWa.rs/) repository.
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWars`](https://github.com/ashvardanian/StringWars/) repository.
 
 ## GoLang
 

@@ -356,13 +356,13 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
 #if defined(__clang__)
-#pragma clang attribute push(                                                                                  \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes"))), \
+#pragma clang attribute push(                                                                                      \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes,sha"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2", \
-                   "aes", "vaes")
+                   "aes", "vaes", "sha")
 #endif
 
 SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i v) {

@@ -92,6 +92,22 @@
 #include <sys/sysctl.h>
 #endif
 
+/* Detect POSIX extensions availability for signal handling.
+ * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
+ * These are needed on Linux ARM for safely testing `mrs` instruction availability. */
+#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
+#include <setjmp.h>
+#include <signal.h>
+#define SZ_HAS_POSIX_EXTENSIONS_ 1
+#else
+#define SZ_HAS_POSIX_EXTENSIONS_ 0
+#endif
+
+/* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
+#if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
+#include <processthreadsapi.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -251,6 +267,15 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #pragma GCC target("arch=armv8.5-a+sve")
 #endif
 
+#if SZ_HAS_POSIX_EXTENSIONS_
+/** @brief SIGILL handler for `mrs` instruction testing on Linux ARM */
+static sigjmp_buf sz_mrs_test_jump_buffer_;
+static void sz_mrs_test_sigill_handler_(int sig) {
+    sz_unused_(sig);
+    siglongjmp(sz_mrs_test_jump_buffer_, 1);
+}
+#endif
+
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
@@ -276,6 +301,36 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_LINUX_)
+
+    // Depending on the environment, reading system registers may cause SIGILL.
+    // One option to avoid the crash is to use `getauxval(AT_HWCAP)` and `getauxval(AT_HWCAP2)`,
+    // Linux APIs, but those aren't as informative as reading the registers directly.
+    // So before reading the ID registers, we set up a signal handler to catch SIGILL
+    // and probe one of the registers, reverting back to the old signal handler afterwards.
+    //
+    // This issue was originally observed in SimSIMD: https://github.com/ashvardanian/SimSIMD/issues/279
+#if SZ_HAS_POSIX_EXTENSIONS_
+    struct sigaction action_new, action_old;
+    action_new.sa_handler = sz_mrs_test_sigill_handler_;
+    sigemptyset(&action_new.sa_mask);
+    action_new.sa_flags = 0;
+
+    int mrs_works = 0;
+    if (sigaction(SIGILL, &action_new, &action_old) == 0) {
+        if (sigsetjmp(sz_mrs_test_jump_buffer_, 1) == 0) {
+            unsigned long midr_value;
+            __asm__ __volatile__("mrs %0, MIDR_EL1" : "=r"(midr_value));
+            mrs_works = 1;
+        }
+        sigaction(SIGILL, &action_old, NULL);
+    }
+
+    // Early exit if `mrs` doesn't work - return conservative NEON-only capabilities
+    if (!mrs_works) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+#else  // SZ_HAS_POSIX_EXTENSIONS_
+    // Without POSIX signal handlers, fall back to conservative NEON capabilities.
+    return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+#endif // SZ_HAS_POSIX_EXTENSIONS_
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -334,8 +389,24 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         (sz_cap_sve2_aes_k * (supports_sve2_aes)) | //
         (sz_cap_serial_k));
 
-#else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
-    return sz_cap_serial_k;
+#elif defined(SZ_IS_WINDOWS_)
+
+    // On Windows ARM, use the `IsProcessorFeaturePresent` API for capability detection.
+    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent
+    unsigned supports_neon = IsProcessorFeaturePresent(PF_ARM_V8_INSTRUCTIONS_AVAILABLE);
+    unsigned supports_crypto = IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE);
+
+    return (sz_capability_t)(                     //
+        (sz_cap_neon_k * (supports_neon)) |       //
+        (sz_cap_neon_aes_k * (supports_crypto)) | //
+        (sz_cap_neon_sha_k * (supports_crypto)) | //
+        (sz_cap_serial_k));
+
+#else // Unknown platform
+
+    // Conservative fallback for unknown platforms: NEON is mandatory in ARMv8-A (ARM64)
+    return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+
 #endif
 }
 
@@ -446,6 +517,7 @@ SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void);
 SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void);
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
+SZ_DYNAMIC void sz_dispatch_table_init(void);
 SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
 
 #else
@@ -462,6 +534,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities(void) {
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
+SZ_PUBLIC void sz_dispatch_table_init(void) {}
 SZ_PUBLIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
 
 #endif

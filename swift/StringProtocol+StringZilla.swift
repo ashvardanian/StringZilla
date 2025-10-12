@@ -270,14 +270,12 @@ extension StringZillaViewable {
 /// Use this class when you need to hash data that arrives in chunks or when building up a hash over time.
 public class StringZillaHasher {
     private var state: sz_hash_state_t
-    private var isInitialized: Bool = false
 
     /// Creates a new hasher with the specified seed.
     /// - Parameter seed: The seed value for the hash function (default: 0).
     public init(seed: UInt64 = 0) {
         state = sz_hash_state_t()
         sz_hash_state_init(&state, seed)
-        isInitialized = true
     }
 
     deinit {
@@ -289,8 +287,6 @@ public class StringZillaHasher {
     /// - Returns: Self for method chaining.
     @discardableResult
     public func update<S: StringZillaViewable>(_ content: S) -> StringZillaHasher {
-        precondition(isInitialized, "Hasher has been finalized and cannot be updated")
-
         content.withStringZillaScope { pointer, length in
             sz_hash_state_update(&state, pointer, length)
         }
@@ -299,13 +295,9 @@ public class StringZillaHasher {
 
     /// Finalizes the hash computation and returns the result.
     /// - Returns: The computed 64-bit hash value.
-    /// - Note: After calling this method, the hasher cannot be used for further updates.
+    /// - Note: This is a non-consuming operation and can be called multiple times.
     public func finalize() -> UInt64 {
-        precondition(isInitialized, "Hasher has already been finalized")
-
-        let result = sz_hash_state_digest(&state)
-        isInitialized = false
-        return result
+        return sz_hash_state_digest(&state)
     }
 
     /// Alias for `finalize()` to match other bindings.
@@ -316,6 +308,94 @@ public class StringZillaHasher {
     public func reset(seed: UInt64? = nil) {
         let newSeed = seed ?? 0  // Default to 0 if no seed provided
         sz_hash_state_init(&state, newSeed)
-        isInitialized = true
+    }
+}
+
+/// A progressive SHA-256 hasher for computing cryptographic checksums incrementally.
+/// Use this class when you need to hash data that arrives in chunks or when building up a hash over time.
+public class StringZillaSha256 {
+    private var state: sz_sha256_state_t
+
+    /// Creates a new SHA-256 hasher.
+    public init() {
+        state = sz_sha256_state_t()
+        sz_sha256_state_init(&state)
+    }
+
+    deinit {
+        // StringZilla SHA-256 state doesn't require explicit cleanup
+    }
+
+    /// Updates the hash state with additional data.
+    /// - Parameter content: The data to add to the hash.
+    /// - Returns: Self for method chaining.
+    @discardableResult
+    public func update<S: StringZillaViewable>(_ content: S) -> StringZillaSha256 {
+        content.withStringZillaScope { pointer, length in
+            sz_sha256_state_update(&state, pointer, length)
+        }
+        return self
+    }
+
+    /// Updates the hash state with raw byte data.
+    /// - Parameter data: The byte data to add to the hash.
+    /// - Returns: Self for method chaining.
+    @discardableResult
+    public func update(_ data: [UInt8]) -> StringZillaSha256 {
+        data.withUnsafeBufferPointer { bufferPointer in
+            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
+            sz_sha256_state_update(&state, cString, sz_size_t(bufferPointer.count))
+        }
+        return self
+    }
+
+    /// Finalizes the hash computation and returns the result as a 32-byte array.
+    /// - Returns: The computed SHA-256 digest.
+    /// - Note: This is a non-consuming operation and can be called multiple times.
+    public func finalize() -> [UInt8] {
+        var digest = [UInt8](repeating: 0, count: 32)
+        digest.withUnsafeMutableBufferPointer { bufferPointer in
+            sz_sha256_state_digest(&state, bufferPointer.baseAddress!)
+        }
+        return digest
+    }
+
+    /// Alias for `finalize()` to match other bindings.
+    public func digest() -> [UInt8] { return finalize() }
+
+    /// Returns the current SHA-256 hash as a lowercase hexadecimal string.
+    /// - Returns: A 64-character hex string.
+    public func hexdigest() -> String {
+        let digest = self.digest()
+        let hexDigits = "0123456789abcdef"
+        var result = ""
+        result.reserveCapacity(digest.count * 2)
+        for byte in digest {
+            result.append(hexDigits[hexDigits.index(hexDigits.startIndex, offsetBy: Int(byte >> 4))])
+            result.append(hexDigits[hexDigits.index(hexDigits.startIndex, offsetBy: Int(byte & 0x0F))])
+        }
+        return result
+    }
+
+    /// Resets the hasher to its initial state.
+    public func reset() {
+        sz_sha256_state_init(&state)
+    }
+}
+
+extension StringZillaViewable {
+    /// Computes the SHA-256 cryptographic hash of the content.
+    /// - Returns: A 32-byte array containing the SHA-256 digest.
+    public func sha256() -> [UInt8] {
+        var state = sz_sha256_state_t()
+        sz_sha256_state_init(&state)
+        withStringZillaScope { pointer, length in
+            sz_sha256_state_update(&state, pointer, length)
+        }
+        var digest = [UInt8](repeating: 0, count: 32)
+        digest.withUnsafeMutableBufferPointer { bufferPointer in
+            sz_sha256_state_digest(&state, bufferPointer.baseAddress!)
+        }
+        return digest
     }
 }

@@ -207,6 +207,122 @@ napi_value hasherReset(napi_env env, napi_callback_info info) {
     return js_this;
 }
 
+napi_value sha256API(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    // Get buffer info for data (zero-copy)
+    void *buffer_data;
+    size_t buffer_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &buffer_data, &buffer_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Argument must be a Buffer");
+        return NULL;
+    }
+
+    // Compute SHA-256 using StringZilla
+    sz_u8_t digest[32];
+    sz_sha256_state_t state;
+    sz_sha256_state_init(&state);
+    sz_sha256_state_update(&state, (sz_cptr_t)buffer_data, buffer_length);
+    sz_sha256_state_digest(&state, digest);
+
+    // Convert result to JavaScript Buffer
+    napi_value js_result;
+    void *result_data;
+    napi_create_buffer_copy(env, 32, digest, &result_data, &js_result);
+
+    return js_result;
+}
+
+static void sha256_hasher_cleanup(napi_env env, void *data, void *hint) { free(data); }
+typedef struct {
+    sz_sha256_state_t state;
+} sha256_hasher_t;
+
+napi_value sha256HasherConstructor(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+
+    sha256_hasher_t *hasher = malloc(sizeof(sha256_hasher_t));
+    sz_sha256_state_init(&hasher->state);
+    napi_wrap(env, js_this, hasher, sha256_hasher_cleanup, NULL, NULL);
+
+    return js_this;
+}
+
+napi_value sha256HasherUpdate(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_value js_this;
+    napi_get_cb_info(env, info, &argc, args, &js_this, NULL);
+
+    sha256_hasher_t *hasher;
+    napi_unwrap(env, js_this, (void **)&hasher);
+
+    void *buffer_data;
+    size_t buffer_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &buffer_data, &buffer_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Argument must be a Buffer");
+        return NULL;
+    }
+
+    sz_sha256_state_update(&hasher->state, (sz_cptr_t)buffer_data, buffer_length);
+    return js_this;
+}
+
+napi_value sha256HasherDigest(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+
+    sha256_hasher_t *hasher;
+    napi_unwrap(env, js_this, (void **)&hasher);
+
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&hasher->state, digest);
+
+    // Convert result to JavaScript Buffer
+    napi_value js_result;
+    void *result_data;
+    napi_create_buffer_copy(env, 32, digest, &result_data, &js_result);
+
+    return js_result;
+}
+
+napi_value sha256HasherHexdigest(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+
+    sha256_hasher_t *hasher;
+    napi_unwrap(env, js_this, (void **)&hasher);
+
+    sz_u8_t digest[32];
+    sz_sha256_state_digest(&hasher->state, digest);
+
+    // Convert to hex string
+    char hex[65];
+    for (int i = 0; i < 32; i++) { sprintf(&hex[i * 2], "%02x", digest[i]); }
+    hex[64] = '\0';
+
+    napi_value js_result;
+    napi_create_string_utf8(env, hex, 64, &js_result);
+
+    return js_result;
+}
+
+napi_value sha256HasherReset(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+
+    sha256_hasher_t *hasher;
+    napi_unwrap(env, js_this, (void **)&hasher);
+
+    sz_sha256_state_init(&hasher->state);
+    return js_this;
+}
+
 napi_value findLastAPI(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2];
@@ -493,6 +609,17 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_define_class(env, "Hasher", NAPI_AUTO_LENGTH, hasherConstructor, NULL,
                       sizeof(hasherProps) / sizeof(hasherProps[0]), hasherProps, &hasherClass);
 
+    // Create Sha256 class constructor
+    napi_value sha256HasherClass;
+    napi_property_descriptor sha256HasherProps[] = {
+        {"update", 0, sha256HasherUpdate, 0, 0, 0, napi_default, 0},
+        {"digest", 0, sha256HasherDigest, 0, 0, 0, napi_default, 0},
+        {"hexdigest", 0, sha256HasherHexdigest, 0, 0, 0, napi_default, 0},
+        {"reset", 0, sha256HasherReset, 0, 0, 0, napi_default, 0},
+    };
+    napi_define_class(env, "Sha256", NAPI_AUTO_LENGTH, sha256HasherConstructor, NULL,
+                      sizeof(sha256HasherProps) / sizeof(sha256HasherProps[0]), sha256HasherProps, &sha256HasherClass);
+
     // Define function exports
     napi_property_descriptor findDesc = {"indexOf", 0, indexOfAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor findLastDesc = {"lastIndexOf", 0, findLastAPI, 0, 0, 0, napi_default, 0};
@@ -503,10 +630,12 @@ napi_value Init(napi_env env, napi_value exports) {
                                                      napi_default,       0};
     napi_property_descriptor countDesc = {"count", 0, countAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hashDesc = {"hash", 0, hashAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor sha256Desc = {"sha256", 0, sha256API, 0, 0, 0, napi_default, 0};
     napi_property_descriptor equalDesc = {"equal", 0, equalAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor compareDesc = {"compare", 0, compareAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
+    napi_property_descriptor sha256HasherDesc = {"Sha256", 0, 0, 0, 0, sha256HasherClass, napi_default, 0};
 
     // Export the `capabilities` string for debugging
     napi_value caps_str_value;
@@ -515,8 +644,9 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor capabilitiesDesc = {"capabilities", 0, 0, 0, 0, caps_str_value, napi_default, 0};
 
     napi_property_descriptor properties[] = {
-        findDesc, findLastDesc, findByteDesc, findLastByteDesc, findByteFromDesc, findLastByteFromDesc, countDesc,
-        hashDesc, equalDesc,    compareDesc,  byteSumDesc,      hasherDesc,       capabilitiesDesc,
+        findDesc,   findLastDesc,     findByteDesc,     findLastByteDesc, findByteFromDesc, findLastByteFromDesc,
+        countDesc,  hashDesc,         sha256Desc,       equalDesc,        compareDesc,      byteSumDesc,
+        hasherDesc, sha256HasherDesc, capabilitiesDesc,
     };
 
     // Define the properties on the `exports` object

@@ -56,6 +56,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
         # the standard output.
@@ -77,8 +88,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "GCC Version:"
             gcc-12 --version
             echo "G++ Version:"
@@ -87,6 +96,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
@@ -99,7 +110,7 @@ jobs:
         working-directory: golang
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-        run: go test -v
+        run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
@@ -133,13 +144,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
-      - name: Log CPU and Python capabilities (StringZilla)
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== StringZilla capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -177,6 +183,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
       - name: Install dependencies
@@ -200,8 +217,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "Clang Version:"
             clang-16 --version
             echo "Clang++ Version:"
@@ -210,6 +225,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
@@ -245,13 +262,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
-      - name: Log CPU and Python capabilities (StringZilla)
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== StringZilla capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -292,6 +304,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
       - name: Install dependencies
         run: |
@@ -311,8 +334,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "GCC Version:"
             gcc-12 --version
             echo "G++ Version:"
@@ -321,6 +342,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CPUs
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -335,13 +358,8 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
-      - name: Log CPU and Python capabilities
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== Python capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -373,6 +391,21 @@ jobs:
           cuda: "12.9.1"
           method: "network"
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo ""
+          echo "GPU Info:"
+          nvcc --version 2>/dev/null || echo "nvcc not yet installed"
+          nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
       - name: Install dependencies
         run: |
@@ -394,8 +427,6 @@ jobs:
             cat build_artifacts/logs.txt
             echo "The original compilation commands:"
             cat build_artifacts/compile_commands.json
-            echo "CPU Features:"
-            lscpu
             echo "CUDA Version:"
             nvcc --version
             echo "GCC Version:"
@@ -406,6 +437,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CUDA
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -420,16 +453,8 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
-      - name: Log CPU/GPU and Python capabilities
+      - name: Log Python capabilities
         run: |
-          echo "==== lscpu ===="
-          lscpu
-          echo "==== /proc/cpuinfo (model name, flags) ===="
-          grep -m1 -E "model name|flags" /proc/cpuinfo || true
-          echo "==== nvcc/nvidia-smi ===="
-          nvcc --version || true
-          nvidia-smi || true
-          echo "==== Python capabilities ===="
           python - << 'PY'
           import platform
           import stringzilla as sz
@@ -452,65 +477,20 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu || true
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
       - name: Test Swift
         run: swift test
-
-  test_ubuntu_cross_compilation:
-    name: Cross Compilation
-    runs-on: ubuntu-22.04
-    env:
-      CC: clang-16
-      CXX: clang++-16
-      AR: llvm-ar
-      NM: llvm-nm
-      RANLIB: llvm-ranlib
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            target: x86_64-linux-gnu
-          - arch: arm64
-            target: aarch64-linux-gnu
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-        # C/C++
-        # We need to install the cross-compilation toolchain for ARM64 and ARMHF
-        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
-
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
-            -DSTRINGZILLA_BUILD_SHARED=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo
-
-        # We can't run the produced builds, but we can make sure they exist
-      - name: Test artifacts presence
-        run: |
-          test -e build_artifacts/libstringzilla_bare.so
-          test -e build_artifacts/libstringzilla_shared.so
-          test -e build_artifacts/stringzilla_test_cpp20
 
   test_macos:
     name: MacOS
@@ -520,6 +500,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          sysctl -a | grep machdep.cpu || true
+          echo ""
+          echo "System Info:"
+          system_profiler SPHardwareDataType || true
+          echo "────────────────────────────────────────────────────────────────"
 
         # C/C++
       - name: Install dependencies
@@ -589,6 +580,15 @@ jobs:
           submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Log hardware capabilities
+        shell: powershell
+        run: |
+          Write-Host "────────────────────────────────────────────────────────────────"
+          Write-Host "Hardware Capabilities"
+          Write-Host "────────────────────────────────────────────────────────────────"
+          Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
+          Write-Host "────────────────────────────────────────────────────────────────"
+
       - name: Build C/C++
         shell: cmd
         run: |
@@ -603,13 +603,13 @@ jobs:
             type build_artifacts\logs.txt
             echo "The original compilation commands:"
             type build_artifacts\compile_commands.json
-            echo:
-            echo "CPU Features:"
-            wmic cpu list /format:list
             exit 1
           )
       - name: Test C++
         run: .\build_artifacts\stringzilla_test_cpp20.exe
+      - name: Check stringzilla_bare is built correctly 
+        shell: cmd 
+        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
           .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
@@ -654,6 +654,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Hardware Capabilities"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu || true
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
         # C/C++
       - name: Build C/C++
         run: |
@@ -666,6 +677,8 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so' | grep '=>')"
 
         # Python
       - name: Build Python

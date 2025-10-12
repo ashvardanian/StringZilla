@@ -382,3 +382,25 @@ test("Compare - Special Cases", () => {
     const binary2 = Buffer.from([0x00, 0x01, 0x03]);
     assert(stringzilla.compare(binary1, binary2) < 0);
 });
+
+test("SHA-256 - Test Vectors", () => {
+    // NIST test vectors
+    assert.strictEqual(stringzilla.sha256(Buffer.from("")).toString("hex"),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert.strictEqual(stringzilla.sha256(Buffer.from("abc")).toString("hex"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+
+test("Sha256 Class - Streaming", () => {
+    const hasher = new stringzilla.Sha256();
+    hasher.update(Buffer.from("Hello, ")).update(Buffer.from("world!"));
+    const progressive = hasher.digest();
+    const oneshot = stringzilla.sha256(Buffer.from("Hello, world!"));
+    assert.strictEqual(progressive.toString("hex"), oneshot.toString("hex"));
+
+    // Hexdigest and reset
+    assert.strictEqual(hasher.hexdigest(), progressive.toString("hex"));
+    hasher.reset();
+    hasher.update(Buffer.from("test"));
+    assert.strictEqual(hasher.digest().length, 32);
+});

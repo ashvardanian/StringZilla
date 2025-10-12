@@ -10,10 +10,15 @@
 //
 // Unlike the native Go `strings` package, StringZilla primarily targets byte-level
 // binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
+//
+// For some functions we are avoiding `noescape` and `nocallback`, assuming they use
+// too much stack space:
+// - sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
+// - sz_sha256_state_init, sz_sha256_state_update, sz_sha256_state_digest
 package sz
 
-// #cgo CFLAGS: -O3 -I../include
-// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_release -L../build_shared -lstringzilla_shared
+// #cgo CFLAGS: -O3 -I../include -DSZ_DYNAMIC_DISPATCH=1
+// #cgo LDFLAGS: -L. -L/usr/local/lib -L../build_golang -L../build_release -L../build_shared -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo nocallback sz_find
 // #cgo noescape sz_find_byte
@@ -30,16 +35,30 @@ package sz
 // #cgo nocallback sz_bytesum
 // #cgo noescape sz_hash
 // #cgo nocallback sz_hash
-// #cgo noescape sz_hash_state_init
-// #cgo nocallback sz_hash_state_init
-// #cgo noescape sz_hash_state_update
-// #cgo nocallback sz_hash_state_update
-// #cgo noescape sz_hash_state_digest
-// #cgo nocallback sz_hash_state_digest
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
-import "unsafe"
+import (
+	"fmt"
+	"io"
+	"unsafe"
+)
+
+// Explicitly initialize the dynamic dispatch table.
+func init() {
+	// The `__attribute__((constructor))` in the C library may not be called
+	// by CGO's internal linker (see golang/go#28909), so we call it manually
+	// to ensure the dispatch table is populated before any functions are used.
+	C.sz_dispatch_table_init()
+}
+
+// Capabilities returns a string describing the detected CPU features.
+// This can be used for debugging to understand which SIMD backend is being used.
+func Capabilities() string {
+	caps := C.sz_capabilities()
+	capsStr := C.sz_capabilities_to_string(caps)
+	return C.GoString(capsStr)
+}
 
 // Contains reports whether `substr` is within `str`.
 // https://pkg.go.dev/strings#Contains
@@ -156,30 +175,135 @@ func Hash(str string, seed uint64) uint64 {
 	return uint64(C.sz_hash(strPtr, strLen, (C.sz_u64_t)(seed)))
 }
 
-// Hasher is a streaming hasher compatible with Hash when fed the same data.
+// Hasher is a streaming 64-bit non-cryptographic hasher that implements hash.Hash64 and io.Writer.
 type Hasher struct {
 	state C.sz_hash_state_t
+	seed  uint64
 }
+
+// Compile-time interface checks
+var _ io.Writer = (*Hasher)(nil)
 
 // NewHasher creates a new streaming hasher with the given seed.
 func NewHasher(seed uint64) *Hasher {
-	h := &Hasher{}
+	h := &Hasher{seed: seed}
 	C.sz_hash_state_init(&h.state, (C.sz_u64_t)(seed))
 	return h
 }
 
-// Write adds data to the streaming hasher.
-func (h *Hasher) Write(p []byte) *Hasher {
-	if len(p) == 0 {
-		return h
+// Write adds data to the streaming hasher. Implements io.Writer.
+func (h *Hasher) Write(p []byte) (n int, err error) {
+	if len(p) > 0 {
+		C.sz_hash_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
 	}
-	C.sz_hash_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
-	return h
+	return len(p), nil
+}
+
+// Sum appends the current hash to b and returns the resulting slice.
+// It does not change the underlying hash state. Implements hash.Hash.
+func (h *Hasher) Sum(b []byte) []byte {
+	digest := h.Sum64()
+	return append(b,
+		byte(digest>>56), byte(digest>>48), byte(digest>>40), byte(digest>>32),
+		byte(digest>>24), byte(digest>>16), byte(digest>>8), byte(digest))
+}
+
+// Reset resets the hasher to its initial state. Implements hash.Hash.
+func (h *Hasher) Reset() {
+	C.sz_hash_state_init(&h.state, (C.sz_u64_t)(h.seed))
+}
+
+// Size returns the number of bytes Sum will return. Implements hash.Hash.
+func (h *Hasher) Size() int {
+	return 8
+}
+
+// BlockSize returns the hash's underlying block size. Implements hash.Hash.
+func (h *Hasher) BlockSize() int {
+	return 1 // No specific block size for this hash
+}
+
+// Sum64 returns the current 64-bit hash without consuming the state. Implements hash.Hash64.
+func (h *Hasher) Sum64() uint64 {
+	return uint64(C.sz_hash_state_digest(&h.state))
 }
 
 // Digest returns the current 64-bit hash without consuming the state.
+// This is an alias for Sum64() for consistency with other bindings.
 func (h *Hasher) Digest() uint64 {
-	return uint64(C.sz_hash_state_digest(&h.state))
+	return h.Sum64()
+}
+
+// HashSha256 computes the SHA-256 cryptographic hash of the input data.
+func HashSha256(data []byte) [32]byte {
+	var state C.sz_sha256_state_t
+	C.sz_sha256_state_init(&state)
+	if len(data) > 0 {
+		C.sz_sha256_state_update(&state, (*C.char)(unsafe.Pointer(&data[0])), C.ulong(len(data)))
+	}
+	var digest [32]byte
+	C.sz_sha256_state_digest(&state, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	return digest
+}
+
+// Sha256 is a streaming SHA-256 hasher that implements hash.Hash and io.Writer.
+type Sha256 struct {
+	state C.sz_sha256_state_t
+}
+
+// Compile-time interface checks
+var _ io.Writer = (*Sha256)(nil)
+
+// NewSha256 creates a new streaming SHA-256 hasher.
+func NewSha256() *Sha256 {
+	h := &Sha256{}
+	C.sz_sha256_state_init(&h.state)
+	return h
+}
+
+// Write adds data to the streaming SHA-256 hasher. Implements io.Writer.
+func (h *Sha256) Write(p []byte) (n int, err error) {
+	if len(p) > 0 {
+		C.sz_sha256_state_update(&h.state, (*C.char)(unsafe.Pointer(&p[0])), C.ulong(len(p)))
+	}
+	return len(p), nil
+}
+
+// Sum appends the current hash to b and returns the resulting slice.
+// It does not change the underlying hash state. Implements hash.Hash.
+func (h *Sha256) Sum(b []byte) []byte {
+	digest := h.Digest()
+	return append(b, digest[:]...)
+}
+
+// Reset resets the hasher to its initial state. Implements hash.Hash.
+func (h *Sha256) Reset() {
+	C.sz_sha256_state_init(&h.state)
+}
+
+// Size returns the number of bytes Sum will return. Implements hash.Hash.
+func (h *Sha256) Size() int {
+	return 32
+}
+
+// BlockSize returns the hash's underlying block size. Implements hash.Hash.
+func (h *Sha256) BlockSize() int {
+	return 64
+}
+
+// Digest returns the current SHA-256 hash as a 32-byte array without consuming the state.
+// This is a convenience method in addition to the standard hash.Hash interface.
+func (h *Sha256) Digest() [32]byte {
+	var digest [32]byte
+	C.sz_sha256_state_digest(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])))
+	return digest
+}
+
+// Hexdigest returns the current SHA-256 hash as a lowercase hexadecimal string.
+// This is a convenience method matching Python's hashlib interface.
+func (h *Sha256) Hexdigest() string {
+	digest := h.Digest()
+	return fmt.Sprintf("%x", digest)
 }
 
 // Count returns the number of overlapping or non-overlapping instances of `substr` in `str`.
