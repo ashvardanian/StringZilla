@@ -45,8 +45,12 @@ jobs:
           dry-run: "true"
 
   test_ubuntu_gcc:
-    name: Ubuntu (GCC 12)
-    runs-on: ubuntu-22.04
+    name: Ubuntu (GCC 12) - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
     env:
       CC: gcc-12
       CXX: g++-12
@@ -170,8 +174,12 @@ jobs:
           override: true
 
   test_ubuntu_clang:
-    name: Ubuntu (Clang 16)
-    runs-on: ubuntu-22.04
+    name: Ubuntu (Clang 16) - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
     env:
       CC: clang-16
       CXX: clang++-16
@@ -484,24 +492,15 @@ jobs:
       - name: Test Swift
         run: swift test
 
-  test_ubuntu_cross_compilation:
-    name: Cross Compilation
+  test_cross_x86_to_arm:
+    name: Cross Compile (x86_64 → ARM64)
     runs-on: ubuntu-22.04
     env:
       CC: clang-16
       CXX: clang++-16
-      AR: llvm-ar
-      NM: llvm-nm
-      RANLIB: llvm-ranlib
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            target: x86_64-linux-gnu
-          - arch: aarch64
-            target: aarch64-linux-gnu
+      AR: llvm-ar-16
+      NM: llvm-nm-16
+      RANLIB: llvm-ranlib-16
 
     steps:
       - uses: actions/checkout@v5
@@ -511,33 +510,27 @@ jobs:
       - name: Log hardware capabilities
         run: |
           echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
+          echo "Cross-Compilation: x86_64 → aarch64"
           echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
           echo "CPU Info:"
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo ""
-          echo "Cross-compiling for: ${{ matrix.arch }} (${{ matrix.target }})"
           echo "────────────────────────────────────────────────────────────────"
 
-        # C/C++
-        # We need to install the cross-compilation toolchain for ARM64 and ARMHF
-        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
-      - name: Install dependencies
+      - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
+          sudo apt-get install -y make build-essential crossbuild-essential-arm64
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
 
-        # Skip CMake's compiler test phase for cross-compilation
-        # The tests fail because the linker can't find libraries during the test,
-        # but the actual build works fine. We provide the properties CMake would
-        # normally detect (pointer size, thread library) explicitly.
-      - name: Build C/C++
+      - name: Build C/C++ for ARM64
         run: |
+          # Configure CMake for cross-compilation
+          # We skip compiler tests because the linker can't execute ARM64 binaries during configuration
+          # We provide explicit properties that CMake would normally detect automatically
           cmake -B build_artifacts \
             -DCMAKE_C_COMPILER_WORKS=1 \
             -DCMAKE_CXX_COMPILER_WORKS=1 \
@@ -546,23 +539,96 @@ jobs:
             -DCMAKE_HAVE_THREADS_LIBRARY=1 \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_SYSROOT=/usr/${{ matrix.target }} \
+            -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu \
+            -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu \
+            -DCMAKE_SYSROOT=/usr/aarch64-linux-gnu \
             -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/aarch64-linux-gnu/lib" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/aarch64-linux-gnu/lib" \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
 
           cmake --build build_artifacts --config RelWithDebInfo
 
-        # We can't run the produced builds, but we can make sure they exist
-      - name: Test artifacts presence
+      - name: Verify ARM64 binaries
         run: |
+          # We can't run ARM64 binaries on x86_64, but we can verify they exist and are ARM64
           test -e build_artifacts/libstringzilla_bare.so
           test -e build_artifacts/libstringzilla_shared.so
           test -e build_artifacts/stringzilla_test_cpp20
+          file build_artifacts/stringzilla_test_cpp20 | grep -q "aarch64"
+          echo "✓ ARM64 binaries built successfully"
+
+  test_cross_arm_to_x86:
+    name: Cross Compile (ARM64 → x86_64)
+    runs-on: ubuntu-22.04-arm
+    env:
+      CC: clang-16
+      CXX: clang++-16
+      AR: llvm-ar-16
+      NM: llvm-nm-16
+      RANLIB: llvm-ranlib-16
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Log hardware capabilities
+        run: |
+          echo "────────────────────────────────────────────────────────────────"
+          echo "Cross-Compilation: aarch64 → x86_64"
+          echo "────────────────────────────────────────────────────────────────"
+          lscpu
+          echo ""
+          echo "CPU Info:"
+          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+          echo "────────────────────────────────────────────────────────────────"
+
+      - name: Install cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make build-essential crossbuild-essential-amd64
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+
+      - name: Build C/C++ for x86_64
+        run: |
+          # Configure CMake for cross-compilation
+          # We skip compiler tests because the linker can't execute x86_64 binaries during configuration
+          # We provide explicit properties that CMake would normally detect automatically
+          cmake -B build_artifacts \
+            -DCMAKE_C_COMPILER_WORKS=1 \
+            -DCMAKE_CXX_COMPILER_WORKS=1 \
+            -DCMAKE_SIZEOF_VOID_P=8 \
+            -DCMAKE_THREAD_LIBS_INIT=-lpthread \
+            -DCMAKE_HAVE_THREADS_LIBRARY=1 \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DCMAKE_C_COMPILER_TARGET=x86_64-linux-gnu \
+            -DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-gnu \
+            -DCMAKE_SYSROOT=/usr/x86_64-linux-gnu \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/x86_64-linux-gnu/lib" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/x86_64-linux-gnu/lib" \
+            -DSTRINGZILLA_BUILD_SHARED=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo
+
+      - name: Verify x86_64 binaries
+        run: |
+          # We can't run x86_64 binaries on ARM64, but we can verify they exist and are x86_64
+          test -e build_artifacts/libstringzilla_bare.so
+          test -e build_artifacts/libstringzilla_shared.so
+          test -e build_artifacts/stringzilla_test_cpp20
+          file build_artifacts/stringzilla_test_cpp20 | grep -q "x86-64"
+          echo "✓ x86_64 binaries built successfully"
 
   test_macos:
     name: MacOS
@@ -644,8 +710,12 @@ jobs:
           override: true
 
   test_windows:
-    name: Windows
-    runs-on: windows-2022
+    name: Windows - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-11-arm]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -766,7 +836,15 @@ jobs:
   build_wheels:
     name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    needs: [test_ubuntu_gcc, test_ubuntu_clang, test_macos, test_windows]
+    needs:
+      [
+        test_ubuntu_gcc,
+        test_ubuntu_clang,
+        test_macos,
+        test_windows,
+        test_cross_x86_to_arm,
+        test_cross_arm_to_x86,
+      ]
     strategy:
       fail-fast: false
       matrix:
