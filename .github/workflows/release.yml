@@ -683,7 +683,7 @@ jobs:
       - name: Build library
         shell: cmd
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
+          cmake -DCMAKE_BUILD_TYPE=Release -GNinja -B build_release -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_release --config Release
           tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzilla_bare.dll" "build_release\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
 
