@@ -92,8 +92,17 @@
 #include <sys/sysctl.h>
 #endif
 
+/* Detect POSIX extensions availability for signal handling.
+ * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
+ * These are needed on Linux ARM for safely testing MRS instruction availability. */
+#if !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
+#define SZ_HAS_POSIX_EXTENSIONS_ 1
+#else
+#define SZ_HAS_POSIX_EXTENSIONS_ 0
+#endif
+
 /* On Linux ARM, we need signal handling to safely test MRS instruction availability */
-#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && !SZ_AVOID_LIBC
+#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && SZ_HAS_POSIX_EXTENSIONS_
 #include <setjmp.h>
 #include <signal.h>
 #endif
@@ -262,7 +271,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #pragma GCC target("arch=armv8.5-a+sve")
 #endif
 
-#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && !SZ_AVOID_LIBC
+#if SZ_HAS_POSIX_EXTENSIONS_
 /** @brief SIGILL handler for MRS instruction testing on Linux ARM */
 static sigjmp_buf sz_mrs_test_jump_buffer_;
 static void sz_mrs_test_sigill_handler_(int sig) {
@@ -304,7 +313,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // and probe one of the registers, reverting back to the old signal handler afterwards.
     //
     // This issue was originally observed in SimSIMD: https://github.com/ashvardanian/SimSIMD/issues/279
-#if !SZ_AVOID_LIBC
+#if SZ_HAS_POSIX_EXTENSIONS_
     struct sigaction action_new, action_old;
     action_new.sa_handler = sz_mrs_test_sigill_handler_;
     sigemptyset(&action_new.sa_mask);
@@ -322,7 +331,10 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
     // Early exit if MRS doesn't work - return conservative NEON-only capabilities
     if (!mrs_works) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
-#endif // !SZ_AVOID_LIBC
+#else  // SZ_HAS_POSIX_EXTENSIONS_
+    // Without POSIX signal handlers, fall back to conservative NEON capabilities.
+    return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+#endif // SZ_HAS_POSIX_EXTENSIONS_
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;

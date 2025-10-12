@@ -217,13 +217,12 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(
             ${target}
             PRIVATE
-                "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion"
+                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion"
         )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
         target_compile_options(
-            ${target}
-            PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion"
+            ${target} PRIVATE "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion"
         )
     elseif (compiler_id MATCHES "MSVC")
         target_compile_options(
@@ -623,6 +622,13 @@ if (STRINGZILLA_BUILD_SHARED)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(stringzilla_bare PUBLIC include)
+
+        # For stringzilla_bare, enforce strict C99 standard conformance with `-pedantic`. This ensures the bare build
+        # remains strictly standards-compliant without POSIX extensions. Explore `SZ_HAS_POSIX_EXTENSIONS_` macro usage
+        # for details.
+        if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+            target_compile_options(stringzilla_bare PRIVATE "-pedantic")
+        endif ()
 
         # Avoid built-ins on GCC and Clang compilers
         target_compile_options(stringzilla_bare PRIVATE "-fno-builtin;-nostdlib")
