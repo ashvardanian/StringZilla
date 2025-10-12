@@ -96,6 +96,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
@@ -223,6 +225,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
@@ -338,6 +342,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CPUs
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -431,6 +437,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly 
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CUDA
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -599,6 +607,9 @@ jobs:
           )
       - name: Test C++
         run: .\build_artifacts\stringzilla_test_cpp20.exe
+      - name: Check stringzilla_bare is built correctly 
+        shell: cmd 
+        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
           .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
@@ -666,6 +677,8 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzilla_bare is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so' | grep '=>')"
 
         # Python
       - name: Build Python
