@@ -26,6 +26,11 @@
  *  - `Str_like_*`: Functions that can be called both as module-level functions AND as member methods.
  *  - `Str_*`: Functions that are member-only methods or have simpler calling conventions.
  */
+// Define _POSIX_C_SOURCE before any includes to enable POSIX signal handling for Linux ARM
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
 #include <windows.h>
@@ -50,10 +55,6 @@ typedef SSIZE_T ssize_t;
 #define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
-// Undefine _POSIX_C_SOURCE to avoid redefinition warning with Python headers
-#ifdef _POSIX_C_SOURCE
-#undef _POSIX_C_SOURCE
-#endif
 #include <Python.h> // Core CPython interfaces
 
 #include <errno.h>  // `errno`
