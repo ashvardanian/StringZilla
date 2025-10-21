@@ -67,7 +67,7 @@
 
 #define STRINGZILLA_H_VERSION_MAJOR 4
 #define STRINGZILLA_H_VERSION_MINOR 2
-#define STRINGZILLA_H_VERSION_PATCH 0
+#define STRINGZILLA_H_VERSION_PATCH 1
 
 #include "types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
 #include "compare.h"      // `sz_equal`, `sz_order`
@@ -94,17 +94,13 @@
 
 /* Detect POSIX extensions availability for signal handling.
  * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
- * These are needed on Linux ARM for safely testing MRS instruction availability. */
-#if !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
+ * These are needed on Linux ARM for safely testing `mrs` instruction availability. */
+#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
+#include <setjmp.h>
+#include <signal.h>
 #define SZ_HAS_POSIX_EXTENSIONS_ 1
 #else
 #define SZ_HAS_POSIX_EXTENSIONS_ 0
-#endif
-
-/* On Linux ARM, we need signal handling to safely test MRS instruction availability */
-#if defined(SZ_IS_LINUX_) && SZ_IS_64BIT_ARM_ && SZ_HAS_POSIX_EXTENSIONS_
-#include <setjmp.h>
-#include <signal.h>
 #endif
 
 /* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
@@ -272,7 +268,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
 #endif
 
 #if SZ_HAS_POSIX_EXTENSIONS_
-/** @brief SIGILL handler for MRS instruction testing on Linux ARM */
+/** @brief SIGILL handler for `mrs` instruction testing on Linux ARM */
 static sigjmp_buf sz_mrs_test_jump_buffer_;
 static void sz_mrs_test_sigill_handler_(int sig) {
     sz_unused_(sig);
@@ -329,7 +325,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
         sigaction(SIGILL, &action_old, NULL);
     }
 
-    // Early exit if MRS doesn't work - return conservative NEON-only capabilities
+    // Early exit if `mrs` doesn't work - return conservative NEON-only capabilities
     if (!mrs_works) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
 #else  // SZ_HAS_POSIX_EXTENSIONS_
     // Without POSIX signal handlers, fall back to conservative NEON capabilities.

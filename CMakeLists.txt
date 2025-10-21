@@ -45,7 +45,7 @@
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(
     stringzilla
-    VERSION 4.2.0
+    VERSION 4.2.1
     LANGUAGES C CXX ASM
     DESCRIPTION "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla"
@@ -198,11 +198,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
 
     # Set output directory for single-configuration generators (like Make)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
+    set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
 
     # Set output directory for multi-configuration generators (like Visual Studio)
     foreach (config IN LISTS CMAKE_CONFIGURATION_TYPES)
         string(TOUPPER ${config} config_upper)
         set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
+        set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
     endforeach ()
 
     # Set the C++ standard
@@ -610,16 +612,6 @@ function (define_stringzilla_shared target)
     # Set architecture-specific SIMD flags using shared helper function
     set_architecture_simd_definitions(${target})
 
-    if (MSVC)
-        # Add dependencies for necessary runtime libraries in case of static linking. This ensures that basic runtime
-        # functions are available:
-        #
-        # * msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
-        # * vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
-        # * ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
-        target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
-    endif ()
-
 endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
@@ -640,10 +632,9 @@ if (STRINGZILLA_BUILD_SHARED)
         target_compile_options(stringzilla_shared PRIVATE "-mllvm" "-inline-threshold=2000" "-finline-functions")
     endif ()
 
-    # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
-    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
-    # they have linker issues with bare builds.
-    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS machines !
+    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
+    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
         define_stringzilla_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
@@ -656,9 +647,11 @@ if (STRINGZILLA_BUILD_SHARED)
             target_compile_options(stringzilla_bare PRIVATE "-pedantic")
         endif ()
 
-        # Avoid built-ins on GCC and Clang compilers
-        target_compile_options(stringzilla_bare PRIVATE "-fno-builtin;-nostdlib")
-        target_link_options(stringzilla_bare PRIVATE "-nostdlib")
+        # Avoid built-ins
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>")
+        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
+        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
     endif ()
 endif ()
 
