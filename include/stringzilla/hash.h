@@ -3132,10 +3132,10 @@ SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state_ptr, sz
 #pragma region NEON Implementation
 #if SZ_USE_NEON
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd")
+#pragma GCC target("+simd")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
@@ -3167,10 +3167,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
 #pragma region NEON AES Implementation
 #if SZ_USE_NEON_AES
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+aes"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd+crypto+aes")
+#pragma GCC target("+simd+crypto+aes")
 #endif
 
 /**
@@ -3614,10 +3614,10 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
 #pragma region NEON SHA Implementation
 #if SZ_USE_NEON_SHA
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+sha2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+simd+crypto+sha2"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd+crypto+sha2")
+#pragma GCC target("+simd+crypto+sha2")
 #endif
 
 /**
@@ -3917,10 +3917,10 @@ SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state_ptr, s
 #pragma region SVE Implementation
 #if SZ_USE_SVE
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve")
+#pragma GCC target("+sve")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
@@ -3955,10 +3955,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
 #pragma region SVE2 Implementation
 #if SZ_USE_SVE2
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve+sve2")
+#pragma GCC target("+sve+sve2")
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
@@ -3997,10 +3997,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 #pragma region SVE2 AES Implementation
 #if SZ_USE_SVE2_AES
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve+sve2+sve2-aes"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
+#pragma GCC target("+sve+sve2+sve2-aes")
 #endif
 
 /**

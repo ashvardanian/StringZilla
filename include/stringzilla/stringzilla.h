@@ -261,10 +261,10 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
  *  function targeting newer ones.
  */
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.5-a+sve"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.5-a+sve")
+#pragma GCC target("+sve")
 #endif
 
 #if SZ_HAS_POSIX_EXTENSIONS_
