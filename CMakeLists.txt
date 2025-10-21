@@ -310,6 +310,25 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "-fno-builtin-memset")
     endif ()
 
+    # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++.
+    # AppleClang automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
+    if (CMAKE_SYSTEM_NAME MATCHES "Darwin" AND compiler_id STREQUAL "Clang" AND NOT compiler_id STREQUAL "AppleClang")
+        if (NOT target_type STREQUAL "SHARED_LIBRARY")
+            target_compile_options(${target} PRIVATE "-stdlib=libc++")
+            target_link_options(${target} PRIVATE "-stdlib=libc++")
+            # Find and link the C++ standard library from the compiler's installation
+            # Homebrew LLVM stores libc++ in lib/c++ subdirectory
+            get_filename_component(COMPILER_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
+            get_filename_component(COMPILER_ROOT ${COMPILER_DIR} DIRECTORY)
+            if (EXISTS "${COMPILER_ROOT}/lib/c++/libc++.dylib")
+                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib/c++")
+                target_link_libraries(${target} PRIVATE c++abi)
+            elseif (EXISTS "${COMPILER_ROOT}/lib/libc++.dylib")
+                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib")
+            endif ()
+        endif ()
+    endif ()
+
     # Check for ${target_arch} and set it or use the current system if not defined
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
