@@ -326,7 +326,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # Check for ${target_arch} and set it or use the current system if not defined
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
-        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
+        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES ${CMAKE_HOST_SYSTEM_PROCESSOR}))
             if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass native flag to host compiler
                 include(CheckCXXCompilerFlag)
