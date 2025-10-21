@@ -544,8 +544,8 @@ jobs:
             -DCMAKE_SYSROOT=/usr/aarch64-linux-gnu \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/aarch64-linux-gnu/lib" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/aarch64-linux-gnu/lib" \
+            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
+            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
@@ -613,8 +613,8 @@ jobs:
             -DCMAKE_SYSROOT=/usr/x86_64-linux-gnu \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-            -DCMAKE_EXE_LINKER_FLAGS="-L/usr/x86_64-linux-gnu/lib" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/x86_64-linux-gnu/lib" \
+            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/x86_64-linux-gnu" \
+            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/x86_64-linux-gnu" \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
