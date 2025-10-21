@@ -106,6 +106,9 @@ inline std::uint64_t cpu_cycle_counter() {
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
     // Use MSVC intrinsics for `rdtsc`
     return __rdtsc();
+#elif defined(_MSC_VER) && defined(_M_ARM64)
+    // Use MSVC ARM64 intrinsics to read the virtual count register
+    return _ReadStatusReg(ARM64_SYSREG(3, 3, 14, 0, 1));
 #elif defined(__i386__) || defined(__x86_64__)
     // Use x86 inline assembly for `rdtsc` only if actually compiling for x86.
     unsigned int lo, hi;
