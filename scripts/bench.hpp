@@ -49,7 +49,10 @@
 #include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
 
 #if defined(_MSC_VER)
-#include <intrin.h> // `__rdtsc`
+#include <intrin.h> // `__rdtsc`, `_ReadStatusReg`
+#if defined(_M_ARM64)
+#include <arm64intr.h> // `ARM64_CNTVCT`
+#endif
 #endif
 
 #include "stringzilla/stringzilla.h"
@@ -107,8 +110,12 @@ inline std::uint64_t cpu_cycle_counter() {
     // Use MSVC intrinsics for `rdtsc`
     return __rdtsc();
 #elif defined(_MSC_VER) && defined(_M_ARM64)
-    // Use MSVC ARM64 intrinsics to read the virtual count register
-    return _ReadStatusReg(ARM64_SYSREG(3, 3, 14, 0, 1));
+    // Use MSVC ARM64 intrinsics to read the virtual count register - CNTVCT_EL0.
+    // This register is more reliably accessible in user mode than PMCCNTR_EL0.
+#if !defined(ARM64_CNTVCT)
+#define ARM64_CNTVCT ARM64_SYSREG(3, 3, 14, 0, 1)
+#endif
+    return _ReadStatusReg(ARM64_CNTVCT);
 #elif defined(__i386__) || defined(__x86_64__)
     // Use x86 inline assembly for `rdtsc` only if actually compiling for x86.
     unsigned int lo, hi;
