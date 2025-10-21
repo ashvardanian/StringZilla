@@ -382,6 +382,9 @@ void bench_lookup(environment_t const &env) {
 #if SZ_USE_NEON
     bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);
 #endif
+#if SZ_USE_SVE
+    bench_unary(env, "sz_lookup_sve", lookup_from_sz<sz_lookup_sve> {env, o, lut}).log(zeros);
+#endif
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }
 

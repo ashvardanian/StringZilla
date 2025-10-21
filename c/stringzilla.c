@@ -244,7 +244,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->copy = sz_copy_sve;
         impl->move = sz_move_sve;
         impl->fill = sz_fill_sve;
-
+        impl->lookup = sz_lookup_sve;
+	
         impl->find = sz_find_sve;
         // TODO: impl->rfind = sz_rfind_sve;
         impl->find_byte = sz_find_byte_sve;
