@@ -957,6 +957,20 @@ typedef union sz_u512_vec_t {
     sz_i8_t i8s[64];
 } sz_u512_vec_t;
 
+/**
+ *  @brief Helper structure to simplify work with arbitrarily-aligned 8-byte inputs.
+ */
+typedef union sz_b8x8_t {
+    sz_u8_t b8s[8];
+} sz_b8x8_t;
+
+/**
+ *  @brief Helper structure to simplify work with arbitrarily-aligned 16-byte inputs.
+ */
+typedef union sz_b8x16_t {
+    sz_u8_t b8s[16];
+} sz_b8x16_t;
+
 #pragma endregion
 
 #pragma region UTF8
