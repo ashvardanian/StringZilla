@@ -100,7 +100,7 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly 
+      - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
@@ -233,7 +233,7 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly 
+      - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
@@ -350,7 +350,7 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly 
+      - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CPUs
@@ -445,7 +445,7 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly 
+      - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
         # Python StringZillas-CUDA
@@ -552,8 +552,10 @@ jobs:
             -DCMAKE_SYSROOT=/usr/aarch64-linux-gnu \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
-            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
+            -DCMAKE_FIND_ROOT_PATH=/usr/aarch64-linux-gnu \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
@@ -621,8 +623,10 @@ jobs:
             -DCMAKE_SYSROOT=/usr/x86_64-linux-gnu \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/x86_64-linux-gnu" \
-            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/x86_64-linux-gnu" \
+            -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-linux-gnu \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
@@ -763,8 +767,8 @@ jobs:
           )
       - name: Test C++
         run: .\build_artifacts\stringzilla_test_cpp20.exe
-      - name: Check stringzilla_bare is built correctly 
-        shell: cmd 
+      - name: Check stringzilla_bare is built correctly
+        shell: cmd
         run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
