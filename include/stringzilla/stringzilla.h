@@ -105,7 +105,7 @@
 
 /* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
 #if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
-#include <processthreadsapi.h>
+#include <windows.h>
 #endif
 
 #ifdef __cplusplus
