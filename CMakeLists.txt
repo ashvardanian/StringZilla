@@ -489,13 +489,12 @@ if (STRINGZILLA_BUILD_TEST)
     elseif (SZ_IS_64BIT_ARM_)
         # ARM specific backends
         if (MSVC)
+            # SVE is not supported with MSVC
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8.0")
             define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8.0")
-            define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2")
             if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8.0")
                 define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8.0")
-                define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2")
             endif ()
         else ()
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
@@ -538,6 +537,12 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_SVE2_AES=0"
         )
     elseif (SZ_IS_64BIT_ARM_)
+        # SVE is not supported with MSVC
+        if (MSVC)
+            set(supports_sve "0")
+        else ()
+            set(supports_sve "1")
+        endif ()
         target_compile_definitions(
             ${target}
             PRIVATE "SZ_IS_64BIT_ARM_=1"
@@ -550,9 +555,9 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_NEON=1"
                     "SZ_USE_NEON_AES=1"
                     "SZ_USE_NEON_SHA=1"
-                    "SZ_USE_SVE=1"
-                    "SZ_USE_SVE2=1"
-                    "SZ_USE_SVE2_AES=1"
+                    "SZ_USE_SVE=${supports_sve}"
+                    "SZ_USE_SVE2=${supports_sve}"
+                    "SZ_USE_SVE2_AES=${supports_sve}"
         )
     else ()
         # Fallback: disable all SIMD and use serial execution only
