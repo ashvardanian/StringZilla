@@ -105,6 +105,7 @@
 
 /* On Windows ARM, we use IsProcessorFeaturePresent API for capability detection */
 #if defined(SZ_IS_WINDOWS_) && SZ_IS_64BIT_ARM_
+#define NOMINMAX
 #include <windows.h>
 #endif
 
