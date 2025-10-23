@@ -790,7 +790,7 @@ jobs:
       - name: Build Python
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy pyarrow
+          pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
         run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
