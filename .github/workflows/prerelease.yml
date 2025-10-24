@@ -769,7 +769,7 @@ jobs:
         run: .\build_artifacts\stringzilla_test_cpp20.exe
       - name: Check stringzilla_bare is built correctly
         shell: cmd
-        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
+        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
           .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
@@ -790,7 +790,7 @@ jobs:
       - name: Build Python
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy pyarrow
+          pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
         run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace

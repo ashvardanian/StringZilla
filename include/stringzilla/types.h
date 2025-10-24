@@ -267,7 +267,7 @@
 #if !defined(SZ_USE_NEON)
 #if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON)
 #define SZ_USE_NEON (1)
-#elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__ARM_ARCH) && __ARM_ARCH >= 800
+#elif SZ_IS_64BIT_ARM_ && defined(_MSC_VER) && defined(_M_ARM64)
 #define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros
 #else
 #define SZ_USE_NEON (0)
