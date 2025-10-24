@@ -217,6 +217,7 @@ def is_big_endian() -> bool:
 def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
+        "-D_GNU_SOURCE",  # enable POSIX extensions (sigaction, sigjmp_buf, etc.) when using -std=c99
         "-O2",  # optimization level
         "-fdiagnostics-color=always",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
