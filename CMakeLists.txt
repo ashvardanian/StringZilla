@@ -94,6 +94,19 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif ()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
+# MSVC does not set `CMAKE_SYSTEM_PROCESSOR` correctly so use `CMAKE_<LANG>_COMPILER_ARCHITECTURE_ID` instead
+if (MSVC)
+    if (CMAKE_C_COMPILER_ARCHITECTURE_ID MATCHES "x64")
+        set(CMAKE_SYSTEM_PROCESSOR "AMD64")
+    elseif (CMAKE_C_COMPILER_ARCHITECTURE_ID MATCHES "X86")
+        set(CMAKE_SYSTEM_PROCESSOR "X86")
+    elseif (CMAKE_C_COMPILER_ARCHITECTURE_ID MATCHES "ARM64")
+        set(CMAKE_SYSTEM_PROCESSOR "ARM64")
+    else ()
+        message(WARNING "Unknown CMAKE_C_COMPILER_ARCHITECTURE_ID=${CMAKE_C_COMPILER_ARCHITECTURE_ID}")
+    endif ()
+endif ()
+
 # Detect target architecture from `CMAKE_SYSTEM_PROCESSOR`... safer for cross-compilation!
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64|amd64")
     set(SZ_IS_64BIT_X86_ TRUE)
@@ -180,11 +193,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
 
     # Set output directory for single-configuration generators (like Make)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
+    set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
 
     # Set output directory for multi-configuration generators (like Visual Studio)
     foreach (config IN LISTS CMAKE_CONFIGURATION_TYPES)
         string(TOUPPER ${config} config_upper)
         set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
+        set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
     endforeach ()
 
     # Set the C++ standard
@@ -308,10 +323,29 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "-fno-builtin-memset")
     endif ()
 
+    # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++.
+    # AppleClang automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
+    if (CMAKE_SYSTEM_NAME MATCHES "Darwin" AND compiler_id STREQUAL "Clang" AND NOT compiler_id STREQUAL "AppleClang")
+        if (NOT target_type STREQUAL "SHARED_LIBRARY")
+            target_compile_options(${target} PRIVATE "-stdlib=libc++")
+            target_link_options(${target} PRIVATE "-stdlib=libc++")
+            # Find and link the C++ standard library from the compiler's installation
+            # Homebrew LLVM stores libc++ in lib/c++ subdirectory
+            get_filename_component(COMPILER_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
+            get_filename_component(COMPILER_ROOT ${COMPILER_DIR} DIRECTORY)
+            if (EXISTS "${COMPILER_ROOT}/lib/c++/libc++.dylib")
+                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib/c++")
+                target_link_libraries(${target} PRIVATE c++abi)
+            elseif (EXISTS "${COMPILER_ROOT}/lib/libc++.dylib")
+                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib")
+            endif ()
+        endif ()
+    endif ()
+
     # Check for ${target_arch} and set it or use the current system if not defined
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
-        if ((NOT CMAKE_CROSSCOMPILING) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
+        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES ${CMAKE_HOST_SYSTEM_PROCESSOR}))
             if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass native flag to host compiler
                 include(CheckCXXCompilerFlag)
@@ -327,7 +361,11 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 endif ()
             else ()
                 # MSVC does not have a direct equivalent to -march=native
-                target_compile_options(${target} PRIVATE "/arch:AVX2")
+                if (SZ_IS_64BIT_ARM_)
+                    target_compile_options(${target} PRIVATE "/arch:armv8.0")
+                else ()
+                    target_compile_options(${target} PRIVATE "/arch:AVX2")
+                endif ()
             endif ()
         endif ()
     else ()
@@ -469,18 +507,28 @@ if (STRINGZILLA_BUILD_TEST)
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
         # ARM specific backends
-        define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
-        define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
-        # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
-        if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-            define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
-        endif ()
-        if (STRINGZILLA_BUILD_CUDA)
-            define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
-            define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
+        if (MSVC)
+            # SVE is not supported with MSVC
+            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8.0")
+            define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8.0")
+            if (STRINGZILLA_BUILD_CUDA)
+                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8.0")
+                define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8.0")
+            endif ()
+        else ()
+            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
+            define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
             # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
             if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-                define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
+                define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
+            endif ()
+            if (STRINGZILLA_BUILD_CUDA)
+                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
+                define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
+                # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
+                if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+                    define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
+                endif ()
             endif ()
         endif ()
     endif ()
@@ -508,6 +556,12 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_SVE2_AES=0"
         )
     elseif (SZ_IS_64BIT_ARM_)
+        # SVE is not supported with MSVC
+        if (MSVC)
+            set(supports_sve "0")
+        else ()
+            set(supports_sve "1")
+        endif ()
         target_compile_definitions(
             ${target}
             PRIVATE "SZ_IS_64BIT_ARM_=1"
@@ -520,9 +574,9 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_NEON=1"
                     "SZ_USE_NEON_AES=1"
                     "SZ_USE_NEON_SHA=1"
-                    "SZ_USE_SVE=1"
-                    "SZ_USE_SVE2=1"
-                    "SZ_USE_SVE2_AES=1"
+                    "SZ_USE_SVE=${supports_sve}"
+                    "SZ_USE_SVE2=${supports_sve}"
+                    "SZ_USE_SVE2_AES=${supports_sve}"
         )
     else ()
         # Fallback: disable all SIMD and use serial execution only
@@ -576,7 +630,11 @@ function (define_stringzilla_shared target)
             set_compiler_flags(${target} "" "ivybridge" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
-        set_compiler_flags(${target} "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
+        if (MSVC)
+            set_compiler_flags(${target} "" "armv8.0" "${CMAKE_CXX_COMPILER_ID}")
+        else ()
+            set_compiler_flags(${target} "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
+        endif ()
     else ()
         set_compiler_flags(${target} "" "" "${CMAKE_CXX_COMPILER_ID}")
     endif ()
@@ -686,7 +744,11 @@ if (STRINGZILLAS_BUILD_SHARED)
             set_compiler_flags(stringzillas_cpus_shared "" "ivybridge" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
-        set_compiler_flags(stringzillas_cpus_shared "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
+		if (MSVC)
+            set_compiler_flags(stringzillas_cpus_shared "" "armv8.0" "${CMAKE_CXX_COMPILER_ID}")
+		else ()
+            set_compiler_flags(stringzillas_cpus_shared "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
+		endif ()
     else ()
         set_compiler_flags(stringzillas_cpus_shared "" "" "${CMAKE_CXX_COMPILER_ID}")
     endif ()
@@ -720,7 +782,11 @@ if (STRINGZILLA_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
             set_compiler_flags(stringzillas_cuda_shared "" "ivybridge" "${CMAKE_CUDA_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
-        set_compiler_flags(stringzillas_cuda_shared "" "armv8-a" "${CMAKE_CUDA_COMPILER_ID}")
+		if (MSVC)
+            set_compiler_flags(stringzillas_cuda_shared "" "armv8.0" "${CMAKE_CUDA_COMPILER_ID}")
+		else ()
+            set_compiler_flags(stringzillas_cuda_shared "" "armv8-a" "${CMAKE_CUDA_COMPILER_ID}")
+		endif ()
     else ()
         set_compiler_flags(stringzillas_cuda_shared "" "" "${CMAKE_CUDA_COMPILER_ID}")
     endif ()

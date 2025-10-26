@@ -1578,10 +1578,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
 #pragma region NEON Implementation
 #if SZ_USE_NEON
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd")
+#pragma GCC target("+simd")
 #endif
 
 SZ_INTERNAL sz_u64_t sz_vreinterpretq_u8_u4_(uint8x16_t vec) {
@@ -1813,10 +1813,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_by
 #pragma region SVE Implementation
 #if SZ_USE_SVE
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve")
+#pragma GCC target("+sve")
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
