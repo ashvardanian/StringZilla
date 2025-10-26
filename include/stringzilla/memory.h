@@ -1384,6 +1384,71 @@ SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     }
 }
 
+SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+
+    if (length <= 128) {
+        sz_lookup_serial(target, length, source, lut);
+        return;
+    }
+
+    // SVE vector length in bytes
+    sz_size_t vl = svcntb();
+
+    // Load the 256-byte lookup table into 4 SVE vectors
+    svuint8_t lut_0_to_63_vec = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 0));
+    svuint8_t lut_64_to_127_vec = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 64));
+    svuint8_t lut_128_to_191_vec = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 128));
+    svuint8_t lut_192_to_255_vec = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 192));
+
+    svuint8_t mask_0x3f = svdup_u8(0x3f);
+
+    sz_size_t i = 0;
+
+    // Main loop: process full vectors
+    while (i + vl <= length) {
+        svuint8_t source_vec = svld1_u8(svptrue_b8(), (sz_u8_t const *)(source + i));
+
+        // Create predicates based on top 2 bits (which 64-byte range)
+        svbool_t pred_0_63 = svcmplt_n_u8(svptrue_b8(), source_vec, 64);
+        svbool_t pred_64_127 = svcmpge_n_u8(svcmplt_n_u8(svptrue_b8(), source_vec, 128), source_vec, 64);
+        svbool_t pred_128_191 = svcmpge_n_u8(svcmplt_n_u8(svptrue_b8(), source_vec, 192), source_vec, 128);
+        svbool_t pred_192_255 = svcmpge_n_u8(svptrue_b8(), source_vec, 192);
+
+        // Mask indices to bottom 6 bits for indexing within each 64-byte table
+        svuint8_t idx = svand_u8_x(svptrue_b8(), source_vec, mask_0x3f);
+
+        // Perform lookups and blend results based on predicates
+        svuint8_t result = svsel_u8(pred_0_63, svtbl_u8(lut_0_to_63_vec, idx), svdup_u8(0));
+        result = svsel_u8(pred_64_127, svtbl_u8(lut_64_to_127_vec, idx), result);
+        result = svsel_u8(pred_128_191, svtbl_u8(lut_128_to_191_vec, idx), result);
+        result = svsel_u8(pred_192_255, svtbl_u8(lut_192_to_255_vec, idx), result);
+
+        svst1_u8(svptrue_b8(), (sz_u8_t *)target + i, result);
+        i += vl;
+    }
+
+    // Handle tail: process remaining elements with predicated operations
+    if (i < length) {
+        svbool_t pred = svwhilelt_b8_u64(i, length);
+        svuint8_t source_vec = svld1_u8(pred, (sz_u8_t const *)(source + i));
+
+        // Create predicates for each range (comparison already uses pred as governing predicate)
+        svbool_t pred_0_63 = svcmplt_n_u8(pred, source_vec, 64);
+        svbool_t pred_64_127 = svcmpge_n_u8(svcmplt_n_u8(pred, source_vec, 128), source_vec, 64);
+        svbool_t pred_128_191 = svcmpge_n_u8(svcmplt_n_u8(pred, source_vec, 192), source_vec, 128);
+        svbool_t pred_192_255 = svcmpge_n_u8(pred, source_vec, 192);
+
+        // Mask indices to bottom 6 bits
+        svuint8_t idx = svand_u8_x(pred, source_vec, mask_0x3f);
+
+        svuint8_t result = svsel_u8(pred_0_63, svtbl_u8(lut_0_to_63_vec, idx), svdup_u8(0));
+        result = svsel_u8(pred_64_127, svtbl_u8(lut_64_to_127_vec, idx), result);
+        result = svsel_u8(pred_128_191, svtbl_u8(lut_128_to_191_vec, idx), result);
+        result = svsel_u8(pred_192_255, svtbl_u8(lut_192_to_255_vec, idx), result);
+
+        svst1_u8(pred, (sz_u8_t *)target + i, result);
+    }
+}
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
