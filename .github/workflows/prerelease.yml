@@ -500,9 +500,24 @@ jobs:
       - name: Test Swift
         run: swift test
 
-  test_cross_x86_to_arm:
-    name: Cross Compile (x86_64 → ARM64)
-    runs-on: ubuntu-22.04
+  test_cross_linux:
+    name: Cross Compile (${{ matrix.arch }} → ${{ matrix.target_arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x86-64
+            target_arch: aarch64
+            target: aarch64-linux-gnu
+            target_processor: arm64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            target_arch: x86-64
+            target: x86_64-linux-gnu
+            target_processor: amd64
+    
     env:
       CC: clang-16
       CXX: clang++-16
@@ -518,7 +533,7 @@ jobs:
       - name: Log hardware capabilities
         run: |
           echo "────────────────────────────────────────────────────────────────"
-          echo "Cross-Compilation: x86_64 → aarch64"
+          echo "Cross-Compilation: ${{ matrix.arch }} → ${{ matrix.target_arch }}"
           echo "────────────────────────────────────────────────────────────────"
           lscpu
           echo ""
@@ -529,118 +544,35 @@ jobs:
       - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-arm64
+          sudo apt-get install -y make build-essential crossbuild-essential-${{ matrix.target_processor }}
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
 
-      - name: Build C/C++ for ARM64
-        run: |
-          # Configure CMake for cross-compilation
-          # We skip compiler tests because the linker can't execute ARM64 binaries during configuration
-          # We provide explicit properties that CMake would normally detect automatically
+      - name: Build C/C++ for ${{ matrix.target_arch }}
+        run: |          
+          # Configure and build the project
           cmake -B build_artifacts \
-            -DCMAKE_C_COMPILER_WORKS=1 \
-            -DCMAKE_CXX_COMPILER_WORKS=1 \
-            -DCMAKE_SIZEOF_VOID_P=8 \
-            -DCMAKE_THREAD_LIBS_INIT=-lpthread \
-            -DCMAKE_HAVE_THREADS_LIBRARY=1 \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu \
-            -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu \
-            -DCMAKE_SYSROOT=/usr/aarch64-linux-gnu \
+            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
             -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_FIND_ROOT_PATH=/usr/aarch64-linux-gnu \
-            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
             -DSTRINGZILLA_BUILD_SHARED=1 \
             -DSTRINGZILLA_BUILD_BENCHMARK=1 \
             -DSTRINGZILLA_BUILD_TEST=1
 
           cmake --build build_artifacts --config RelWithDebInfo
 
-      - name: Verify ARM64 binaries
+      - name: Verify ${{ matrix.target_arch }} binaries
         run: |
-          # We can't run ARM64 binaries on x86_64, but we can verify they exist and are ARM64
+          # We can't run ${{ matrix.target_arch }} binaries on ${{ matrix.arch }}, but we can verify they exist and are ${{ matrix.target_arch }}
           test -e build_artifacts/libstringzilla_bare.so
           test -e build_artifacts/libstringzilla_shared.so
           test -e build_artifacts/stringzilla_test_cpp20
-          file build_artifacts/stringzilla_test_cpp20 | grep -q "aarch64"
-          echo "✓ ARM64 binaries built successfully"
-
-  test_cross_arm_to_x86:
-    name: Cross Compile (ARM64 → x86_64)
-    runs-on: ubuntu-22.04-arm
-    env:
-      CC: clang-16
-      CXX: clang++-16
-      AR: llvm-ar-16
-      NM: llvm-nm-16
-      RANLIB: llvm-ranlib-16
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Cross-Compilation: aarch64 → x86_64"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
-
-      - name: Install cross-compilation toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-amd64
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
-
-      - name: Build C/C++ for x86_64
-        run: |
-          # Configure CMake for cross-compilation
-          # We skip compiler tests because the linker can't execute x86_64 binaries during configuration
-          # We provide explicit properties that CMake would normally detect automatically
-          cmake -B build_artifacts \
-            -DCMAKE_C_COMPILER_WORKS=1 \
-            -DCMAKE_CXX_COMPILER_WORKS=1 \
-            -DCMAKE_SIZEOF_VOID_P=8 \
-            -DCMAKE_THREAD_LIBS_INIT=-lpthread \
-            -DCMAKE_HAVE_THREADS_LIBRARY=1 \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=x86_64-linux-gnu \
-            -DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-gnu \
-            -DCMAKE_SYSROOT=/usr/x86_64-linux-gnu \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-            -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-linux-gnu \
-            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-            -DSTRINGZILLA_BUILD_SHARED=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo
-
-      - name: Verify x86_64 binaries
-        run: |
-          # We can't run x86_64 binaries on ARM64, but we can verify they exist and are x86_64
-          test -e build_artifacts/libstringzilla_bare.so
-          test -e build_artifacts/libstringzilla_shared.so
-          test -e build_artifacts/stringzilla_test_cpp20
-          file build_artifacts/stringzilla_test_cpp20 | grep -q "x86-64"
-          echo "✓ x86_64 binaries built successfully"
+          file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.target_arch }}"
+          echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
   test_macos:
     name: MacOS
@@ -865,8 +797,7 @@ jobs:
         test_ubuntu_clang,
         test_macos,
         test_windows,
-        test_cross_x86_to_arm,
-        test_cross_arm_to_x86,
+        test_cross_linux,
       ]
     strategy:
       fail-fast: false
