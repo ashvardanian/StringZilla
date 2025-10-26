@@ -1120,10 +1120,10 @@ SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source
 #pragma region NEON Implementation
 #if SZ_USE_NEON
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd")
+#pragma GCC target("+simd")
 #endif
 
 SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -1248,10 +1248,10 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 #pragma region SVE Implementation
 #if SZ_USE_SVE
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve")
+#pragma GCC target("+sve")
 #endif
 
 SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
