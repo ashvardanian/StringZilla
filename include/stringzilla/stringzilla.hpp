@@ -486,19 +486,35 @@ struct matcher_find_last_not_of {
 };
 
 /**
+ *  @brief Helper to detect if a type has a nested `::string_view` typedef.
+ *         Uses SFINAE with no STL dependencies for `std::enabled_if` or `std::void_t`.
+ */
+template <typename type_>
+struct has_string_view_member_ {
+  private:
+    template <typename candidate_>
+    static char test_(typename candidate_::string_view *);
+    template <typename candidate_>
+    static int test_(...);
+
+  public:
+    static constexpr bool value = sizeof(test_<type_>(0)) == sizeof(char);
+};
+
+/**
  *  @brief Helper to extract the appropriate view type for a string-like type.
  *         For StringZilla types, uses the nested ::string_view typedef.
  *         For STL types (like std::string_view), uses the type itself.
  */
-template <typename string_type_, typename = void>
+template <typename string_type_, bool has_nested_view_ = has_string_view_member_<string_type_>::value>
 struct string_view_for {
     // Default: use the type itself (for STL types)
     using type = string_type_;
 };
 
+// Specialization for types with nested ::string_view
 template <typename string_type_>
-struct string_view_for<string_type_,
-                       typename std::enable_if<std::is_class<typename string_type_::string_view>::value>::type> {
+struct string_view_for<string_type_, true> {
     // For StringZilla types with nested ::string_view
     using type = typename string_type_::string_view;
 };
