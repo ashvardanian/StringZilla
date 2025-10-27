@@ -1089,10 +1089,10 @@ Similar to GCC, StringZilla is 32 bytes in size, and similar to Clang it can fit
 Our layout might be preferential, if you want to avoid branches.
 If you use a different compiler, you may want to check its SSO buffer size with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
 
-|                       | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
-| :-------------------- | ---------------------: | -------------------: | ----------: |
-| `sizeof(std::string)` |                     32 |                   24 |          32 |
-| Small String Capacity |                     15 |               __22__ |      __22__ |
+|                 | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
+| :-------------- | ---------------------: | -------------------: | ----------: |
+| String `sizeof` |                     32 |                   24 |          32 |
+| Inner Capacity  |                     15 |               __22__ |      __22__ |
 
 This design has been since ported to many high-level programming languages.
 Swift, for example, [can store 15 bytes](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion) in the `String` instance itself.

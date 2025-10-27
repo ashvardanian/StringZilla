@@ -486,7 +486,32 @@ struct matcher_find_last_not_of {
 };
 
 /**
+ *  @brief Helper to extract the appropriate view type for a string-like type.
+ *         For StringZilla types, uses the nested ::string_view typedef.
+ *         For STL types (like std::string_view), uses the type itself.
+ */
+template <typename string_type_, typename = void>
+struct string_view_for {
+    // Default: use the type itself (for STL types)
+    using type = string_type_;
+};
+
+template <typename string_type_>
+struct string_view_for<string_type_,
+                       typename std::enable_if<std::is_class<typename string_type_::string_view>::value>::type> {
+    // For StringZilla types with nested ::string_view
+    using type = typename string_type_::string_view;
+};
+
+/**
  *  @brief A range of string slices representing the matches of a substring search.
+ *
+ *  @note Lifetime semantics: Stores forwarded objects (including owning strings) to maintain lifetime.
+ *        Iterators receive lightweight views only, ensuring safe iteration without ownership concerns.
+ *  @note For-loop optimized: Iterators are lightweight views with minimal register pressure, ideal for
+ *        high-performance applications where cache efficiency and register allocation matter.
+ *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
+ *        efficient termination without constructing full end iterators.
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
@@ -495,6 +520,7 @@ class range_matches {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
 
   private:
     matcher_type matcher_;
@@ -503,24 +529,24 @@ class range_matches {
   public:
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
-    using value_type = string_type;
-    using pointer = string_type;   // Needed for compatibility with STL container constructors.
-    using reference = string_type; // Needed for compatibility with STL container constructors.
+    using value_type = string_view_type;
+    using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+    using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
     range_matches(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
         matcher_type matcher_;
-        string_type remaining_;
+        string_view_type remaining_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
         using difference_type = std::ptrdiff_t;
-        using value_type = string_type;
-        using pointer = string_type;   // Needed for compatibility with STL container constructors.
-        using reference = string_type; // Needed for compatibility with STL container constructors.
+        using value_type = string_view_type;
+        using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+        using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
+        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
             auto position = matcher_(remaining_);
             remaining_.remove_prefix(position != string_type::npos ? position : remaining_.size());
         }
@@ -548,8 +574,8 @@ class range_matches {
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
 
-    iterator begin() const noexcept { return {haystack_, matcher_}; }
-    iterator end() const noexcept { return {string_type {haystack_.data() + haystack_.size(), 0ull}, matcher_}; }
+    iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
+    iterator end() const noexcept { return {string_view_type(haystack_.data() + haystack_.size(), 0ull), matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     bool empty() const noexcept { return begin() == end_sentinel_type {}; }
@@ -570,6 +596,13 @@ class range_matches {
 
 /**
  *  @brief A range of string slices representing the matches of a @b reverse-order substring search.
+ *
+ *  @note Lifetime semantics: Stores forwarded objects (including owning strings) to maintain lifetime.
+ *        Iterators receive lightweight views only, ensuring safe iteration without ownership concerns.
+ *  @note For-loop optimized: Iterators are lightweight views with minimal register pressure, ideal for
+ *        high-performance applications where cache efficiency and register allocation matter.
+ *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
+ *        efficient termination without constructing full end iterators.
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
@@ -578,12 +611,13 @@ class range_rmatches {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
 
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
-    using value_type = string_type;
-    using pointer = string_type;   // Needed for compatibility with STL container constructors.
-    using reference = string_type; // Needed for compatibility with STL container constructors.
+    using value_type = string_view_type;
+    using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+    using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
   private:
     matcher_type matcher_;
@@ -594,16 +628,16 @@ class range_rmatches {
 
     class iterator {
         matcher_type matcher_;
-        string_type remaining_;
+        string_view_type remaining_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
         using difference_type = std::ptrdiff_t;
-        using value_type = string_type;
-        using pointer = string_type;   // Needed for compatibility with STL container constructors.
-        using reference = string_type; // Needed for compatibility with STL container constructors.
+        using value_type = string_view_type;
+        using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+        using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
+        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
             auto position = matcher_(remaining_);
             remaining_.remove_suffix(         //
                 position != string_type::npos //
@@ -644,8 +678,8 @@ class range_rmatches {
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
 
-    iterator begin() const noexcept { return {haystack_, matcher_}; }
-    iterator end() const noexcept { return {string_type {haystack_.data(), 0ull}, matcher_}; }
+    iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
+    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     bool empty() const noexcept { return begin() == end_sentinel_type {}; }
@@ -666,6 +700,13 @@ class range_rmatches {
 
 /**
  *  @brief A range of string slices for different splits of the data.
+ *
+ *  @note Lifetime semantics: Stores forwarded objects (including owning strings) to maintain lifetime.
+ *        Iterators receive lightweight views only, ensuring safe iteration without ownership concerns.
+ *  @note For-loop optimized: Iterators are lightweight views with minimal register pressure, ideal for
+ *        high-performance applications where cache efficiency and register allocation matter.
+ *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
+ *        efficient termination without constructing full end iterators.
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
@@ -678,12 +719,13 @@ class range_splits {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
 
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
-    using value_type = string_type;
-    using pointer = string_type;   // Needed for compatibility with STL container constructors.
-    using reference = string_type; // Needed for compatibility with STL container constructors.
+    using value_type = string_view_type;
+    using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+    using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
   private:
     matcher_type matcher_;
@@ -694,24 +736,24 @@ class range_splits {
 
     class iterator {
         matcher_type matcher_;
-        string_type remaining_;
+        string_view_type remaining_;
         std::size_t length_within_remaining_;
         bool reached_tail_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
         using difference_type = std::ptrdiff_t;
-        using value_type = string_type;
-        using pointer = string_type;   // Needed for compatibility with STL container constructors.
-        using reference = string_type; // Needed for compatibility with STL container constructors.
+        using value_type = string_view_type;
+        using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+        using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
+        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
             auto position = matcher_(remaining_);
             length_within_remaining_ = position != string_type::npos ? position : remaining_.size();
             reached_tail_ = false;
         }
 
-        iterator(string_type haystack, matcher_type matcher, end_sentinel_type) noexcept
+        iterator(string_view_type haystack, matcher_type matcher, end_sentinel_type) noexcept
             : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
 
         pointer operator->() const noexcept = delete;
@@ -743,8 +785,8 @@ class range_splits {
         bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
     };
 
-    iterator begin() const noexcept { return {haystack_, matcher_}; }
-    iterator end() const noexcept { return {string_type {haystack_.end(), 0}, matcher_, end_sentinel_type {}}; }
+    iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
+    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -765,6 +807,13 @@ class range_splits {
 
 /**
  *  @brief A range of string slices for different splits of the data in @b reverse-order.
+ *
+ *  @note Lifetime semantics: Stores forwarded objects (including owning strings) to maintain lifetime.
+ *        Iterators receive lightweight views only, ensuring safe iteration without ownership concerns.
+ *  @note For-loop optimized: Iterators are lightweight views with minimal register pressure, ideal for
+ *        high-performance applications where cache efficiency and register allocation matter.
+ *  @note Sentinel support: Supports sentinel-based iteration via `operator==(end_sentinel_type)` for
+ *        efficient termination without constructing full end iterators.
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
@@ -777,12 +826,13 @@ class range_rsplits {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
 
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
-    using value_type = string_type;
-    using pointer = string_type;   // Needed for compatibility with STL container constructors.
-    using reference = string_type; // Needed for compatibility with STL container constructors.
+    using value_type = string_view_type;
+    using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+    using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
   private:
     matcher_type matcher_;
@@ -793,18 +843,18 @@ class range_rsplits {
 
     class iterator {
         matcher_type matcher_;
-        string_type remaining_;
+        string_view_type remaining_;
         std::size_t length_within_remaining_;
         bool reached_tail_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
         using difference_type = std::ptrdiff_t;
-        using value_type = string_type;
-        using pointer = string_type;   // Needed for compatibility with STL container constructors.
-        using reference = string_type; // Needed for compatibility with STL container constructors.
+        using value_type = string_view_type;
+        using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
+        using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
+        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
             auto position = matcher_(remaining_);
             length_within_remaining_ = position != string_type::npos
                                            ? remaining_.size() - position - matcher_.needle_length()
@@ -812,7 +862,7 @@ class range_rsplits {
             reached_tail_ = false;
         }
 
-        iterator(string_type haystack, matcher_type matcher, end_sentinel_type) noexcept
+        iterator(string_view_type haystack, matcher_type matcher, end_sentinel_type) noexcept
             : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
 
         pointer operator->() const noexcept = delete;
@@ -848,8 +898,8 @@ class range_rsplits {
         bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
     };
 
-    iterator begin() const noexcept { return {haystack_, matcher_}; }
-    iterator end() const noexcept { return {{haystack_.data(), 0ull}, matcher_, end_sentinel_type {}}; }
+    iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
+    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }

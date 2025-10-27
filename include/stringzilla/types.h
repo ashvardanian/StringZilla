@@ -541,8 +541,7 @@ typedef enum sz_status_t {
     sz_invalid_utf8_k = -12,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -13,
-    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
-     */
+    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
     sz_overflow_risk_k = -14,
     /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
     sz_unexpected_dimensions_k = -15,
