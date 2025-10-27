@@ -541,8 +541,7 @@ typedef enum sz_status_t {
     sz_invalid_utf8_k = -12,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -13,
-    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
-     */
+    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
     sz_overflow_risk_k = -14,
     /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
     sz_unexpected_dimensions_k = -15,
@@ -841,6 +840,7 @@ typedef union sz_u16_vec_t {
  */
 typedef union sz_u32_vec_t {
     sz_u32_t u32;
+    sz_i32_t i32;
     sz_u16_t u16s[2];
     sz_i16_t i16s[2];
     sz_u8_t u8s[4];
@@ -853,6 +853,7 @@ typedef union sz_u32_vec_t {
  */
 typedef union sz_u64_vec_t {
     sz_u64_t u64;
+    sz_i64_t i64;
     sz_u32_t u32s[2];
     sz_i32_t i32s[2];
     sz_u16_t u16s[4];

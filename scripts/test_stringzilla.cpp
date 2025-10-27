@@ -305,7 +305,8 @@ void test_hash_equivalence(                                               //
 
     // Let's try different-length strings repeating a "abc" pattern:
     std::vector<sz_u64_t> seeds = {
-        0u, 42u,                              //
+        0u,
+        42u,                                  //
         std::numeric_limits<sz_u32_t>::max(), //
         std::numeric_limits<sz_u64_t>::max(), //
     };
@@ -337,7 +338,8 @@ void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_r
 
     // Let's try different nonces:
     std::vector<sz_u64_t> nonces = {
-        0u, 42u,                              //
+        0u,
+        42u,                                  //
         std::numeric_limits<sz_u32_t>::max(), //
         std::numeric_limits<sz_u64_t>::max(), //
     };
@@ -1618,6 +1620,29 @@ void test_search() {
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
+    // Test propagating strings and their non-owning views into temporary ranges and iterators
+    assert(sz::find_all("abc"_sv, "b"_sv).size() == 1);
+    assert(sz::find_all("hello"_sv, "l"_sv).size() == 2);
+    assert(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
+
+    {
+        sz::string h("abc"), n("b");
+        assert(sz::find_all(h, n).size() == 1);
+    }
+    {
+        sz::string h("hello"), n("l");
+        assert(sz::find_all(h, n).size() == 2);
+    }
+    {
+        sz::string h("abc"), n("b");
+        assert(sz::rfind_all(h, n).size() == 1);
+    }
+
+    assert(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
+    assert(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
+    assert(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
+
+    // Check splitting - the inverse of `find_all` ranges
     {
         auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>();
         assert(splits.size() == 5);

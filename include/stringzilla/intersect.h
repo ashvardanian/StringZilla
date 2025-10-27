@@ -288,7 +288,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1 << SZ_SEQUENCE_INTERSECT_BUDGET);
+    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1u << SZ_SEQUENCE_INTERSECT_BUDGET);
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *const table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc);
     if (!table_positions) return sz_bad_alloc_k;
@@ -414,7 +414,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1 << SZ_SEQUENCE_INTERSECT_BUDGET);
+    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) * (1u << SZ_SEQUENCE_INTERSECT_BUDGET);
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc);
     if (!table_positions) return sz_bad_alloc_k;

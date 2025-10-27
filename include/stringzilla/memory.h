@@ -1194,6 +1194,7 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 
     sz_size_t head_length = (16 - ((sz_size_t)target % 16)) % 16; // 15 or less.
     sz_size_t tail_length = (sz_size_t)(target + length) % 16;    // 15 or less.
+    sz_size_t body_length = length - head_length - tail_length;
 
     // We need to pull the lookup table into 16x NEON registers. We have a total of 32 such registers.
     // According to the Neoverse V2 manual, the 4-table lookup has a latency of 6 cycles, and 4x throughput.
@@ -1216,9 +1217,7 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
     // to perform a 4-table lookup in a single instruction. The XORs are used to adjust the lookup position
     // within each 64-byte range of the table.
     // Details on the 4-table lookup: https://lemire.me/blog/2019/07/23/arbitrary-byte-to-byte-maps-using-arm-neon/
-    length -= head_length;
-    length -= tail_length;
-    for (; length >= 16; source += 16, target += 16, length -= 16) {
+    for (; body_length >= 16; source += 16, target += 16, body_length -= 16) {
         source_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
         lookup_0_to_63_vec.u8x16 = vqtbl4q_u8(lut_0_to_63_vec, source_vec.u8x16);
         lookup_64_to_127_vec.u8x16 = vqtbl4q_u8(lut_64_to_127_vec, veorq_u8(source_vec.u8x16, vdupq_n_u8(0x40)));

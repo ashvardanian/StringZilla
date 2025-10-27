@@ -5,6 +5,7 @@ build_release/
 build_relwithdebinfo/
 build_go/
 build_golang/
+build_test/
 build_artifacts*
 
 # Yes, everyone loves keeping this file in the history.
