@@ -650,6 +650,7 @@ where
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
+    assert!(target_slice.len() >= source_slice.len());
     unsafe {
         sz_move(
             target_slice.as_mut_ptr() as *const c_void,
@@ -684,6 +685,7 @@ where
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
+    assert!(target_slice.len() >= source_slice.len());
     unsafe {
         sz_copy(
             target_slice.as_mut_ptr() as *mut c_void,
@@ -726,6 +728,7 @@ where
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
+    assert!(target_slice.len() >= source_slice.len());
     unsafe {
         sz_lookup(
             target_slice.as_mut_ptr() as *mut c_void,
@@ -1281,6 +1284,10 @@ where
     G: Fn(usize) -> B,
     B: AsRef<[u8]>,
 {
+    if positions1.len() != positions2.len() {
+        return Err(Status::BadAlloc);
+    }
+
     // Adapter closure: given an index, call the provided mapper and then transmute the
     // resulting slice to have a `'static` lifetime. This transmute is safe as long as
     // the FFI call is synchronous and the returned slices are only used during the call.
@@ -2390,6 +2397,16 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn intersection_size_checks() {
+        let mut indices = [0usize; 10];
+        let mut indices2 = [0usize; 5];
+        let data = vec![0x41u8; 12];
+
+        intersection_by(|_: usize| &data, |_: usize| &data, 1, &mut indices, &mut indices2).unwrap();
+    }
+
+    #[test]
     fn intersection_debug() {
         println!("Starting intersection debug test...");
 
@@ -2490,5 +2507,33 @@ mod tests {
             0x2b, 0x99, 0xef, 0xd6, 0x32, 0x2c, 0xa9, 0x4c, 0xd3, 0x2c, 0x1e, 0x45, 0x09, 0xfd,
         ];
         assert_eq!(mac, expected);
+    }
+
+    #[test]
+    #[should_panic]
+    fn copy_size_checks() {
+        let long: Vec<u8> = vec![0; 20];
+        let mut less_long: Vec<u8> = vec![0; 10];
+
+        copy(&mut less_long, &long);
+    }
+
+    #[test]
+    #[should_panic]
+    fn move_size_checks() {
+        let long: Vec<u8> = vec![0; 20];
+        let mut less_long: Vec<u8> = vec![0; 10];
+
+        move_(&mut less_long, &long);
+    }
+
+    #[test]
+    #[should_panic]
+    fn lookup_size_checks() {
+        let long: Vec<u8> = vec![0; 20];
+        let mut less_long: Vec<u8> = vec![0; 10];
+
+        let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
+        lookup(&mut less_long, &long, lut);
     }
 }
