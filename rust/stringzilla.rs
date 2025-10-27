@@ -1119,7 +1119,7 @@ pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) 
     if data.len() > order.len() {
         return Err(Status::BadAlloc);
     }
-    argsort_permutation_by(|i| data[i].as_ref(), order)
+    argsort_permutation_by(|i| data[i].as_ref(), order[..data.len()].as_mut())
 }
 
 /// Sorts a sequence of items by comparing their corresponding byte-slice representations.
