@@ -840,6 +840,7 @@ typedef union sz_u16_vec_t {
  */
 typedef union sz_u32_vec_t {
     sz_u32_t u32;
+    sz_i32_t i32;
     sz_u16_t u16s[2];
     sz_i16_t i16s[2];
     sz_u8_t u8s[4];
@@ -852,6 +853,7 @@ typedef union sz_u32_vec_t {
  */
 typedef union sz_u64_vec_t {
     sz_u64_t u64;
+    sz_i64_t i64;
     sz_u32_t u32s[2];
     sz_i32_t i32s[2];
     sz_u16_t u16s[4];
