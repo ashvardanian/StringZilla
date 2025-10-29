@@ -2017,8 +2017,12 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
- *          @b three skewed (reverse) diagonals at a time on a GPU, leveraging CUDA for parallelization.
+ *          @b two-rows at a time on a GPU, leveraging CUDA for parallelization.
  *          Each pair of strings gets its own @b "thread" and uses only @b register memory!
+ *
+ *  As each thread receives a different input, the DP matrix size would also be different and we would end up
+ *  with divergent branches. To address this issue, we pad all the inputs to a fixed maximum length, and keep
+ *  a separate variable tracking the passed entry.
  *
  *  @param[in] tasks Tasks containing the strings and output locations.
  *  @param[in] tasks_count The number of tasks to process.
@@ -2027,161 +2031,93 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
  */
 template < //
     typename task_type_,
-    typename char_type_ = char,                                  //
-    typename index_type_ = unsigned,                             //
-    typename score_type_ = size_t,                               //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_cuda_k,                 //
-    unsigned max_length_ = 128                                   //
+    typename char_type_ = char,                  //
+    typename score_type_ = size_t,               //
+    sz_capability_t capability_ = sz_cap_cuda_k, //
+    unsigned max_text_length_ = 127              //
     >
-__global__ void linear_score_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,         //
-    substituter_type_ const substituter, linear_gap_costs_t const gap_costs) {
+__global__ void levenshtein_on_each_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,        //
+    uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
     using char_t = char_type_;
-    using index_t = index_type_;
     using score_t = score_type_;
-
-    static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_similarity_objective_t objective_k = objective_;
-    static_assert(locality_k == sz_similarity_global_k,
-                  "Only global alignments are supported in the register-based implementation.");
-
-    // Unlike other algorithms, where the difference between strings may be significant,
-    // on smaller strings the scheduling and control-flow overhead takes a larger toll.
-    // So instead of 3 individual loops processing (1) the top-left triangle, (2) the anti-diagonal band,
-    // and (3) the bottom-right triangle of the DP matrix, we will just have a square matrix, dropping the
-    // middle band.
-    //
-    // Assuming we don't have enough register memory to store the entire DP matrix, we need a cheap way
-    // to extract the (shorter_dim, longer_dim) cell on the fly, as soon as we pass the containing diagonal.
-    // That solves the issue for global alignments, but not the local ones.
-    static constexpr unsigned max_length_k = max_length_;
-    static constexpr unsigned padded_diagonals_count_k = max_length_k + max_length_k - 1;
-
-    // Pre-load the substituter and gap costs.
-    using substituter_t = substituter_type_;
-    using gap_costs_t = linear_gap_costs_t;
-    static_assert(std::is_trivially_copyable<substituter_t>::value, "Substituter must be trivially copyable.");
-    static_assert(std::is_trivially_copyable<gap_costs_t>::value, "Gap costs must be trivially copyable.");
-
-    using cuda_warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t,
-                                           objective_k, locality_k, capability_k>;
 
     // We may have multiple warps operating in the same block.
     unsigned const warp_size = warpSize;
     size_t const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
     size_t const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
     size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     size_t const threads_per_device = warps_per_device * warp_size;
-    unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
 
     // No shared memory, only registers!
-    char_t diagonals_registers[3][max_length_k + 1];
-    char_t padded_strings_registers[2][max_length_k];
+    constexpr unsigned max_text_length_k = max_text_length_;
+    constexpr unsigned matrix_side_k = max_text_length_k + 1;
+
+    score_t row_registers[2][matrix_side_k];
+    char_t first_string_registers[max_text_length_k];
+    char_t second_string_registers[max_text_length_k];
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
-    for (size_t task_idx = global_warp_index; task_idx < tasks_count; task_idx += threads_per_device) {
+    for (size_t task_idx = global_thread_index; task_idx < tasks_count; task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        char_t const *shorter_global = task.shorter_ptr;
-        char_t const *longer_global = task.longer_ptr;
-        size_t const shorter_length = task.shorter_length;
-        size_t const longer_length = task.longer_length;
+        char_t const *first_global = task.shorter_ptr;
+        char_t const *second_global = task.longer_ptr;
+        size_t const first_length = task.shorter_length;
+        size_t const second_length = task.longer_length;
         auto &result_ref = task.result;
 
-        // We are going to store 3 diagonals of the matrix.
-        // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        unsigned const shorter_dim = static_cast<unsigned>(shorter_length + 1);
-        unsigned const longer_dim = static_cast<unsigned>(longer_length + 1);
-
-        // Knowing the lengths of both strings, we can pre-compute the relevant diagonal
-        // and the offset of a relevant entry within that diagonal.
-        unsigned const relevant_diagonal_index = shorter_dim + longer_dim - 1;
-        unsigned const relevant_diagonal_offset = max_length_k - shorter_dim;
+        // We are going to store 2 rows of the matrix.
+        // The length of the longest (main) diagonal would be `first_dim = (first_length + 1)`.
+        unsigned const first_dim = static_cast<unsigned>(first_length + 1);
+        unsigned const second_dim = static_cast<unsigned>(second_length + 1);
 
         // The next few pointers will be swapped around.
-        score_t *previous_scores = &diagonals_registers[0][0];
-        score_t *current_scores = &diagonals_registers[1][0];
-        score_t *next_scores = &diagonals_registers[2][0];
-        char_t *const longer = &padded_strings_registers[0][0];
-        char_t *const shorter = &padded_strings_registers[1][0];
+        score_t *previous_scores = &row_registers[0][0];
+        score_t *current_scores = &row_registers[1][0];
 
         // Copy the string into registers once.
-        for (unsigned i = thread_in_warp_index; i < longer_length; ++i) longer[i] = longer_global[i];
-        for (unsigned i = thread_in_warp_index; i < shorter_length; ++i) shorter[i] = shorter_global[i];
+        {
+            unsigned i = 0, j = 0;
+            for (; i < first_length; ++i) first_string_registers[i] = first_global[i];
+            for (; i < matrix_side_k; ++i) first_string_registers[i] = 0xFF;
+            for (; j < second_length; ++j) second_string_registers[j] = second_global[j];
+            for (; j < matrix_side_k; ++j) second_string_registers[j] = 0xFF;
+        }
 
-        // Initialize the first two diagonals:
-        cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
-        diagonal_aligner.init_score(previous_scores[0], 0);
-        diagonal_aligner.init_score(current_scores[0], 1);
-        diagonal_aligner.init_score(current_scores[1], 1);
+        // Initialize the first row (all elements, including padding):
+        for (unsigned col_idx = 0; col_idx <= matrix_side_k; ++col_idx)
+            previous_scores[col_idx] = col_idx * gap_costs.open_or_extend;
 
-        // We skip diagonals 0 and 1, as they are trivial.
-        // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
-        // so we are effectively computing just one value, as will be marked by a single set bit in
-        // the `next_diagonal_mask` on the very first iteration.
-        unsigned next_diagonal_index = 2;
+        // We are computing a larger matrix - let's use this scalar for pulling the relevant score out,
+        // before it's wiped out by subsequent loop iterations.
         score_t relevant_score = 0;
 
-        // Progress through the upper-left triangle of the Levenshtein matrix.
-        for (; next_diagonal_index < max_length_k; ++next_diagonal_index) {
+        // Progress through the matrix row-by-row (compute full padded matrix to avoid divergence):
+        for (unsigned row_idx = 1; row_idx <= /* second_dim */ matrix_side_k; ++row_idx) {
 
-            unsigned const next_diagonal_length = next_diagonal_index + 1;
-            diagonal_aligner(                       //
-                shorter,                            // first sequence of characters
-                longer,                             // second sequence of characters
-                thread_in_warp_index, warp_size,    //
-                next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores + 1);                   // ! notice unaligned write destination
+            // Don't forget to populate the first column of each row:
+            current_scores[0] = row_idx * gap_costs.open_or_extend;
+            for (unsigned col_idx = 1; col_idx <= /* first_dim */ matrix_side_k; ++col_idx) {
+                score_t substitution_cost = substituter(  //
+                    second_string_registers[row_idx - 1], //
+                    first_string_registers[col_idx - 1]);
+                current_scores[col_idx] = sz_min_of_three(                  //
+                    previous_scores[col_idx - 1] + substitution_cost,       // substitution
+                    current_scores[col_idx - 1] + gap_costs.open_or_extend, // insertion
+                    previous_scores[col_idx] + gap_costs.open_or_extend);   // deletion
+            }
 
-            // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-            diagonal_aligner.init_score(next_scores[0], next_diagonal_index);
-            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            // Extract the actual result at the exact row when we finish computing it
+            // The following code is akin to a branch:
+            bool is_relevant_row = row_idx == second_length;
+            relevant_score = is_relevant_row ? current_scores[first_length] : relevant_score;
 
-            // Extract the relevant score, if we are on the relevant diagonal.
-            relevant_score = next_diagonal_index == relevant_diagonal_index //
-                                 ? next_scores[relevant_diagonal_offset]
-                                 : relevant_score;
-
-            // Perform a circular rotation of those buffers, to reuse the memory.
-            rotate_three(previous_scores, current_scores, next_scores);
+            // Reuse the memory.
+            trivial_swap(previous_scores, current_scores);
         }
 
-        // Now let's handle the bottom-right triangle of the matrix.
-        for (; next_diagonal_index < padded_diagonals_count_k; ++next_diagonal_index) {
-
-            unsigned const next_diagonal_length = padded_diagonals_count_k - next_diagonal_index;
-            diagonal_aligner(                               //
-                shorter + next_diagonal_index - longer_dim, // first sequence of characters
-                longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                thread_in_warp_index, warp_size,            //
-                next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                            // costs pre substitution
-                current_scores, current_scores + 1,         // costs pre insertion/deletion
-                next_scores);
-
-            // Perform a circular rotation of those buffers, to reuse the memory.
-            rotate_three(previous_scores, current_scores, next_scores);
-
-            // Extract the relevant score, if we are on the relevant diagonal.
-            relevant_score = next_diagonal_index == relevant_diagonal_index //
-                                 ? next_scores[relevant_diagonal_offset]
-                                 : relevant_score;
-
-            // ! Drop the first entry among the current scores.
-            // ! Assuming every next diagonal is shorter by one element,
-            // ! we don't need a full-blown `sz_move` to shift the array by one element.
-            previous_scores++;
-        }
-
-        // Export one result per each block.
         result_ref = relevant_score;
     }
 }
@@ -2312,17 +2248,43 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         }
 
         // Now some warp-level tasks are so tiny, we can perform them at the single register level!
-        // For that, partition
         if constexpr (!is_affine_k) {
-            std::partition( //
-                tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
+            if (count_register_level_tasks > 0) {
+                std::partition( //
+                    tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
+                auto thread_level_kernel = &levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k, 127>;
 
-            linear_score_on_each_cuda_thread_<char_t, u8_t, u8_t, final_score_t, uniform_substitution_costs_t,
-                                              sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+                // Store values in variables since we need their addresses
+                task_t *tasks_ptr = tasks.data();
+                size_t tasks_count = count_register_level_tasks; // Only register-level tasks!
+
+                void *thread_level_kernel_args[4];
+                thread_level_kernel_args[0] = (void *)(&tasks_ptr);
+                thread_level_kernel_args[1] = (void *)(&tasks_count);
+                thread_level_kernel_args[2] = (void *)(&substituter_);
+                thread_level_kernel_args[3] = (void *)(&gap_costs_);
+
+                // TODO: We can be wiser about the dimensions of this grid.
+                unsigned const random_block_size = 128;
+                unsigned const random_blocks_per_multiprocessor = 8;
+                cudaError_t launch_error = cudaLaunchKernel(                                  //
+                    reinterpret_cast<void *>(thread_level_kernel),                            // Kernel function pointer
+                    dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+                    dim3(random_block_size),                                                  // Block dimensions
+                    thread_level_kernel_args, // Array of kernel argument pointers
+                    0,                        // Shared memory per block (in bytes)
+                    executor.stream());       // CUDA stream
+                if (launch_error != cudaSuccess) {
+                    if (launch_error == cudaErrorMemoryAllocation) return {status_t::bad_alloc_k, launch_error};
+                    else
+                        return {status_t::unknown_k, launch_error};
+                }
+            }
         }
 
-        auto [device_level_tasks, warp_level_tasks, empty_tasks] =
-            warp_tasks_grouping<task_t>({tasks.data(), tasks.size()}, specs);
+        // Group remaining non-register tasks into device-level and warp-level.
+        auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
+            {tasks.data() + count_register_level_tasks, tasks.size() - count_register_level_tasks}, specs);
 
         if (device_level_tasks.size()) {
             auto device_level_u16_kernel =
@@ -2445,6 +2407,13 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 auto const [optimal_density, speculative_factor] =
                     speculation_friendly_density(indicative_task.density);
 
+                // Wait until previous kernels complete, before we modify the kernel attributes
+                cudaError_t sync_error = cudaStreamSynchronize(executor.stream());
+                if (sync_error != cudaSuccess) {
+                    result = {status_t::unknown_k, sync_error};
+                    return;
+                }
+
                 // Update the selected kernels properties.
                 unsigned const shared_memory_per_block =
                     static_cast<unsigned>(indicative_task.memory_requirement * optimal_density);
@@ -2478,16 +2447,15 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                               launch_error};
                     return;
                 }
-
-                // Wait until everything completes, as on the next iteration we will update the properties again.
-                cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
-                if (execution_error != cudaSuccess) {
-                    result = {status_t::unknown_k, execution_error};
-                    return;
-                }
             };
             group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, task_group_callback);
             if (result.status != status_t::success_k) return result;
+        }
+
+        // Wait until everything completes
+        {
+            cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
+            if (execution_error != cudaSuccess) return {status_t::unknown_k, execution_error};
         }
 
         // Calculate the duration:

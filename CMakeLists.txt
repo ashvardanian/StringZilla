@@ -702,7 +702,6 @@ function (define_stringzillas_shared target source_file backend_flags)
     target_include_directories(${target} PRIVATE fork_union/include)
     target_compile_definitions(${target} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
     target_compile_definitions(${target} PRIVATE "SZ_AVOID_LIBC=0")
-    target_compile_definitions(${target} PRIVATE "SZ_DEBUG=0")
 
     # Set backend-specific compilation flags
     foreach (flag ${backend_flags})

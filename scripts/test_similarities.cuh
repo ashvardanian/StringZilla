@@ -34,21 +34,24 @@ inline std::size_t levenshtein_baseline(                                //
     std::vector<std::size_t> matrix_buffer(rows * cols);
 
     // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i * gap_cost;
-    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j * gap_cost;
+    for (std::size_t row = 0; row < rows; ++row) matrix_buffer[row * cols + 0] /* [row][0] in 2D */ = row * gap_cost;
+    for (std::size_t col = 0; col < cols; ++col) matrix_buffer[0 * cols + col] /* [0][col] in 2D */ = col * gap_cost;
 
-    for (std::size_t i = 1; i < rows; ++i) {
-        std::size_t const *last_row = &matrix_buffer[(i - 1) * cols];
-        std::size_t *row = &matrix_buffer[i * cols];
-        for (std::size_t j = 1; j < cols; ++j) {
-            std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
-            std::size_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + gap_cost;
-            row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
+    for (std::size_t row = 1; row < rows; ++row) {
+        std::size_t const *last_row_buffer = &matrix_buffer[(row - 1) * cols];
+        std::size_t *current_row_buffer = &matrix_buffer[row * cols];
+        for (std::size_t col = 1; col < cols; ++col) {
+            std::size_t substitution_cost = (s1[row - 1] == s2[col - 1]) ? match_cost : mismatch_cost;
+            std::size_t if_deletion_or_insertion =
+                std::min(last_row_buffer[col], current_row_buffer[col - 1]) + gap_cost;
+            current_row_buffer[col] = std::min(if_deletion_or_insertion, last_row_buffer[col - 1] + substitution_cost);
         }
     }
 
     return matrix_buffer.back();
 }
+
+#if 0 // ! Coming later :)
 
 /**
  *  The purpose of this class is to emulate SIMD processing in CUDA with 4-byte-wide words,
@@ -169,6 +172,8 @@ inline std::size_t levenshtein_recursive_baseline(                      //
 
     return algorithm(s1_padded, s2_padded, match_cost, mismatch_cost, gap_cost, previous, current, next);
 }
+
+#endif // ! Coming later :)
 
 /**
  *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
