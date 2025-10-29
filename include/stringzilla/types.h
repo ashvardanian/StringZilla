@@ -821,6 +821,9 @@ typedef sz_status_t (*sz_sequence_intersect_t)(struct sz_sequence_t const *, str
                                                sz_memory_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
                                                sz_sorted_idx_t *);
 
+/** @brief Signature of `sz_sequence_hashes`. */
+typedef void (*sz_sequence_hashes_t)(sz_cptr_t const *, sz_size_t const *, sz_size_t, sz_u64_t, sz_u64_t *);
+
 #pragma endregion
 
 #pragma region Helper Structures

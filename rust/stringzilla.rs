@@ -274,6 +274,14 @@ extern "C" {
         second_positions: *mut SortedIdx,
     ) -> Status;
 
+    pub(crate) fn sz_sequence_hashes(
+        starts: *const *const u8,
+        lengths: *const usize,
+        count: usize,
+        seed: u64,
+        hashes: *mut u64,
+    );
+
 }
 
 impl SemVer {
@@ -818,6 +826,134 @@ where
 {
     hash_with_seed(text, 0)
 }
+
+/// Iterator adapter that computes hashes in batches for efficiency.
+/// Uses SIMD-accelerated batch hashing for strings ≤16 bytes.
+pub struct SzHashes<I, const BATCH_SIZE: usize = 32>
+where
+    I: Iterator,
+    I::Item: AsRef<[u8]>,
+{
+    source: I,
+    seed: u64,
+    items: [Option<I::Item>; BATCH_SIZE],
+    starts: [*const u8; BATCH_SIZE],
+    lengths: [usize; BATCH_SIZE],
+    hashes: [u64; BATCH_SIZE],
+    batch_len: usize,
+    batch_pos: usize,
+}
+
+impl<I, const BATCH_SIZE: usize> SzHashes<I, BATCH_SIZE>
+where
+    I: Iterator,
+    I::Item: AsRef<[u8]>,
+{
+    fn new(source: I, seed: u64) -> Self {
+        Self {
+            source,
+            seed,
+            items: core::array::from_fn(|_| None),
+            starts: [core::ptr::null(); BATCH_SIZE],
+            lengths: [0; BATCH_SIZE],
+            hashes: [0; BATCH_SIZE],
+            batch_len: 0,
+            batch_pos: 0,
+        }
+    }
+
+    fn fill_batch(&mut self) -> bool {
+        self.batch_len = 0;
+        self.batch_pos = 0;
+
+        // Collect batch of items and extract pointers upfront
+        for i in 0..BATCH_SIZE {
+            self.items[i] = self.source.next();
+            if let Some(ref item) = self.items[i] {
+                let slice = item.as_ref();
+                self.starts[i] = slice.as_ptr();
+                self.lengths[i] = slice.len();
+                self.batch_len += 1;
+            } else {
+                break;
+            }
+        }
+
+        if self.batch_len > 0 {
+            // Call C function directly with pointer arrays - no callbacks!
+            unsafe {
+                sz_sequence_hashes(
+                    self.starts.as_ptr(),
+                    self.lengths.as_ptr(),
+                    self.batch_len,
+                    self.seed,
+                    self.hashes.as_mut_ptr(),
+                );
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl<I, const BATCH_SIZE: usize> Iterator for SzHashes<I, BATCH_SIZE>
+where
+    I: Iterator,
+    I::Item: AsRef<[u8]>,
+{
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.batch_pos >= self.batch_len {
+            if !self.fill_batch() {
+                return None;
+            }
+        }
+
+        let hash = self.hashes[self.batch_pos];
+        self.batch_pos += 1;
+        Some(hash)
+    }
+}
+
+/// Extension trait for iterator-based batched hashing.
+pub trait SzHashExt: Iterator {
+    /// Compute hashes for iterator items in batches for efficiency.
+    /// Uses default batch size of 32.
+    ///
+    /// # Examples
+    /// ```
+    /// use stringzilla::stringzilla::SzHashExt;
+    /// let strings = vec!["apple", "banana", "cherry"];
+    /// let hashes: Vec<u64> = strings.iter().sz_hashes(0).collect();
+    /// ```
+    fn sz_hashes(self, seed: u64) -> SzHashes<Self, 32>
+    where
+        Self: Sized,
+        Self::Item: AsRef<[u8]>,
+    {
+        SzHashes::new(self, seed)
+    }
+
+    /// Compute hashes for iterator items in batches with custom batch size.
+    ///
+    /// # Examples
+    /// ```
+    /// use stringzilla::stringzilla::SzHashExt;
+    /// let strings = vec!["apple", "banana", "cherry"];
+    /// let hashes: Vec<u64> = strings.iter().sz_hashes_with_batch_size::<64>(0).collect();
+    /// ```
+    fn sz_hashes_with_batch_size<const BATCH_SIZE: usize>(self, seed: u64) -> SzHashes<Self, BATCH_SIZE>
+    where
+        Self: Sized,
+        Self::Item: AsRef<[u8]>,
+    {
+        SzHashes::new(self, seed)
+    }
+}
+
+impl<I> SzHashExt for I where I: Iterator {}
 
 /// Locates the first matching substring within `haystack` that equals `needle`.
 /// This function is similar to the `memmem()` function in LibC, but, unlike `strstr()`,
@@ -2024,6 +2160,37 @@ mod tests {
                 sz::hash_with_seed("HelloWorld", *seed)
             );
         }
+    }
+
+    #[test]
+    fn batched_hashing() {
+        use crate::stringzilla::SzHashExt;
+
+        let strings = vec!["apple", "banana", "cherry", "date", "elderberry"];
+
+        // Compute hashes using batched iterator with default batch size
+        let batched_hashes: Vec<u64> = strings.iter().sz_hashes(0).collect();
+
+        // Compute hashes individually for comparison
+        let individual_hashes: Vec<u64> = strings.iter().map(|s| sz::hash(s)).collect();
+
+        // They should match
+        assert_eq!(batched_hashes.len(), individual_hashes.len());
+        for (batched, individual) in batched_hashes.iter().zip(individual_hashes.iter()) {
+            assert_eq!(batched, individual);
+        }
+
+        // Test with custom batch size
+        let batched_hashes_2: Vec<u64> = strings.iter().sz_hashes_with_batch_size::<2>(0).collect();
+        assert_eq!(batched_hashes, batched_hashes_2);
+
+        // Test with seed
+        let batched_hashes_seed: Vec<u64> = strings.iter().sz_hashes(42).collect();
+        let individual_hashes_seed: Vec<u64> = strings.iter().map(|s| sz::hash_with_seed(s, 42)).collect();
+        assert_eq!(batched_hashes_seed, individual_hashes_seed);
+
+        // Different seeds should produce different hashes
+        assert_ne!(batched_hashes, batched_hashes_seed);
     }
 
     #[test]
