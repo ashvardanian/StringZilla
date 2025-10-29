@@ -51,6 +51,126 @@ inline std::size_t levenshtein_baseline(                                //
 }
 
 /**
+ *  The purpose of this class is to emulate SIMD processing in CUDA with 4-byte-wide words,
+ *  entirely unrolling the entire Levenshtein matrix calculation in diagonal order, only
+ *  using properly aligned loads!
+ */
+template <unsigned max_length_, unsigned next_diagonal_index_ = 0>
+struct levenshtein_recursive_algorithm {
+
+    using text_t = char[max_length_];
+    using diagonal_scores_t = std::uint8_t[max_length_ + 1];
+
+    static constexpr unsigned diagonals_count = max_length_ * 2 + 1;
+    static constexpr unsigned max_diagonal_length = max_length_ + 1;
+    constexpr unsigned next_diagonal_length = next_diagonal_index_ + 1;
+
+    std::size_t operator()(                                                                     //
+        text_t s1, std::size_t len1, text_t s2, std::size_t len2,                               //
+        error_cost_t match_cost = 0, error_cost_t mismatch_cost = 1, error_cost_t gap_cost = 1, //
+        diagonal_scores_t previous, diagonal_scores_t current, diagonal_scores_t next) {
+
+        // Top-left cell of the matrix
+        if constexpr (next_diagonal_index_ == 0) {
+            next[0] = 0;
+            // Recurse to the next diagonal
+            levenshtein_recursive_algorithm<max_length_, next_diagonal_index_ + 1> next_run;
+            return next_run(s1, s2,                              // same texts as before
+                            match_cost, mismatch_cost, gap_cost, // same costs
+                            current, next, previous);            // 3-way rotation of the diagonals
+        }
+        // The cells below and next to it
+        else if constexpr (next_diagonal_index_ == 1) {
+            next[0] = gap_cost, next[1] = gap_cost;
+
+            // Recurse to the next diagonal
+            levenshtein_recursive_algorithm<max_length_, next_diagonal_index_ + 1> next_run;
+            return next_run(s1, s2,                              // same texts as before
+                            match_cost, mismatch_cost, gap_cost, // same costs
+                            current, next, previous);            // 3-way rotation of the diagonals
+        }
+        // We are still in the top-left triangle
+        else if constexpr (next_diagonal_index_ <= max_length_) {
+
+            constexpr unsigned next_diagonal_length = next_diagonal_index_ + 1;
+#pragma unroll
+            for (unsigned k = 1; k < next_diagonal_length - 1; ++k) {
+                char first_char = s1[next_diagonal_length - k];
+                char second_char = s2[k - 1];
+
+                error_cost_t substitution_cost = first_char == second_char ? match_cost : mismatch_cost;
+                error_cost_t if_substitution = previous[k - 1] + substitution_cost;
+                error_cost_t if_deletion_or_insertion = std::min(current[k], current[k - 1]) + gap_cost;
+                next[k] = std::min(if_deletion_or_insertion, if_substitution);
+            }
+
+            // Single-byte stores at the edges of the diagonal - to overwrite the noisy values:
+            next[0] = gap_cost * next_diagonal_index_;
+            next[next_diagonal_length - 1] = gap_cost * next_diagonal_index_;
+
+            // Recurse to the next diagonal
+            levenshtein_recursive_algorithm<max_length_, next_diagonal_index_ + 1> next_run;
+            return next_run(s1, s2,                              // same texts as before
+                            match_cost, mismatch_cost, gap_cost, // same costs
+                            current, next, previous);            // 3-way rotation of the diagonals
+        }
+    }
+    // We are in the last diagonal and need to return the bottom-right cell
+    else if constexpr (next_diagonal_index_ + 1 == diagonals_count) {
+        char first_char = s1[max_length_ - 1];
+        char second_char = s2[max_length_ - 1];
+
+        error_cost_t substitution_cost = first_char == second_char ? match_cost : mismatch_cost;
+        error_cost_t if_substitution = previous[0] + substitution_cost;
+        error_cost_t if_deletion_or_insertion = std::min(current[0], current[1]) + gap_cost;
+        next[0] = std::min(if_deletion_or_insertion, if_substitution);
+
+        return next[0];
+    }
+    // We are in the bottom-right triangle
+    else {
+
+        constexpr unsigned next_diagonal_length = diagonals_count - next_diagonal_index_;
+#pragma unroll
+        for (unsigned k = 0; k < next_diagonal_length; ++k) {
+            char first_char = s1[...];
+            char second_char = s2[...];
+
+            error_cost_t substitution_cost = first_char == second_char ? match_cost : mismatch_cost;
+            error_cost_t if_substitution = previous[k - 1] + substitution_cost;
+            error_cost_t if_deletion_or_insertion = std::min(current[k], current[k - 1]) + gap_cost;
+            next[k] = std::min(if_deletion_or_insertion, if_substitution);
+        }
+
+        // Recurse to the next diagonal
+        levenshtein_recursive_algorithm<max_length_, next_diagonal_index_ + 1> next_run;
+        return next_run(s1, s2,                              // same texts as before
+                        match_cost, mismatch_cost, gap_cost, // same costs
+                        current, next, previous);            // 3-way rotation of the diagonals
+    }
+};
+
+inline std::size_t levenshtein_recursive_baseline(                      //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    error_cost_t match_cost = 0, error_cost_t mismatch_cost = 1, error_cost_t gap_cost = 1) noexcept(false) {
+
+    static constexpr std::size_t max_length = 8;
+    levenshtein_recursive_algorithm<max_length> algorithm;
+
+    char s1_padded[max_length] = {0};
+    char s2_padded[max_length] = {0};
+    std::memcpy(s1_padded, s1, len1);
+    std::memcpy(s2_padded, s2, len2);
+
+    // Need 3 diagonals for the rotation
+    std::uint8_t previous[max_length + 1] = {0};
+    std::uint8_t current[max_length + 1] = {0};
+    std::uint8_t next[max_length + 1] = {0};
+
+    return algorithm(s1_padded, s2_padded, match_cost, mismatch_cost, gap_cost, previous, current, next);
+}
+
+/**
  *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
