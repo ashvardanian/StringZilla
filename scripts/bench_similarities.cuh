@@ -112,9 +112,9 @@ void bench_levenshtein(environment_t const &env) {
     sz_unused_(scramble_accelerated_results);
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
-    constexpr linear_gap_costs_t weird_linear {3};
+    constexpr linear_gap_costs_t weird_linear {2};
     constexpr affine_gap_costs_t weird_affine {4, 2};
-    constexpr uniform_substitution_costs_t weird_uniform {1, 3};
+    constexpr uniform_substitution_costs_t weird_uniform {1, 2};
 
     for (std::size_t batch_size : batch_sizes) {
         results_linear_baseline.resize(batch_size), results_linear_accelerated.resize(batch_size);
