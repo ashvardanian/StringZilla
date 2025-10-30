@@ -2015,7 +2015,7 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
     }
 }
 
-inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 127;
+inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 31;
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
@@ -2057,9 +2057,8 @@ __global__ void levenshtein_on_each_cuda_thread_( //
     constexpr unsigned max_text_length_k = max_text_length_;
     constexpr unsigned matrix_side_k = max_text_length_k + 1;
 
-    score_t row_registers[2][matrix_side_k];
+    score_t row_registers[matrix_side_k];
     char_t first_string_registers[max_text_length_k];
-    char_t second_string_registers[max_text_length_k];
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     for (size_t task_idx = global_thread_index; task_idx < tasks_count; task_idx += threads_per_device) {
@@ -2070,50 +2069,39 @@ __global__ void levenshtein_on_each_cuda_thread_( //
         size_t const second_length = task.longer_length;
         auto &result_ref = task.result;
 
-        // We are going to store 2 rows of the matrix.
-        score_t *previous_scores = &row_registers[0][0];
-        score_t *current_scores = &row_registers[1][0];
+        // We are going to store 1 row of the matrix (one-row Wagner-Fischer algorithm)
+        for (unsigned i = 0; i < first_length; ++i) first_string_registers[i] = first_global[i];
 
-        // Copy the strings into registers once
-        {
-            unsigned i = 0, j = 0;
-            for (; i < first_length; ++i) first_string_registers[i] = first_global[i];
-            for (; i < matrix_side_k; ++i) first_string_registers[i] = 0xFF;
-            for (; j < second_length; ++j) second_string_registers[j] = second_global[j];
-            for (; j < matrix_side_k; ++j) second_string_registers[j] = 0xFF;
-        }
-
-        // Initialize the first row (all elements, including padding):
+        // Initialize the first row
         for (unsigned col_idx = 0; col_idx < matrix_side_k; ++col_idx)
-            previous_scores[col_idx] = col_idx * gap_costs.open_or_extend;
+            row_registers[col_idx] = col_idx * gap_costs.open_or_extend;
 
-        // We are computing a larger matrix - use this scalar for pulling the relevant score out
         score_t relevant_score = 0;
 
-        // Progress through the matrix row-by-row (compute full padded matrix to avoid divergence):
-#pragma unroll
-        for (unsigned row_idx = 1; row_idx < matrix_side_k; ++row_idx) {
-            // Don't forget to populate the first column of each row:
-            current_scores[0] = row_idx * gap_costs.open_or_extend;
+        // Outer loop: runtime bound (no unroll to avoid code explosion)
+        for (unsigned row_idx = 1; row_idx <= second_length; ++row_idx) {
+            score_t diagonal_value = row_registers[0];             // Save top-left corner (previous row, previous col)
+            row_registers[0] = row_idx * gap_costs.open_or_extend; // First column
 
-#pragma unroll
-            for (unsigned col_idx = 1; col_idx < matrix_side_k; ++col_idx) {
-                score_t substitution_cost = substituter(  //
-                    second_string_registers[row_idx - 1], //
+            // Inner loop: no unrolling to minimize register pressure
+            for (unsigned col_idx = 1; col_idx <= first_length; ++col_idx) {
+                score_t top_left = diagonal_value;       // This is previous_row[col-1]
+                diagonal_value = row_registers[col_idx]; // Save current value before overwriting
+
+                // Read second string from global memory (only once per row)
+                score_t substitution_cost = substituter( //
+                    second_global[row_idx - 1],          //
                     first_string_registers[col_idx - 1]);
-                current_scores[col_idx] = sz_min_of_three(                  //
-                    previous_scores[col_idx - 1] + substitution_cost,       // substitution
-                    current_scores[col_idx - 1] + gap_costs.open_or_extend, // insertion
-                    previous_scores[col_idx] + gap_costs.open_or_extend);   // deletion
+
+                row_registers[col_idx] = sz_min_of_three(                  //
+                    top_left + substitution_cost,                          // diagonal (substitution)
+                    row_registers[col_idx - 1] + gap_costs.open_or_extend, // left (insertion)
+                    diagonal_value + gap_costs.open_or_extend);            // top (deletion)
             }
 
-            // Extract the actual result at the exact row when we finish computing it
-            // The following code is akin to a branch:
+            // Extract result at the exact position
             bool is_relevant_row = row_idx == second_length;
-            relevant_score = is_relevant_row ? current_scores[first_length] : relevant_score;
-
-            // Reuse the memory
-            trivial_swap(previous_scores, current_scores);
+            relevant_score = is_relevant_row ? row_registers[first_length] : relevant_score;
         }
 
         result_ref = relevant_score;
