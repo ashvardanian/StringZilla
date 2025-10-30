@@ -2015,6 +2015,8 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
     }
 }
 
+inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 127;
+
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
  *          @b two-rows at a time on a GPU, leveraging CUDA for parallelization.
@@ -2031,10 +2033,10 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
  */
 template < //
     typename task_type_,
-    typename char_type_ = char,                  //
-    typename score_type_ = size_t,               //
-    sz_capability_t capability_ = sz_cap_cuda_k, //
-    unsigned max_text_length_ = 127              //
+    typename char_type_ = char,                                                      //
+    typename score_type_ = size_t,                                                   //
+    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
+    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ void levenshtein_on_each_cuda_thread_( //
     task_type_ *tasks, size_t tasks_count,        //
@@ -2069,15 +2071,10 @@ __global__ void levenshtein_on_each_cuda_thread_( //
         auto &result_ref = task.result;
 
         // We are going to store 2 rows of the matrix.
-        // The length of the longest (main) diagonal would be `first_dim = (first_length + 1)`.
-        unsigned const first_dim = static_cast<unsigned>(first_length + 1);
-        unsigned const second_dim = static_cast<unsigned>(second_length + 1);
-
-        // The next few pointers will be swapped around.
         score_t *previous_scores = &row_registers[0][0];
         score_t *current_scores = &row_registers[1][0];
 
-        // Copy the string into registers once.
+        // Copy the strings into registers once
         {
             unsigned i = 0, j = 0;
             for (; i < first_length; ++i) first_string_registers[i] = first_global[i];
@@ -2087,19 +2084,20 @@ __global__ void levenshtein_on_each_cuda_thread_( //
         }
 
         // Initialize the first row (all elements, including padding):
-        for (unsigned col_idx = 0; col_idx <= matrix_side_k; ++col_idx)
+        for (unsigned col_idx = 0; col_idx < matrix_side_k; ++col_idx)
             previous_scores[col_idx] = col_idx * gap_costs.open_or_extend;
 
-        // We are computing a larger matrix - let's use this scalar for pulling the relevant score out,
-        // before it's wiped out by subsequent loop iterations.
+        // We are computing a larger matrix - use this scalar for pulling the relevant score out
         score_t relevant_score = 0;
 
         // Progress through the matrix row-by-row (compute full padded matrix to avoid divergence):
-        for (unsigned row_idx = 1; row_idx <= /* second_dim */ matrix_side_k; ++row_idx) {
-
+#pragma unroll
+        for (unsigned row_idx = 1; row_idx < matrix_side_k; ++row_idx) {
             // Don't forget to populate the first column of each row:
             current_scores[0] = row_idx * gap_costs.open_or_extend;
-            for (unsigned col_idx = 1; col_idx <= /* first_dim */ matrix_side_k; ++col_idx) {
+
+#pragma unroll
+            for (unsigned col_idx = 1; col_idx < matrix_side_k; ++col_idx) {
                 score_t substitution_cost = substituter(  //
                     second_string_registers[row_idx - 1], //
                     first_string_registers[col_idx - 1]);
@@ -2114,7 +2112,7 @@ __global__ void levenshtein_on_each_cuda_thread_( //
             bool is_relevant_row = row_idx == second_length;
             relevant_score = is_relevant_row ? current_scores[first_length] : relevant_score;
 
-            // Reuse the memory.
+            // Reuse the memory
             trivial_swap(previous_scores, current_scores);
         }
 
@@ -2159,9 +2157,12 @@ struct cuda_similarity_task_ {
     constexpr size_t max_diagonal_length() const noexcept { return sz_max_of_two(shorter_length, longer_length) + 1; }
 
     constexpr bool fits_in_registers() const noexcept {
-        return                                               //
-            shorter_length <= 128 && longer_length <= 128 && // ? H100 has 256x 32-bit registers per thread
-            bytes_per_cell == one_byte_per_cell_k;           // ? 2-byte entries require too many registers
+        return
+            // ? 2-byte entries require too many registers
+            bytes_per_cell == one_byte_per_cell_k &&
+            // ? H100 has 256x 32-bit registers per thread
+            shorter_length <= levenshtein_on_each_cuda_thread_default_text_limit_k &&
+            longer_length <= levenshtein_on_each_cuda_thread_default_text_limit_k;
     }
 };
 
@@ -2252,7 +2253,9 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             if (count_register_level_tasks > 0) {
                 std::partition( //
                     tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
-                auto thread_level_kernel = &levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k, 127>;
+                auto thread_level_kernel =
+                    &levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k,
+                                                      levenshtein_on_each_cuda_thread_default_text_limit_k>;
 
                 // Store values in variables since we need their addresses
                 task_t *tasks_ptr = tasks.data();
