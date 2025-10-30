@@ -2015,7 +2015,229 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
     }
 }
 
-inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 127;
+inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 128;
+
+/**
+ *  @brief  Byte-wise equality comparison: returns 0xFF per byte where equal, 0x00 where different.
+ *          Example: vcmpeq4(0x12345678, 0x12FF5678) = 0xFF00FFFF
+ */
+__forceinline__ __device__ __host__ sz_u32_t sz_u32_vcmpeq4_(sz_u32_t a, sz_u32_t b) {
+#ifdef __CUDA_ARCH__
+    return __vcmpeq4(a, b);
+#else
+    sz_u32_t result = 0;
+    for (int i = 0; i < 4; ++i) {
+        sz_u8_t byte_a = (a >> (i * 8)) & 0xFF;
+        sz_u8_t byte_b = (b >> (i * 8)) & 0xFF;
+        if (byte_a == byte_b) result |= 0xFFu << (i * 8);
+    }
+    return result;
+#endif
+}
+
+/**
+ *  @brief  Byte-wise unsigned minimum.
+ *          Example: vminu4(0x12345678, 0x34127856) = 0x12125656
+ */
+__forceinline__ __device__ __host__ sz_u32_t sz_u32_vminu4_(sz_u32_t a, sz_u32_t b) {
+#ifdef __CUDA_ARCH__
+    return __vminu4(a, b);
+#else
+    sz_u32_t result = 0;
+    for (int i = 0; i < 4; ++i) {
+        sz_u8_t byte_a = (a >> (i * 8)) & 0xFF;
+        sz_u8_t byte_b = (b >> (i * 8)) & 0xFF;
+        sz_u8_t min_byte = (byte_a < byte_b) ? byte_a : byte_b;
+        result |= (sz_u32_t)min_byte << (i * 8);
+    }
+    return result;
+#endif
+}
+
+/**
+ *  @brief  Byte-wise saturating addition (clamps at 0xFF).
+ *          Example: vaddus4(0xFE020304, 0x03020100) = 0xFF040404
+ */
+__forceinline__ __device__ __host__ sz_u32_t sz_u32_vaddus4_(sz_u32_t a, sz_u32_t b) {
+#ifdef __CUDA_ARCH__
+    return __vaddus4(a, b);
+#else
+    sz_u32_t result = 0;
+    for (int i = 0; i < 4; ++i) {
+        sz_u8_t byte_a = (a >> (i * 8)) & 0xFF;
+        sz_u8_t byte_b = (b >> (i * 8)) & 0xFF;
+        sz_u32_t sum = byte_a + byte_b;
+        sz_u8_t sat_byte = (sum > 0xFF) ? 0xFF : (sz_u8_t)sum;
+        result |= (sz_u32_t)sat_byte << (i * 8);
+    }
+    return result;
+#endif
+}
+
+/**
+ *  @brief  Byte permutation: select 4 bytes from 8-byte source {x[0..3], y[0..3]}.
+ *          Selector format (nibbles): each 4-bit value selects one of 8 source bytes.
+ *
+ *          Selector nibbles:     [3]  [2]  [1]  [0]  (hex digits in selector)
+ *          Result bytes:       byte3 byte2 byte1 byte0
+ *
+ *          Example: byte_perm(0x44332211, 0x88776655, 0x6543)
+ *            Source: [11 22 33 44 | 55 66 77 88]  (indices 0-7)
+ *            Selector 0x6543 = nibbles [6,5,4,3]
+ *            Result: [77 66 55 44] = 0x77665544
+ */
+__forceinline__ __device__ __host__ sz_u32_t sz_u32_byte_perm_(sz_u32_t x, sz_u32_t y, sz_u32_t selector) {
+#ifdef __CUDA_ARCH__
+    return __byte_perm(x, y, selector);
+#else
+    sz_u8_t source[8];
+    for (int i = 0; i < 4; ++i) {
+        source[i] = (x >> (i * 8)) & 0xFF;
+        source[i + 4] = (y >> (i * 8)) & 0xFF;
+    }
+
+    sz_u32_t result = 0;
+    for (int i = 0; i < 4; ++i) {
+        sz_u8_t sel = (selector >> (i * 4)) & 0x7;
+        result |= (sz_u32_t)source[sel] << (i * 8);
+    }
+    return result;
+#endif
+}
+
+/**
+ *  @brief  Register-only Levenshtein distance for strings up to 128 bytes using SIMD operations.
+ *
+ *  Implements the Wagner-Fischer algorithm using a single-row optimization where only the current
+ *  row of the DP matrix is stored in registers. The longer input string is also cached in registers
+ *  to avoid repeated memory access. This design targets GPU architectures (H100) where register
+ *  memory is abundant but shared/global memory access is expensive. The algorithm processes 4 columns
+ *  at a time by packing them into uint32 vectors and using video instructions (vcmpeq4, vminu4,
+ *  vaddus4, byte_perm) for parallel byte-wise operations.
+ *
+ *  Each iteration computes one row by: (1) comparing the current character against 4 cached characters
+ *  in parallel, (2) computing vertical and diagonal dependencies using SIMD min/add, and (3) propagating
+ *  horizontal dependencies through 4 sequential iterations within each uint32. The result is extracted
+ *  from the final row vector at the position corresponding to the longer string's length. Total register
+ *  usage is approximately 70 registers (256 bytes for arrays plus temporaries).
+ *
+ *  Register layout (max_text_length_ = 128):
+ *
+ *    row_vec_[32]           : current DP row,  4 cells per uint32  (128 bytes)
+ *    longer_string_vec_[32] : cached string,   4 chars per uint32  (128 bytes)
+ *
+ *  Processing order per uint32:
+ *
+ *    1. Compare:    match[0..3] = (char == longer[0..3])  [parallel]
+ *    2. Vertical:   r[0..3] = min(top[0..3]+gap, diag[0..3]+cost)  [parallel]
+ *    3. Horizontal: r[0]=min(r[0],left+gap), r[1]=min(r[1],r[0]+gap), ... [sequential]
+ */
+template <unsigned max_text_length_>
+struct register_optimal_levenshtein {
+    static constexpr unsigned max_text_length_k = max_text_length_;
+    static constexpr unsigned vec_count_k = max_text_length_k / sizeof(sz_u32_vec_t);
+
+    sz_u32_vec_t row_vec_[vec_count_k];
+    sz_u32_vec_t longer_string_vec_[vec_count_k];
+
+    __forceinline__ __device__ __host__ sz_u8_t operator()(     //
+        sz_u8_t const *longer_string, unsigned longer_length,   //
+        sz_u8_t const *shorter_string, unsigned shorter_length, //
+        uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
+
+        // Initialize the first row with the vectorized variant of:
+        //  for (unsigned col_idx = 0; col_idx < matrix_side_k; ++col_idx)
+        //      row_registers[col_idx] = col_idx * gap_costs.open_or_extend;
+        for (unsigned i = 0, running_gap = gap_costs.open_or_extend; i < vec_count_k; ++i) {
+            row_vec_[i].u32 = running_gap;
+            running_gap += gap_costs.open_or_extend;
+            row_vec_[i].u32 |= running_gap << 8;
+            running_gap += gap_costs.open_or_extend;
+            row_vec_[i].u32 |= running_gap << 16;
+            running_gap += gap_costs.open_or_extend;
+            row_vec_[i].u32 |= running_gap << 24;
+            running_gap += gap_costs.open_or_extend;
+        }
+
+        // Load longer string into vector array (stays in registers, accessed in inner loop)
+        for (unsigned i = 0; i < longer_length; ++i) longer_string_vec_[0].u8s[i] = longer_string[i];
+
+        // Broadcast costs to all 4 bytes per uint32
+        error_cost_t const gap_cost = gap_costs.open_or_extend;
+        error_cost_t const match_cost = substituter.match;
+        error_cost_t const mismatch_cost = substituter.mismatch;
+        sz_u32_vec_t gap_vec, match_vec, mismatch_vec;
+        gap_vec.u32 = gap_cost | (gap_cost << 8) | (gap_cost << 16) | (gap_cost << 24);
+        match_vec.u32 = match_cost | (match_cost << 8) | (match_cost << 16) | (match_cost << 24);
+        mismatch_vec.u32 = mismatch_cost | (mismatch_cost << 8) | (mismatch_cost << 16) | (mismatch_cost << 24);
+
+        // Outer loop: iterate over shorter string (fewer iterations)
+        sz_u32_vec_t shorter_char_vec;
+        for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
+            // Load one character from shorter string and broadcast to all 4 bytes
+            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
+            shorter_char_vec.u32 = shorter_char | (shorter_char << 8) | (shorter_char << 16) | (shorter_char << 24);
+
+            // Column 0 values (not stored in row_vec_)
+            sz_u8_t col0_prev = (row_idx - 1) * gap_cost;
+            sz_u8_t col0_curr = row_idx * gap_cost;
+
+            // Broadcast col0_prev for diagonal construction
+            sz_u32_t prev_u32vec = col0_prev | (col0_prev << 8) | (col0_prev << 16) | (col0_prev << 24);
+
+#pragma unroll(vec_count_k)
+            // Inner loop: process longer string 4 bytes at a time
+            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
+                // Load DP values from previous row ("top" in DP matrix)
+                sz_u32_t top_u32vec = row_vec_[vec_idx].u32;
+
+                // Construct diagonal: {prev[byte3], top[byte0], top[byte1], top[byte2]}
+                sz_u32_t diag_u32vec = sz_u32_byte_perm_(prev_u32vec, top_u32vec, 0x6543);
+
+                // Compare shorter_char with 4 chars from longer string
+                sz_u32_t longer_u32vec = longer_string_vec_[vec_idx].u32;
+                sz_u32_t match_u32vec = sz_u32_vcmpeq4_(shorter_char_vec.u32, longer_u32vec);
+
+                // Blend match_cost/mismatch_cost using match mask
+                // match_u32vec = 0xFF (match) or 0x00 (mismatch)
+                sz_u32_t substitutions_u32vec = (match_vec.u32 & match_u32vec) | (mismatch_vec.u32 & ~match_u32vec);
+
+                // DP recurrence: min(diagonal + subst, top + gap, left + gap)
+                sz_u32_t from_diag_u32vec = sz_u32_vaddus4_(diag_u32vec, substitutions_u32vec);
+                sz_u32_t from_top_u32vec = sz_u32_vaddus4_(top_u32vec, gap_vec.u32);
+                sz_u32_t result_u32vec = sz_u32_vminu4_(from_diag_u32vec, from_top_u32vec);
+
+                // Propagate left dependency across 4 bytes (sequential scan)
+                sz_u32_t left_source = (vec_idx == 0) ? col0_curr : (row_vec_[vec_idx - 1].u32 >> 24);
+                sz_u32_t left_u32vec = left_source | (left_source << 8) | (left_source << 16) | (left_source << 24);
+
+                // 4 iterations to propagate left-to-right within uint32:
+                //   After iter N, bytes [0..N] are finalized
+                sz_u32_t shifted_u32vec = sz_u32_byte_perm_(left_u32vec, result_u32vec, 0x6540);
+                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted_u32vec, gap_vec.u32));
+
+                shifted_u32vec = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2100);
+                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted_u32vec, gap_vec.u32));
+
+                shifted_u32vec = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2110);
+                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted_u32vec, gap_vec.u32));
+
+                shifted_u32vec = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2221);
+                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted_u32vec, gap_vec.u32));
+
+                prev_u32vec = top_u32vec;
+                row_vec_[vec_idx].u32 = result_u32vec;
+            }
+        }
+
+        // Extract result once after loop completes
+        unsigned result_vec_idx = (longer_length - 1) / 4;
+        unsigned result_byte_idx = (longer_length - 1) % 4;
+        sz_u32_t result_vec = row_vec_[result_vec_idx].u32;
+        sz_u8_t relevant_score = (result_vec >> (result_byte_idx * 8)) & 0xFF;
+        return relevant_score;
+    }
+};
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
@@ -2053,61 +2275,23 @@ __global__ void levenshtein_on_each_cuda_thread_( //
     size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     size_t const threads_per_device = warps_per_device * warp_size;
 
-    // No shared memory, only registers!
-    constexpr unsigned max_text_length_k = max_text_length_;
-    constexpr unsigned matrix_side_k = max_text_length_k + 1;
-
-    score_t row_registers[matrix_side_k];
-    char_t first_string_registers[max_text_length_k];
+    // Instantiate register-optimal Levenshtein struct (processes 4 bytes at a time)
+    register_optimal_levenshtein<max_text_length_> levenshtein_computer;
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     for (size_t task_idx = global_thread_index; task_idx < tasks_count; task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        char_t const *first_global = task.shorter_ptr;
-        char_t const *second_global = task.longer_ptr;
-        size_t const first_length = task.shorter_length;
-        size_t const second_length = task.longer_length;
+        sz_u8_t const *shorter_ptr = reinterpret_cast<sz_u8_t const *>(task.shorter_ptr);
+        sz_u8_t const *longer_ptr = reinterpret_cast<sz_u8_t const *>(task.longer_ptr);
+        unsigned const shorter_length = task.shorter_length;
+        unsigned const longer_length = task.longer_length;
         auto &result_ref = task.result;
 
-        // We are going to store 1 row of the matrix (one-row Wagner-Fischer algorithm)
-        for (unsigned i = 0; i < first_length; ++i) first_string_registers[i] = first_global[i];
+        // Call SIMD/SWAR optimized Levenshtein distance computation
+        sz_u8_t distance =
+            levenshtein_computer(longer_ptr, longer_length, shorter_ptr, shorter_length, substituter, gap_costs);
 
-        // Initialize the first row
-        for (unsigned col_idx = 0; col_idx < matrix_side_k; ++col_idx)
-            row_registers[col_idx] = col_idx * gap_costs.open_or_extend;
-
-        score_t relevant_score = 0;
-
-        // Outer loop: runtime bound (no unroll to avoid code explosion)
-        for (unsigned row_idx = 1; row_idx <= second_length; ++row_idx) {
-            // Cache second_char in scalar (read once per row, used for all columns)
-            char_t second_char = second_global[row_idx - 1];
-
-            score_t diagonal_value = row_registers[0];             // Save top-left corner (previous row, previous col)
-            row_registers[0] = row_idx * gap_costs.open_or_extend; // First column
-
-            // Inner loop: no unrolling to minimize register pressure
-            for (unsigned col_idx = 1; col_idx <= first_length; ++col_idx) {
-                score_t top_left = diagonal_value;       // This is previous_row[col-1]
-                diagonal_value = row_registers[col_idx]; // Save current value before overwriting
-
-                // Use cached second_char (read once, used first_length times)
-                score_t substitution_cost = substituter( //
-                    second_char,                         // Cached in scalar
-                    first_string_registers[col_idx - 1]);
-
-                row_registers[col_idx] = sz_min_of_three(                  //
-                    top_left + substitution_cost,                          // diagonal (substitution)
-                    row_registers[col_idx - 1] + gap_costs.open_or_extend, // left (insertion)
-                    diagonal_value + gap_costs.open_or_extend);            // top (deletion)
-            }
-
-            // Extract result at the exact position
-            bool is_relevant_row = row_idx == second_length;
-            relevant_score = is_relevant_row ? row_registers[first_length] : relevant_score;
-        }
-
-        result_ref = relevant_score;
+        result_ref = distance;
     }
 }
 
