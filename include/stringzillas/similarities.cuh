@@ -2015,7 +2015,7 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
     }
 }
 
-inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 31;
+inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 127;
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
@@ -2080,6 +2080,9 @@ __global__ void levenshtein_on_each_cuda_thread_( //
 
         // Outer loop: runtime bound (no unroll to avoid code explosion)
         for (unsigned row_idx = 1; row_idx <= second_length; ++row_idx) {
+            // Cache second_char in scalar (read once per row, used for all columns)
+            char_t second_char = second_global[row_idx - 1];
+
             score_t diagonal_value = row_registers[0];             // Save top-left corner (previous row, previous col)
             row_registers[0] = row_idx * gap_costs.open_or_extend; // First column
 
@@ -2088,9 +2091,9 @@ __global__ void levenshtein_on_each_cuda_thread_( //
                 score_t top_left = diagonal_value;       // This is previous_row[col-1]
                 diagonal_value = row_registers[col_idx]; // Save current value before overwriting
 
-                // Read second string from global memory (only once per row)
+                // Use cached second_char (read once, used first_length times)
                 score_t substitution_cost = substituter( //
-                    second_global[row_idx - 1],          //
+                    second_char,                         // Cached in scalar
                     first_string_registers[col_idx - 1]);
 
                 row_registers[col_idx] = sz_min_of_three(                  //
