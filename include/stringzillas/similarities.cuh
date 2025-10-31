@@ -2259,7 +2259,7 @@ template < //
     sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
-__global__ __launch_bounds__(128, 4)           // Target: 128 threads/block, 4 blocks/SM for occupancy
+__global__ __launch_bounds__(256, 4)           // Target: 256 threads/block, 4 blocks/SM minimum
     void levenshtein_on_each_cuda_thread_(     //
         task_type_ *tasks, size_t tasks_count, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
@@ -2442,9 +2442,9 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 thread_level_kernel_args[2] = (void *)(&substituter_);
                 thread_level_kernel_args[3] = (void *)(&gap_costs_);
 
-                // Launch configuration tuned for register-heavy kernel with __launch_bounds__(128, 4)
-                unsigned const threads_per_block = 128;
-                unsigned const blocks_per_multiprocessor = 16; // Aggressive: H100 can handle high block count
+                // Launch configuration tuned for register-heavy kernel with __launch_bounds__(256, 4)
+                unsigned const threads_per_block = 256;
+                unsigned const blocks_per_multiprocessor = 8; // 2048 threads/SM = 256 × 8
                 unsigned const total_blocks = blocks_per_multiprocessor * specs.streaming_multiprocessors;
                 cudaError_t launch_error = cudaLaunchKernel(       //
                     reinterpret_cast<void *>(thread_level_kernel), // Kernel function pointer
