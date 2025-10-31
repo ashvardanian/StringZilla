@@ -2185,7 +2185,6 @@ struct register_optimal_levenshtein {
             // Broadcast col0_prev for diagonal construction
             sz_u32_t prev_u32vec = col0_prev | (col0_prev << 8) | (col0_prev << 16) | (col0_prev << 24);
 
-#pragma unroll(vec_count_k)
             // Inner loop: process longer string 4 bytes at a time
             for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
                 // Load DP values from previous row ("top" in DP matrix)
@@ -2260,9 +2259,10 @@ template < //
     sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
-__global__ void levenshtein_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,        //
-    uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
+__global__ __launch_bounds__(128, 4)           // Target: 128 threads/block, 4 blocks/SM for occupancy
+    void levenshtein_on_each_cuda_thread_(     //
+        task_type_ *tasks, size_t tasks_count, //
+        uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
     using char_t = char_type_;
@@ -2442,16 +2442,17 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 thread_level_kernel_args[2] = (void *)(&substituter_);
                 thread_level_kernel_args[3] = (void *)(&gap_costs_);
 
-                // TODO: We can be wiser about the dimensions of this grid.
-                unsigned const random_block_size = 128;
-                unsigned const random_blocks_per_multiprocessor = 8;
-                cudaError_t launch_error = cudaLaunchKernel(                                  //
-                    reinterpret_cast<void *>(thread_level_kernel),                            // Kernel function pointer
-                    dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
-                    dim3(random_block_size),                                                  // Block dimensions
-                    thread_level_kernel_args, // Array of kernel argument pointers
-                    0,                        // Shared memory per block (in bytes)
-                    executor.stream());       // CUDA stream
+                // Launch configuration tuned for register-heavy kernel with __launch_bounds__(128, 4)
+                unsigned const threads_per_block = 128;
+                unsigned const blocks_per_multiprocessor = 16; // Aggressive: H100 can handle high block count
+                unsigned const total_blocks = blocks_per_multiprocessor * specs.streaming_multiprocessors;
+                cudaError_t launch_error = cudaLaunchKernel(       //
+                    reinterpret_cast<void *>(thread_level_kernel), // Kernel function pointer
+                    dim3(total_blocks),                            // Grid dimensions
+                    dim3(threads_per_block),                       // Block dimensions
+                    thread_level_kernel_args,                      // Array of kernel argument pointers
+                    0,                                             // Shared memory per block (in bytes)
+                    executor.stream());                            // CUDA stream
                 if (launch_error != cudaSuccess) {
                     if (launch_error == cudaErrorMemoryAllocation) return {status_t::bad_alloc_k, launch_error};
                     else
