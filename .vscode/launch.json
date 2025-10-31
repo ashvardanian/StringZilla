@@ -177,8 +177,16 @@
       "cwd": "${workspaceFolder}",
       "environment": [
         {
+          "name": "STRINGWARS_STRESS",
+          "value": "0"
+        },
+        {
+          "name": "STRINGWARS_FILTER",
+          "value": "levenshtein_cuda:batch64"
+        },
+        {
           "name": "STRINGWARS_DATASET",
-          "value": "leipzig1M.txt"
+          "value": "acgt_100.txt"
         }
       ],
       "stopAtEntry": false,
