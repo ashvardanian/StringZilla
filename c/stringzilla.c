@@ -58,6 +58,9 @@ typedef struct sz_implementations_t {
     sz_find_byteset_t find_byteset;
     sz_find_byteset_t rfind_byteset;
 
+    sz_find_utf8_boundary_t find_newline_utf8;
+    sz_find_utf8_boundary_t find_whitespace_utf8;
+
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
     sz_pgrams_sort_t pgrams_sort;
@@ -98,6 +101,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->rfind_byte = sz_rfind_byte_serial;
     impl->find_byteset = sz_find_byteset_serial;
     impl->rfind_byteset = sz_rfind_byteset_serial;
+    impl->find_newline_utf8 = sz_find_newline_utf8_serial;
+    impl->find_whitespace_utf8 = sz_find_whitespace_utf8_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -180,6 +185,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     if (caps & sz_cap_ice_k) {
         impl->find_byteset = sz_find_byteset_ice;
         impl->rfind_byteset = sz_rfind_byteset_ice;
+        impl->find_newline_utf8 = sz_find_newline_utf8_ice;
+        impl->find_whitespace_utf8 = sz_find_whitespace_utf8_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -245,7 +252,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->move = sz_move_sve;
         impl->fill = sz_fill_sve;
         impl->lookup = sz_lookup_sve;
-	
+
         impl->find = sz_find_sve;
         // TODO: impl->rfind = sz_rfind_sve;
         impl->find_byte = sz_find_byte_sve;
@@ -432,6 +439,14 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
                                              sz_size_t *first_positions, sz_size_t *second_positions) {
     return sz_dispatch_table.sequence_intersect(first_array, second_array, alloc, seed, intersection_size,
                                                 first_positions, second_positions);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_find_newline_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.find_newline_utf8(text, length, matched_length);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_find_whitespace_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.find_whitespace_utf8(text, length, matched_length);
 }
 
 // Provide overrides for the libc mem* functions

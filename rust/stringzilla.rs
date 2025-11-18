@@ -47,6 +47,86 @@ pub struct Byteset {
     bits: [u64; 4],
 }
 
+/// Represents a byte span with offset and length.
+///
+/// Used for matches of UTF-8 characters, substrings, or any byte-level operations.
+/// Stores the byte offset from the start of the text and the length in bytes.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{IndexSpan, find_newline_utf8};
+///
+/// let text = "Hello\nWorld";
+/// if let Some(span) = find_newline_utf8(text) {
+///     assert_eq!(span.offset, 5);
+///     assert_eq!(span.length, 1);
+///     let matched = span.extract(text.as_bytes());
+///     assert_eq!(matched, b"\n");
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IndexSpan {
+    /// Byte offset from the start of the text
+    pub offset: usize,
+    /// Length in bytes of the matched span
+    pub length: usize,
+}
+
+impl IndexSpan {
+    /// Creates a new IndexSpan with the given offset and length.
+    #[inline]
+    pub fn new(offset: usize, length: usize) -> Self {
+        Self { offset, length }
+    }
+
+    /// Returns the range of bytes covered by this span.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let span = IndexSpan::new(5, 3);
+    /// assert_eq!(span.range(), 5..8);
+    /// ```
+    #[inline]
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.offset..self.offset + self.length
+    }
+
+    /// Extracts the matched bytes from the source text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let text = b"Hello World";
+    /// let span = IndexSpan::new(6, 5);
+    /// assert_eq!(span.extract(text), b"World");
+    /// ```
+    #[inline]
+    pub fn extract<'a>(&self, text: &'a [u8]) -> &'a [u8] {
+        &text[self.range()]
+    }
+
+    /// Returns the end offset (offset + length).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let span = IndexSpan::new(5, 3);
+    /// assert_eq!(span.end(), 8);
+    /// ```
+    #[inline]
+    pub fn end(&self) -> usize {
+        self.offset + self.length
+    }
+}
+
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
 /// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
@@ -246,6 +326,14 @@ extern "C" {
         haystack: *const c_void,
         haystack_length: usize,
         byteset: *const c_void,
+    ) -> *const c_void;
+
+    pub(crate) fn sz_find_newline_utf8(text: *const c_void, length: usize, matched_length: *mut usize)
+        -> *const c_void;
+    pub(crate) fn sz_find_whitespace_utf8(
+        text: *const c_void,
+        length: usize,
+        matched_length: *mut usize,
     ) -> *const c_void;
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
@@ -1030,6 +1118,142 @@ where
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
+/// Finds the first newline character in UTF-8 encoded text.
+///
+/// Searches for any of the 8 Unicode newline characters:
+/// - U+000A (LF - Line Feed `\n`)
+/// - U+000B (VT - Vertical Tab `\v`)
+/// - U+000C (FF - Form Feed `\f`)
+/// - U+000D (CR - Carriage Return `\r`, handles `\r\n` as single newline)
+/// - U+001C (FILE SEPARATOR)
+/// - U+001D (GROUP SEPARATOR)
+/// - U+001E (RECORD SEPARATOR)
+/// - U+0085 (NEL - Next Line)
+/// - U+2028 (LINE SEPARATOR)
+/// - U+2029 (PARAGRAPH SEPARATOR)
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+///
+/// # Returns
+///
+/// An `Option<IndexSpan>` containing the byte offset and length of the matched newline.
+/// The length can be 1-3 bytes for single characters, or 2 bytes for CRLF sequence.
+///
+/// Returns `None` if no newline is found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello\nWorld";
+/// let span = sz::find_newline_utf8(text).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+///
+/// let text_crlf = "Hello\r\nWorld";
+/// let span = sz::find_newline_utf8(text_crlf).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 2);
+///
+/// let text_unicode = "Hello\u{2028}World"; // LINE SEPARATOR
+/// let span = sz::find_newline_utf8(text_unicode).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 3);
+/// ```
+pub fn find_newline_utf8<T>(text: T) -> Option<IndexSpan>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+    let mut matched_length: usize = 0;
+
+    let result = unsafe { sz_find_newline_utf8(text_pointer, text_length, &mut matched_length as *mut usize) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(IndexSpan::new(offset, matched_length))
+    }
+}
+
+/// Finds the first whitespace character in UTF-8 encoded text.
+///
+/// Searches for any of the 29 Unicode whitespace characters (includes all newlines
+/// per Unicode standard, plus spaces, tabs, and various Unicode space characters).
+///
+/// The complete set includes:
+/// - All 8 newline characters (see [`find_newline_utf8`])
+/// - U+0009 (CHARACTER TABULATION `\t`)
+/// - U+001F (UNIT SEPARATOR)
+/// - U+0020 (SPACE)
+/// - U+00A0 (NO-BREAK SPACE)
+/// - U+1680 (OGHAM SPACE MARK)
+/// - U+2000-U+200A (11 various spaces)
+/// - U+202F (NARROW NO-BREAK SPACE)
+/// - U+205F (MEDIUM MATHEMATICAL SPACE)
+/// - U+3000 (IDEOGRAPHIC SPACE)
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+///
+/// # Returns
+///
+/// An `Option<IndexSpan>` containing the byte offset and length of the matched whitespace.
+/// The length can be 1-3 bytes depending on the UTF-8 character.
+///
+/// Returns `None` if no whitespace is found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello World";
+/// let span = sz::find_whitespace_utf8(text).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+///
+/// let text_unicode = "Hello\u{3000}World"; // IDEOGRAPHIC SPACE
+/// let span = sz::find_whitespace_utf8(text_unicode).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 3);
+///
+/// // Whitespace includes newlines
+/// let text_newline = "Hello\nWorld";
+/// let span = sz::find_whitespace_utf8(text_newline).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+/// ```
+pub fn find_whitespace_utf8<T>(text: T) -> Option<IndexSpan>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+    let mut matched_length: usize = 0;
+
+    let result = unsafe { sz_find_whitespace_utf8(text_pointer, text_length, &mut matched_length as *mut usize) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(IndexSpan::new(offset, matched_length))
+    }
+}
+
 /// Randomizes the contents of a given byte slice `text` using characters from
 /// a specified `alphabet`. This function mutates `text` in place, replacing each
 /// byte with a random one from `alphabet`. It is designed for situations where
@@ -1628,6 +1852,136 @@ impl<'a> Iterator for RangeRSplits<'a> {
     }
 }
 
+/// An iterator over substrings of UTF-8 text split by newline characters.
+///
+/// This iterator yields slices between newline characters. The newline characters themselves
+/// are not included in the yielded slices. Handles all 8 Unicode newline characters including
+/// CRLF as a single delimiter.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeNewlineUtf8Splits};
+///
+/// let text = b"Hello\nWorld\r\nRust";
+/// let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+/// assert_eq!(lines, vec![b"Hello", b"World", b"Rust"]);
+/// ```
+pub struct RangeNewlineUtf8Splits<'a> {
+    text: &'a [u8],
+    position: usize,
+    finished: bool,
+}
+
+impl<'a> RangeNewlineUtf8Splits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        Self {
+            text,
+            position: 0,
+            finished: false,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        if self.position >= self.text.len() {
+            if self.position == self.text.len() && !self.finished {
+                // Return empty slice for trailing newline case
+                self.finished = true;
+                return Some(&self.text[self.text.len()..]);
+            }
+            return None;
+        }
+
+        let start = self.position;
+
+        // Search for next newline
+        if let Some(span) = find_newline_utf8(&self.text[self.position..]) {
+            let end = self.position + span.offset;
+            self.position = end + span.length;
+            Some(&self.text[start..end])
+        } else {
+            // No more newlines, return rest of text
+            self.finished = true;
+            self.position = self.text.len();
+            Some(&self.text[start..])
+        }
+    }
+}
+
+/// An iterator over words in UTF-8 text split by whitespace characters.
+///
+/// This iterator yields non-empty slices between whitespace characters. The whitespace
+/// characters themselves are not included. Handles all 29 Unicode whitespace characters.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeWhitespaceUtf8Splits};
+///
+/// let text = b"Hello  World\tRust";
+/// let words: Vec<&[u8]> = RangeWhitespaceUtf8Splits::new(text).collect();
+/// assert_eq!(words, vec![b"Hello", b"World", b"Rust"]);
+/// ```
+pub struct RangeWhitespaceUtf8Splits<'a> {
+    text: &'a [u8],
+    position: usize,
+}
+
+impl<'a> RangeWhitespaceUtf8Splits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        Self { text, position: 0 }
+    }
+}
+
+impl<'a> Iterator for RangeWhitespaceUtf8Splits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.text.len() {
+            return None;
+        }
+
+        // Skip leading whitespace
+        while self.position < self.text.len() {
+            if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
+                if span.offset == 0 {
+                    // Whitespace at current position, skip it
+                    self.position += span.length;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if self.position >= self.text.len() {
+            return None;
+        }
+
+        let start = self.position;
+
+        // Find next whitespace or end of text
+        if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
+            let end = self.position + span.offset;
+            self.position = end + span.length;
+            Some(&self.text[start..end])
+        } else {
+            // No more whitespace, return rest of text
+            self.position = self.text.len();
+            Some(&self.text[start..])
+        }
+    }
+}
+
 /// Trait for unary string operations that only operate on `self` without needle parameters.
 /// These operations include hash computation and byte sum calculation.
 ///
@@ -1671,6 +2025,79 @@ pub trait StringZillableUnary {
     /// assert_ne!(s1.sz_hash(), s2.sz_hash());
     /// ```
     fn sz_hash(&self) -> u64;
+
+    /// Finds the first newline character in UTF-8 encoded text.
+    ///
+    /// Returns an `IndexSpan` containing the byte offset and length of the matched newline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello\nWorld";
+    /// let span = text.sz_find_newline_utf8().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 1);
+    ///
+    /// let text_crlf = "Hello\r\nWorld";
+    /// let span = text_crlf.sz_find_newline_utf8().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 2);
+    /// ```
+    fn sz_find_newline_utf8(&self) -> Option<IndexSpan>;
+
+    /// Finds the first whitespace character in UTF-8 encoded text.
+    ///
+    /// Returns an `IndexSpan` containing the byte offset and length of the matched whitespace.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello World";
+    /// let span = text.sz_find_whitespace_utf8().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 1);
+    /// ```
+    fn sz_find_whitespace_utf8(&self) -> Option<IndexSpan>;
+
+    /// Returns an iterator over lines split by newline characters.
+    ///
+    /// The iterator yields slices between newlines. Handles all Unicode newline characters
+    /// including CRLF as a single delimiter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello\nWorld\r\nRust";
+    /// let lines: Vec<&str> = text.sz_newline_utf8_splits()
+    ///     .map(|line| std::str::from_utf8(line).unwrap())
+    ///     .collect();
+    /// assert_eq!(lines, vec!["Hello", "World", "Rust"]);
+    /// ```
+    fn sz_newline_utf8_splits(&self) -> RangeNewlineUtf8Splits;
+
+    /// Returns an iterator over words split by whitespace characters.
+    ///
+    /// The iterator yields non-empty slices between whitespace. Handles all 29 Unicode
+    /// whitespace characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello  World\tRust";
+    /// let words: Vec<&str> = text.sz_whitespace_utf8_splits()
+    ///     .map(|word| std::str::from_utf8(word).unwrap())
+    ///     .collect();
+    /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
+    /// ```
+    fn sz_whitespace_utf8_splits(&self) -> RangeWhitespaceUtf8Splits;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -1917,6 +2344,22 @@ where
 
     fn sz_hash(&self) -> u64 {
         hash(self)
+    }
+
+    fn sz_find_newline_utf8(&self) -> Option<IndexSpan> {
+        find_newline_utf8(self)
+    }
+
+    fn sz_find_whitespace_utf8(&self) -> Option<IndexSpan> {
+        find_whitespace_utf8(self)
+    }
+
+    fn sz_newline_utf8_splits(&self) -> RangeNewlineUtf8Splits {
+        RangeNewlineUtf8Splits::new(self.as_ref())
+    }
+
+    fn sz_whitespace_utf8_splits(&self) -> RangeWhitespaceUtf8Splits {
+        RangeWhitespaceUtf8Splits::new(self.as_ref())
     }
 }
 
@@ -2535,5 +2978,277 @@ mod tests {
 
         let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
         lookup(&mut less_long, &long, lut);
+    }
+
+    #[test]
+    fn find_newline_utf8_lf() {
+        let text = "Hello\nWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_crlf() {
+        let text = "Hello\r\nWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_newline_utf8_vt() {
+        let text = "Hello\x0BWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_ff() {
+        let text = "Hello\x0CWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_cr() {
+        let text = "Hello\rWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_file_separator() {
+        let text = "Hello\x1CWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_group_separator() {
+        let text = "Hello\x1DWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_record_separator() {
+        let text = "Hello\x1EWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_nel() {
+        // U+0085 (NEL - Next Line) is 2 bytes in UTF-8: C2 85
+        let text = "Hello\u{0085}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_newline_utf8_line_separator() {
+        // U+2028 (LINE SEPARATOR) is 3 bytes in UTF-8: E2 80 A8
+        let text = "Hello\u{2028}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_newline_utf8_paragraph_separator() {
+        // U+2029 (PARAGRAPH SEPARATOR) is 3 bytes in UTF-8: E2 80 A9
+        let text = "Hello\u{2029}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_newline_utf8_not_found() {
+        let text = "Hello World";
+        assert_eq!(sz::find_newline_utf8(text), None);
+    }
+
+    #[test]
+    fn find_newline_utf8_empty() {
+        let text = "";
+        assert_eq!(sz::find_newline_utf8(text), None);
+    }
+
+    #[test]
+    fn find_newline_utf8_trait_method() {
+        use crate::sz::StringZillableUnary;
+        let text = "Hello\nWorld";
+        let span = text.sz_find_newline_utf8().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_trait_method_string() {
+        use crate::sz::StringZillableUnary;
+        let text = String::from("Hello\nWorld");
+        let span = text.sz_find_newline_utf8().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_space() {
+        let text = "Hello World";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_tab() {
+        let text = "Hello\tWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_newline() {
+        // Whitespace should include newlines
+        let text = "Hello\nWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_cr() {
+        // Whitespace should include CR (finds CR as 1-byte, not CRLF as 2-byte)
+        let text = "Hello\r\nWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_nbsp() {
+        // U+00A0 (NO-BREAK SPACE) is 2 bytes in UTF-8: C2 A0
+        let text = "Hello\u{00A0}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_ideographic() {
+        // U+3000 (IDEOGRAPHIC SPACE) is 3 bytes in UTF-8: E3 80 80
+        let text = "Hello\u{3000}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_en_quad() {
+        // U+2000 (EN QUAD) is 3 bytes in UTF-8: E2 80 80
+        let text = "Hello\u{2000}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_ogham() {
+        // U+1680 (OGHAM SPACE MARK) is 3 bytes in UTF-8: E1 9A 80
+        let text = "Hello\u{1680}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_not_found() {
+        let text = "HelloWorld";
+        assert_eq!(sz::find_whitespace_utf8(text), None);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_empty() {
+        let text = "";
+        assert_eq!(sz::find_whitespace_utf8(text), None);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method() {
+        use crate::sz::StringZillableUnary;
+        let text = "Hello World";
+        let span = text.sz_find_whitespace_utf8().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method_string() {
+        use crate::sz::StringZillableUnary;
+        let text = String::from("Hello World");
+        let span = text.sz_find_whitespace_utf8().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method_bytes() {
+        use crate::sz::StringZillableUnary;
+        let text = b"Hello World";
+        let span = text.sz_find_whitespace_utf8().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits() {
+        let text = b"a\nb\r\nc\n\nd";
+        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines, vec![b"a", b"b", b"c", &b""[..], b"d"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_unicode() {
+        let text = "Hello\u{2028}World".as_bytes(); // LINE SEPARATOR
+        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines, vec!["Hello".as_bytes(), "World".as_bytes()]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits() {
+        let text = b"  a \t b\n\nc  ";
+        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        assert_eq!(words, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits_unicode() {
+        let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
+        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        assert_eq!(words, vec![b"a", b"b", b"c"]);
     }
 }
