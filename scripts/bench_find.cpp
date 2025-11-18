@@ -75,6 +75,7 @@ struct matcher_from_sz_find {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -140,6 +141,7 @@ struct matcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.begin(), haystack.end(), searcher_);
+        do_not_optimize(match);
         if (match == haystack.end()) return std::string_view::npos; // No match found
         return (size_type)(match - haystack.begin());
     }
@@ -157,6 +159,7 @@ struct rmatcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.rbegin(), haystack.rend(), searcher_);
+        do_not_optimize(match);
         if (match == haystack.rend()) return std::string_view::npos; // No match found
         auto offset_from_end = match - haystack.rbegin();
         auto offset_from_start = haystack.size() - offset_from_end - needle_.size();
@@ -180,6 +183,7 @@ auto callable_for_substring_search(environment_t const &env) {
         std::size_t count_bytes = haystack.size();
         std::size_t count_matches = matches.size();
         std::size_t count_operations = count_bytes * needle.size();
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches, count_operations};
     };
 }
@@ -289,6 +293,7 @@ struct matcher_from_sz_find_byte {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &needle_);
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -345,6 +350,7 @@ struct matcher_from_std_find {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::find(haystack.begin(), haystack.end(), needle_);
+        do_not_optimize(match);
         return (size_type)(match - haystack.begin());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -362,6 +368,7 @@ auto callable_for_byte_search(environment_t const &env) {
         // As a checksum, mix the counts together
         std::size_t count_matches = count_whitespaces + count_newlines + count_nulls;
         std::size_t count_bytes = haystack.size() * 3; // We've traversed the input 3 times
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches};
     };
 }
@@ -453,6 +460,7 @@ struct matcher_from_sz_find_byteset {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &needles_.raw());
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -471,6 +479,7 @@ struct matcher_strcspn_t {
     inline size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = strcspn(haystack.data(), needles_.data());
+        do_not_optimize(match);
         if (match == haystack.size()) return std::string_view::npos; // No match found
         return match;
     }
@@ -612,6 +621,7 @@ struct matcher_from_sz_find_boundary {
     constexpr matcher_from_sz_find_boundary() noexcept {}
     inline size_type operator()(std::string_view haystack) noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &last_match_length_);
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
