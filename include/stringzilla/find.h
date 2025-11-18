@@ -8,8 +8,8 @@
  *  - `sz_find` and reverse-order `sz_rfind`
  *  - `sz_find_byte` and reverse-order `sz_rfind_byte`
  *  - `sz_find_byteset` and reverse-order `sz_rfind_byteset`
- *  - `sz_find_newline_utf8` - for 8 unicode newline characters (including rare separators)
- *  - `sz_find_whitespace_utf8` - for 29 unicode whitespace characters (includes all newlines per Unicode standard)
+ *  - `sz_find_newline_utf8` - for 7 Unicode newline characters + CRLF sequence
+ *  - `sz_find_whitespace_utf8` - for 25 Unicode whitespace characters per Unicode "White_Space" property
  *  - `sz_find_delimiter_utf8` - for newlines, whitespaces, and punctuation characters
  *
  *  Convenience functions for character-set matching:
@@ -216,22 +216,23 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, 
 /**
  *  @brief  Finds the first occurence of a UTF-8 newline character in a string.
  *
- *  Here are all the UTF-8 newline characters we are looking for:
- *  - single-byte chars:
+ *  Here are all the UTF-8 newline characters we are looking for (7 characters + CRLF):
+ *  - single-byte chars (4 total):
  *    - U+000A for @c "\n" (LINE FEED)
  *    - U+000B for @c "\v" (VERTICAL TAB / LINE TABULATION)
  *    - U+000C for @c "\f" (FORM FEED)
  *    - U+000D for @c "\r" (CARRIAGE RETURN)
- *    - U+001C for @c 0x1C (FILE SEPARATOR)
- *    - U+001D for @c 0x1D (GROUP SEPARATOR)
- *    - U+001E for @c 0x1E (RECORD SEPARATOR)
- *  - double-byte chars:
+ *  - double-byte chars (1 total):
  *    - U+0085 for @c 0xC285 (NEXT LINE)
- *  - triple-byte chars:
+ *  - triple-byte chars (2 total):
  *    - U+2028 for @c 0xE280A8 (LINE SEPARATOR)
  *    - U+2029 for @c 0xE280A9 (PARAGRAPH SEPARATOR)
  *  - double-character sequence:
  *    - U+000D U+000A for @c "\r\n" that should be treated as a single new line!
+ *
+ *  @note U+001C, U+001D, U+001E (FILE/GROUP/RECORD SEPARATOR) are NOT included.
+ *        These are data structure delimiters used in formats like USV (Unicode Separated Values),
+ *        not line breaks. Use @c sz_find_byte() if you need to find these separators.
  *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
@@ -243,18 +244,16 @@ SZ_DYNAMIC sz_cptr_t sz_find_newline_utf8(sz_cptr_t text, sz_size_t length, sz_s
 /**
  *  @brief  Finds the first occurence of a UTF-8 whitespace character in a string.
  *
+ *  Implements the Unicode White_Space property (25 characters total).
  *  Per Unicode standard, whitespace includes all newline characters plus horizontal spaces.
- *  This function finds all 29 Unicode whitespace characters:
- *  - single-byte chars (10 total):
+ *  Matches the behavior of ICU's `u_isspace()` and Python's `str.isspace()`.
+ *
+ *  - single-byte chars (6 total):
  *    - U+0009 tab @c "\t" (CHARACTER TABULATION)
  *    - U+000A @c "\n" (LINE FEED - newline)
  *    - U+000B @c "\v" (LINE TABULATION - newline)
  *    - U+000C @c "\f" (FORM FEED - newline)
  *    - U+000D @c "\r" (CARRIAGE RETURN - newline)
- *    - U+001C @c 0x1C (FILE SEPARATOR - newline)
- *    - U+001D @c 0x1D (GROUP SEPARATOR - newline)
- *    - U+001E @c 0x1E (RECORD SEPARATOR - newline)
- *    - U+001F @c 0x1F (UNIT SEPARATOR)
  *    - U+0020 (SPACE)
  *  - double-byte chars (2 total):
  *    - U+0085 @c 0xC285 (NEXT LINE - newline)
@@ -272,19 +271,24 @@ SZ_DYNAMIC sz_cptr_t sz_find_newline_utf8(sz_cptr_t text, sz_size_t length, sz_s
  *    - U+2008 @c 0xE28088 (PUNCTUATION SPACE)
  *    - U+2009 @c 0xE28089 (THIN SPACE)
  *    - U+200A @c 0xE2808A (HAIR SPACE)
- *    - U+200B @c 0xE2808B (ZERO WIDTH SPACE - Format char)
- *    - U+200C @c 0xE2808C (ZERO WIDTH NON-JOINER - Format char)
- *    - U+200D @c 0xE2808D (ZERO WIDTH JOINER - Format char)
  *    - U+2028 @c 0xE280A8 (LINE SEPARATOR - newline)
  *    - U+2029 @c 0xE280A9 (PARAGRAPH SEPARATOR - newline)
  *    - U+202F @c 0xE280AF (NARROW NO-BREAK SPACE)
  *    - U+205F @c 0xE2819F (MEDIUM MATHEMATICAL SPACE)
  *    - U+3000 @c 0xE38080 (IDEOGRAPHIC SPACE, common in CJK texts)
  *
+ *  @note NOT included (despite some implementations treating them as whitespace):
+ *    - U+001C, U+001D, U+001E, U+001F (FILE/GROUP/RECORD/UNIT SEPARATOR):
+ *      These are data structure delimiters for formats like USV (Unicode Separated Values).
+ *      Only Java's Character.isWhitespace() includes them; Unicode, ICU, and Python do not.
+ *    - U+200B, U+200C, U+200D (ZERO WIDTH SPACE/NON-JOINER/JOINER):
+ *      These are Format characters, not whitespace. They have no width and affect rendering,
+ *      not spacing.
+ *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
- *  @param[out] matched_length Number of bytes in the matched newline delimiter.
- *  @return Pointer to the first matching newline character from @p text.
+ *  @param[out] matched_length Number of bytes in the matched whitespace character.
+ *  @return Pointer to the first matching whitespace character from @p text.
  */
 SZ_DYNAMIC sz_cptr_t sz_find_whitespace_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 
@@ -993,12 +997,7 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_serial(sz_cptr_t text, sz_size_t length
         switch (c) {
         case '\n':
         case '\v':
-        case '\f':
-        case '\x1c': // U+001C - FILE SEPARATOR
-        case '\x1d': // U+001D - GROUP SEPARATOR
-        case '\x1e': // U+001E - RECORD SEPARATOR
-            *matched_length = 1;
-            return (sz_cptr_t)text_u8;
+        case '\f': *matched_length = 1; return (sz_cptr_t)text_u8;
         // Differentiate between "\r" and "\r\n"
         case '\r':
             if (text_u8 + 1 != end_u8 && text_u8[1] == '\n') {
@@ -1052,13 +1051,7 @@ SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_serial(sz_cptr_t text, sz_size_t len
         case '\n':
         case '\v':
         case '\f':
-        case '\r':
-        case '\x1c': // U+001C - FILE SEPARATOR
-        case '\x1d': // U+001D - GROUP SEPARATOR
-        case '\x1e': // U+001E - RECORD SEPARATOR
-        case '\x1f': // U+001F - UNIT SEPARATOR
-            *matched_length = 1;
-            return (sz_cptr_t)text_u8;
+        case '\r': *matched_length = 1; return (sz_cptr_t)text_u8;
         // Matching 2-byte whitespace characters
         case 0xC2:
             if (text_u8 + 1 != end_u8) {
@@ -1847,17 +1840,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
 
 SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
-    // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present,
-    // plus the separator chars 0x1C, 0x1D, 0x1E (FILE/GROUP/RECORD SEPARATOR).
+    // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
     // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    sz_u512_vec_t n_vec, v_vec, f_vec, r_vec, x1c_vec, x1d_vec, x1e_vec;
+    sz_u512_vec_t n_vec, v_vec, f_vec, r_vec;
     n_vec.zmm = _mm512_set1_epi8('\n');
     v_vec.zmm = _mm512_set1_epi8('\v');
     f_vec.zmm = _mm512_set1_epi8('\f');
     r_vec.zmm = _mm512_set1_epi8('\r');
-    x1c_vec.zmm = _mm512_set1_epi8('\x1C');
-    x1d_vec.zmm = _mm512_set1_epi8('\x1D');
-    x1e_vec.zmm = _mm512_set1_epi8('\x1E');
 
     // We also need to match the 2-byte newline character 0xC285 (NEL),
     // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
@@ -1879,12 +1868,7 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, s
         __mmask64 v_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, v_vec.zmm);
         __mmask64 f_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, f_vec.zmm);
         __mmask64 r_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, r_vec.zmm); // Ignore last
-        __mmask64 x1c_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1c_vec.zmm);
-        __mmask64 x1d_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1d_vec.zmm);
-        __mmask64 x1e_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1e_vec.zmm);
-        sz_u64_t one_byte_mask =
-            _cvtmask64_u64(_kor_mask64(_kor_mask64(_kor_mask64(n_mask, v_mask), _kor_mask64(f_mask, r_mask)),
-                                       _kor_mask64(_kor_mask64(x1c_mask, x1d_mask), x1e_mask)));
+        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(_kor_mask64(n_mask, v_mask), _kor_mask64(f_mask, r_mask)));
 
         // 2-byte indicators
         __mmask64 xc2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xc2_vec.zmm);
@@ -1934,14 +1918,11 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, s
 
 SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
-    // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present,
-    // plus the separators 0x1C, 0x1D, 0x1E, 0x1F.
+    // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present.
     // There is also the canonical space ' ' (0x20).
-    sz_u512_vec_t t_vec, r_vec, x1c_vec, x1f_vec, x20_vec;
+    sz_u512_vec_t t_vec, r_vec, x20_vec;
     t_vec.zmm = _mm512_set1_epi8('\t');
     r_vec.zmm = _mm512_set1_epi8('\r');
-    x1c_vec.zmm = _mm512_set1_epi8('\x1C');
-    x1f_vec.zmm = _mm512_set1_epi8('\x1F');
     x20_vec.zmm = _mm512_set1_epi8(' ');
 
     // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP),
@@ -1980,11 +1961,7 @@ SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length
         __mmask64 x20_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x20_vec.zmm);
         __mmask64 t_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, t_vec.zmm);
         __mmask64 r_mask = _mm512_cmple_epu8_mask(text_vec.zmm, r_vec.zmm);
-        // Range [0x1C,0x1F] covers FILE/GROUP/RECORD/UNIT SEPARATOR
-        __mmask64 x1c_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, x1c_vec.zmm);
-        __mmask64 x1f_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, x1f_vec.zmm);
-        sz_u64_t one_byte_mask = _cvtmask64_u64(
-            _kor_mask64(_kor_mask64(x20_mask, _kand_mask64(t_mask, r_mask)), _kand_mask64(x1c_ge_mask, x1f_le_mask)));
+        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(x20_mask, _kand_mask64(t_mask, r_mask)));
 
         // Instead of immediately checking for 2-byte and 3-byte matches with a ridiculous number of masks and
         // comparisons, let's define a "fast path" for following cases:
