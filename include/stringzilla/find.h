@@ -8,8 +8,8 @@
  *  - `sz_find` and reverse-order `sz_rfind`
  *  - `sz_find_byte` and reverse-order `sz_rfind_byte`
  *  - `sz_find_byteset` and reverse-order `sz_rfind_byteset`
- *  - `sz_find_newline_utf8` - for 8 possible unicode newline characters
- *  - `sz_find_whitespace_utf8` - for 25 possible whitespace unicode characters
+ *  - `sz_find_newline_utf8` - for 8 unicode newline characters (including rare separators)
+ *  - `sz_find_whitespace_utf8` - for 29 unicode whitespace characters (includes all newlines per Unicode standard)
  *  - `sz_find_delimiter_utf8` - for newlines, whitespaces, and punctuation characters
  *
  *  Convenience functions for character-set matching:
@@ -218,14 +218,18 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, 
  *
  *  Here are all the UTF-8 newline characters we are looking for:
  *  - single-byte chars:
- *    - U+000A for @c "\n"
- *    - U+000B for @c "\v"
- *    - U+000C for @c "\f"
- *    - U+000D for @c "\r"
+ *    - U+000A for @c "\n" (LINE FEED)
+ *    - U+000B for @c "\v" (VERTICAL TAB / LINE TABULATION)
+ *    - U+000C for @c "\f" (FORM FEED)
+ *    - U+000D for @c "\r" (CARRIAGE RETURN)
+ *    - U+001C for @c 0x1C (FILE SEPARATOR)
+ *    - U+001D for @c 0x1D (GROUP SEPARATOR)
+ *    - U+001E for @c 0x1E (RECORD SEPARATOR)
  *  - double-byte chars:
- *    - U+0085 for @c 0xC285
- *    - U+2028 for @c 0xE280A8
- *    - U+2029 for @c 0xE280A9
+ *    - U+0085 for @c 0xC285 (NEXT LINE)
+ *  - triple-byte chars:
+ *    - U+2028 for @c 0xE280A8 (LINE SEPARATOR)
+ *    - U+2029 for @c 0xE280A9 (PARAGRAPH SEPARATOR)
  *  - double-character sequence:
  *    - U+000D U+000A for @c "\r\n" that should be treated as a single new line!
  *
@@ -239,31 +243,43 @@ SZ_DYNAMIC sz_cptr_t sz_find_newline_utf8(sz_cptr_t text, sz_size_t length, sz_s
 /**
  *  @brief  Finds the first occurence of a UTF-8 whitespace character in a string.
  *
- *  Here are all the UTF-8 whitespace characters we are looking for:
- *  - single-byte chars:
- *    - U+0020 space
- *    - U+0009 tab @c "\t"
- *  - double-byte chars:
- *    - U+00A0 no-break space, quite common
- *  - triple-byte chars, most of them quite uncommon:
- *    - U+1680: OGHAM SPACE MARK, coded as @c 0xE19A80
- *    - U+2000: EN QUAD, coded as @c 0xE28080
- *    - U+2001: EM QUAD, coded as @c 0xE28081
- *    - U+2002: EN SPACE, coded as @c 0xE28082
- *    - U+2003: EM SPACE, coded as @c 0xE28083
- *    - U+2004: THREE-PER-EM SPACE, coded as @c 0xE28084
- *    - U+2005: FOUR-PER-EM SPACE, coded as @c 0xE28085
- *    - U+2006: SIX-PER-EM SPACE, coded as @c 0xE28086
- *    - U+2007: FIGURE SPACE, coded as @c 0xE28087
- *    - U+2008: PUNCTUATION SPACE, coded as @c 0xE28088
- *    - U+2009: THIN SPACE, coded as @c 0xE28089
- *    - U+200A: HAIR SPACE, coded as @c 0xE2808A
- *    - U+200B: ZERO WIDTH SPACE, coded as @c 0xE2808B, sometimes used in the Web
- *    - U+200C: ZERO WIDTH NON-JOINER, coded as @c 0xE2808C, used in complex scripts
- *    - U+200D: ZERO WIDTH JOINER, coded as @c 0xE2808D, used in complex scripts
- *    - U+202F: NARROW NO-BREAK SPACE, coded as @c 0xE280AF
- *    - U+205F: MEDIUM MATHEMATICAL SPACE, coded as @c 0xE2819F
- *    - U+3000: IDEOGRAPHIC SPACE, coded as @c 0xE38080, quite common in @b CJK texts
+ *  Per Unicode standard, whitespace includes all newline characters plus horizontal spaces.
+ *  This function finds all 29 Unicode whitespace characters:
+ *  - single-byte chars (10 total):
+ *    - U+0009 tab @c "\t" (CHARACTER TABULATION)
+ *    - U+000A @c "\n" (LINE FEED - newline)
+ *    - U+000B @c "\v" (LINE TABULATION - newline)
+ *    - U+000C @c "\f" (FORM FEED - newline)
+ *    - U+000D @c "\r" (CARRIAGE RETURN - newline)
+ *    - U+001C @c 0x1C (FILE SEPARATOR - newline)
+ *    - U+001D @c 0x1D (GROUP SEPARATOR - newline)
+ *    - U+001E @c 0x1E (RECORD SEPARATOR - newline)
+ *    - U+001F @c 0x1F (UNIT SEPARATOR)
+ *    - U+0020 (SPACE)
+ *  - double-byte chars (2 total):
+ *    - U+0085 @c 0xC285 (NEXT LINE - newline)
+ *    - U+00A0 @c 0xC2A0 (NO-BREAK SPACE)
+ *  - triple-byte chars (17 total):
+ *    - U+1680 @c 0xE19A80 (OGHAM SPACE MARK)
+ *    - U+2000 @c 0xE28080 (EN QUAD)
+ *    - U+2001 @c 0xE28081 (EM QUAD)
+ *    - U+2002 @c 0xE28082 (EN SPACE)
+ *    - U+2003 @c 0xE28083 (EM SPACE)
+ *    - U+2004 @c 0xE28084 (THREE-PER-EM SPACE)
+ *    - U+2005 @c 0xE28085 (FOUR-PER-EM SPACE)
+ *    - U+2006 @c 0xE28086 (SIX-PER-EM SPACE)
+ *    - U+2007 @c 0xE28087 (FIGURE SPACE)
+ *    - U+2008 @c 0xE28088 (PUNCTUATION SPACE)
+ *    - U+2009 @c 0xE28089 (THIN SPACE)
+ *    - U+200A @c 0xE2808A (HAIR SPACE)
+ *    - U+200B @c 0xE2808B (ZERO WIDTH SPACE - Format char)
+ *    - U+200C @c 0xE2808C (ZERO WIDTH NON-JOINER - Format char)
+ *    - U+200D @c 0xE2808D (ZERO WIDTH JOINER - Format char)
+ *    - U+2028 @c 0xE280A8 (LINE SEPARATOR - newline)
+ *    - U+2029 @c 0xE280A9 (PARAGRAPH SEPARATOR - newline)
+ *    - U+202F @c 0xE280AF (NARROW NO-BREAK SPACE)
+ *    - U+205F @c 0xE2819F (MEDIUM MATHEMATICAL SPACE)
+ *    - U+3000 @c 0xE38080 (IDEOGRAPHIC SPACE, common in CJK texts)
  *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
@@ -970,48 +986,54 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 
 SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
     // TODO: Optimize with a SWAR variant
-    sz_cptr_t const end = text + length;
-    while (text != end) {
-        char const c = *text;
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    while (text_u8 != end_u8) {
+        sz_u8_t const c = *text_u8;
         switch (c) {
         case '\n':
         case '\v':
-        case '\f': *matched_length = 1; return text;
+        case '\f':
+        case '\x1c': // U+001C - FILE SEPARATOR
+        case '\x1d': // U+001D - GROUP SEPARATOR
+        case '\x1e': // U+001E - RECORD SEPARATOR
+            *matched_length = 1;
+            return (sz_cptr_t)text_u8;
         // Differentiate between "\r" and "\r\n"
         case '\r':
-            if (text + 1 != end && text[1] == '\n') {
+            if (text_u8 + 1 != end_u8 && text_u8[1] == '\n') {
                 *matched_length = 2;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
             else {
                 *matched_length = 1;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
         // Matching the 0xC285 character
-        case '\xC2':
-            if (text + 1 != end && text[1] == '\x85') {
+        case 0xC2:
+            if (text_u8 + 1 != end_u8 && text_u8[1] == 0x85) {
                 *matched_length = 2;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
             else {
-                ++text;
+                ++text_u8;
                 continue;
             }
         // Matching 3-byte newline characters
-        case '\xE2':
-            if (text + 2 < end && text[1] == '\x80' && text[2] == '\xA8') {
+        case 0xE2:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
                 *matched_length = 3;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
-            else if (text + 2 != end && text[1] == '\x80' && text[2] == '\xA9') {
+            else if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
                 *matched_length = 3;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
             else {
-                ++text;
+                ++text_u8;
                 continue;
             }
-        default: ++text; continue;
+        default: ++text_u8; continue;
         }
     }
     *matched_length = 0;
@@ -1020,60 +1042,95 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_serial(sz_cptr_t text, sz_size_t length
 
 SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
     // TODO: Optimize with a SWAR variant
-    sz_cptr_t const end = text + length;
-    while (text != end) {
-        char const c = *text;
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    while (text_u8 != end_u8) {
+        sz_u8_t const c = *text_u8;
         switch (c) {
         case ' ':
         case '\t':
         case '\n':
         case '\v':
         case '\f':
-        case '\r': *matched_length = 1; return text;
-        // Matching the 0xC2A0 no-break space character
-        case '\xC2':
-            if (text + 1 != end && text[1] == '\xA0') {
-                *matched_length = 2;
-                return text;
+        case '\r':
+        case '\x1c': // U+001C - FILE SEPARATOR
+        case '\x1d': // U+001D - GROUP SEPARATOR
+        case '\x1e': // U+001E - RECORD SEPARATOR
+        case '\x1f': // U+001F - UNIT SEPARATOR
+            *matched_length = 1;
+            return (sz_cptr_t)text_u8;
+        // Matching 2-byte whitespace characters
+        case 0xC2:
+            if (text_u8 + 1 != end_u8) {
+                // U+0085: NEXT LINE (NEL)
+                if (text_u8[1] == 0x85) {
+                    *matched_length = 2;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+00A0: NO-BREAK SPACE
+                else if (text_u8[1] == 0xA0) {
+                    *matched_length = 2;
+                    return (sz_cptr_t)text_u8;
+                }
             }
-            else {
-                ++text;
-                continue;
-            }
+            ++text_u8;
+            continue;
         // Matching the 0xE19A80 ogham space mark
-        case '\xE1':
-            if (text + 2 < end && text[1] == '\x9A' && text[2] == '\x80') {
+        case 0xE1:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x9A && text_u8[2] == 0x80) {
                 *matched_length = 3;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
             else {
-                ++text;
+                ++text_u8;
                 continue;
             }
-        // Match the range of 3-byte whitespace characters from 0xE28080 to 0xE2808A
-        case '\xE2':
-            if (text + 2 < end && text[1] == '\x80' && text[2] >= '\x80' && text[2] <= '\x8A') {
-                *matched_length = 3;
-                return text;
+        // Match the 3-byte whitespace characters starting with 0xE2
+        case 0xE2:
+            if (text_u8 + 2 < end_u8) {
+                // U+2000 to U+200D: 0xE28080 to 0xE2808D
+                if (text_u8[1] == 0x80 && text_u8[2] >= 0x80 && text_u8[2] <= 0x8D) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+2028: LINE SEPARATOR (0xE280A8)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+2029: PARAGRAPH SEPARATOR (0xE280A9)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+202F: NARROW NO-BREAK SPACE (0xE280AF)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xAF) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+205F: MEDIUM MATHEMATICAL SPACE (0xE2819F)
+                else if (text_u8[1] == 0x81 && text_u8[2] == 0x9F) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
             }
-            else {
-                ++text;
-                continue;
-            }
+            ++text_u8;
+            continue;
         // Match the 3-byte ideographic space
-        case '\xE3':
-            if (text + 2 < end && text[1] == '\x80' && text[2] == '\x80') {
+        case 0xE3:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0x80) {
                 *matched_length = 3;
-                return text;
+                return (sz_cptr_t)text_u8;
             }
             else {
-                ++text;
+                ++text_u8;
                 continue;
             }
         }
+        ++text_u8;
     }
     *matched_length = 0;
-    return SZ_NULL_CHAR
+    return SZ_NULL_CHAR;
 }
 
 #pragma endregion // Serial Implementation
@@ -1790,13 +1847,17 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
 
 SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
-    // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
+    // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present,
+    // plus the separator chars 0x1C, 0x1D, 0x1E (FILE/GROUP/RECORD SEPARATOR).
     // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    sz_u512_vec_t n_vec, v_vec, f_vec, r_vec;
+    sz_u512_vec_t n_vec, v_vec, f_vec, r_vec, x1c_vec, x1d_vec, x1e_vec;
     n_vec.zmm = _mm512_set1_epi8('\n');
     v_vec.zmm = _mm512_set1_epi8('\v');
     f_vec.zmm = _mm512_set1_epi8('\f');
     r_vec.zmm = _mm512_set1_epi8('\r');
+    x1c_vec.zmm = _mm512_set1_epi8('\x1C');
+    x1d_vec.zmm = _mm512_set1_epi8('\x1D');
+    x1e_vec.zmm = _mm512_set1_epi8('\x1E');
 
     // We also need to match the 2-byte newline character 0xC285 (NEL),
     // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
@@ -1817,8 +1878,13 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, s
         __mmask64 n_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, n_vec.zmm);
         __mmask64 v_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, v_vec.zmm);
         __mmask64 f_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, f_vec.zmm);
-        __mmask64 r_mask = _mm512_mask_cmpeq_epi8_mask(0xFFFFFFFFFFFFFFFE, text_vec.zmm, r_vec.zmm); // ? Ignore last
-        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(_kor_mask64(n_mask, v_mask), _kor_mask64(f_mask, r_mask)));
+        __mmask64 r_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, r_vec.zmm); // Ignore last
+        __mmask64 x1c_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1c_vec.zmm);
+        __mmask64 x1d_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1d_vec.zmm);
+        __mmask64 x1e_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x1e_vec.zmm);
+        sz_u64_t one_byte_mask =
+            _cvtmask64_u64(_kor_mask64(_kor_mask64(_kor_mask64(n_mask, v_mask), _kor_mask64(f_mask, r_mask)),
+                                       _kor_mask64(_kor_mask64(x1c_mask, x1d_mask), x1e_mask)));
 
         // 2-byte indicators
         __mmask64 xc2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xc2_vec.zmm);
@@ -1829,31 +1895,33 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, s
         __mmask64 xa9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xa9_vec.zmm);
 
         // 2-byte matches
-        __mmask64 rn_mask = _kand_mask64(r_mask, _kshiftli_mask64(n_mask, 1));
-        __mmask64 xc285_mask = _kand_mask64(xc2_mask, _kshiftli_mask64(x85_mask, 1));
+        __mmask64 rn_mask = _kand_mask64(r_mask, _kshiftri_mask64(n_mask, 1));
+        __mmask64 xc285_mask = _kand_mask64(xc2_mask, _kshiftri_mask64(x85_mask, 1));
         sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(rn_mask, xc285_mask));
 
         // 3-byte matches
-        __mmask64 xe280_mask = _kand_mask64(xe2_mask, _kshiftli_mask64(x80_mask, 1));
-        __mmask64 e280a8_mask = _kand_mask64(xe280_mask, _kshiftli_mask64(xa8_mask, 2));
-        __mmask64 e280a9_mask = _kand_mask64(xe280_mask, _kshiftli_mask64(xa9_mask, 2));
+        __mmask64 xe280_mask = _kand_mask64(xe2_mask, _kshiftri_mask64(x80_mask, 1));
+        __mmask64 e280a8_mask = _kand_mask64(xe280_mask, _kshiftri_mask64(xa8_mask, 2));
+        __mmask64 e280a9_mask = _kand_mask64(xe280_mask, _kshiftri_mask64(xa9_mask, 2));
         sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(e280a8_mask, e280a9_mask));
 
-        // Check for decreasingly-long matches
-        if (three_byte_mask) {
-            int offset = sz_u64_ctz(three_byte_mask);
-            *matched_length = 3;
-            return text + offset;
-        }
-        else if (two_byte_mask) {
-            int offset = sz_u64_ctz(two_byte_mask);
-            *matched_length = 2;
-            return text + offset;
-        }
-        else if (one_byte_mask) {
-            int offset = sz_u64_ctz(one_byte_mask);
-            *matched_length = 1;
-            return text + offset;
+        // Find the earliest match regardless of length
+        sz_u64_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
+        if (combined_mask) {
+            int first_offset = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)(1) << first_offset;
+
+            // We don't want to produce too much divergent control flow,
+            // but need to achieve a behavior similar to this:
+            //
+            //  if (first_match_mask & three_byte_mask) { *matched_length = 3; }
+            //  else if (first_match_mask & two_byte_mask) { *matched_length = 2; }
+            //  else { *matched_length = 1; }
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (three_byte_mask)) != 0;
+            length_value += (first_match_mask & (two_byte_mask | three_byte_mask)) != 0;
+            *matched_length = length_value;
+            return text + first_offset;
         }
         else {
             text += 62;
@@ -1866,30 +1934,41 @@ SZ_PUBLIC sz_cptr_t sz_find_newline_utf8_ice(sz_cptr_t text, sz_size_t length, s
 
 SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
-    // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present.
+    // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present,
+    // plus the separators 0x1C, 0x1D, 0x1E, 0x1F.
     // There is also the canonical space ' ' (0x20).
-    sz_u512_vec_t t_vec, r_vec, x20_vec;
+    sz_u512_vec_t t_vec, r_vec, x1c_vec, x1f_vec, x20_vec;
     t_vec.zmm = _mm512_set1_epi8('\t');
     r_vec.zmm = _mm512_set1_epi8('\r');
+    x1c_vec.zmm = _mm512_set1_epi8('\x1C');
+    x1f_vec.zmm = _mm512_set1_epi8('\x1F');
     x20_vec.zmm = _mm512_set1_epi8(' ');
 
-    // We also need to match the 2-byte newline character 0xC2A0 (NBSP),
-    sz_u512_vec_t xc2_vec, xa0_vec;
+    // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP),
+    sz_u512_vec_t xc2_vec, x85_vec, xa0_vec;
     xc2_vec.zmm = _mm512_set1_epi8('\xC2');
+    x85_vec.zmm = _mm512_set1_epi8('\x85');
     xa0_vec.zmm = _mm512_set1_epi8('\xA0');
 
     // We also need to match 3-byte ogham space mark 0xE19A80 (OGHAM SPACE MARK),
-    // a range of 3-byte characters from 0xE28080 to 0xE2808A (various spaces),
+    // a range of 3-byte characters from 0xE28080 to 0xE2808D (various spaces),
+    // U+202F (0xE280AF), U+205F (0xE2819F),
+    // U+2028 (0xE280A8) LINE SEPARATOR, U+2029 (0xE280A9) PARAGRAPH SEPARATOR,
     // and the 3-byte ideographic space 0xE38080 (IDEOGRAPHIC SPACE).
-    sz_u512_vec_t xe1_vec, xe2_vec, xe3_vec, // ? possible first byte values
-        x9a_vec, x80_vec,                    // ? possible second byte values
-        x8a_vec;                             // ? we also need 0x80 at 3rd place, but it's defined :)
+    sz_u512_vec_t xe1_vec, xe2_vec, xe3_vec,         // ? possible first byte values
+        x9a_vec, x80_vec, x81_vec,                   // ? possible second byte values
+        x8d_vec, xa8_vec, xa9_vec, xaf_vec, x9f_vec; // ? third byte values for ranges and specific matches
     xe1_vec.zmm = _mm512_set1_epi8('\xE1');
     xe2_vec.zmm = _mm512_set1_epi8('\xE2');
     xe3_vec.zmm = _mm512_set1_epi8('\xE3');
     x9a_vec.zmm = _mm512_set1_epi8('\x9A');
     x80_vec.zmm = _mm512_set1_epi8('\x80');
-    x8a_vec.zmm = _mm512_set1_epi8('\x8A');
+    x81_vec.zmm = _mm512_set1_epi8('\x81');
+    x8d_vec.zmm = _mm512_set1_epi8('\x8D');
+    xa8_vec.zmm = _mm512_set1_epi8('\xA8');
+    xa9_vec.zmm = _mm512_set1_epi8('\xA9');
+    xaf_vec.zmm = _mm512_set1_epi8('\xAF');
+    x9f_vec.zmm = _mm512_set1_epi8('\x9F');
 
     // We check 64 bytes of data at once, but only step forward by 62 bytes for split-register matches.
     sz_u512_vec_t text_vec;
@@ -1897,15 +1976,23 @@ SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length
         text_vec.zmm = _mm512_loadu_epi8(text);
 
         // 1-byte indicators & matches
+        // Range [9,13] covers \t, \n, \v, \f, \r
         __mmask64 x20_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x20_vec.zmm);
-        __mmask64 t_mask = _mm512_cmpgt_epi8_mask(text_vec.zmm, t_vec.zmm);
-        __mmask64 r_mask = _mm512_cmplt_epi8_mask(text_vec.zmm, r_vec.zmm);
-        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(x20_mask, _kand_mask64(t_mask, r_mask)));
+        __mmask64 t_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, t_vec.zmm);
+        __mmask64 r_mask = _mm512_cmple_epu8_mask(text_vec.zmm, r_vec.zmm);
+        // Range [0x1C,0x1F] covers FILE/GROUP/RECORD/UNIT SEPARATOR
+        __mmask64 x1c_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, x1c_vec.zmm);
+        __mmask64 x1f_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, x1f_vec.zmm);
+        sz_u64_t one_byte_mask = _cvtmask64_u64(
+            _kor_mask64(_kor_mask64(x20_mask, _kand_mask64(t_mask, r_mask)), _kand_mask64(x1c_ge_mask, x1f_le_mask)));
 
         // 2-byte indicators & matches
         __mmask64 xc2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xc2_vec.zmm);
+        __mmask64 x85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x85_vec.zmm);
         __mmask64 xa0_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xa0_vec.zmm);
-        sz_u64_t two_byte_mask = _cvtmask64_u64(_kand_mask64(xc2_mask, _kshiftli_mask64(xa0_mask, 1)));
+        __mmask64 xc285_mask = _kand_mask64(xc2_mask, _kshiftri_mask64(x85_mask, 1)); // U+0085 NEL
+        __mmask64 xc2a0_mask = _kand_mask64(xc2_mask, _kshiftri_mask64(xa0_mask, 1)); // U+00A0 NBSP
+        sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(xc285_mask, xc2a0_mask));
 
         // 3-byte indicators
         __mmask64 xe1_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xe1_vec.zmm);
@@ -1913,43 +2000,57 @@ SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length
         __mmask64 xe3_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xe3_vec.zmm);
         __mmask64 x9a_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x9a_vec.zmm);
         __mmask64 x80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x80_vec.zmm);
-        __mmask64 x80_ge_mask = _mm512_cmpge_epi8_mask(text_vec.zmm, x80_vec.zmm);
-        __mmask64 x8a_le_mask = _mm512_cmple_epi8_mask(text_vec.zmm, x8a_vec.zmm);
+        __mmask64 x81_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x81_vec.zmm);
+        __mmask64 x80_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, x80_vec.zmm);
+        __mmask64 x8d_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, x8d_vec.zmm);
+        __mmask64 xa8_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xa8_vec.zmm);
+        __mmask64 xa9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xa9_vec.zmm);
+        __mmask64 xaf_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xaf_vec.zmm);
+        __mmask64 x9f_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x9f_vec.zmm);
 
         // 3-byte matches
-        __mmask64 ogham_mask = _kand_mask64(   //
-            xe1_mask,                          //
-            _kand_mask64(                      //
-                _kshiftli_mask64(x9a_mask, 1), //
-                _kshiftli_mask64(x80_mask, 2)));
-        __mmask64 range_mask = _kand_mask64( //
-            xe2_mask,                        //
-            _kand_mask64(                    //
-                _kshiftli_mask64(x80_mask, 1),
-                _kand_mask64( //
-                    _kshiftli_mask64(x80_ge_mask, 2), _kshiftli_mask64(x8a_le_mask, 2))));
-        __mmask64 ideographic_mask = _kand_mask64( //
-            xe3_mask,                              //
-            _kand_mask64(                          //
-                _kshiftli_mask64(x80_mask, 1),     //
-                _kshiftli_mask64(x80_mask, 2)));
-        sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(_kor_mask64(ogham_mask, range_mask), ideographic_mask));
+        __mmask64 ogham_mask =
+            _kand_mask64(xe1_mask, _kand_mask64(_kshiftri_mask64(x9a_mask, 1), _kshiftri_mask64(x80_mask, 2)));
+        // U+2000 to U+200D: E2 80 [80-8D]
+        __mmask64 range_e280_mask = _kand_mask64(
+            xe2_mask, _kand_mask64(_kshiftri_mask64(x80_mask, 1),
+                                   _kand_mask64(_kshiftri_mask64(x80_ge_mask, 2), _kshiftri_mask64(x8d_le_mask, 2))));
+        // U+202F: E2 80 AF
+        __mmask64 u202f_mask =
+            _kand_mask64(xe2_mask, _kand_mask64(_kshiftri_mask64(x80_mask, 1), _kshiftri_mask64(xaf_mask, 2)));
+        // U+205F: E2 81 9F
+        __mmask64 u205f_mask =
+            _kand_mask64(xe2_mask, _kand_mask64(_kshiftri_mask64(x81_mask, 1), _kshiftri_mask64(x9f_mask, 2)));
+        // U+2028: E2 80 A8 (LINE SEPARATOR)
+        __mmask64 u2028_mask =
+            _kand_mask64(xe2_mask, _kand_mask64(_kshiftri_mask64(x80_mask, 1), _kshiftri_mask64(xa8_mask, 2)));
+        // U+2029: E2 80 A9 (PARAGRAPH SEPARATOR)
+        __mmask64 u2029_mask =
+            _kand_mask64(xe2_mask, _kand_mask64(_kshiftri_mask64(x80_mask, 1), _kshiftri_mask64(xa9_mask, 2)));
+        __mmask64 ideographic_mask =
+            _kand_mask64(xe3_mask, _kand_mask64(_kshiftri_mask64(x80_mask, 1), _kshiftri_mask64(x80_mask, 2)));
+        sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(
+            _kor_mask64(_kor_mask64(_kor_mask64(ogham_mask, range_e280_mask), _kor_mask64(u202f_mask, u205f_mask)),
+                        _kor_mask64(u2028_mask, u2029_mask)),
+            ideographic_mask));
 
-        // Check for decreasingly-long matches
-        if (three_byte_mask) {
-            int offset = sz_u64_ctz(three_byte_mask);
-            *matched_length = 3;
-            return text + offset;
-        }
-        else if (two_byte_mask) {
-            int offset = sz_u64_ctz(two_byte_mask);
-            *matched_length = 2;
-            return text + offset;
-        }
-        else if (one_byte_mask) {
-            int offset = sz_u64_ctz(one_byte_mask);
-            *matched_length = 1;
-            return text + offset;
+        // Find the earliest match regardless of length
+        sz_u64_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
+        if (combined_mask) {
+            int first_offset = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)(1) << first_offset;
+
+            // We don't want to produce too much divergent control flow,
+            // but need to achieve a behavior similar to this:
+            //
+            //  if (first_match_mask & three_byte_mask) { *matched_length = 3; }
+            //  else if (first_match_mask & two_byte_mask) { *matched_length = 2; }
+            //  else { *matched_length = 1; }
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (three_byte_mask)) != 0;
+            length_value += (first_match_mask & (two_byte_mask | three_byte_mask)) != 0;
+            *matched_length = length_value;
+            return text + first_offset;
         }
         else {
             text += 62;

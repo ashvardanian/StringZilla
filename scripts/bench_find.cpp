@@ -521,6 +521,7 @@ auto callable_for_byteset_search(environment_t const &env) {
         // As a checksum, mix the counts together
         std::size_t count_matches = count_tabs + count_html + count_digits;
         std::size_t count_bytes = haystack.size() * 3; // We've traversed the input 3 times
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches};
     };
 }
@@ -626,6 +627,7 @@ auto callable_for_utf8_boundary(environment_t const &env) {
         std::string_view haystack = env.tokens[token_index];
         std::size_t count_matches = matches_t(haystack, matcher_t()).size();
         std::size_t count_bytes = haystack.size();
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches};
     };
 }
