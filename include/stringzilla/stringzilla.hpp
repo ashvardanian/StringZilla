@@ -486,6 +486,30 @@ struct matcher_find_last_not_of {
 };
 
 /**
+ *  @brief Zero-cost wrapper around the `.find_newline_utf8` member function of string-like classes.
+ */
+template <typename haystack_type_>
+struct matcher_find_newline_utf8 {
+    using size_type = typename haystack_type_::size_type;
+    size_type last_match_length_ = 0;
+    constexpr size_type needle_length() const noexcept { return last_match_length_; }
+    constexpr size_type skip_length() const noexcept { return last_match_length_; }
+    size_type operator()(haystack_type_ haystack) noexcept { return haystack.find_newline_utf8(last_match_length_); }
+};
+
+/**
+ *  @brief Zero-cost wrapper around the `.find_whitespace_utf8` member function of string-like classes.
+ */
+template <typename haystack_type_>
+struct matcher_find_whitespace_utf8 {
+    using size_type = typename haystack_type_::size_type;
+    size_type last_match_length_ = 0;
+    constexpr size_type needle_length() const noexcept { return last_match_length_; }
+    constexpr size_type skip_length() const noexcept { return last_match_length_; }
+    size_type operator()(haystack_type_ haystack) noexcept { return haystack.find_whitespace_utf8(last_match_length_); }
+};
+
+/**
  *  @brief Helper to detect if a type has a nested `::string_view` typedef.
  *         Uses SFINAE with no STL dependencies for `std::enabled_if` or `std::void_t`.
  */
@@ -1826,6 +1850,42 @@ class basic_string_slice {
      */
     size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return find_last_of(set.inverted(), until);
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched newline sequence.
+     */
+    size_type find_newline_utf8(size_type &match_length) const noexcept {
+        auto ptr = sz_find_newline_utf8(start_, length_, &match_length);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched whitespace sequence.
+     */
+    size_type find_whitespace_utf8(size_type &match_length) const noexcept {
+        auto ptr = sz_find_whitespace_utf8(start_, length_, &match_length);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched newline sequence.
+     */
+    size_type find_newline_utf8() const noexcept {
+        size_type match_length;
+        return find_newline_utf8(match_length);
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched whitespace sequence.
+     */
+    size_type find_whitespace_utf8() const noexcept {
+        size_type match_length;
+        return find_whitespace_utf8(match_length);
     }
 
 #pragma endregion
