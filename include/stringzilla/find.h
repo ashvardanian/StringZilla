@@ -1986,18 +1986,42 @@ SZ_PUBLIC sz_cptr_t sz_find_whitespace_utf8_ice(sz_cptr_t text, sz_size_t length
         sz_u64_t one_byte_mask = _cvtmask64_u64(
             _kor_mask64(_kor_mask64(x20_mask, _kand_mask64(t_mask, r_mask)), _kand_mask64(x1c_ge_mask, x1f_le_mask)));
 
-        // 2-byte indicators & matches
-        __mmask64 xc2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xc2_vec.zmm);
+        // Instead of immediately checking for 2-byte and 3-byte matches with a ridiculous number of masks and
+        // comparisons, let's define a "fast path" for following cases:
+        // - no whitespaces are found in the range
+        // - a one-byte match comes before any possible prefix byte of a multi-byte match
+        __mmask64 xc2_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, xc2_vec.zmm);
+        __mmask64 xe1_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, xe1_vec.zmm);
+        __mmask64 xe2_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, xe2_vec.zmm);
+        __mmask64 xe3_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, xe3_vec.zmm);
+        sz_u64_t prefix_mask =
+            _cvtmask64_u64(_kor_mask64(_kor_mask64(xc2_mask, xe1_mask), _kor_mask64(xe2_mask, xe3_mask)));
+
+        // Check if we matched the "fast path"
+        if (one_byte_mask) {
+            if (prefix_mask) {
+                int first_one_byte_offset = sz_u64_ctz(one_byte_mask);
+                int first_prefix_offset = sz_u64_ctz(prefix_mask);
+                if (first_one_byte_offset < first_prefix_offset) {
+                    *matched_length = 1;
+                    return text + first_one_byte_offset;
+                }
+            }
+            else {
+                int first_one_byte_offset = sz_u64_ctz(one_byte_mask);
+                *matched_length = 1;
+                return text + first_one_byte_offset;
+            }
+        }
+
+        // 2-byte indicators suffixes & matches
         __mmask64 x85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x85_vec.zmm);
         __mmask64 xa0_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xa0_vec.zmm);
         __mmask64 xc285_mask = _kand_mask64(xc2_mask, _kshiftri_mask64(x85_mask, 1)); // U+0085 NEL
         __mmask64 xc2a0_mask = _kand_mask64(xc2_mask, _kshiftri_mask64(xa0_mask, 1)); // U+00A0 NBSP
         sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(xc285_mask, xc2a0_mask));
 
-        // 3-byte indicators
-        __mmask64 xe1_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xe1_vec.zmm);
-        __mmask64 xe2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xe2_vec.zmm);
-        __mmask64 xe3_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, xe3_vec.zmm);
+        // 3-byte indicators suffixes
         __mmask64 x9a_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x9a_vec.zmm);
         __mmask64 x80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x80_vec.zmm);
         __mmask64 x81_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x81_vec.zmm);
