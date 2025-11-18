@@ -78,6 +78,41 @@
           }
         ]
       }
+    },
+    {
+      "label": "Build Current File: Debug",
+      "command": "cmake",
+      "args": [
+        "-DFILE=${file}",
+        "-DBUILD_TYPE=Debug",
+        "-P",
+        "${workspaceFolder}/.vscode/build_current.cmake"
+      ],
+      "type": "shell",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Current File: Release",
+      "command": "cmake",
+      "args": [
+        "-DFILE=${file}",
+        "-DBUILD_TYPE=Release",
+        "-P",
+        "${workspaceFolder}/.vscode/build_current.cmake"
+      ],
+      "type": "shell",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
     }
   ]
 }
