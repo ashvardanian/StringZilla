@@ -6,7 +6,8 @@
  *  Includes core APIs:
  *
  *  - `sz_utf8_valid` - validate UTF-8 encoding correctness
- *  - `sz_utf8_find_nth` - skip to Nth UTF-8 character (unified skip/count API)
+ *  - `sz_utf8_count` - count UTF-8 characters in a string
+ *  - `sz_utf8_find_nth` - skip to Nth UTF-8 character
  *  - `sz_utf8_find_newline` - skip to first newline (7 Unicode newline characters + CRLF)
  *  - `sz_utf8_find_whitespace` - skip to first whitespace (25 Unicode White_Space characters)
  *
@@ -113,62 +114,77 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 
 /**
- *  @brief  Skip forward to the Nth UTF-8 character, returning the pointer and character count.
+ *  @brief  Count the number of UTF-8 characters in a string.
  *
- *  This is a unified API that handles both character counting and skipping:
- *  - To count all characters: pass max_chars = SIZE_MAX
- *  - To skip N characters: pass max_chars = N
- *  - Always returns BOTH pointer position and character count
+ *  The logic is to count the number of "continuation bytes" matching the 10xxxxxx pattern,
+ *  and then subtract that from the total byte length to get the number of "start bytes" -
+ *  coinciding with the number of UTF-8 characters.
  *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
- *  @param[in] max_chars Maximum number of UTF-8 characters to skip (SIZE_MAX for "count all").
- *  @param[out] chars_skipped Actual number of UTF-8 characters skipped/counted.
- *  @return Pointer to position after skipping (use for slicing), or end of string if max_chars exceeded.
+ *  @return Number of UTF-8 characters in the string.
  *
- *  @example Count all characters:
+ *  @example Count characters:
  *  @code
- *      size_t char_count;
- *      sz_utf8_find_nth(text, length, SIZE_MAX, &char_count);
+ *      size_t char_count = sz_utf8_count(text, length);
  *      printf("String has %zu characters\n", char_count);
  *  @endcode
+ */
+SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
+
+/**
+ *  @brief  Skip forward to the Nth UTF-8 character.
+ *
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] n Number of UTF-8 characters to skip (0-indexed, so n=0 returns text).
+ *  @return Pointer to the Nth character, or NULL if the string has fewer than n characters.
  *
  *  @example Skip to character 1000 (e.g., pagination):
  *  @code
- *      size_t actual_chars;
- *      char const *pos = sz_utf8_find_nth(text, length, 1000, &actual_chars);
- *      // Continue processing from pos
+ *      char const *pos = sz_utf8_find_nth(text, length, 1000);
+ *      if (!pos) {
+ *          // String has fewer than 1000 characters
+ *      }
  *  @endcode
  *
  *  @example Truncate to 280 characters (Twitter-style):
  *  @code
- *      size_t actual_chars;
- *      char const *end = sz_utf8_find_nth(text, length, 280, &actual_chars);
- *      size_t truncated_bytes = end - text;
+ *      char const *end = sz_utf8_find_nth(text, length, 280);
+ *      size_t truncated_bytes = end ? (end - text) : length;
  *  @endcode
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t max_chars, sz_size_t *chars_skipped);
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n);
 
 /**
- *  @brief  Validate UTF-8 encoding correctness.
+ *  @brief  Validate UTF-8 encoding correctness per RFC 3629.
  *
- *  Checks for:
- *  - Correct continuation byte patterns (10xxxxxx after lead bytes)
- *  - No overlong encodings (e.g., 2-byte encoding of ASCII char)
- *  - No invalid code points (surrogates U+D800-U+DFFF, values > U+10FFFF)
- *  - Proper sequence lengths (1-4 bytes only)
+ *  Checks continuation byte patterns (10xxxxxx), rejects overlong encodings, surrogates (U+D800-U+DFFF),
+ *  values beyond U+10FFFF, and truncated sequences. Only accepts proper 1-4 byte UTF-8 sequences.
+ *
+ *  Overlong encodings occur when a codepoint is encoded with more bytes than necessary.
+ *  For example, "/" (U+002F) can be incorrectly encoded as 0xC0 0xAF (2 bytes) or 0xE0 0x80 0xAF (3 bytes)
+ *  instead of the valid 0x2F (1 byte). These create security vulnerabilities (directory traversal attacks)
+ *  by bypassing filters that check for "/" in its canonical form.
+ *
+ *  Surrogates (U+D800-U+DFFF) are UTF-16 encoding artifacts - they're not actual Unicode characters.
+ *  UTF-16 uses "surrogate pairs" (high surrogate + low surrogate) to represent codepoints beyond U+FFFF.
+ *  UTF-8 encodes these codepoints directly in 4 bytes without needing surrogates, so the range
+ *  U+D800-U+DFFF is permanently invalid in UTF-8 to prevent multiple representations of the same character.
  *
  *  @param[in] text String to validate.
  *  @param[in] length Number of bytes in the string.
  *  @return 1 if valid UTF-8, 0 if invalid.
  *
- *  @example Validate user input:
  *  @code
  *      if (!sz_utf8_valid(user_input, input_len)) {
  *          fprintf(stderr, "Invalid UTF-8 encoding\n");
  *          return ERROR;
  *      }
  *  @endcode
+ *
+ *  @note Invalid patterns include: overlong encodings (0xC0 0x80 for null), surrogates (0xED 0xA0 0x80),
+ *        invalid continuation bytes, out-of-range codepoints (0xF4 0x90+), and truncated sequences.
  */
 SZ_DYNAMIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length);
 
@@ -177,27 +193,26 @@ SZ_DYNAMIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length);
 #pragma region Platform-Specific Backends
 
 // Serial (portable) implementations
+SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                            sz_size_t *chars_skipped);
-SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length);
 
 // Haswell (AVX2) implementations
+SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                             sz_size_t *chars_skipped);
-SZ_PUBLIC sz_bool_t sz_utf8_valid_haswell(sz_cptr_t text, sz_size_t length);
 
 // Ice Lake (AVX-512) implementations
+SZ_PUBLIC sz_size_t sz_utf8_count_ice(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_size_t n);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                         sz_size_t *chars_skipped);
-SZ_PUBLIC sz_bool_t sz_utf8_valid_ice(sz_cptr_t text, sz_size_t length);
 
 // NEON (ARM) implementations - fall back to serial
+SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 
@@ -347,22 +362,36 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t len
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                            sz_size_t *chars_skipped) {
-    // Count UTF-8 characters by counting non-continuation bytes
-    // Continuation bytes have pattern 10xxxxxx (i.e., (byte & 0xC0) == 0x80)
+SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *end_u8 = text_u8 + length;
     sz_size_t char_count = 0;
 
-    while (text_u8 < end_u8 && char_count < max_chars) {
+    while (text_u8 < end_u8) {
         // Count this byte if it's NOT a continuation byte
-        if ((*text_u8 & 0xC0) != 0x80) { char_count++; }
+        if ((*text_u8 & 0xC0) != 0x80) char_count++;
         text_u8++;
     }
 
-    *chars_skipped = char_count;
-    return (sz_cptr_t)text_u8;
+    return char_count;
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    sz_size_t char_count = 0;
+
+    while (text_u8 < end_u8) {
+        // Check if this is NOT a continuation byte
+        if ((*text_u8 & 0xC0) != 0x80) {
+            if (char_count == n) return (sz_cptr_t)text_u8;
+            char_count++;
+        }
+        text_u8++;
+    }
+
+    // If we reached the end without finding the nth character, return NULL
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
@@ -373,22 +402,18 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
         sz_u8_t byte1 = *text_u8;
 
         // 1-byte sequence (0x00-0x7F)
-        if (byte1 <= 0x7F) {
-            text_u8 += 1;
-            continue;
-        }
+        if (byte1 <= 0x7F) { text_u8 += 1; }
 
         // 2-byte sequence (0xC2-0xDF)
-        if (byte1 >= 0xC2 && byte1 <= 0xDF) {
+        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
             if (text_u8 + 1 >= end_u8) return sz_false_k;
             sz_u8_t byte2 = text_u8[1];
             if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
             text_u8 += 2;
-            continue;
         }
 
         // 3-byte sequence (0xE0-0xEF)
-        if (byte1 >= 0xE0 && byte1 <= 0xEF) {
+        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
             if (text_u8 + 2 >= end_u8) return sz_false_k;
             sz_u8_t byte2 = text_u8[1];
             sz_u8_t byte3 = text_u8[2];
@@ -399,11 +424,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
             if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
 
             text_u8 += 3;
-            continue;
         }
 
         // 4-byte sequence (0xF0-0xF4)
-        if (byte1 >= 0xF0 && byte1 <= 0xF4) {
+        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
             if (text_u8 + 3 >= end_u8) return sz_false_k;
             sz_u8_t byte2 = text_u8[1];
             sz_u8_t byte3 = text_u8[2];
@@ -415,11 +439,11 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
             if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
 
             text_u8 += 4;
-            continue;
         }
 
         // Invalid lead byte
-        return sz_false_k;
+        else
+            return sz_false_k;
     }
 
     return sz_true_k;
@@ -662,64 +686,100 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_ice(sz_cptr_t text, sz_size_t length
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                         sz_size_t *chars_skipped) {
-    sz_u512_vec_t continuation_mask_vec;
-    continuation_mask_vec.zmm = _mm512_set1_epi8((char)0xC0);
-    sz_u512_vec_t continuation_pattern_vec;
-    continuation_pattern_vec.zmm = _mm512_set1_epi8((char)0x80);
+SZ_PUBLIC sz_size_t sz_utf8_count_ice(sz_cptr_t text, sz_size_t length) {
+    // UTF-8 character counting strategy:
+    // Count every byte that is NOT a continuation byte (i.e., character start bytes).
+    //
+    // UTF-8 byte patterns:
+    //   ASCII:        0xxxxxxx (0x00-0x7F)  - single byte character
+    //   Start 2-byte: 110xxxxx (0xC0-0xDF)  - first byte of 2-byte sequence
+    //   Start 3-byte: 1110xxxx (0xE0-0xEF)  - first byte of 3-byte sequence
+    //   Start 4-byte: 11110xxx (0xF0-0xF7)  - first byte of 4-byte sequence
+    //   Continuation: 10xxxxxx (0x80-0xBF)  - continuation byte (NOT a character start)
+    //
+    // To detect continuation bytes: (byte & 0xC0) == 0x80
+    //   0xC0 = 11000000  - masks the top 2 bits
+    //   0x80 = 10000000  - pattern for continuation bytes after masking
+
+    sz_u512_vec_t continuation_mask_vec, continuation_pattern_vec;
+    continuation_mask_vec.zmm = _mm512_set1_epi8((char)0xC0);    // 0xC0 = 0b11000000 - mask top 2 bits
+    continuation_pattern_vec.zmm = _mm512_set1_epi8((char)0x80); // 0x80 = 0b10000000 - continuation pattern
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
     // Process 64 bytes at a time
-    while (length >= 64 && char_count < max_chars) {
-        sz_u512_vec_t text_vec;
+    sz_u512_vec_t text_vec, headers_vec;
+    while (length >= 64) {
         text_vec.zmm = _mm512_loadu_epi8(text_u8);
 
-        // Apply mask (byte & 0xC0)
-        sz_u512_vec_t masked;
-        masked.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
+        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
+        headers_vec.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
 
-        // Compare with 0x80 to find continuation bytes
-        __mmask64 is_continuation = _mm512_cmpeq_epi8_mask(masked.zmm, continuation_pattern_vec.zmm);
+        // Compare with 0x80 (0b10000000) to find continuation bytes
+        sz_u64_t start_byte_mask =
+            _cvtmask64_u64(_mm512_cmpneq_epi8_mask(headers_vec.zmm, continuation_pattern_vec.zmm));
 
-        // Count non-continuation bytes (inverted mask)
-        sz_u32_t non_continuation_count = 64 - _mm_popcnt_u64(_cvtmask64_u64(is_continuation));
-
-        // Check if we would exceed max_chars
-        if (char_count + non_continuation_count > max_chars) {
-            // Fall back to serial for the remainder
-            sz_size_t remaining_chars = max_chars - char_count;
-            sz_cptr_t result = sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, remaining_chars, chars_skipped);
-            *chars_skipped = char_count + *chars_skipped;
-            return result;
-        }
-
-        char_count += non_continuation_count;
+        // Count non-continuation bytes (i.e., character starts)
+        char_count += _mm_popcnt_u64(start_byte_mask);
         text_u8 += 64;
         length -= 64;
     }
 
-    // Process remaining bytes with serial
-    if (length > 0 && char_count < max_chars) {
-        sz_size_t remaining_chars = max_chars - char_count;
-        sz_size_t serial_chars;
-        sz_cptr_t result = sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, remaining_chars, &serial_chars);
-        char_count += serial_chars;
-        *chars_skipped = char_count;
-        return result;
+    // Process remaining bytes with a masked variant
+    if (length) {
+        __mmask64 load_mask = sz_u64_mask_until_(length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, text_u8);
+        headers_vec.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
+        __mmask64 start_byte_mask =
+            _mm512_mask_cmpneq_epi8_mask(load_mask, headers_vec.zmm, continuation_pattern_vec.zmm);
+        char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask));
     }
-
-    *chars_skipped = char_count;
-    return (sz_cptr_t)text_u8;
+    return char_count;
 }
 
-SZ_PUBLIC sz_bool_t sz_utf8_valid_ice(sz_cptr_t text, sz_size_t length) {
-    // For now, fall back to serial implementation
-    // TODO: Implement full SIMD UTF-8 validation using AVX-512
-    // (This requires complex state machine for multi-byte sequences)
-    return sz_utf8_valid_serial(text, length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+
+    // The logic of this function is similar to `sz_utf8_count_ice`, but uses PDEP & PEXT
+    // instructions in the inner loop to locate Nth character start byte efficiently
+    // without one more loop.
+    sz_u512_vec_t continuation_mask_vec, continuation_pattern_vec;
+    continuation_mask_vec.zmm = _mm512_set1_epi8((char)0xC0);
+    continuation_pattern_vec.zmm = _mm512_set1_epi8((char)0x80);
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+
+    // Process 64 bytes at a time
+    sz_u512_vec_t text_vec, headers_vec;
+    while (length >= 64) {
+        text_vec.zmm = _mm512_loadu_epi8(text_u8);
+
+        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
+        headers_vec.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
+
+        // Compare with 0x80 (0b10000000) to find continuation bytes
+        sz_u64_t start_byte_mask =
+            _cvtmask64_u64(_mm512_cmpneq_epi8_mask(headers_vec.zmm, continuation_pattern_vec.zmm));
+        sz_size_t start_byte_count = _mm_popcnt_u64(start_byte_mask);
+
+        // Check if we've reached the terminal part of our search
+        if (n < start_byte_count) {
+            // PDEP directly gives us the nth set bit position
+            // Example: _pdep_u64(0b10, 0b0001010100) = 0b0000010000
+            sz_u64_t deposited_bits = _pdep_u64((sz_u64_t)1 << n, start_byte_mask);
+            int byte_offset = sz_u64_ctz(deposited_bits);
+            return (sz_cptr_t)(text_u8 + byte_offset);
+        }
+        // Jump to the next block
+        else {
+            n -= start_byte_count;
+            text_u8 += 64;
+            length -= 64;
+        }
+    }
+
+    // Process remaining bytes with serial
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #if defined(__clang__)
@@ -963,59 +1023,77 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t max_chars,
-                                             sz_size_t *chars_skipped) {
-    __m256i continuation_mask_vec = _mm256_set1_epi8((char)0xC0);
-    __m256i continuation_pattern_vec = _mm256_set1_epi8((char)0x80);
+SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
+    sz_u256_vec_t continuation_mask_vec, continuation_pattern_vec;
+    continuation_mask_vec.ymm = _mm256_set1_epi8((char)0xC0);
+    continuation_pattern_vec.ymm = _mm256_set1_epi8((char)0x80);
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
     // Process 32 bytes at a time
-    while (length >= 32 && char_count < max_chars) {
-        __m256i text_vec = _mm256_loadu_si256((__m256i const *)text_u8);
+    sz_u256_vec_t text_vec, headers_vec;
+    while (length >= 32) {
+        text_vec.ymm = _mm256_loadu_si256((__m256i const *)text_u8);
 
-        // Apply mask (byte & 0xC0)
-        __m256i masked = _mm256_and_si256(text_vec, continuation_mask_vec);
+        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
+        headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
 
-        // Compare with 0x80 to find continuation bytes
-        __m256i is_continuation_vec = _mm256_cmpeq_epi8(masked, continuation_pattern_vec);
-        sz_u32_t is_continuation_mask = (sz_u32_t)_mm256_movemask_epi8(is_continuation_vec);
+        // Compare with 0x80 (0b10000000) to find continuation bytes
+        sz_u32_t start_byte_mask =
+            ~(sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
 
-        // Count non-continuation bytes (inverted mask)
-        sz_u32_t non_continuation_count = 32 - _mm_popcnt_u32(is_continuation_mask);
-
-        // Check if we would exceed max_chars
-        if (char_count + non_continuation_count > max_chars) {
-            // Fall back to serial for the remainder
-            sz_size_t remaining_chars = max_chars - char_count;
-            sz_cptr_t result = sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, remaining_chars, chars_skipped);
-            *chars_skipped = char_count + *chars_skipped;
-            return result;
-        }
-
-        char_count += non_continuation_count;
+        char_count += _mm_popcnt_u32(start_byte_mask);
         text_u8 += 32;
         length -= 32;
     }
 
     // Process remaining bytes with serial
-    if (length > 0 && char_count < max_chars) {
-        sz_size_t remaining_chars = max_chars - char_count;
-        sz_size_t serial_chars;
-        sz_cptr_t result = sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, remaining_chars, &serial_chars);
-        char_count += serial_chars;
-        *chars_skipped = char_count;
-        return result;
-    }
-
-    *chars_skipped = char_count;
-    return (sz_cptr_t)text_u8;
+    char_count += sz_utf8_count_serial((sz_cptr_t)text_u8, length);
+    return char_count;
 }
 
-SZ_PUBLIC sz_bool_t sz_utf8_valid_haswell(sz_cptr_t text, sz_size_t length) {
-    // TODO: Implement AVX2 version - for now fall back to serial
-    return sz_utf8_valid_serial(text, length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    // The logic of this function is similar to `sz_utf8_count_haswell`, but uses PDEP
+    // instruction in the inner loop to locate Nth character start byte efficiently
+    // without one more loop.
+    sz_u256_vec_t continuation_mask_vec, continuation_pattern_vec;
+    continuation_mask_vec.ymm = _mm256_set1_epi8((char)0xC0);
+    continuation_pattern_vec.ymm = _mm256_set1_epi8((char)0x80);
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+
+    // Process 32 bytes at a time
+    sz_u256_vec_t text_vec, headers_vec;
+    while (length >= 32) {
+        text_vec.ymm = _mm256_loadu_si256((__m256i const *)text_u8);
+
+        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
+        headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
+
+        // Compare with 0x80 (0b10000000) to find continuation bytes
+        sz_u32_t start_byte_mask =
+            ~(sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
+        sz_size_t start_byte_count = _mm_popcnt_u32(start_byte_mask);
+
+        // Check if we've reached the terminal part of our search
+        if (n < start_byte_count) {
+            // PDEP directly gives us the nth set bit position
+            // Example: _pdep_u32(0b10, 0b00010101) = 0b00000100
+            sz_u32_t deposited_bits = _pdep_u32((sz_u32_t)1 << n, start_byte_mask);
+            int byte_offset = sz_u32_ctz(deposited_bits);
+            return (sz_cptr_t)(text_u8 + byte_offset);
+        }
+        // Jump to the next block
+        else {
+            n -= start_byte_count;
+            text_u8 += 32;
+            length -= 32;
+        }
+    }
+
+    // Process remaining bytes with serial
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #if defined(__clang__)
@@ -1050,23 +1128,23 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t max_chars, sz_size_t *chars_skipped) {
+SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
-    return sz_utf8_find_nth_ice(text, length, max_chars, chars_skipped);
+    return sz_utf8_count_ice(text, length);
 #elif SZ_USE_HASWELL
-    return sz_utf8_find_nth_haswell(text, length, max_chars, chars_skipped);
+    return sz_utf8_count_haswell(text, length);
 #else
-    return sz_utf8_find_nth_serial(text, length, max_chars, chars_skipped);
+    return sz_utf8_count_serial(text, length);
 #endif
 }
 
-SZ_DYNAMIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n) {
 #if SZ_USE_ICE
-    return sz_utf8_valid_ice(text, length);
+    return sz_utf8_find_nth_ice(text, length, n);
 #elif SZ_USE_HASWELL
-    return sz_utf8_valid_haswell(text, length);
+    return sz_utf8_find_nth_haswell(text, length, n);
 #else
-    return sz_utf8_valid_serial(text, length);
+    return sz_utf8_find_nth_serial(text, length, n);
 #endif
 }
 

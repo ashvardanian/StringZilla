@@ -87,6 +87,22 @@ struct bytesum_from_std_t {
     }
 };
 
+/** @brief Wraps a hardware-specific UTF-8 character counting backend. */
+template <sz_utf8_count_t func_>
+struct utf8_count_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        sz_size_t char_count = func_(buffer.data(), buffer.size());
+        do_not_optimize(char_count);
+        return {buffer.size(), static_cast<check_value_t>(char_count)};
+    }
+};
+
 /** @brief Wraps a hardware-specific hashing backend into something similar to @b `std::hash`. */
 template <sz_hash_t func_>
 struct hash_from_sz {
@@ -161,6 +177,19 @@ void bench_checksums(environment_t const &env) {
 #endif
 #if SZ_USE_SVE2
     bench_unary(env, "sz_bytesum_sve2", validator, bytesum_from_sz<sz_bytesum_sve2> {env}).log(base, base_stl);
+#endif
+}
+
+void bench_utf8_count(environment_t const &env) {
+
+    auto validator = utf8_count_from_sz<sz_utf8_count_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_count_serial", validator).log();
+
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_count_haswell", validator, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);
+#endif
+#if SZ_USE_ICE
+    bench_unary(env, "sz_utf8_count_ice", validator, utf8_count_from_sz<sz_utf8_count_ice> {env}).log(base);
 #endif
 }
 
@@ -437,6 +466,7 @@ int main(int argc, char const **argv) {
 
     // Unary operations
     bench_checksums(env);
+    bench_utf8_count(env);
     bench_hashing(env);
     bench_stream_hashing(env);
     bench_sha256(env);

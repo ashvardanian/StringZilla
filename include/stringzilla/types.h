@@ -771,6 +771,9 @@ typedef sz_u64_t (*sz_hash_state_digest_t)(struct sz_hash_state_t const *);
 /** @brief Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
+/** @brief Signature of `sz_utf8_count`. */
+typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
+
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
