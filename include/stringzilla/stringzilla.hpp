@@ -1857,7 +1857,7 @@ class basic_string_slice {
      *  @param[out] match_length Length of the matched newline sequence.
      */
     size_type find_newline_utf8(size_type &match_length) const noexcept {
-        auto ptr = sz_find_newline_utf8(start_, length_, &match_length);
+        auto ptr = sz_utf8_find_newline(start_, length_, &match_length);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1866,7 +1866,7 @@ class basic_string_slice {
      *  @param[out] match_length Length of the matched whitespace sequence.
      */
     size_type find_whitespace_utf8(size_type &match_length) const noexcept {
-        auto ptr = sz_find_whitespace_utf8(start_, length_, &match_length);
+        auto ptr = sz_utf8_find_whitespace(start_, length_, &match_length);
         return ptr ? ptr - start_ : npos;
     }
 

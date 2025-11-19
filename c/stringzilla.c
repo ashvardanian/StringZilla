@@ -58,8 +58,8 @@ typedef struct sz_implementations_t {
     sz_find_byteset_t find_byteset;
     sz_find_byteset_t rfind_byteset;
 
-    sz_find_utf8_boundary_t find_newline_utf8;
-    sz_find_utf8_boundary_t find_whitespace_utf8;
+    sz_utf8_find_boundary_t utf8_find_newline;
+    sz_utf8_find_boundary_t utf8_find_whitespace;
 
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
@@ -101,8 +101,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->rfind_byte = sz_rfind_byte_serial;
     impl->find_byteset = sz_find_byteset_serial;
     impl->rfind_byteset = sz_rfind_byteset_serial;
-    impl->find_newline_utf8 = sz_find_newline_utf8_serial;
-    impl->find_whitespace_utf8 = sz_find_whitespace_utf8_serial;
+    impl->utf8_find_newline = sz_utf8_find_newline_serial;
+    impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -185,8 +185,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     if (caps & sz_cap_ice_k) {
         impl->find_byteset = sz_find_byteset_ice;
         impl->rfind_byteset = sz_rfind_byteset_ice;
-        impl->find_newline_utf8 = sz_find_newline_utf8_ice;
-        impl->find_whitespace_utf8 = sz_find_whitespace_utf8_ice;
+        impl->utf8_find_newline = sz_utf8_find_newline_ice;
+        impl->utf8_find_whitespace = sz_utf8_find_whitespace_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -441,12 +441,12 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
                                                 first_positions, second_positions);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_newline_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_dispatch_table.find_newline_utf8(text, length, matched_length);
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.utf8_find_newline(text, length, matched_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_whitespace_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_dispatch_table.find_whitespace_utf8(text, length, matched_length);
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.utf8_find_whitespace(text, length, matched_length);
 }
 
 // Provide overrides for the libc mem* functions

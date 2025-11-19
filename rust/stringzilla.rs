@@ -328,9 +328,9 @@ extern "C" {
         byteset: *const c_void,
     ) -> *const c_void;
 
-    pub(crate) fn sz_find_newline_utf8(text: *const c_void, length: usize, matched_length: *mut usize)
+    pub(crate) fn sz_utf8_find_newline(text: *const c_void, length: usize, matched_length: *mut usize)
         -> *const c_void;
-    pub(crate) fn sz_find_whitespace_utf8(
+    pub(crate) fn sz_utf8_find_whitespace(
         text: *const c_void,
         length: usize,
         matched_length: *mut usize,
@@ -1172,7 +1172,7 @@ where
     let text_length = text_ref.len();
     let mut matched_length: usize = 0;
 
-    let result = unsafe { sz_find_newline_utf8(text_pointer, text_length, &mut matched_length as *mut usize) };
+    let result = unsafe { sz_utf8_find_newline(text_pointer, text_length, &mut matched_length as *mut usize) };
 
     if result.is_null() {
         None
@@ -1242,7 +1242,7 @@ where
     let text_length = text_ref.len();
     let mut matched_length: usize = 0;
 
-    let result = unsafe { sz_find_whitespace_utf8(text_pointer, text_length, &mut matched_length as *mut usize) };
+    let result = unsafe { sz_utf8_find_whitespace(text_pointer, text_length, &mut matched_length as *mut usize) };
 
     if result.is_null() {
         None
@@ -2036,16 +2036,16 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello\nWorld";
-    /// let span = text.sz_find_newline_utf8().unwrap();
+    /// let span = text.sz_utf8_find_newline().unwrap();
     /// assert_eq!(span.offset, 5);
     /// assert_eq!(span.length, 1);
     ///
     /// let text_crlf = "Hello\r\nWorld";
-    /// let span = text_crlf.sz_find_newline_utf8().unwrap();
+    /// let span = text_crlf.sz_utf8_find_newline().unwrap();
     /// assert_eq!(span.offset, 5);
     /// assert_eq!(span.length, 2);
     /// ```
-    fn sz_find_newline_utf8(&self) -> Option<IndexSpan>;
+    fn sz_utf8_find_newline(&self) -> Option<IndexSpan>;
 
     /// Finds the first whitespace character in UTF-8 encoded text.
     ///
@@ -2057,11 +2057,11 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello World";
-    /// let span = text.sz_find_whitespace_utf8().unwrap();
+    /// let span = text.sz_utf8_find_whitespace().unwrap();
     /// assert_eq!(span.offset, 5);
     /// assert_eq!(span.length, 1);
     /// ```
-    fn sz_find_whitespace_utf8(&self) -> Option<IndexSpan>;
+    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan>;
 
     /// Returns an iterator over lines split by newline characters.
     ///
@@ -2346,11 +2346,11 @@ where
         hash(self)
     }
 
-    fn sz_find_newline_utf8(&self) -> Option<IndexSpan> {
+    fn sz_utf8_find_newline(&self) -> Option<IndexSpan> {
         find_newline_utf8(self)
     }
 
-    fn sz_find_whitespace_utf8(&self) -> Option<IndexSpan> {
+    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan> {
         find_whitespace_utf8(self)
     }
 
@@ -3093,7 +3093,7 @@ mod tests {
     fn find_newline_utf8_trait_method() {
         use crate::sz::StringZillableUnary;
         let text = "Hello\nWorld";
-        let span = text.sz_find_newline_utf8().unwrap();
+        let span = text.sz_utf8_find_newline().unwrap();
         assert_eq!(span.offset, 5);
         assert_eq!(span.length, 1);
     }
@@ -3102,7 +3102,7 @@ mod tests {
     fn find_newline_utf8_trait_method_string() {
         use crate::sz::StringZillableUnary;
         let text = String::from("Hello\nWorld");
-        let span = text.sz_find_newline_utf8().unwrap();
+        let span = text.sz_utf8_find_newline().unwrap();
         assert_eq!(span.offset, 5);
         assert_eq!(span.length, 1);
     }
@@ -3201,7 +3201,7 @@ mod tests {
     fn find_whitespace_utf8_trait_method() {
         use crate::sz::StringZillableUnary;
         let text = "Hello World";
-        let span = text.sz_find_whitespace_utf8().unwrap();
+        let span = text.sz_utf8_find_whitespace().unwrap();
         assert_eq!(span.offset, 5);
         assert_eq!(span.length, 1);
     }
@@ -3210,7 +3210,7 @@ mod tests {
     fn find_whitespace_utf8_trait_method_string() {
         use crate::sz::StringZillableUnary;
         let text = String::from("Hello World");
-        let span = text.sz_find_whitespace_utf8().unwrap();
+        let span = text.sz_utf8_find_whitespace().unwrap();
         assert_eq!(span.offset, 5);
         assert_eq!(span.length, 1);
     }
@@ -3219,7 +3219,7 @@ mod tests {
     fn find_whitespace_utf8_trait_method_bytes() {
         use crate::sz::StringZillableUnary;
         let text = b"Hello World";
-        let span = text.sz_find_whitespace_utf8().unwrap();
+        let span = text.sz_utf8_find_whitespace().unwrap();
         assert_eq!(span.offset, 5);
         assert_eq!(span.length, 1);
     }

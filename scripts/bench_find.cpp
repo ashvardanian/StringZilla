@@ -613,12 +613,12 @@ void bench_byteset_search(environment_t const &env) {
  *  @brief  Wraps an individual hardware-specific search backend into something similar
  *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
-template <sz_find_utf8_boundary_t find_func_>
-struct matcher_from_sz_find_boundary {
+template <sz_utf8_find_boundary_t find_func_>
+struct matcher_from_sz_utf8_find_boundary {
     using size_type = std::size_t;
     size_type last_match_length_ = 0;
 
-    constexpr matcher_from_sz_find_boundary() noexcept {}
+    constexpr matcher_from_sz_utf8_find_boundary() noexcept {}
     inline size_type operator()(std::string_view haystack) noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &last_match_length_);
         do_not_optimize(ptr);
@@ -630,7 +630,7 @@ struct matcher_from_sz_find_boundary {
 };
 
 template <template <typename, typename> class range_template_, typename matcher_type_>
-auto callable_for_utf8_boundary(environment_t const &env) {
+auto callable_for_utf8_find_boundary(environment_t const &env) {
     using matcher_t = matcher_type_;
     using matches_t = range_template_<std::string_view, matcher_t>;
     return [&env](std::size_t token_index) -> call_result_t {
@@ -646,26 +646,29 @@ auto callable_for_utf8_boundary(environment_t const &env) {
  *  @brief Find all UTF-8 token boundaries - newlines, whitespaces, punctuation delimiters, etc.
  *  @warning Notice, there are no runtime-dependant "needles", we know the Unicode spec ahead of time :)
  */
-void bench_utf8_boundary(environment_t const &env) {
+void bench_utf8_find_boundary(environment_t const &env) {
 
     // First, benchmark the serial function
     auto base_newline_call =
-        callable_for_utf8_boundary<sz::range_matches, matcher_from_sz_find_boundary<sz_find_newline_utf8_serial>>(env);
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_serial>>(env);
     auto base_whitespace_call =
-        callable_for_utf8_boundary<sz::range_matches, matcher_from_sz_find_boundary<sz_find_whitespace_utf8_serial>>(
-            env);
-    bench_result_t base_newline = bench_unary(env, "sz_find_newline_utf8_serial", base_newline_call).log();
-    bench_result_t base_whitespace = bench_unary(env, "sz_find_whitespace_utf8_serial", base_whitespace_call).log();
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_serial>>(env);
+    bench_result_t base_newline = bench_unary(env, "sz_utf8_find_newline_serial", base_newline_call).log();
+    bench_result_t base_whitespace = bench_unary(env, "sz_utf8_find_whitespace_serial", base_whitespace_call).log();
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_ICE
     bench_unary( //
-        env, "sz_find_newline_utf8_ice", base_newline_call,
-        callable_for_utf8_boundary<sz::range_matches, matcher_from_sz_find_boundary<sz_find_newline_utf8_ice>>(env))
+        env, "sz_utf8_find_newline_ice", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_ice>>(env))
         .log(base_newline);
     bench_unary( //
-        env, "sz_find_whitespace_utf8_ice", base_whitespace_call,
-        callable_for_utf8_boundary<sz::range_matches, matcher_from_sz_find_boundary<sz_find_whitespace_utf8_ice>>(env))
+        env, "sz_utf8_find_whitespace_ice", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_ice>>(env))
         .log(base_whitespace);
 #endif
 }
@@ -682,7 +685,7 @@ int main(int argc, char const **argv) {
         environment_t::tokenization_t::words_k);
 
     std::printf("Starting search benchmarks...\n");
-    bench_utf8_boundary(env);
+    bench_utf8_find_boundary(env);
     bench_substring_search(env);
     bench_byte_search(env);
     bench_byteset_search(env);

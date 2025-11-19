@@ -810,8 +810,8 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
-/** @brief Signature of `sz_find_utf8_newline`, `sz_find_utf8_whitespace`, `sz_find_utf8_delimiter`. */
-typedef sz_cptr_t (*sz_find_utf8_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
+/** @brief Signature of `sz_utf8_find_newline`, `sz_utf8_find_whitespace`. */
+typedef sz_cptr_t (*sz_utf8_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_sequence_argsort`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
