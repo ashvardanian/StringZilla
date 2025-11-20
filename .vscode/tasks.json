@@ -7,16 +7,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -25,16 +21,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -49,16 +41,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -67,16 +55,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
