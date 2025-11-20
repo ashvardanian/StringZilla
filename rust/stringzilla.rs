@@ -91,7 +91,7 @@ impl IndexSpan {
     /// assert_eq!(span.range(), 5..8);
     /// ```
     #[inline]
-    pub fn range(&self) -> std::ops::Range<usize> {
+    pub fn range(&self) -> core::ops::Range<usize> {
         self.offset..self.offset + self.length
     }
 
@@ -1374,7 +1374,7 @@ where
 /// ```
 pub struct Utf8View<'a> {
     octets: &'a [u8],
-    cached_len: std::cell::Cell<Option<usize>>,
+    cached_len: core::cell::Cell<Option<usize>>,
 }
 
 impl<'a> Utf8View<'a> {
@@ -1382,7 +1382,7 @@ impl<'a> Utf8View<'a> {
     pub fn new(octets: &'a [u8]) -> Self {
         Self {
             octets,
-            cached_len: std::cell::Cell::new(None),
+            cached_len: core::cell::Cell::new(None),
         }
     }
 
@@ -1417,13 +1417,16 @@ impl<'a> Utf8View<'a> {
 /// Decodes up to 64 bytes at a time into UTF-32 codepoints, then yields them one at a time.
 /// This is much more efficient than decoding character-by-character.
 ///
+/// Typically created through [`Utf8View::iter()`].
+///
 /// # Examples
 ///
 /// ```
 /// use stringzilla::stringzilla as sz;
 ///
 /// let text = "Hello🌍";
-/// let chars: Vec<char> = sz::Utf8Chars::new(text.as_bytes()).collect();
+/// let view = sz::Utf8View::new(text.as_bytes());
+/// let chars: Vec<char> = view.iter().collect();
 /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 /// ```
 pub struct Utf8Chars<'a> {
@@ -2119,7 +2122,7 @@ impl<'a> Iterator for RangeRSplits<'a> {
 ///
 /// let text = b"Hello\nWorld\r\nRust";
 /// let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
-/// assert_eq!(lines, vec![b"Hello", b"World", b"Rust"]);
+/// assert_eq!(lines, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
 pub struct RangeNewlineUtf8Splits<'a> {
     text: &'a [u8],
@@ -2182,7 +2185,7 @@ impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
 ///
 /// let text = b"Hello  World\tRust";
 /// let words: Vec<&[u8]> = RangeWhitespaceUtf8Splits::new(text).collect();
-/// assert_eq!(words, vec![b"Hello", b"World", b"Rust"]);
+/// assert_eq!(words, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
 pub struct RangeWhitespaceUtf8Splits<'a> {
     text: &'a [u8],
