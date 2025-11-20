@@ -1751,196 +1751,239 @@ void test_utf8() {
 
     // Test utf8_chars() - iterate over UTF-32 codepoints
     {
-        sz::string_view text = "Hello";
-        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
-        assert(chars.size() == 5);
-        assert(chars[0] == 'H');
-        assert(chars[1] == 'e');
-        assert(chars[4] == 'o');
+        auto chars = [](char const *t) {
+            return sz::string_view(t).utf8_chars().template to<std::vector<sz_rune_t>>();
+        };
+
+        // Basic ASCII and edge cases
+        let_assert(auto c = chars("Hello"), c.size() == 5 && c[0] == 'H' && c[4] == 'o');
+        let_assert(auto c = chars(""), c.size() == 0);
+        let_assert(auto c = chars("A"), c.size() == 1 && c[0] == 'A');
+
+        // CJK (3-byte UTF-8)
+        let_assert(auto c = chars("世界"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x754C);
+        let_assert(auto c = chars("你好"), c.size() == 2 && c[0] == 0x4F60 && c[1] == 0x597D);
+
+        // Cyrillic (2-byte UTF-8)
+        let_assert(auto c = chars("Привет"), c.size() == 6 && c[0] == 0x041F && c[5] == 0x0442);
+
+        // Arabic/RTL (2-byte UTF-8)
+        let_assert(auto c = chars("مرحبا"), c.size() == 5 && c[0] == 0x0645 && c[4] == 0x0627);
+
+        // Hebrew/RTL (2-byte UTF-8)
+        let_assert(auto c = chars("שלום"), c.size() == 4 && c[0] == 0x05E9 && c[3] == 0x05DD);
+
+        // Thai (3-byte UTF-8)
+        let_assert(auto c = chars("สวัสดี"), c.size() == 6 && c[0] == 0x0E2A);
+
+        // Devanagari/Hindi (3-byte UTF-8)
+        let_assert(auto c = chars("नमस्ते"), c.size() == 6 && c[0] == 0x0928);
+
+        // Emoji: basic smileys (4-byte UTF-8)
+        let_assert(auto c = chars("😀😁😂"), c.size() == 3 && c[0] == 0x1F600 && c[2] == 0x1F602);
+
+        // Emoji: with variation selector
+        let_assert(auto c = chars("❤️"), c.size() == 2 && c[0] == 0x2764 && c[1] == 0xFE0F);
+
+        // Emoji: various categories
+        let_assert(auto c = chars("🚀🎉🔥"), c.size() == 3 && c[0] == 0x1F680);
+
+        // Maximum valid Unicode codepoint (U+10FFFF)
+        let_assert(auto c = chars("\xF4\x8F\xBF\xBF"), c.size() == 1 && c[0] == 0x10FFFF);
+
+        // Deseret alphabet (4-byte UTF-8, U+10400 range)
+        let_assert(auto c = chars("𐐷"), c.size() == 1 && c[0] == 0x10437);
+
+        // Mixed scripts
+        let_assert(auto c = chars("Hello世界"), c.size() == 7 && c[4] == 'o' && c[5] == 0x4E16);
+        let_assert(auto c = chars("a𐐷b"), c.size() == 3 && c[0] == 'a' && c[1] == 0x10437 && c[2] == 'b');
+
+        // Zero-width characters
+        let_assert(auto c = chars("a\u200Bb"), c.size() == 3 && c[0] == 'a' && c[1] == 0x200B && c[2] == 'b');
+        let_assert(auto c = chars("\uFEFF"), c.size() == 1 && c[0] == 0xFEFF); // BOM
+
+        // Combining diacritics (é as e + combining acute)
+        let_assert(auto c = chars("e\u0301"), c.size() == 2 && c[0] == 'e' && c[1] == 0x0301);
+
+        // Precomposed vs decomposed normalization
+        let_assert(auto c = chars("é"), c.size() == 1 && c[0] == 0x00E9); // Precomposed
+
+        // Test all byte-length transitions (stress Ice Lake waterfall approach)
+        // Missing transitions: 1→2, 2→1, 2→3, 3→2, 2→4, 4→2, 3→4, 4→3
+        let_assert(auto c = chars("aП"), c.size() == 2 && c[0] == 'a' && c[1] == 0x041F);       // 1→2
+        let_assert(auto c = chars("Пa"), c.size() == 2 && c[0] == 0x041F && c[1] == 'a');       // 2→1
+        let_assert(auto c = chars("П世"), c.size() == 2 && c[0] == 0x041F && c[1] == 0x4E16);   // 2→3
+        let_assert(auto c = chars("世П"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x041F);   // 3→2
+        let_assert(auto c = chars("П😀"), c.size() == 2 && c[0] == 0x041F && c[1] == 0x1F600);  // 2→4
+        let_assert(auto c = chars("😀П"), c.size() == 2 && c[0] == 0x1F600 && c[1] == 0x041F);  // 4→2
+        let_assert(auto c = chars("世😀"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x1F600); // 3→4
+        let_assert(auto c = chars("😀世"), c.size() == 2 && c[0] == 0x1F600 && c[1] == 0x4E16); // 4→3
+
+        // Extended transitions with same-length runs
+        let_assert(auto c = chars("ПРС"), c.size() == 3 && c[0] == 0x041F && c[2] == 0x0421);    // 2→2→2
+        let_assert(auto c = chars("世界人"), c.size() == 3 && c[0] == 0x4E16 && c[2] == 0x4EBA); // 3→3→3
+
+        // Asymmetric alternating patterns (2:3, 3:2) - stress homogeneity assumption
+        let_assert(auto c = chars("aaПППaaППП"), c.size() == 10);           // 2 ASCII, 3 Cyrillic
+        let_assert(auto c = chars("aaaППaaaПП"), c.size() == 10);           // 3 ASCII, 2 Cyrillic
+        let_assert(auto c = chars("aa世世世aa世世世"), c.size() == 10);     // 2 ASCII, 3 CJK
+        let_assert(auto c = chars("ПП世世世ПП世世世"), c.size() == 10);     // 2 Cyrillic, 3 CJK
+        let_assert(auto c = chars("世世😀😀😀世世😀😀😀"), c.size() == 10); // 2 CJK, 3 Emoji
+        let_assert(auto c = chars("aaa😀😀aaa😀😀"), c.size() == 10);       // 3 ASCII, 2 Emoji
+
+        // Pathological mixed patterns
+        let_assert(auto c = chars("aaПППП世世世世😀😀😀😀😀"), c.size() == 15); // 2-4-4-5
+        let_assert(auto c = chars("aaПППaa😀😀😀😀世世世ПП"), c.size() == 16);  // 2-3-2-4-3-2
+
+        // Extended asymmetric: 30x "aaППП" = 150 chars, 210 bytes (crosses multiple 64-byte chunks)
+        scope_assert(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "aaППП",
+                     sz::string_view(asym_long).utf8_count() == 150);
     }
 
+    // Test 64-byte chunk boundaries and batch limits
     {
-        sz::string_view text = "Hello 世界";
-        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
-        assert(chars.size() == 8);
-        assert(chars[0] == 'H');
-        assert(chars[5] == ' ');
-        assert(chars[6] == 0x4E16); // '世'
-        assert(chars[7] == 0x754C); // '界'
+        // Critical 63, 64, 65 byte boundaries
+        let_assert(std::string s63(63, 'a'), sz::string_view(s63).utf8_chars().size() == 63);
+        let_assert(std::string s64(64, 'a'), sz::string_view(s64).utf8_chars().size() == 64);
+        let_assert(std::string s65(65, 'a'), sz::string_view(s65).utf8_chars().size() == 65);
+
+        // ASCII batch limit: 16 characters max per Ice Lake iteration
+        let_assert(std::string s17(17, 'x'), sz::string_view(s17).utf8_chars().size() == 17);
+        let_assert(std::string s20(20, 'x'), sz::string_view(s20).utf8_chars().size() == 20);
+
+        // 2-byte batch limit: 32 characters (64 bytes) max per iteration
+        scope_assert(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "П",
+                     sz::string_view(cyr32).utf8_count() == 32);
+        scope_assert(std::string cyr33, for (int i = 0; i < 33; ++i) cyr33 += "П",
+                     sz::string_view(cyr33).utf8_count() == 33);
+
+        // 3-byte batch limit: 16 characters (48 bytes) max per iteration
+        scope_assert(std::string cjk16, for (int i = 0; i < 16; ++i) cjk16 += "世",
+                     sz::string_view(cjk16).utf8_count() == 16);
+        scope_assert(std::string cjk17, for (int i = 0; i < 17; ++i) cjk17 += "世",
+                     sz::string_view(cjk17).utf8_count() == 17);
+
+        // 4-byte batch limit: 16 characters (64 bytes) max per iteration
+        scope_assert(std::string emoji16, for (int i = 0; i < 16; ++i) emoji16 += "😀",
+                     sz::string_view(emoji16).utf8_count() == 16);
+        scope_assert(std::string emoji17, for (int i = 0; i < 17; ++i) emoji17 += "😀",
+                     sz::string_view(emoji17).utf8_count() == 17);
+
+        // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
+        scope_assert(std::string boundary_asym(60, 'a'), boundary_asym += "ПП世",
+                     sz::string_view(boundary_asym).utf8_count() == 63);
+
+        // Test sequences exceeding batch limits
+        // 100 consecutive 2-byte (exceeds 32-char limit 3x)
+        scope_assert(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "П",
+                     sz::string_view(cyr100).utf8_chars().size() == 100);
+
+        // 50 consecutive 3-byte (exceeds 16-char limit 3x)
+        scope_assert(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "世",
+                     sz::string_view(cjk50).utf8_chars().size() == 50);
+
+        // 50 consecutive 4-byte (exceeds 16-char limit 3x)
+        scope_assert(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "😀",
+                     sz::string_view(emoji50).utf8_chars().size() == 50);
+
+        // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
+        scope_assert(std::string overflow_asym, for (int i = 0; i < 20; ++i) overflow_asym += "aaПРС",
+                     sz::string_view(overflow_asym).utf8_count() == 100);
+
+        // Test transitions at chunk boundaries
+        // 63 bytes ASCII + 2-byte char (transition at 64-byte boundary)
+        scope_assert(std::string boundary_test(63, 'a'), boundary_test += "П",
+                     sz::string_view(boundary_test).utf8_chars().size() == 64);
+
+        // Asymmetric spanning boundary: 60 ASCII + 24 Cyrillic = 84 chars, 108 bytes
+        scope_assert(
+            std::string span_asym,
+            {
+                for (int i = 0; i < 30; ++i) span_asym += "aa";
+                for (int i = 0; i < 8; ++i) span_asym += "ПРС";
+            },
+            sz::string_view(span_asym).utf8_count() == 84);
+
+        // Transition exactly at 64-byte boundary
+        scope_assert(std::string exact_boundary(64, 'a'), exact_boundary += "П世😀",
+                     sz::string_view(exact_boundary).utf8_count() == 67);
     }
 
+    // Test utf8_split_lines() - split by Unicode newlines
     {
-        sz::string_view text = "😀😁😂";
-        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
-        assert(chars.size() == 3);
-        assert(chars[0] == 0x1F600); // 😀
-        assert(chars[1] == 0x1F601); // 😁
-        assert(chars[2] == 0x1F602); // 😂
-    }
+        auto lines = [](char const *t) {
+            return sz::string_view(t).utf8_split_lines().template to<std::vector<std::string>>();
+        };
 
-    // Test empty string iteration
-    {
-        sz::string_view text = "";
-        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
-        assert(chars.size() == 0);
-    }
+        // Basic newline types
+        let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
+        let_assert(auto l = lines("a\r\nb\r\nc"), l.size() == 3 && l[1] == "b");
+        let_assert(auto l = lines("a\rb\rc"), l.size() == 3 && l[0] == "a");
 
-    // Test utf8_split_lines() - split by all Unicode newlines
-    {
-        // LF only
-        sz::string_view text = "line1\nline2\nline3";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 3);
-        assert(lines[0] == "line1");
-        assert(lines[1] == "line2");
-        assert(lines[2] == "line3");
-    }
+        // Edge cases (trailing newlines are stripped)
+        let_assert(auto l = lines(""), l.size() == 0);
+        let_assert(auto l = lines("\n"), l.size() == 0);
+        let_assert(auto l = lines("\n\n"), l.size() == 1 && l[0] == "");
+        let_assert(auto l = lines("a\n"), l.size() == 1 && l[0] == "a");
+        let_assert(auto l = lines("\na"), l.size() == 2 && l[0] == "" && l[1] == "a");
+        let_assert(auto l = lines("a\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b");
+        let_assert(auto l = lines("single"), l.size() == 1 && l[0] == "single");
 
-    {
-        // CRLF
-        sz::string_view text = "line1\r\nline2\r\nline3";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 3);
-        assert(lines[0] == "line1");
-        assert(lines[1] == "line2");
-        assert(lines[2] == "line3");
-    }
-
-    {
-        // CR only
-        sz::string_view text = "line1\rline2\rline3";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 3);
-        assert(lines[0] == "line1");
-        assert(lines[1] == "line2");
-        assert(lines[2] == "line3");
-    }
-
-    {
         // Mixed newlines with non-ASCII content
-        sz::string_view text = "Hello 世界\nПривет\r\n😀";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 3);
-        assert(lines[0] == "Hello 世界");
-        assert(lines[1] == "Привет");
-        assert(lines[2] == "😀");
-    }
+        let_assert(auto l = lines("Hello 世界\nПривет\r\n😀"),
+                   l.size() == 3 && l[0] == "Hello 世界" && l[1] == "Привет" && l[2] == "😀");
 
-    {
-        // Empty lines
-        sz::string_view text = "\n\n";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 3);
-        assert(lines[0] == "");
-        assert(lines[1] == "");
-        assert(lines[2] == "");
-    }
+        // Multiple line types
+        let_assert(auto l = lines("a\nb\r\nc\rd"), l.size() == 4 && l[3] == "d");
 
-    {
-        // Trailing newline
-        sz::string_view text = "line1\n";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 2);
-        assert(lines[0] == "line1");
-        assert(lines[1] == "");
-    }
-
-    {
-        // No newlines
-        sz::string_view text = "single line";
-        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 1);
-        assert(lines[0] == "single line");
+        // Unicode line separators (U+2028, U+2029)
+        let_assert(auto l = lines("a\u2028b"), l.size() >= 1);
+        let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
     }
 
     // Test utf8_split() - split by Unicode whitespace
     {
-        // ASCII spaces
-        sz::string_view text = "Hello World Test";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 3);
-        assert(words[0] == "Hello");
-        assert(words[1] == "World");
-        assert(words[2] == "Test");
+        auto words = [](char const *t) {
+            return sz::string_view(t).utf8_split().template to<std::vector<std::string>>();
+        };
+
+        // Basic ASCII whitespace
+        let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
+        let_assert(auto w = words("a\tb\nc"), w.size() == 3 && w[1] == "b");
+        let_assert(auto w = words("  a  b  "), w.size() == 2 && w[0] == "a" && w[1] == "b");
+        let_assert(auto w = words("a    b"), w.size() == 2);
+
+        // Edge cases
+        let_assert(auto w = words(""), w.size() == 0);
+        let_assert(auto w = words("   "), w.size() == 0);
+        let_assert(auto w = words("\t\n\r"), w.size() == 0);
+        let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
+
+        // Non-ASCII content
+        let_assert(auto w = words("Hello 世界 Привет 😀"),
+                   w.size() == 4 && w[1] == "世界" && w[2] == "Привет" && w[3] == "😀");
+        let_assert(auto w = words("مرحبا بك"), w.size() == 2);
+        let_assert(auto w = words("שלום עולם"), w.size() == 2);
+
+        // Unicode whitespace characters
+        let_assert(auto w = words("a\u00A0b"), w.size() >= 1); // Non-breaking space
+        let_assert(auto w = words("a\u3000b"), w.size() >= 1); // Ideographic space
     }
 
-    {
-        // Tabs and spaces
-        sz::string_view text = "Hello\tWorld  Test";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 3);
-        assert(words[0] == "Hello");
-        assert(words[1] == "World");
-        assert(words[2] == "Test");
-    }
-
-    {
-        // Non-ASCII content with spaces
-        sz::string_view text = "Hello 世界 Привет 😀";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 4);
-        assert(words[0] == "Hello");
-        assert(words[1] == "世界");
-        assert(words[2] == "Привет");
-        assert(words[3] == "😀");
-    }
-
-    {
-        // Leading and trailing whitespace
-        sz::string_view text = "  Hello World  ";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 2);
-        assert(words[0] == "Hello");
-        assert(words[1] == "World");
-    }
-
-    {
-        // Multiple consecutive spaces
-        sz::string_view text = "Hello    World";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 2);
-        assert(words[0] == "Hello");
-        assert(words[1] == "World");
-    }
-
-    {
-        // No whitespace
-        sz::string_view text = "HelloWorld";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 1);
-        assert(words[0] == "HelloWorld");
-    }
-
-    {
-        // Empty string
-        sz::string_view text = "";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 0);
-    }
-
-    {
-        // Only whitespace
-        sz::string_view text = "   \t  \n  ";
-        auto words = text.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 0);
-    }
-
-    // Test with sz::string as well (not just string_view)
+    // Test with sz::string (not just string_view)
     {
         sz::string str = "Hello 世界";
         assert(str.utf8_count() == 8);
         assert(str.utf8_find_nth(6) == 6);
+        let_assert(auto c = str.utf8_chars().template to<std::vector<sz_rune_t>>(), c.size() == 8 && c[6] == 0x4E16);
 
-        auto chars = str.utf8_chars().template to<std::vector<sz_rune_t>>();
-        assert(chars.size() == 8);
+        sz::string multiline = "a\nb\nc";
+        let_assert(auto l = multiline.utf8_split_lines().template to<std::vector<std::string>>(),
+                   l.size() == 3 && l[1] == "b");
 
-        sz::string multiline = "line1\nline2";
-        auto lines = multiline.utf8_split_lines().template to<std::vector<std::string>>();
-        assert(lines.size() == 2);
-
-        sz::string words_str = "Hello World";
-        auto words = words_str.utf8_split().template to<std::vector<std::string>>();
-        assert(words.size() == 2);
+        sz::string words_str = "foo bar baz";
+        let_assert(auto w = words_str.utf8_split().template to<std::vector<std::string>>(),
+                   w.size() == 3 && w[2] == "baz");
     }
 }
 

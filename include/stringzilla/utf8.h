@@ -912,7 +912,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     // Check, how many of the next characters are single byte (ASCII) codepoints
     // ASCII bytes have bit 7 clear (0x00-0x7F), non-ASCII have bit 7 set (0x80-0xFF)
     __mmask64 non_ascii_mask = _mm512_movepi8_mask(text_vec.zmm);
-    sz_size_t ascii_prefix_length = sz_u64_ctz(non_ascii_mask);
+    // Find first non-ASCII byte or end of loaded data
+    sz_size_t ascii_prefix_length = sz_u64_ctz(non_ascii_mask | ~load_mask);
 
     if (ascii_prefix_length) {
         // Unpack the last 16 bytes of text into the next 16 runes.
@@ -1403,17 +1404,6 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
-                                          sz_size_t *runes_unpacked) {
-#if SZ_USE_ICE
-    return sz_utf8_unpack_chunk_ice(text, length, runes, runes_capacity, runes_unpacked);
-#elif SZ_USE_HASWELL
-    return sz_utf8_unpack_chunk_haswell(text, length, runes, runes_capacity, runes_unpacked);
-#else
-    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
-#endif
-}
-
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 #if SZ_USE_ICE
     return sz_utf8_find_newline_ice(text, length, matched_length);
@@ -1431,6 +1421,17 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_find_whitespace_haswell(text, length, matched_length);
 #else
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
+#endif
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
+                                          sz_size_t *runes_unpacked) {
+#if SZ_USE_ICE
+    return sz_utf8_unpack_chunk_ice(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_HASWELL
+    return sz_utf8_unpack_chunk_haswell(text, length, runes, runes_capacity, runes_unpacked);
+#else
+    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 #endif
 }
 
