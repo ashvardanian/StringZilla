@@ -774,6 +774,9 @@ typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_utf8_count`. */
 typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
 
+/** @brief Signature of `sz_utf8_find_nth`. */
+typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
+
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
@@ -976,36 +979,36 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *
     sz_rune_length_t ch_length;
 
     // TODO: This can be made entirely branchless using 32-bit SWAR.
+    // Single-byte rune (0xxxxxxx)
     if (leading_byte < 0x80U) {
-        // Single-byte rune (0xxxxxxx)
         ch = leading_byte;
         ch_length = sz_utf8_rune_1byte_k;
     }
+    // Two-byte rune (110xxxxx 10xxxxxx)
     else if ((leading_byte & 0xE0U) == 0xC0U) {
-        // Two-byte rune (110xxxxx 10xxxxxx)
-        ch = (leading_byte & 0x1FU) << 6;
-        ch |= (*current++ & 0x3FU);
+        ch = (leading_byte & 0x1FU) << 6; // bottom 5 bits from the first byte
+        ch |= (*current++ & 0x3FU);       // bottom 6 bits from the second byte
         ch_length = sz_utf8_rune_2bytes_k;
     }
+    // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF0U) == 0xE0U) {
-        // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x0FU) << 12;
-        ch |= (*current++ & 0x3FU) << 6;
-        ch |= (*current++ & 0x3FU);
+        ch = (leading_byte & 0x0FU) << 12; // bottom 4 bits from the first byte
+        ch |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the second byte
+        ch |= (*current++ & 0x3FU);        // bottom 6 bits from the third byte
         ch_length = sz_utf8_rune_3bytes_k;
     }
+    // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF8U) == 0xF0U) {
-        // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x07U) << 18;
-        ch |= (*current++ & 0x3FU) << 12;
-        ch |= (*current++ & 0x3FU) << 6;
-        ch |= (*current++ & 0x3FU);
+        ch = (leading_byte & 0x07U) << 18; // bottom 3 bits from the first byte
+        ch |= (*current++ & 0x3FU) << 12;  // bottom 6 bits from the second byte
+        ch |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the third byte
+        ch |= (*current++ & 0x3FU);        // bottom 6 bits from the fourth byte
         // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
         if (ch > 0x10FFFFU) { ch = 0U, ch_length = sz_utf8_invalid_k; }
         else { ch_length = sz_utf8_rune_4bytes_k; }
     }
+    // Invalid UTF8 rune.
     else {
-        // Invalid UTF8 rune.
         ch = 0U;
         ch_length = sz_utf8_invalid_k;
     }
