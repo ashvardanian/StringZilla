@@ -60,6 +60,7 @@ typedef struct sz_implementations_t {
 
     sz_utf8_count_t utf8_count;
     sz_utf8_find_nth_t utf8_find_nth;
+    sz_utf8_unpack_chunk_t utf8_unpack_chunk;
     sz_utf8_find_boundary_t utf8_find_newline;
     sz_utf8_find_boundary_t utf8_find_whitespace;
 
@@ -106,6 +107,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
     impl->utf8_count = sz_utf8_count_serial;
     impl->utf8_find_nth = sz_utf8_find_nth_serial;
+    impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
     impl->utf8_find_newline = sz_utf8_find_newline_serial;
     impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
 
@@ -160,6 +162,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_haswell;
         impl->utf8_find_nth = sz_utf8_find_nth_haswell;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
         impl->utf8_find_newline = sz_utf8_find_newline_haswell;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_haswell;
     }
@@ -198,6 +201,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_ice;
         impl->utf8_find_nth = sz_utf8_find_nth_ice;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_ice;
         impl->utf8_find_newline = sz_utf8_find_newline_ice;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_ice;
 
@@ -238,6 +242,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_neon;
         impl->utf8_find_nth = sz_utf8_find_nth_neon;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_neon;
         impl->utf8_find_newline = sz_utf8_find_newline_neon;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_neon;
     }
@@ -465,6 +470,11 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     return sz_dispatch_table.utf8_find_nth(text, length, n);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
+                                          sz_size_t *runes_unpacked) {
+    return sz_dispatch_table.utf8_unpack_chunk(text, length, runes, runes_capacity, runes_unpacked);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {

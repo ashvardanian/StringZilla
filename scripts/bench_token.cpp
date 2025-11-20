@@ -103,6 +103,46 @@ struct utf8_count_from_sz {
     }
 };
 
+/** @brief Wraps a hardware-specific UTF-8 to UTF-32 unpacking backend. */
+template <sz_utf8_unpack_chunk_t func_>
+struct utf8_unpack_from_sz {
+
+    environment_t const &env;
+    mutable sz_rune_t runes[64]; // Reusable buffer to avoid repeated stack allocation
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        check_value_t checksum = 0;
+        sz_size_t total_bytes = 0;
+        sz_cptr_t text = buffer.data();
+        sz_size_t remaining = buffer.size();
+
+        // Process entire token, letting the function decode as much as it can each iteration
+        while (remaining > 0) {
+            sz_size_t unpacked_count = 0;
+            sz_cptr_t next = func_(text, remaining, runes, 64, &unpacked_count);
+
+            // Compute checksum of decoded runes
+            for (sz_size_t i = 0; i < unpacked_count; i++) checksum += static_cast<check_value_t>(runes[i]);
+
+            sz_size_t bytes_consumed = next - text;
+            total_bytes += bytes_consumed;
+            text = next;
+            remaining -= bytes_consumed;
+
+            // Safety check: if no progress, break to avoid infinite loop
+            if (bytes_consumed == 0) break;
+        }
+
+        do_not_optimize(runes);
+        do_not_optimize(checksum);
+        return {total_bytes, checksum};
+    }
+};
+
 /** @brief Wraps a hardware-specific hashing backend into something similar to @b `std::hash`. */
 template <sz_hash_t func_>
 struct hash_from_sz {
@@ -190,6 +230,17 @@ void bench_utf8_count(environment_t const &env) {
 #endif
 #if SZ_USE_ICE
     bench_unary(env, "sz_utf8_count_ice", validator, utf8_count_from_sz<sz_utf8_count_ice> {env}).log(base);
+#endif
+}
+
+void bench_utf8_unpack(environment_t const &env) {
+
+    auto validator = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", validator).log();
+
+#if SZ_USE_ICE
+    bench_unary(env, "sz_utf8_unpack_chunk_ice", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_ice> {env})
+        .log(base);
 #endif
 }
 
@@ -467,6 +518,7 @@ int main(int argc, char const **argv) {
     // Unary operations
     bench_checksums(env);
     bench_utf8_count(env);
+    bench_utf8_unpack(env);
     bench_hashing(env);
     bench_stream_hashing(env);
     bench_sha256(env);

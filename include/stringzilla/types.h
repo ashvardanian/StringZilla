@@ -777,6 +777,9 @@ typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_utf8_find_nth`. */
 typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
+/** @brief Signature of `sz_utf8_unpack_chunk`. */
+typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
+
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 

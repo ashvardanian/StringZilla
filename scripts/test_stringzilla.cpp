@@ -1688,6 +1688,256 @@ void test_search() {
     assert(rsplits[4] == "");
 }
 
+/**
+ *  @brief Tests UTF-8 specific functionality, including character counting, nth character finding,
+ *         character iteration, and Unicode-aware splitting.
+ */
+void test_utf8() {
+
+    // Test utf8_count() - character counting vs byte length
+    assert("hello"_sv.utf8_count() == 5);
+    assert("hello"_sv.size() == 5);
+
+    // ASCII text: bytes == characters
+    assert("Hello World"_sv.utf8_count() == 11);
+    assert(sz::string_view("").utf8_count() == 0);
+
+    // Mixed ASCII and multi-byte characters
+    assert(sz::string_view("Hello 世界").utf8_count() == 8); // "Hello " (6) + "世界" (2 chars)
+    assert(sz::string_view("Hello 世界").size() == 12);      // "Hello " (6) + "世界" (6 bytes)
+
+    // Emojis (4-byte UTF-8)
+    assert(sz::string_view("Hello 😀").utf8_count() == 7); // "Hello " (6) + emoji (1 char)
+    assert(sz::string_view("Hello 😀").size() == 10);      // "Hello " (6) + emoji (4 bytes)
+    assert(sz::string_view("😀😁😂").utf8_count() == 3);
+    assert(sz::string_view("😀😁😂").size() == 12);
+
+    // Cyrillic (2-byte UTF-8)
+    assert(sz::string_view("Привет").utf8_count() == 6);
+    assert(sz::string_view("Привет").size() == 12);
+
+    // Test utf8_find_nth() - finding byte offset of nth character
+    {
+        sz::string_view text = "Hello";
+        assert(text.utf8_find_nth(0) == 0);                     // First char at byte 0
+        assert(text.utf8_find_nth(1) == 1);                     // Second char at byte 1
+        assert(text.utf8_find_nth(4) == 4);                     // Fifth char at byte 4
+        assert(text.utf8_find_nth(5) == sz::string_view::npos); // Beyond end
+        assert(text.utf8_find_nth(100) == sz::string_view::npos);
+    }
+
+    {
+        sz::string_view text = "Hello 世界";
+        assert(text.utf8_find_nth(0) == 0); // 'H' at byte 0
+        assert(text.utf8_find_nth(5) == 5); // ' ' at byte 5
+        assert(text.utf8_find_nth(6) == 6); // '世' at byte 6
+        assert(text.utf8_find_nth(7) == 9); // '界' at byte 9
+        assert(text.utf8_find_nth(8) == sz::string_view::npos);
+    }
+
+    {
+        sz::string_view text = "😀😁😂";
+        assert(text.utf8_find_nth(0) == 0); // First emoji at byte 0
+        assert(text.utf8_find_nth(1) == 4); // Second emoji at byte 4
+        assert(text.utf8_find_nth(2) == 8); // Third emoji at byte 8
+        assert(text.utf8_find_nth(3) == sz::string_view::npos);
+    }
+
+    // Test utf8_chars() - iterate over UTF-32 codepoints
+    {
+        sz::string_view text = "Hello";
+        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
+        assert(chars.size() == 5);
+        assert(chars[0] == 'H');
+        assert(chars[1] == 'e');
+        assert(chars[4] == 'o');
+    }
+
+    {
+        sz::string_view text = "Hello 世界";
+        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
+        assert(chars.size() == 8);
+        assert(chars[0] == 'H');
+        assert(chars[5] == ' ');
+        assert(chars[6] == 0x4E16); // '世'
+        assert(chars[7] == 0x754C); // '界'
+    }
+
+    {
+        sz::string_view text = "😀😁😂";
+        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
+        assert(chars.size() == 3);
+        assert(chars[0] == 0x1F600); // 😀
+        assert(chars[1] == 0x1F601); // 😁
+        assert(chars[2] == 0x1F602); // 😂
+    }
+
+    // Test empty string iteration
+    {
+        sz::string_view text = "";
+        auto chars = text.utf8_chars().template to<std::vector<sz_rune_t>>();
+        assert(chars.size() == 0);
+    }
+
+    // Test utf8_split_lines() - split by all Unicode newlines
+    {
+        // LF only
+        sz::string_view text = "line1\nline2\nline3";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 3);
+        assert(lines[0] == "line1");
+        assert(lines[1] == "line2");
+        assert(lines[2] == "line3");
+    }
+
+    {
+        // CRLF
+        sz::string_view text = "line1\r\nline2\r\nline3";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 3);
+        assert(lines[0] == "line1");
+        assert(lines[1] == "line2");
+        assert(lines[2] == "line3");
+    }
+
+    {
+        // CR only
+        sz::string_view text = "line1\rline2\rline3";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 3);
+        assert(lines[0] == "line1");
+        assert(lines[1] == "line2");
+        assert(lines[2] == "line3");
+    }
+
+    {
+        // Mixed newlines with non-ASCII content
+        sz::string_view text = "Hello 世界\nПривет\r\n😀";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 3);
+        assert(lines[0] == "Hello 世界");
+        assert(lines[1] == "Привет");
+        assert(lines[2] == "😀");
+    }
+
+    {
+        // Empty lines
+        sz::string_view text = "\n\n";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 3);
+        assert(lines[0] == "");
+        assert(lines[1] == "");
+        assert(lines[2] == "");
+    }
+
+    {
+        // Trailing newline
+        sz::string_view text = "line1\n";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 2);
+        assert(lines[0] == "line1");
+        assert(lines[1] == "");
+    }
+
+    {
+        // No newlines
+        sz::string_view text = "single line";
+        auto lines = text.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 1);
+        assert(lines[0] == "single line");
+    }
+
+    // Test utf8_split() - split by Unicode whitespace
+    {
+        // ASCII spaces
+        sz::string_view text = "Hello World Test";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 3);
+        assert(words[0] == "Hello");
+        assert(words[1] == "World");
+        assert(words[2] == "Test");
+    }
+
+    {
+        // Tabs and spaces
+        sz::string_view text = "Hello\tWorld  Test";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 3);
+        assert(words[0] == "Hello");
+        assert(words[1] == "World");
+        assert(words[2] == "Test");
+    }
+
+    {
+        // Non-ASCII content with spaces
+        sz::string_view text = "Hello 世界 Привет 😀";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 4);
+        assert(words[0] == "Hello");
+        assert(words[1] == "世界");
+        assert(words[2] == "Привет");
+        assert(words[3] == "😀");
+    }
+
+    {
+        // Leading and trailing whitespace
+        sz::string_view text = "  Hello World  ";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 2);
+        assert(words[0] == "Hello");
+        assert(words[1] == "World");
+    }
+
+    {
+        // Multiple consecutive spaces
+        sz::string_view text = "Hello    World";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 2);
+        assert(words[0] == "Hello");
+        assert(words[1] == "World");
+    }
+
+    {
+        // No whitespace
+        sz::string_view text = "HelloWorld";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 1);
+        assert(words[0] == "HelloWorld");
+    }
+
+    {
+        // Empty string
+        sz::string_view text = "";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 0);
+    }
+
+    {
+        // Only whitespace
+        sz::string_view text = "   \t  \n  ";
+        auto words = text.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 0);
+    }
+
+    // Test with sz::string as well (not just string_view)
+    {
+        sz::string str = "Hello 世界";
+        assert(str.utf8_count() == 8);
+        assert(str.utf8_find_nth(6) == 6);
+
+        auto chars = str.utf8_chars().template to<std::vector<sz_rune_t>>();
+        assert(chars.size() == 8);
+
+        sz::string multiline = "line1\nline2";
+        auto lines = multiline.utf8_split_lines().template to<std::vector<std::string>>();
+        assert(lines.size() == 2);
+
+        sz::string words_str = "Hello World";
+        auto words = words_str.utf8_split().template to<std::vector<std::string>>();
+        assert(words.size() == 2);
+    }
+}
+
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
 /**
@@ -2190,6 +2440,7 @@ int main(int argc, char const **argv) {
     test_stl_conversions();
     test_comparisons();
     test_search();
+    test_utf8();
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     test_search_with_misaligned_repetitions();
 #endif

@@ -330,11 +330,12 @@ extern "C" {
 
     pub(crate) fn sz_utf8_count(text: *const c_void, length: usize) -> usize;
     pub(crate) fn sz_utf8_find_nth(text: *const c_void, length: usize, n: usize) -> *const c_void;
-    pub(crate) fn sz_utf8_unpack_upto64(
+    pub(crate) fn sz_utf8_unpack_chunk(
         text: *const c_void,
         length: usize,
         runes: *mut u32,
-        unpacked_runes: *mut usize,
+        runes_capacity: usize,
+        runes_unpacked: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_find_newline(text: *const c_void, length: usize, matched_length: *mut usize)
         -> *const c_void;
@@ -1461,10 +1462,11 @@ impl<'a> Utf8Chars<'a> {
         let mut unpacked_count: usize = 0;
 
         let next_ptr = unsafe {
-            sz_utf8_unpack_upto64(
+            sz_utf8_unpack_chunk(
                 octets_ptr,
                 chunk_size,
                 self.runes.as_mut_ptr(),
+                64, // Capacity of runes buffer
                 &mut unpacked_count as *mut usize,
             )
         };
@@ -1472,7 +1474,7 @@ impl<'a> Utf8Chars<'a> {
         // Update position
         let bytes_consumed: usize = unsafe {
             let offset = (next_ptr as *const u8).offset_from(octets_ptr as *const u8);
-            debug_assert!(offset >= 0, "sz_utf8_unpack_upto64 returned a pointer before the input");
+            debug_assert!(offset >= 0, "sz_utf8_unpack_chunk returned a pointer before the input");
             offset.try_into().expect("offset should be non-negative")
         };
         self.octets_offset += bytes_consumed;
@@ -1495,8 +1497,6 @@ impl<'a> Iterator for Utf8Chars<'a> {
 
         let codepoint = self.runes[self.runes_offset];
         self.runes_offset += 1;
-
-        // Convert u32 to char (safe because sz_utf8_unpack_upto64 produces valid codepoints)
         char::from_u32(codepoint)
     }
 
@@ -3306,27 +3306,30 @@ mod tests {
     }
 
     #[test]
-    fn find_newline_utf8_file_separator() {
+    fn find_newline_utf8_file_separator_not_detected() {
+        // U+001C (FILE SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
         let text = "Hello\x1CWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "FILE SEPARATOR should not be detected as newline");
     }
 
     #[test]
-    fn find_newline_utf8_group_separator() {
+    fn find_newline_utf8_group_separator_not_detected() {
+        // U+001D (GROUP SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
         let text = "Hello\x1DWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "GROUP SEPARATOR should not be detected as newline");
     }
 
     #[test]
-    fn find_newline_utf8_record_separator() {
+    fn find_newline_utf8_record_separator_not_detected() {
+        // U+001E (RECORD SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
         let text = "Hello\x1EWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "RECORD SEPARATOR should not be detected as newline");
     }
 
     #[test]
