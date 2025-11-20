@@ -328,6 +328,14 @@ extern "C" {
         byteset: *const c_void,
     ) -> *const c_void;
 
+    pub(crate) fn sz_utf8_count(text: *const c_void, length: usize) -> usize;
+    pub(crate) fn sz_utf8_find_nth(text: *const c_void, length: usize, n: usize) -> *const c_void;
+    pub(crate) fn sz_utf8_unpack_upto64(
+        text: *const c_void,
+        length: usize,
+        runes: *mut u32,
+        unpacked_runes: *mut usize,
+    ) -> *const c_void;
     pub(crate) fn sz_utf8_find_newline(text: *const c_void, length: usize, matched_length: *mut usize)
         -> *const c_void;
     pub(crate) fn sz_utf8_find_whitespace(
@@ -1254,6 +1262,252 @@ where
     }
 }
 
+/// Counts the number of UTF-8 characters in the text.
+///
+/// This function efficiently counts UTF-8 characters by identifying character start bytes
+/// (non-continuation bytes). Uses SIMD acceleration when available.
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to count characters in.
+///
+/// # Returns
+///
+/// The number of UTF-8 characters (codepoints) in the text.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello";
+/// assert_eq!(sz::count_utf8(text), 5);
+///
+/// let text_unicode = "Hello🌍";
+/// assert_eq!(sz::count_utf8(text_unicode), 6);
+///
+/// let text_cjk = "你好世界";
+/// assert_eq!(sz::count_utf8(text_cjk), 4);
+/// ```
+pub fn count_utf8<T>(text: T) -> usize
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+
+    unsafe { sz_utf8_count(text_pointer, text_length) }
+}
+
+/// Finds the byte offset of the Nth UTF-8 character (0-indexed).
+///
+/// This function efficiently locates the Nth UTF-8 character without decoding
+/// the entire string. Uses SIMD acceleration when available.
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+/// * `n`: The 0-based index of the character to find.
+///
+/// # Returns
+///
+/// An `Option<usize>` containing the byte offset of the Nth character.
+/// Returns `None` if the string has fewer than N+1 characters.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello";
+/// assert_eq!(sz::find_nth_utf8(text, 0), Some(0)); // 'H'
+/// assert_eq!(sz::find_nth_utf8(text, 4), Some(4)); // 'o'
+/// assert_eq!(sz::find_nth_utf8(text, 5), None);
+///
+/// let text_unicode = "Hello🌍";
+/// assert_eq!(sz::find_nth_utf8(text_unicode, 5), Some(5)); // 🌍 starts at byte 5
+/// assert_eq!(sz::find_nth_utf8(text_unicode, 6), None);
+/// ```
+pub fn find_nth_utf8<T>(text: T, n: usize) -> Option<usize>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+
+    let result = unsafe { sz_utf8_find_nth(text_pointer, text_length, n) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(offset)
+    }
+}
+
+/// Lazy UTF-8 character view with SIMD-accelerated operations.
+///
+/// Provides O(1) construction with lazy character counting and efficient random access.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello🌍";
+/// let view = sz::Utf8View::new(text.as_bytes());
+///
+/// // Lazy character count (computed once, then cached)
+/// assert_eq!(view.len(), 6);
+///
+/// // Random access to byte offset of Nth character
+/// assert_eq!(view.offset_of(5), Some(5)); // 🌍 at byte 5
+///
+/// // Iterate over characters
+/// let chars: Vec<char> = view.iter().collect();
+/// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+/// ```
+pub struct Utf8View<'a> {
+    octets: &'a [u8],
+    cached_len: std::cell::Cell<Option<usize>>,
+}
+
+impl<'a> Utf8View<'a> {
+    /// Creates a new UTF-8 view (O(1) - no scanning).
+    pub fn new(octets: &'a [u8]) -> Self {
+        Self {
+            octets,
+            cached_len: std::cell::Cell::new(None),
+        }
+    }
+
+    /// Returns the number of UTF-8 characters (lazy evaluation, cached after first call).
+    pub fn len(&self) -> usize {
+        if let Some(len) = self.cached_len.get() {
+            return len;
+        }
+        let len = count_utf8(self.octets);
+        self.cached_len.set(Some(len));
+        len
+    }
+
+    /// Checks if the view is empty.
+    pub fn is_empty(&self) -> bool {
+        self.octets.is_empty()
+    }
+
+    /// Gets the byte offset of the Nth character (0-indexed, SIMD-accelerated).
+    pub fn offset_of(&self, n: usize) -> Option<usize> {
+        find_nth_utf8(self.octets, n)
+    }
+
+    /// Returns an iterator over UTF-8 characters.
+    pub fn iter(&self) -> Utf8Chars<'a> {
+        Utf8Chars::new(self.octets)
+    }
+}
+
+/// Iterator over UTF-8 characters using batched decoding.
+///
+/// Decodes up to 64 bytes at a time into UTF-32 codepoints, then yields them one at a time.
+/// This is much more efficient than decoding character-by-character.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello🌍";
+/// let chars: Vec<char> = sz::Utf8Chars::new(text.as_bytes()).collect();
+/// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+/// ```
+pub struct Utf8Chars<'a> {
+    octets: &'a [u8],
+    octets_offset: usize,
+    runes: [u32; 64],
+    runes_count: usize,
+    runes_offset: usize,
+}
+
+impl<'a> Utf8Chars<'a> {
+    fn new(octets: &'a [u8]) -> Self {
+        let mut iter = Self {
+            octets,
+            octets_offset: 0,
+            runes: [0; 64],
+            runes_count: 0,
+            runes_offset: 0,
+        };
+        // Decode first batch
+        iter.decode_batch();
+        iter
+    }
+
+    /// Decodes the next batch of UTF-8 bytes into the runes buffer.
+    fn decode_batch(&mut self) {
+        if self.octets_offset >= self.octets.len() {
+            self.runes_count = 0;
+            return;
+        }
+
+        let remaining = self.octets.len() - self.octets_offset;
+        let chunk_size = remaining.min(64);
+        let octets_ptr = unsafe { self.octets.as_ptr().add(self.octets_offset) as *const c_void };
+
+        let mut unpacked_count: usize = 0;
+
+        let next_ptr = unsafe {
+            sz_utf8_unpack_upto64(
+                octets_ptr,
+                chunk_size,
+                self.runes.as_mut_ptr(),
+                &mut unpacked_count as *mut usize,
+            )
+        };
+
+        // Update position
+        let bytes_consumed: usize = unsafe {
+            let offset = (next_ptr as *const u8).offset_from(octets_ptr as *const u8);
+            debug_assert!(offset >= 0, "sz_utf8_unpack_upto64 returned a pointer before the input");
+            offset.try_into().expect("offset should be non-negative")
+        };
+        self.octets_offset += bytes_consumed;
+        self.runes_count = unpacked_count;
+        self.runes_offset = 0;
+    }
+}
+
+impl<'a> Iterator for Utf8Chars<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        // If runes buffer is exhausted, decode next batch
+        if self.runes_offset >= self.runes_count {
+            self.decode_batch();
+            if self.runes_count == 0 {
+                return None;
+            }
+        }
+
+        let codepoint = self.runes[self.runes_offset];
+        self.runes_offset += 1;
+
+        // Convert u32 to char (safe because sz_utf8_unpack_upto64 produces valid codepoints)
+        char::from_u32(codepoint)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // Lower bound: remaining runes in current buffer
+        let lower = self.runes_count.saturating_sub(self.runes_offset);
+        // Upper bound: unknown without counting entire string
+        (lower, None)
+    }
+}
+
 /// Randomizes the contents of a given byte slice `text` using characters from
 /// a specified `alphabet`. This function mutates `text` in place, replacing each
 /// byte with a random one from `alphabet`. It is designed for situations where
@@ -2063,7 +2317,34 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan>;
 
-    /// Returns an iterator over lines split by newline characters.
+    /// Returns a lazy UTF-8 character view with SIMD-accelerated operations.
+    ///
+    /// The view provides:
+    /// - `.len()` for character count (lazy: computed on first call, cached)
+    /// - `.offset_of(n)` for random access to Nth character offset
+    /// - `.iter()` for efficient batched iteration over characters
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello🌍";
+    /// let view = text.sz_utf8_chars();
+    ///
+    /// // Lazy character count
+    /// assert_eq!(view.len(), 6);
+    ///
+    /// // Random access (byte offset of Nth character)
+    /// assert_eq!(view.offset_of(5), Some(5)); // 🌍 at byte 5
+    ///
+    /// // Efficient batched iteration
+    /// let chars: Vec<char> = view.iter().collect();
+    /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+    /// ```
+    fn sz_utf8_chars(&self) -> Utf8View<'_>;
+
+    /// Returns an iterator over lines split by UTF-8 newline characters.
     ///
     /// The iterator yields slices between newlines. Handles all Unicode newline characters
     /// including CRLF as a single delimiter.
@@ -2074,14 +2355,14 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello\nWorld\r\nRust";
-    /// let lines: Vec<&str> = text.sz_newline_utf8_splits()
+    /// let lines: Vec<&str> = text.sz_utf8_newline_splits()
     ///     .map(|line| std::str::from_utf8(line).unwrap())
     ///     .collect();
     /// assert_eq!(lines, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_newline_utf8_splits(&self) -> RangeNewlineUtf8Splits;
+    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_>;
 
-    /// Returns an iterator over words split by whitespace characters.
+    /// Returns an iterator over words split by UTF-8 whitespace characters.
     ///
     /// The iterator yields non-empty slices between whitespace. Handles all 29 Unicode
     /// whitespace characters.
@@ -2092,12 +2373,12 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello  World\tRust";
-    /// let words: Vec<&str> = text.sz_whitespace_utf8_splits()
+    /// let words: Vec<&str> = text.sz_utf8_whitespace_splits()
     ///     .map(|word| std::str::from_utf8(word).unwrap())
     ///     .collect();
     /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_whitespace_utf8_splits(&self) -> RangeWhitespaceUtf8Splits;
+    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -2354,11 +2635,15 @@ where
         find_whitespace_utf8(self)
     }
 
-    fn sz_newline_utf8_splits(&self) -> RangeNewlineUtf8Splits {
+    fn sz_utf8_chars(&self) -> Utf8View<'_> {
+        Utf8View::new(self.as_ref())
+    }
+
+    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_> {
         RangeNewlineUtf8Splits::new(self.as_ref())
     }
 
-    fn sz_whitespace_utf8_splits(&self) -> RangeWhitespaceUtf8Splits {
+    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_> {
         RangeWhitespaceUtf8Splits::new(self.as_ref())
     }
 }
