@@ -710,11 +710,17 @@ static void test_large_memory_utilities() {
     }
 }
 
-#define assert_scoped(init, operation, condition) \
-    do {                                          \
-        init;                                     \
-        operation;                                \
-        assert(condition);                        \
+#define scope_assert(init, operation, condition) \
+    do {                                         \
+        init;                                    \
+        operation;                               \
+        assert(condition);                       \
+    } while (0)
+
+#define let_assert(init, condition) \
+    do {                            \
+        init;                       \
+        assert(condition);          \
     } while (0)
 
 #define assert_throws(expression, exception_type) \
@@ -760,8 +766,8 @@ void test_stl_compatibility_for_reads() {
 
     // Slices... out-of-bounds exceptions are asymmetric!
     // Moreover, `std::string` has no `remove_prefix` and `remove_suffix` methods.
-    // assert_scoped(str s = "hello", s.remove_prefix(1), s == "ello");
-    // assert_scoped(str s = "hello", s.remove_suffix(1), s == "hell");
+    // scope_assert(str s = "hello", s.remove_prefix(1), s == "ello");
+    // scope_assert(str s = "hello", s.remove_suffix(1), s == "hell");
     assert(str("hello world").substr(0, 5) == "hello");
     assert(str("hello world").substr(6, 5) == "world");
     assert(str("hello world").substr(6) == "world");
@@ -986,8 +992,8 @@ void test_stl_compatibility_for_reads() {
 #endif
 
     // Exporting the contents of the string using the `str::copy` method.
-    assert_scoped(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
-    assert_scoped(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
+    scope_assert(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
+    scope_assert(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
     assert_throws(str("hello").copy((char *)"", 1, 100), std::out_of_range);
 
     // Swaps.
@@ -1004,7 +1010,7 @@ void test_stl_compatibility_for_reads() {
 
     // Make sure the standard hash and function-objects instantiate just fine.
     assert(std::hash<str> {}("hello") != 0);
-    assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
+    scope_assert(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
 #if SZ_IS_CPP14_
     // Comparison function objects are a C++14 feature.
@@ -1038,76 +1044,76 @@ void test_stl_compatibility_for_updates() {
     assert(str(258, '0').find(str(256, '1')) == str::npos);
 
     // Assignments.
-    assert_scoped(str s = "obsolete", s = "hello", s == "hello");
-    assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
-    assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
-    assert_scoped(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
+    scope_assert(str s = "obsolete", s = "hello", s == "hello");
+    scope_assert(str s = "obsolete", s.assign("hello"), s == "hello");
+    scope_assert(str s = "obsolete", s.assign("hello", 4), s == "hell");
+    scope_assert(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    scope_assert(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    scope_assert(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    scope_assert(str s = "obsolete", s.assign(str("hello")), s == "hello");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
+    scope_assert(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
+    scope_assert(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
+    scope_assert(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
 
     // Self-assignment is a special case of assignment.
-    assert_scoped(str s = "obsolete", s = s, s == "obsolete");
-    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");
-    assert_scoped(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
-    assert_scoped(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
+    scope_assert(str s = "obsolete", s = s, s == "obsolete");
+    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");
+    scope_assert(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
+    scope_assert(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
 
     // Allocations, capacity and memory management.
-    assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
-    assert_scoped(str s, s.resize(10), s.size() == 10);
-    assert_scoped(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
+    scope_assert(str s, s.reserve(10), s.capacity() >= 10);
+    scope_assert(str s, s.resize(10), s.size() == 10);
+    scope_assert(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
 #if SZ_IS_CPP23_ && defined(__cpp_lib_string_resize_and_overwrite)
     // Test C++23 resize and overwrite functionality
-    assert_scoped(str s("hello"),
-                  s.resize_and_overwrite(10,
-                                         [](char *p, std::size_t count) noexcept {
-                                             std::memset(p, 'X', count);
-                                             return count;
-                                         }),
-                  s.size() == 10 && s == "XXXXXXXXXX");
+    scope_assert(str s("hello"),
+                 s.resize_and_overwrite(10,
+                                        [](char *p, std::size_t count) noexcept {
+                                            std::memset(p, 'X', count);
+                                            return count;
+                                        }),
+                 s.size() == 10 && s == "XXXXXXXXXX");
 
-    assert_scoped(str s("test"),
-                  s.resize_and_overwrite(8,
-                                         [](char *p, std::size_t) noexcept {
-                                             std::strcpy(p, "ABCDE");
-                                             return 5;
-                                         }),
-                  s.size() == 5 && s == "ABCDE");
+    scope_assert(str s("test"),
+                 s.resize_and_overwrite(8,
+                                        [](char *p, std::size_t) noexcept {
+                                            std::strcpy(p, "ABCDE");
+                                            return 5;
+                                        }),
+                 s.size() == 5 && s == "ABCDE");
 
-    assert_scoped(str s("orig"),
-                  s.try_resize_and_overwrite(6,
-                                             [](char *p, std::size_t count) noexcept {
-                                                 std::strcpy(p, "works!");
-                                                 return count;
-                                             }),
-                  s.size() == 6 && s == "works!");
+    scope_assert(str s("orig"),
+                 s.try_resize_and_overwrite(6,
+                                            [](char *p, std::size_t count) noexcept {
+                                                std::strcpy(p, "works!");
+                                                return count;
+                                            }),
+                 s.size() == 6 && s == "works!");
 #endif
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_IS_64BIT_) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (SZ_IS_64BIT_) scope_assert(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
-    // assert_scoped(str s = "!?", s.push_front('a'), s == "a!?");
-    // assert_scoped(str s = "!?", s.pop_front(), s == "?");
+    // scope_assert(str s = "!?", s.push_front('a'), s == "a!?");
+    // scope_assert(str s = "!?", s.pop_front(), s == "?");
     assert(str().append("test") == "test");
     assert(str("test") + "ing" == "testing");
     assert(str("test") + str("ing") == "testing");
     assert(str("test") + str("ing") + str("123") == "testing123");
-    assert_scoped(str s = "!?", s.push_back('a'), s == "!?a");
-    assert_scoped(str s = "!?", s.pop_back(), s == "!");
+    scope_assert(str s = "!?", s.push_back('a'), s == "!?a");
+    scope_assert(str s = "!?", s.pop_back(), s == "!");
 
     // Incremental construction.
     assert(str("__").insert(1, "test") == "_test_");
@@ -1118,10 +1124,10 @@ void test_stl_compatibility_for_updates() {
     assert(str("__").insert(1, str("test"), 2, 1) == "_s_");
 
     // Inserting at a given iterator position yields back an iterator.
-    assert_scoped(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
-    assert_scoped(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
-    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
-    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
+    scope_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
+    scope_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
+    let_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
+    let_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
 
     // Handle exceptions.
     // The `length_error` might be difficult to catch due to a large `max_size()`.
@@ -1133,12 +1139,12 @@ void test_stl_compatibility_for_updates() {
     assert(str("").erase(0, 3) == "");
     assert(str("test").erase(1, 2) == "tt");
     assert(str("test").erase(1) == "t");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1) == (s.begin() + 1));
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
+    scope_assert(str s = "test", s.erase(s.begin() + 1), s == "tst");
+    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
+    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    let_assert(str s = "test", s.erase(s.begin() + 1) == (s.begin() + 1));
+    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
+    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
 
     // Substitutions.
     assert(str("hello").replace(1, 2, "123") == "h123lo");
@@ -1149,8 +1155,8 @@ void test_stl_compatibility_for_updates() {
     assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
 
     // Substitutions with iterators.
-    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
-    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
+    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
+    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
 
     // Some nice "tweetable" examples :)
     assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
@@ -1165,7 +1171,7 @@ void test_stl_compatibility_for_updates() {
     assert(str("hello").append(str("123"), 1, 1) == "hello2");
     assert(str("hello").append({'1', '2'}) == "hello12");
     assert(str("hello").append(2, '!') == "hello!!");
-    assert_scoped(str s = "123", (void)0, str("hello").append(s.begin(), s.end()) == "hello123");
+    let_assert(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
 }
 
 /**
@@ -1277,11 +1283,11 @@ void test_non_stl_extensions_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
     assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
-    assert_scoped(
+    let_assert(
         str s =
             "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
             "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
-        (void)0, s.bytesum() == accumulate_bytes(s));
+        s.bytesum() == accumulate_bytes(s));
 }
 
 void test_non_stl_extensions_for_updates() {
@@ -1299,49 +1305,49 @@ void test_non_stl_extensions_for_updates() {
     assert(str("test").try_shrink_to_fit());
 
     // Self-referencing methods.
-    assert_scoped(str s = "test", s.try_assign(s.view()), s == "test");
-    assert_scoped(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
-    assert_scoped(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
+    scope_assert(str s = "test", s.try_assign(s.view()), s == "test");
+    scope_assert(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
+    scope_assert(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
 
     // Try methods going beyond and beneath capacity threshold.
-    assert_scoped(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
-                  s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
-                      s.try_shrink_to_fit(),
-                  s.capacity() < sz::string::min_capacity);
+    scope_assert(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
+                 s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
+                     s.try_shrink_to_fit(),
+                 s.capacity() < sz::string::min_capacity);
 
     // Same length replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
-    assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
-    assert_scoped(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
+    scope_assert(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", "1"), s == "he11o");
+    scope_assert(str s = "hello", s.replace_all("he", "al"), s == "alllo");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
+    scope_assert(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
 
     // Shorter replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", ""), s == "heo");
-    assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
-    assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
-    assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
+    scope_assert(str s = "hello", s.replace_all("xx", "x"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", ""), s == "heo");
+    scope_assert(str s = "hello", s.replace_all("h", ""), s == "ello");
+    scope_assert(str s = "hello", s.replace_all("o", ""), s == "hell");
+    scope_assert(str s = "hello", s.replace_all("llo", "!"), s == "he!");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
 
     // Longer replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
-    assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
-    assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
-    assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
+    scope_assert(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
+    scope_assert(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
+    scope_assert(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
+    scope_assert(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
     sz::look_up_table invert_case = sz::look_up_table::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
-    assert_scoped(str s = "hello", s.lookup(invert_case), s == "HELLO");
-    assert_scoped(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
-    assert_scoped(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
+    scope_assert(str s = "hello", s.lookup(invert_case), s == "HELLO");
+    scope_assert(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
+    scope_assert(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
 
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");
@@ -2175,28 +2181,28 @@ void test_sorting_algorithms() {
     using order_t = std::vector<sz::sorted_idx_t>;
 
     // Basic tests with predetermined orders.
-    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
-    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
-    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"a", "b", "c", "d"}), sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
+    let_assert(strs_t x({"b", "c", "d", "a"}), sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
+    let_assert(strs_t x({"b", "a", "d", "c"}), sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    assert_scoped(strs_t x({"aa", "a", "aaa", "aa"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"aa", "a", "aaa", "aa"}), sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    assert_scoped(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}), (void)0,
-                  sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+    let_assert(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}),
+               sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // Single character vs multi-character strings with varied patterns
-    assert_scoped(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
-                  (void)0, sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
+               sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    assert_scoped(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}), (void)0,
-                  sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+    let_assert(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}),
+               sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes (this one is already correct)
-    assert_scoped(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}), (void)0,
-                  sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+    let_assert(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}),
+               sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
