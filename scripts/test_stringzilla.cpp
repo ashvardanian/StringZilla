@@ -2482,8 +2482,11 @@ int main(int argc, char const **argv) {
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
 
 #if SZ_USE_CUDA

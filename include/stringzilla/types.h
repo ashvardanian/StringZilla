@@ -294,7 +294,7 @@
 
 /*  AES is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_AES)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_AES)
+#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define SZ_USE_NEON_AES (1)
 #else
 #define SZ_USE_NEON_AES (0)
@@ -303,7 +303,7 @@
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_SHA)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SHA2)
+#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define SZ_USE_NEON_SHA (1)
 #else
 #define SZ_USE_NEON_SHA (0)
