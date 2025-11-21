@@ -1044,31 +1044,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
 #endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 
-#pragma region NEON Implementation
-
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_utf8_find_newline_serial(text, length, matched_length);
-}
-
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_utf8_find_whitespace_serial(text, length, matched_length);
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) { return sz_utf8_count_serial(text, length); }
-
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    return sz_utf8_find_nth_serial(text, length, n);
-}
-
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked) {
-    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
-}
-
-#pragma endregion // NEON Implementation
-
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #if defined(__clang__)
@@ -1379,6 +1354,31 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
 #endif
 #endif            // SZ_USE_HASWELL
 #pragma endregion // Haswell Implementation
+
+#pragma region NEON Implementation
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_utf8_find_newline_serial(text, length, matched_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_utf8_find_whitespace_serial(text, length, matched_length);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) { return sz_utf8_count_serial(text, length); }
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    return sz_utf8_find_nth_serial(text, length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
+    sz_cptr_t text, sz_size_t length,           //
+    sz_rune_t *runes, sz_size_t runes_capacity, //
+    sz_size_t *runes_unpacked) {
+    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
+}
+
+#pragma endregion // NEON Implementation
 
 #pragma region Dynamic Dispatch
 
