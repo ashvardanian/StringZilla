@@ -1127,6 +1127,189 @@ where
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
+fn replace_all_with_finder<F, R>(
+    buffer: &mut Vec<u8>,
+    needle_length: usize,
+    replacement: &[u8],
+    mut find_next: F,
+    mut find_prev: R,
+) -> Result<usize, Status>
+where
+    F: FnMut(&[u8], usize) -> Option<usize>,
+    R: FnMut(&[u8], usize) -> Option<usize>,
+{
+    if needle_length == 0 || buffer.is_empty() {
+        return Ok(0);
+    }
+
+    // Case 1: needle and replacement are the same length – overwrite each match in place.
+    if needle_length == replacement.len() {
+        let mut replaced = 0;
+        let mut search_from = 0;
+        while let Some(pos) = find_next(buffer.as_slice(), search_from) {
+            copy(&mut buffer[pos..pos + needle_length], &replacement);
+            search_from = pos + needle_length;
+            replaced += 1;
+        }
+        return Ok(replaced);
+    }
+
+    // Case 2: replacement is shorter – compact forward to minimize memmoves and avoid allocations.
+    if needle_length > replacement.len() {
+        let mut replaced = 0;
+        let mut read = 0;
+        let mut write = 0;
+        let len = buffer.len();
+
+        while let Some(pos) = find_next(buffer.as_slice(), read) {
+            if pos > read {
+                let chunk = pos - read;
+                unsafe {
+                    sz_move(
+                        buffer.as_mut_ptr().add(write) as *const c_void,
+                        buffer.as_ptr().add(read) as *const c_void,
+                        chunk,
+                    );
+                }
+                write += chunk;
+            }
+            copy(&mut buffer[write..write + replacement.len()], replacement);
+            write += replacement.len();
+            read = pos + needle_length;
+            replaced += 1;
+        }
+
+        if read < len {
+            let chunk = len - read;
+            unsafe {
+                sz_move(
+                    buffer.as_mut_ptr().add(write) as *const c_void,
+                    buffer.as_ptr().add(read) as *const c_void,
+                    chunk,
+                );
+            }
+            write += len - read;
+        }
+        buffer.truncate(write);
+        return Ok(replaced);
+    }
+
+    // Case 3: replacement is longer – collect match positions once, resize once, then rewrite from the back.
+    let mut match_count = 0usize;
+    let mut search_from = 0;
+    while let Some(pos) = find_next(buffer.as_slice(), search_from) {
+        match_count += 1;
+        search_from = pos + needle_length;
+    }
+
+    if match_count == 0 {
+        return Ok(0);
+    }
+
+    let original_len = buffer.len();
+    let delta = replacement.len() - needle_length;
+    let added = match match_count.checked_mul(delta) {
+        Some(v) => v,
+        None => return Err(Status::OverflowRisk),
+    };
+    let new_len = match original_len.checked_add(added) {
+        Some(v) => v,
+        None => return Err(Status::OverflowRisk),
+    };
+    if let Err(_) = buffer.try_reserve_exact(added) {
+        return Err(Status::BadAlloc);
+    }
+    buffer.resize(new_len, 0);
+
+    let mut read_end = original_len;
+    let mut write_end = new_len;
+
+    while let Some(pos) = find_prev(buffer.as_slice(), read_end) {
+        let match_end = pos + needle_length;
+        let tail_len = read_end - match_end;
+        if tail_len > 0 {
+            unsafe {
+                sz_move(
+                    buffer.as_mut_ptr().add(write_end - tail_len) as *const c_void,
+                    buffer.as_ptr().add(match_end) as *const c_void,
+                    tail_len,
+                );
+            }
+        }
+        write_end -= tail_len;
+        write_end -= replacement.len();
+        copy(&mut buffer[write_end..write_end + replacement.len()], replacement);
+        read_end = pos;
+    }
+
+    debug_assert_eq!(write_end, read_end, "replace_all backfill mismatch");
+    Ok(match_count)
+}
+
+/// Tries to replace all non-overlapping occurrences of `needle` inside `buffer` in place.
+///
+/// The algorithm mirrors the C++ `replace_all` logic:
+/// - equal-length replacements simply overwrite matches,
+/// - shorter replacements compact forward without allocating,
+/// - longer replacements count matches once, resize once, and rewrite from the back.
+///
+/// Returns the number of replacements performed.
+pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
+    replace_all_with_finder(
+        buffer,
+        needle.len(),
+        replacement,
+        |haystack, start| {
+            if start >= haystack.len() {
+                None
+            } else {
+                find(&haystack[start..], needle).map(|offset| start + offset)
+            }
+        },
+        |haystack, end| {
+            if end == 0 {
+                None
+            } else {
+                rfind(&haystack[..end], needle)
+            }
+        },
+    )
+}
+
+/// Tries to replace all non-overlapping bytes in `buffer` that belong to `byteset` with `replacement`.
+///
+/// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
+/// left untouched. Returns the number of replacements performed.
+pub fn try_replace_all_byteset(
+    buffer: &mut Vec<u8>,
+    byteset: Byteset,
+    replacement: &[u8],
+) -> Result<usize, Status> {
+    if byteset.bits.iter().all(|&b| b == 0) {
+        return Ok(0);
+    }
+
+    replace_all_with_finder(
+        buffer,
+        1,
+        replacement,
+        |haystack, start| {
+            if start >= haystack.len() {
+                None
+            } else {
+                find_byteset(&haystack[start..], byteset).map(|offset| start + offset)
+            }
+        },
+        |haystack, end| {
+            if end == 0 {
+                None
+            } else {
+                rfind_byteset(&haystack[..end], byteset)
+            }
+        },
+    )
+}
+
 /// Finds the first newline character in UTF-8 encoded text.
 ///
 /// Searches for any of the 8 Unicode newline characters:
@@ -3266,6 +3449,56 @@ mod tests {
 
         let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
         lookup(&mut less_long, &long, lut);
+    }
+
+    #[test]
+    fn replace_all_same_length() {
+        let mut buffer = b"abcabc".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"ab", b"XY").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"XYcXYc");
+    }
+
+    #[test]
+    fn replace_all_shrinks() {
+        let mut buffer = b"aaaa".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"aa", b"b").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"bb");
+    }
+
+    #[test]
+    fn replace_all_grows() {
+        let mut buffer = b"aba".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"a", b"XYZ").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"XYZbXYZ");
+    }
+
+    #[test]
+    fn replace_all_byteset_basic() {
+        let mut buffer = b"hello world".to_vec();
+        let vowels = sz::Byteset::from("aeiou");
+        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"_").unwrap();
+        assert_eq!(replaced, 3);
+        assert_eq!(buffer, b"h_ll_ w_rld");
+    }
+
+    #[test]
+    fn replace_all_byteset_grows() {
+        let mut buffer = b"yzz".to_vec();
+        let vowels = sz::Byteset::from("y");
+        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"(y)").unwrap();
+        assert_eq!(replaced, 1);
+        assert_eq!(buffer, b"(y)zz");
+    }
+
+    #[test]
+    fn replace_all_noop_on_empty_pattern() {
+        let mut buffer = b"unchanged".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"", b"anything").unwrap();
+        assert_eq!(replaced, 0);
+        assert_eq!(buffer, b"unchanged");
     }
 
     #[test]
