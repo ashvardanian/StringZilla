@@ -1722,7 +1722,7 @@ void test_utf8() {
     assert(sz::string_view("Привет").utf8_count() == 6);
     assert(sz::string_view("Привет").size() == 12);
 
-    // Test utf8_find_nth() - finding byte offset of nth character
+    // Finding byte offset of nth character
     {
         sz::string_view text = "Hello";
         assert(text.utf8_find_nth(0) == 0);                     // First char at byte 0
@@ -1749,7 +1749,7 @@ void test_utf8() {
         assert(text.utf8_find_nth(3) == sz::string_view::npos);
     }
 
-    // Test utf8_chars() - iterate over UTF-32 codepoints
+    // Iterate over UTF-32 codepoints
     {
         auto chars = [](char const *t) {
             return sz::string_view(t).utf8_chars().template to<std::vector<sz_rune_t>>();
@@ -1909,7 +1909,7 @@ void test_utf8() {
                      sz::string_view(exact_boundary).utf8_count() == 67);
     }
 
-    // Test utf8_split_lines() - split by Unicode newlines
+    // Split by Unicode newlines
     {
         auto lines = [](char const *t) {
             return sz::string_view(t).utf8_split_lines().template to<std::vector<std::string>>();
@@ -1941,36 +1941,105 @@ void test_utf8() {
         let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
     }
 
-    // Test utf8_split() - split by Unicode whitespace
+    // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
         auto words = [](char const *t) {
             return sz::string_view(t).utf8_split().template to<std::vector<std::string>>();
         };
 
-        // Basic ASCII whitespace
+        // Basic ASCII whitespace (6 single-byte chars)
         let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
-        let_assert(auto w = words("a\tb\nc"), w.size() == 3 && w[1] == "b");
+        let_assert(auto w = words("a\tb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0009 TAB
+        let_assert(auto w = words("a\nb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000A LF
+        let_assert(auto w = words("a\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000B VT
+        let_assert(auto w = words("a\fb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000C FF
+        let_assert(auto w = words("a\rb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000D CR
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");  // U+0020 SPACE
+
+        // Multiple spaces and trimming
         let_assert(auto w = words("  a  b  "), w.size() == 2 && w[0] == "a" && w[1] == "b");
         let_assert(auto w = words("a    b"), w.size() == 2);
+        let_assert(auto w = words("a\tb\nc\rd"), w.size() == 4 && w[3] == "d");
+
+        // Double-byte whitespace (2 chars)
+        let_assert(auto w = words("a\u0085b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0085 NEL (Next Line)
+        let_assert(auto w = words("a\u00A0b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+00A0 NBSP (No-Break Space)
+
+        // Triple-byte whitespace (17 chars) - various space widths
+        let_assert(auto w = words("a\u1680b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+1680 OGHAM SPACE MARK
+        let_assert(auto w = words("a\u2000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2000 EN QUAD
+        let_assert(auto w = words("a\u2001b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2001 EM QUAD
+        let_assert(auto w = words("a\u2002b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2002 EN SPACE
+        let_assert(auto w = words("a\u2003b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2003 EM SPACE
+        let_assert(auto w = words("a\u2004b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2004 THREE-PER-EM SPACE
+        let_assert(auto w = words("a\u2005b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2005 FOUR-PER-EM SPACE
+        let_assert(auto w = words("a\u2006b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2006 SIX-PER-EM SPACE
+        let_assert(auto w = words("a\u2007b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2007 FIGURE SPACE
+        let_assert(auto w = words("a\u2008b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2008 PUNCTUATION SPACE
+        let_assert(auto w = words("a\u2009b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2009 THIN SPACE
+        let_assert(auto w = words("a\u200Ab"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+200A HAIR SPACE
+        let_assert(auto w = words("a\u2028b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2028 LINE SEPARATOR
+        let_assert(auto w = words("a\u2029b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2029 PARAGRAPH SEPARATOR
+        let_assert(auto w = words("a\u202Fb"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+202F NARROW NO-BREAK SPACE
+        let_assert(auto w = words("a\u205Fb"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+205F MEDIUM MATHEMATICAL SPACE
+        let_assert(auto w = words("a\u3000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+3000 IDEOGRAPHIC SPACE
+
+        // Mixed byte-length whitespace patterns
+        let_assert(auto w = words("a \u00A0\u2000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // 1+2+3 byte mix
+        let_assert(auto w = words("a\t\u0085\u3000b"), w.size() == 2);                              // 1+2+3 byte mix
+        let_assert(auto w = words("Hello\u2000世界\u00A0Привет"), w.size() == 3); // Unicode content + spaces
 
         // Edge cases
         let_assert(auto w = words(""), w.size() == 0);
         let_assert(auto w = words("   "), w.size() == 0);
-        let_assert(auto w = words("\t\n\r"), w.size() == 0);
+        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 0);         // All single-byte whitespace
+        let_assert(auto w = words("\u0085\u00A0"), w.size() == 0);       // All double-byte whitespace
+        let_assert(auto w = words("\u2000\u2001\u3000"), w.size() == 0); // All triple-byte whitespace
         let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
 
-        // Non-ASCII content
+        // Non-ASCII content with regular spaces
         let_assert(auto w = words("Hello 世界 Привет 😀"),
                    w.size() == 4 && w[1] == "世界" && w[2] == "Привет" && w[3] == "😀");
         let_assert(auto w = words("مرحبا بك"), w.size() == 2);
         let_assert(auto w = words("שלום עולם"), w.size() == 2);
 
-        // Unicode whitespace characters
-        let_assert(auto w = words("a\u00A0b"), w.size() >= 1); // Non-breaking space
-        let_assert(auto w = words("a\u3000b"), w.size() >= 1); // Ideographic space
+        // Negative tests - characters that should NOT be treated as whitespace
+        // U+001C-U+001F are separators, not whitespace
+        let_assert(auto w = words("a\u001Cb"), w.size() == 1); // FILE SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Db"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Eb"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
+
+        // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
+        // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
+        let_assert(auto w = words("a\u200Bb"), w.size() == 2); // ZERO WIDTH SPACE
+        let_assert(auto w = words("a\u200Cb"), w.size() == 2); // ZERO WIDTH NON-JOINER
+        let_assert(auto w = words("a\u200Db"), w.size() == 2); // ZERO WIDTH JOINER
+
+        // Consecutive different whitespace types (stress SIMD pattern matching)
+        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b");
+        let_assert(auto w = words("a\u0020\u00A0\u2000\u3000b"), w.size() == 2); // 1+2+3+3 byte sequence
+
+        // Long sequences to test chunk boundaries
+        scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
+                     sz::string_view(long_ws).utf8_split().template to<std::vector<std::string>>().size() ==
+                         0); // 100 spaces = no words
+
+        scope_assert(
+            std::string long_mixed,
+            {
+                for (int i = 0; i < 50; ++i) long_mixed += "word ";
+                long_mixed.pop_back();
+            }, // Remove trailing space
+            sz::string_view(long_mixed).utf8_split().template to<std::vector<std::string>>().size() == 50); // 50 words
     }
 
-    // Test with sz::string (not just string_view)
+    // Test with `sz::string` - not just `sz::string_view`
     {
         sz::string str = "Hello 世界";
         assert(str.utf8_count() == 8);
