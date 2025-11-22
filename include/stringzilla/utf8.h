@@ -1549,8 +1549,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
     uint8x16_t continuation_mask_vec = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_vec = vdupq_n_u8(0x80);
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t char_count = 0;
-
+    uint64x2_t char_count_vec = vdupq_n_u64(0);
     while (length >= 16) {
         text_vec.u8x16 = vld1q_u8(text_u8);
         headers_vec.u8x16 = vandq_u8(text_vec.u8x16, continuation_mask_vec);
@@ -1560,16 +1559,18 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
         uint16x8_t sum16 = vpaddlq_u8(start_flags);
         uint32x4_t sum32 = vpaddlq_u16(sum16);
         uint64x2_t sum64 = vpaddlq_u32(sum32);
-        char_count += vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1);
+        char_count_vec = vaddq_u64(char_count_vec, sum64);
         text_u8 += 16;
         length -= 16;
     }
 
+    sz_size_t char_count = vgetq_lane_u64(char_count_vec, 0) + vgetq_lane_u64(char_count_vec, 1);
     if (length) char_count += sz_utf8_count_serial((sz_cptr_t)text_u8, length);
     return char_count;
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    // TODO: Implement a NEON-accelerated version of sz_utf8_find_nth in absense of PDEP instruction.
     return sz_utf8_find_nth_serial(text, length, n);
 }
 
@@ -1577,8 +1578,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
+    // TODO: Implement a fast NEON version once we come up with an AVX-512 design.
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
