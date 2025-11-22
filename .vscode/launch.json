@@ -107,12 +107,16 @@
           "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
         },
         {
+          "name": "STRINGWARS_TOKENS",
+          "value": "file"
+        },
+        {
           "name": "STRINGWARS_DATASET",
           "value": "utf8.txt"
         }
       ],
       "stopAtEntry": false,
-      "preLaunchTask": "Build Benchmarks: Debug",
+      "preLaunchTask": "Build Current File: Debug",
       "linux": {
         "MIMode": "gdb",
         "setupCommands": [
@@ -149,7 +153,7 @@
         }
       ],
       "stopAtEntry": false,
-      "preLaunchTask": "Build Benchmarks: Debug",
+      "preLaunchTask": "Build Current File: Debug",
       "linux": {
         "MIMode": "gdb",
         "setupCommands": [
@@ -182,7 +186,7 @@
         }
       ],
       "stopAtEntry": false,
-      "preLaunchTask": "Build Benchmarks: Debug"
+      "preLaunchTask": "Build Current File: Debug"
     },
     {
       "name": "Current Python File",

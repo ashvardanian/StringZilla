@@ -130,14 +130,15 @@ fn build_stringzilla() -> HashMap<String, bool> {
     println!("cargo:rerun-if-changed=include/stringzilla/stringzilla.h");
 
     // Constituent parts:
-    println!("cargo:rerun-if-changed=include/stringzilla/compare.h");
     println!("cargo:rerun-if-changed=include/stringzilla/find.h");
     println!("cargo:rerun-if-changed=include/stringzilla/hash.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/utf8.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/types.h");
     println!("cargo:rerun-if-changed=include/stringzilla/memory.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/compare.h");
     println!("cargo:rerun-if-changed=include/stringzilla/similarities.h");
     println!("cargo:rerun-if-changed=include/stringzilla/small_string.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/types.h");
 
     // Rerun if SIMD backend environment variables change
     for flag in flags_to_try.iter() {

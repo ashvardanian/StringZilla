@@ -2829,24 +2829,24 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     __m128i msg3 = block_vec.xmms[3];
 
     // Pre-load round constants into 512-bit registers for efficient access
-    sz_u512_vec_t k0_3, k4_7, k8_11, k12_15, k16_19, k20_23, k24_27, k28_31;
-    sz_u512_vec_t k32_35, k36_39, k40_43, k44_47, k48_51, k52_55, k56_59, k60_63;
-    k0_3.zmm = _mm512_loadu_si512(&round_constants[0]);
-    k4_7.zmm = _mm512_loadu_si512(&round_constants[4]);
-    k8_11.zmm = _mm512_loadu_si512(&round_constants[8]);
-    k12_15.zmm = _mm512_loadu_si512(&round_constants[12]);
-    k16_19.zmm = _mm512_loadu_si512(&round_constants[16]);
-    k20_23.zmm = _mm512_loadu_si512(&round_constants[20]);
-    k24_27.zmm = _mm512_loadu_si512(&round_constants[24]);
-    k28_31.zmm = _mm512_loadu_si512(&round_constants[28]);
-    k32_35.zmm = _mm512_loadu_si512(&round_constants[32]);
-    k36_39.zmm = _mm512_loadu_si512(&round_constants[36]);
-    k40_43.zmm = _mm512_loadu_si512(&round_constants[40]);
-    k44_47.zmm = _mm512_loadu_si512(&round_constants[44]);
-    k48_51.zmm = _mm512_loadu_si512(&round_constants[48]);
-    k52_55.zmm = _mm512_loadu_si512(&round_constants[52]);
-    k56_59.zmm = _mm512_loadu_si512(&round_constants[56]);
-    k60_63.zmm = _mm512_loadu_si512(&round_constants[60]);
+    sz_u128_vec_t k0_3, k4_7, k8_11, k12_15, k16_19, k20_23, k24_27, k28_31;
+    sz_u128_vec_t k32_35, k36_39, k40_43, k44_47, k48_51, k52_55, k56_59, k60_63;
+    k0_3.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[0]);
+    k4_7.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[4]);
+    k8_11.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[8]);
+    k12_15.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[12]);
+    k16_19.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[16]);
+    k20_23.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[20]);
+    k24_27.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[24]);
+    k28_31.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[28]);
+    k32_35.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[32]);
+    k36_39.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[36]);
+    k40_43.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[40]);
+    k44_47.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[44]);
+    k48_51.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[48]);
+    k52_55.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[52]);
+    k56_59.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[56]);
+    k60_63.xmm = _mm_lddqu_si128((__m128i const *)&round_constants[60]);
 
     // Pack state into SHA-NI format (ABEF/CDGH)
     __m128i state0 = _mm_lddqu_si128((__m128i const *)&hash[0]); // A B C D
@@ -2860,27 +2860,27 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     __m128i state1_save = state1;
 
     // Rounds 0-3
-    __m128i msg_tmp = _mm_add_epi32(msg0, k0_3.xmms[0]);
+    __m128i msg_tmp = _mm_add_epi32(msg0, k0_3.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
 
     // Rounds 4-7
-    msg_tmp = _mm_add_epi32(msg1, k4_7.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg1, k4_7.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 8-11
-    msg_tmp = _mm_add_epi32(msg2, k8_11.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg2, k8_11.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 12-15
-    msg_tmp = _mm_add_epi32(msg3, k12_15.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg3, k12_15.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2889,7 +2889,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 16-19
-    msg_tmp = _mm_add_epi32(msg0, k16_19.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg0, k16_19.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2898,7 +2898,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 20-23
-    msg_tmp = _mm_add_epi32(msg1, k20_23.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg1, k20_23.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2907,7 +2907,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 24-27
-    msg_tmp = _mm_add_epi32(msg2, k24_27.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg2, k24_27.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2916,7 +2916,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 28-31
-    msg_tmp = _mm_add_epi32(msg3, k28_31.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg3, k28_31.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2925,7 +2925,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 32-35
-    msg_tmp = _mm_add_epi32(msg0, k32_35.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg0, k32_35.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2934,7 +2934,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 36-39
-    msg_tmp = _mm_add_epi32(msg1, k36_39.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg1, k36_39.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2943,7 +2943,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 40-43
-    msg_tmp = _mm_add_epi32(msg2, k40_43.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg2, k40_43.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2952,7 +2952,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 44-47
-    msg_tmp = _mm_add_epi32(msg3, k44_47.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg3, k44_47.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2961,7 +2961,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 48-51
-    msg_tmp = _mm_add_epi32(msg0, k48_51.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg0, k48_51.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2970,7 +2970,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 52-55
-    msg_tmp = _mm_add_epi32(msg1, k52_55.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg1, k52_55.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2978,7 +2978,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg2 = _mm_sha256msg2_epu32(msg2, msg1);
 
     // Rounds 56-59
-    msg_tmp = _mm_add_epi32(msg2, k56_59.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg2, k56_59.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
@@ -2986,7 +2986,7 @@ SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const bl
     msg3 = _mm_sha256msg2_epu32(msg3, msg2);
 
     // Rounds 60-63
-    msg_tmp = _mm_add_epi32(msg3, k60_63.xmms[0]);
+    msg_tmp = _mm_add_epi32(msg3, k60_63.xmm);
     state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
     msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
     state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);

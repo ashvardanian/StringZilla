@@ -486,6 +486,30 @@ struct matcher_find_last_not_of {
 };
 
 /**
+ *  @brief Zero-cost wrapper around the `.find_newline_utf8` member function of string-like classes.
+ */
+template <typename haystack_type_>
+struct matcher_find_newline_utf8 {
+    using size_type = typename haystack_type_::size_type;
+    size_type last_match_length_ = 0;
+    constexpr size_type needle_length() const noexcept { return last_match_length_; }
+    constexpr size_type skip_length() const noexcept { return last_match_length_; }
+    size_type operator()(haystack_type_ haystack) noexcept { return haystack.find_newline_utf8(last_match_length_); }
+};
+
+/**
+ *  @brief Zero-cost wrapper around the `.find_whitespace_utf8` member function of string-like classes.
+ */
+template <typename haystack_type_>
+struct matcher_find_whitespace_utf8 {
+    using size_type = typename haystack_type_::size_type;
+    size_type last_match_length_ = 0;
+    constexpr size_type needle_length() const noexcept { return last_match_length_; }
+    constexpr size_type skip_length() const noexcept { return last_match_length_; }
+    size_type operator()(haystack_type_ haystack) noexcept { return haystack.find_whitespace_utf8(last_match_length_); }
+};
+
+/**
  *  @brief Helper to detect if a type has a nested `::string_view` typedef.
  *         Uses SFINAE with no STL dependencies for `std::enabled_if` or `std::void_t`.
  */
@@ -930,6 +954,398 @@ class range_rsplits {
     template <typename container_>
     container_ to(container_ &&container = {}) {
         for (auto match : *this) container.push_back(match);
+        return std::move(container);
+    }
+};
+
+/**
+ *  @brief A range view over UTF-8 characters (codepoints) in a string.
+ *
+ *  Iterates over UTF-32 codepoints decoded from UTF-8 bytes using efficient batched decoding.
+ *  Decodes up to 64 characters at a time for performance, then yields them one by one.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_>
+class range_utf8_chars {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = sz_rune_t;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    range_utf8_chars() noexcept = default;
+    range_utf8_chars(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        char const *octets_start_;
+        size_type octets_length_;
+        size_type octets_offset_;
+
+        // Batch buffer for efficient decoding
+        sz_rune_t runes_[64];
+        size_type runes_count_;
+        size_type runes_offset_;
+
+        void decode_batch_() noexcept {
+            if (octets_offset_ >= octets_length_) {
+                runes_count_ = 0;
+                return;
+            }
+
+            size_type chunk_size = octets_length_ - octets_offset_;
+            char const *octets_ptr = octets_start_ + octets_offset_;
+            size_type unpacked_count = 0;
+
+            char const *next_ptr = sz_utf8_unpack_chunk(octets_ptr, chunk_size, runes_, 64, &unpacked_count);
+
+            // Update position
+            size_type bytes_consumed = static_cast<size_type>(next_ptr - octets_ptr);
+            octets_offset_ += bytes_consumed;
+            runes_count_ = unpacked_count;
+            runes_offset_ = 0;
+        }
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = sz_rune_t;
+        using difference_type = std::ptrdiff_t;
+        using pointer = sz_rune_t const *;
+        using reference = sz_rune_t;
+
+        iterator() noexcept
+            : octets_start_(nullptr), octets_length_(0), octets_offset_(0), runes_count_(0), runes_offset_(0) {}
+
+        iterator(string_view_type text) noexcept
+            : octets_start_(text.data()), octets_length_(text.size()), octets_offset_(0), runes_count_(0),
+              runes_offset_(0) {
+            decode_batch_();
+        }
+
+        iterator(string_view_type text, end_sentinel_type) noexcept
+            : octets_start_(text.data()), octets_length_(text.size()), octets_offset_(text.size()), runes_count_(0),
+              runes_offset_(0) {}
+
+        reference operator*() const noexcept { return runes_[runes_offset_]; }
+        pointer operator->() const noexcept { return &runes_[runes_offset_]; }
+
+        iterator &operator++() noexcept {
+            runes_offset_++;
+            if (runes_offset_ >= runes_count_) decode_batch_();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        /**
+         *  @brief Advance the iterator by @p n UTF-8 codepoints, decoding new batches as needed.
+         *  @note This is forward-only; negative offsets are unsupported. Uses the fast C API to skip bytes.
+         */
+        iterator &operator+=(size_type n) noexcept {
+            if (n == 0 || octets_offset_ >= octets_length_) return *this;
+
+            sz_cptr_t ptr = sz_utf8_find_nth(octets_start_ + octets_offset_, octets_length_ - octets_offset_, n);
+            if (!ptr) {
+                // Past the end.
+                octets_offset_ = octets_length_;
+                runes_count_ = 0;
+                runes_offset_ = 0;
+                return *this;
+            }
+
+            octets_offset_ = static_cast<size_type>(ptr - octets_start_);
+            decode_batch_();
+            return *this;
+        }
+
+        iterator operator+(size_type n) const noexcept {
+            iterator tmp = *this;
+            tmp += n;
+            return tmp;
+        }
+
+        bool operator==(iterator const &other) const noexcept {
+            // Check if both iterators have exhausted their data
+            bool this_at_end = (runes_count_ == 0 && octets_offset_ >= octets_length_);
+            bool other_at_end = (other.runes_count_ == 0 && other.octets_offset_ >= other.octets_length_);
+            if (this_at_end && other_at_end) return true;
+            if (this_at_end || other_at_end) return false;
+            // Both have data: compare positions
+            return octets_offset_ == other.octets_offset_ && runes_offset_ == other.runes_offset_;
+        }
+
+        bool operator==(end_sentinel_type) const noexcept {
+            return runes_count_ == 0 && octets_offset_ >= octets_length_;
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
+        bool operator!=(end_sentinel_type sentinel) const noexcept { return !(*this == sentinel); }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Count UTF-8 characters in the string. */
+    size_type size() const noexcept {
+        string_view_type view(haystack_);
+        return sz_utf8_count(view.data(), view.size());
+    }
+
+    difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
+    bool empty() const noexcept { return size() == 0; }
+
+    /** @brief Copies the characters into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto ch : *this) container.push_back(ch);
+    }
+
+    /** @brief Copies the characters into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto ch : *this) container.push_back(ch);
+        return std::move(container);
+    }
+};
+
+/**
+ *  @brief A range of string slices split by UTF-8 newline characters.
+ *
+ *  Unlike splitlines() which uses ASCII byteset, this handles full Unicode.
+ *  Splits on all 7 Unicode newline characters + CRLF sequence:
+ *  - U+000A (LF), U+000B (VT), U+000C (FF), U+000D (CR)
+ *  - U+0085 (NEL), U+2028 (LS), U+2029 (PS)
+ *  - U+000D U+000A (CRLF as single delimiter)
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_>
+class range_utf8_line_splits {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = string_view_type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    range_utf8_line_splits() noexcept = default;
+    range_utf8_line_splits(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        string_view_type remaining_; // Remaining text to process
+        string_view_type current_;   // Current line segment
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = string_view_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = string_view_type;
+        using reference = string_view_type;
+
+        iterator() noexcept : remaining_(), current_() {}
+        iterator(string_view_type text) noexcept : remaining_(text), current_() { ++(*this); }
+        iterator(string_view_type, end_sentinel_type) noexcept : remaining_(), current_() {}
+
+        reference operator*() const noexcept { return current_; }
+        pointer operator->() const noexcept { return current_; }
+
+        iterator &operator++() noexcept {
+            // If remaining is empty and current is empty, we're past the end
+            if (remaining_.size() == 0 && current_.size() == 0) return *this;
+
+            size_type newline_length = 0;
+            char const *newline_ptr = sz_utf8_find_newline(remaining_.data(), remaining_.size(), &newline_length);
+
+            if (newline_ptr) {
+                // Found newline: current line is from start of remaining_ to newline_ptr
+                size_type line_length = static_cast<size_type>(newline_ptr - remaining_.data());
+                current_ = string_view_type(remaining_.data(), line_length);
+                // Advance remaining_ past the newline
+                remaining_ =
+                    string_view_type(newline_ptr + newline_length, remaining_.size() - line_length - newline_length);
+            }
+            // No more newlines: last segment
+            else {
+                current_ = remaining_;
+                // Mark as "yielded last element" by making remaining_ empty
+                remaining_ = string_view_type(remaining_.data() + remaining_.size(), 0);
+            }
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(iterator const &other) const noexcept {
+            // Both at end: remaining is empty and we've yielded everything (current is also tracked)
+            bool this_at_end = (remaining_.size() == 0 && current_.size() == 0);
+            bool other_at_end = (other.remaining_.size() == 0 && other.current_.size() == 0);
+            if (this_at_end && other_at_end) return true;
+            if (this_at_end || other_at_end) return false;
+            // Both active: compare positions
+            return remaining_.data() == other.remaining_.data();
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
+        bool operator==(end_sentinel_type) const noexcept { return remaining_.size() == 0 && current_.size() == 0; }
+        bool operator!=(end_sentinel_type) const noexcept { return !(*this == end_sentinel_type {}); }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Copies the lines into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto line : *this) container.push_back(line);
+    }
+
+    /** @brief Copies the lines into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto line : *this) container.push_back(line);
+        return std::move(container);
+    }
+};
+
+/**
+ *  @brief A range of string slices split by UTF-8 whitespace characters.
+ *
+ *  Splits on all 25 Unicode "White_Space" characters.
+ *  Consecutive whitespace is treated as a single delimiter.
+ *  Empty segments are skipped (similar to Python's str.split()).
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_>
+class range_utf8_whitespace_splits {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = string_view_type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    range_utf8_whitespace_splits() noexcept = default;
+    range_utf8_whitespace_splits(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        string_view_type remaining_; // Remaining text to process (data() == nullptr means end)
+        string_view_type current_;   // Current word segment
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = string_view_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = string_view_type;
+        using reference = string_view_type;
+
+        iterator() noexcept : remaining_(), current_() {}
+        iterator(string_view_type text) noexcept : remaining_(text), current_() { ++(*this); }
+        iterator(string_view_type, end_sentinel_type) noexcept : remaining_(), current_() {}
+
+        reference operator*() const noexcept { return current_; }
+        pointer operator->() const noexcept { return current_; }
+
+        iterator &operator++() noexcept {
+            // If remaining is empty and current is empty, we're past the end
+            if (remaining_.size() == 0 && current_.size() == 0) return *this;
+
+            // Find next non-empty segment (skip consecutive whitespace)
+            while (remaining_.size() > 0) {
+                size_type ws_length = 0;
+                char const *ws_ptr = sz_utf8_find_whitespace(remaining_.data(), remaining_.size(), &ws_length);
+
+                if (ws_ptr) {
+                    size_type offset = static_cast<size_type>(ws_ptr - remaining_.data());
+                    if (offset > 0) {
+                        // Non-empty segment before whitespace
+                        current_ = string_view_type(remaining_.data(), offset);
+                        // Advance remaining_ past word and whitespace
+                        remaining_ = string_view_type(ws_ptr + ws_length, remaining_.size() - offset - ws_length);
+                        return *this;
+                    }
+                    else {
+                        // Skip leading/consecutive whitespace
+                        remaining_ = string_view_type(ws_ptr + ws_length, remaining_.size() - ws_length);
+                    }
+                }
+                // No more whitespace - last segment
+                else {
+                    if (remaining_.size() > 0) {
+                        current_ = remaining_;
+                        // Mark as "yielded last element" by making remaining_ empty
+                        remaining_ = string_view_type(remaining_.data() + remaining_.size(), 0);
+                        return *this;
+                    }
+                    // Shouldn't reach here, but handle it
+                    break;
+                }
+            }
+
+            // Exhausted remaining_ without finding non-empty segment (all whitespace)
+            current_ = string_view_type();
+            remaining_ = string_view_type();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(iterator const &other) const noexcept {
+            // Both at end: remaining is empty and we've yielded everything
+            bool this_at_end = (remaining_.size() == 0 && current_.size() == 0);
+            bool other_at_end = (other.remaining_.size() == 0 && other.current_.size() == 0);
+            if (this_at_end && other_at_end) return true;
+            if (this_at_end || other_at_end) return false;
+            // Both active: compare positions
+            return remaining_.data() == other.remaining_.data();
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
+        bool operator==(end_sentinel_type) const noexcept { return remaining_.size() == 0 && current_.size() == 0; }
+        bool operator!=(end_sentinel_type) const noexcept { return !(*this == end_sentinel_type {}); }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Copies the words into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto word : *this) container.push_back(word);
+    }
+
+    /** @brief Copies the words into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto word : *this) container.push_back(word);
         return std::move(container);
     }
 };
@@ -1827,6 +2243,82 @@ class basic_string_slice {
     size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return find_last_of(set.inverted(), until);
     }
+
+    /**
+     *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched newline sequence.
+     */
+    size_type find_newline_utf8(size_type &match_length) const noexcept {
+        auto ptr = sz_utf8_find_newline(start_, length_, &match_length);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched whitespace sequence.
+     */
+    size_type find_whitespace_utf8(size_type &match_length) const noexcept {
+        auto ptr = sz_utf8_find_whitespace(start_, length_, &match_length);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched newline sequence.
+     */
+    size_type find_newline_utf8() const noexcept {
+        size_type match_length;
+        return find_newline_utf8(match_length);
+    }
+
+    /**
+     *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
+     *  @param[out] match_length Length of the matched whitespace sequence.
+     */
+    size_type find_whitespace_utf8() const noexcept {
+        size_type match_length;
+        return find_whitespace_utf8(match_length);
+    }
+
+    /**
+     *  @brief Count the number of UTF-8 characters (not bytes) in the string.
+     *  @return Number of UTF-8 codepoints.
+     */
+    size_type utf8_count() const noexcept { return sz_utf8_count(start_, length_); }
+
+    /**
+     *  @brief Find the byte offset of the Nth UTF-8 character.
+     *  @param[in] n Zero-indexed character position.
+     *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
+     */
+    size_type utf8_find_nth(size_type n) const noexcept {
+        auto ptr = sz_utf8_find_nth(start_, length_, n);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief Iterate over UTF-8 characters (codepoints) in the string.
+     *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
+     */
+    range_utf8_chars<string_slice> utf8_chars() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Split the string by Unicode newline characters (UTF-8 aware).
+     *  @return A range of string slices split by newlines.
+     *
+     *  Splits on all 7 Unicode newline characters + CRLF sequence.
+     */
+    range_utf8_line_splits<string_slice> utf8_split_lines() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
+     *  @return A range of non-empty string slices split by whitespace.
+     *
+     *  Splits on all 25 Unicode White_Space characters.
+     *  Consecutive whitespace is treated as a single delimiter.
+     *  Empty segments are skipped.
+     */
+    range_utf8_whitespace_splits<string_slice> utf8_split() const noexcept { return {*this}; }
 
 #pragma endregion
 #pragma region String Arguments
@@ -3578,6 +4070,52 @@ class basic_string {
         sz_string_range(&string_, &start, &length);
         sz_lookup((sz_ptr_t)output, (sz_size_t)length, (sz_cptr_t)start, (sz_cptr_t)table.raw());
     }
+
+    /**
+     *  @brief Count UTF-8 characters in the string (not bytes).
+     *  @return The number of UTF-8 codepoints.
+     */
+    size_type utf8_count() const noexcept {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_string_range(&string_, &start, &length);
+        return sz_utf8_count(start, length);
+    }
+
+    /**
+     *  @brief Find the byte offset of the nth UTF-8 character.
+     *  @param n The character index (0-based).
+     *  @return The byte offset, or npos if n >= character count.
+     */
+    size_type utf8_find_nth(size_type n) const noexcept {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_string_range(&string_, &start, &length);
+        auto ptr = sz_utf8_find_nth(start, length, n);
+        return ptr ? ptr - start : npos;
+    }
+
+    /**
+     *  @brief Iterate over UTF-8 characters (codepoints) in the string.
+     *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
+     */
+    range_utf8_chars<basic_string> utf8_chars() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Split the string by Unicode newline characters (UTF-8 aware).
+     *  @return A range of string slices split by newlines.
+     *
+     *  Splits on all 7 Unicode newline characters + CRLF sequence.
+     */
+    range_utf8_line_splits<basic_string> utf8_split_lines() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
+     *  @return A range of non-empty string slices split by whitespace.
+     *
+     *  Splits on all 25 Unicode whitespace characters. Empty segments (consecutive whitespace) are skipped.
+     */
+    range_utf8_whitespace_splits<basic_string> utf8_split() const noexcept { return {*this}; }
 
   private:
     template <typename pattern_type>

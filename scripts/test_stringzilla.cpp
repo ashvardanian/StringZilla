@@ -710,11 +710,17 @@ static void test_large_memory_utilities() {
     }
 }
 
-#define assert_scoped(init, operation, condition) \
-    do {                                          \
-        init;                                     \
-        operation;                                \
-        assert(condition);                        \
+#define scope_assert(init, operation, condition) \
+    do {                                         \
+        init;                                    \
+        operation;                               \
+        assert(condition);                       \
+    } while (0)
+
+#define let_assert(init, condition) \
+    do {                            \
+        init;                       \
+        assert(condition);          \
     } while (0)
 
 #define assert_throws(expression, exception_type) \
@@ -760,8 +766,8 @@ void test_stl_compatibility_for_reads() {
 
     // Slices... out-of-bounds exceptions are asymmetric!
     // Moreover, `std::string` has no `remove_prefix` and `remove_suffix` methods.
-    // assert_scoped(str s = "hello", s.remove_prefix(1), s == "ello");
-    // assert_scoped(str s = "hello", s.remove_suffix(1), s == "hell");
+    // scope_assert(str s = "hello", s.remove_prefix(1), s == "ello");
+    // scope_assert(str s = "hello", s.remove_suffix(1), s == "hell");
     assert(str("hello world").substr(0, 5) == "hello");
     assert(str("hello world").substr(6, 5) == "world");
     assert(str("hello world").substr(6) == "world");
@@ -986,8 +992,8 @@ void test_stl_compatibility_for_reads() {
 #endif
 
     // Exporting the contents of the string using the `str::copy` method.
-    assert_scoped(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
-    assert_scoped(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
+    scope_assert(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
+    scope_assert(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
     assert_throws(str("hello").copy((char *)"", 1, 100), std::out_of_range);
 
     // Swaps.
@@ -1004,7 +1010,7 @@ void test_stl_compatibility_for_reads() {
 
     // Make sure the standard hash and function-objects instantiate just fine.
     assert(std::hash<str> {}("hello") != 0);
-    assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
+    scope_assert(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
 #if SZ_IS_CPP14_
     // Comparison function objects are a C++14 feature.
@@ -1038,76 +1044,76 @@ void test_stl_compatibility_for_updates() {
     assert(str(258, '0').find(str(256, '1')) == str::npos);
 
     // Assignments.
-    assert_scoped(str s = "obsolete", s = "hello", s == "hello");
-    assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
-    assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
-    assert_scoped(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
-    assert_scoped(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
+    scope_assert(str s = "obsolete", s = "hello", s == "hello");
+    scope_assert(str s = "obsolete", s.assign("hello"), s == "hello");
+    scope_assert(str s = "obsolete", s.assign("hello", 4), s == "hell");
+    scope_assert(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    scope_assert(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    scope_assert(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    scope_assert(str s = "obsolete", s.assign(str("hello")), s == "hello");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
+    scope_assert(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
+    scope_assert(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
+    scope_assert(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
 
     // Self-assignment is a special case of assignment.
-    assert_scoped(str s = "obsolete", s = s, s == "obsolete");
-    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");
-    assert_scoped(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
-    assert_scoped(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
+    scope_assert(str s = "obsolete", s = s, s == "obsolete");
+    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");
+    scope_assert(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
+    scope_assert(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
 
     // Allocations, capacity and memory management.
-    assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
-    assert_scoped(str s, s.resize(10), s.size() == 10);
-    assert_scoped(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
+    scope_assert(str s, s.reserve(10), s.capacity() >= 10);
+    scope_assert(str s, s.resize(10), s.size() == 10);
+    scope_assert(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
 #if SZ_IS_CPP23_ && defined(__cpp_lib_string_resize_and_overwrite)
     // Test C++23 resize and overwrite functionality
-    assert_scoped(str s("hello"),
-                  s.resize_and_overwrite(10,
-                                         [](char *p, std::size_t count) noexcept {
-                                             std::memset(p, 'X', count);
-                                             return count;
-                                         }),
-                  s.size() == 10 && s == "XXXXXXXXXX");
+    scope_assert(str s("hello"),
+                 s.resize_and_overwrite(10,
+                                        [](char *p, std::size_t count) noexcept {
+                                            std::memset(p, 'X', count);
+                                            return count;
+                                        }),
+                 s.size() == 10 && s == "XXXXXXXXXX");
 
-    assert_scoped(str s("test"),
-                  s.resize_and_overwrite(8,
-                                         [](char *p, std::size_t) noexcept {
-                                             std::strcpy(p, "ABCDE");
-                                             return 5;
-                                         }),
-                  s.size() == 5 && s == "ABCDE");
+    scope_assert(str s("test"),
+                 s.resize_and_overwrite(8,
+                                        [](char *p, std::size_t) noexcept {
+                                            std::strcpy(p, "ABCDE");
+                                            return 5;
+                                        }),
+                 s.size() == 5 && s == "ABCDE");
 
-    assert_scoped(str s("orig"),
-                  s.try_resize_and_overwrite(6,
-                                             [](char *p, std::size_t count) noexcept {
-                                                 std::strcpy(p, "works!");
-                                                 return count;
-                                             }),
-                  s.size() == 6 && s == "works!");
+    scope_assert(str s("orig"),
+                 s.try_resize_and_overwrite(6,
+                                            [](char *p, std::size_t count) noexcept {
+                                                std::strcpy(p, "works!");
+                                                return count;
+                                            }),
+                 s.size() == 6 && s == "works!");
 #endif
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_IS_64BIT_) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (SZ_IS_64BIT_) scope_assert(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
-    // assert_scoped(str s = "!?", s.push_front('a'), s == "a!?");
-    // assert_scoped(str s = "!?", s.pop_front(), s == "?");
+    // scope_assert(str s = "!?", s.push_front('a'), s == "a!?");
+    // scope_assert(str s = "!?", s.pop_front(), s == "?");
     assert(str().append("test") == "test");
     assert(str("test") + "ing" == "testing");
     assert(str("test") + str("ing") == "testing");
     assert(str("test") + str("ing") + str("123") == "testing123");
-    assert_scoped(str s = "!?", s.push_back('a'), s == "!?a");
-    assert_scoped(str s = "!?", s.pop_back(), s == "!");
+    scope_assert(str s = "!?", s.push_back('a'), s == "!?a");
+    scope_assert(str s = "!?", s.pop_back(), s == "!");
 
     // Incremental construction.
     assert(str("__").insert(1, "test") == "_test_");
@@ -1118,10 +1124,10 @@ void test_stl_compatibility_for_updates() {
     assert(str("__").insert(1, str("test"), 2, 1) == "_s_");
 
     // Inserting at a given iterator position yields back an iterator.
-    assert_scoped(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
-    assert_scoped(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
-    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
-    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
+    scope_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
+    scope_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
+    let_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
+    let_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
 
     // Handle exceptions.
     // The `length_error` might be difficult to catch due to a large `max_size()`.
@@ -1133,12 +1139,12 @@ void test_stl_compatibility_for_updates() {
     assert(str("").erase(0, 3) == "");
     assert(str("test").erase(1, 2) == "tt");
     assert(str("test").erase(1) == "t");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
-    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1) == (s.begin() + 1));
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
-    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
+    scope_assert(str s = "test", s.erase(s.begin() + 1), s == "tst");
+    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
+    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    let_assert(str s = "test", s.erase(s.begin() + 1) == (s.begin() + 1));
+    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
+    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
 
     // Substitutions.
     assert(str("hello").replace(1, 2, "123") == "h123lo");
@@ -1149,8 +1155,8 @@ void test_stl_compatibility_for_updates() {
     assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
 
     // Substitutions with iterators.
-    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
-    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
+    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
+    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
 
     // Some nice "tweetable" examples :)
     assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
@@ -1165,7 +1171,7 @@ void test_stl_compatibility_for_updates() {
     assert(str("hello").append(str("123"), 1, 1) == "hello2");
     assert(str("hello").append({'1', '2'}) == "hello12");
     assert(str("hello").append(2, '!') == "hello!!");
-    assert_scoped(str s = "123", (void)0, str("hello").append(s.begin(), s.end()) == "hello123");
+    let_assert(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
 }
 
 /**
@@ -1277,11 +1283,11 @@ void test_non_stl_extensions_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
     assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
-    assert_scoped(
+    let_assert(
         str s =
             "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
             "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
-        (void)0, s.bytesum() == accumulate_bytes(s));
+        s.bytesum() == accumulate_bytes(s));
 }
 
 void test_non_stl_extensions_for_updates() {
@@ -1299,49 +1305,49 @@ void test_non_stl_extensions_for_updates() {
     assert(str("test").try_shrink_to_fit());
 
     // Self-referencing methods.
-    assert_scoped(str s = "test", s.try_assign(s.view()), s == "test");
-    assert_scoped(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
-    assert_scoped(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
+    scope_assert(str s = "test", s.try_assign(s.view()), s == "test");
+    scope_assert(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
+    scope_assert(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
 
     // Try methods going beyond and beneath capacity threshold.
-    assert_scoped(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
-                  s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
-                      s.try_shrink_to_fit(),
-                  s.capacity() < sz::string::min_capacity);
+    scope_assert(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
+                 s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
+                     s.try_shrink_to_fit(),
+                 s.capacity() < sz::string::min_capacity);
 
     // Same length replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
-    assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
-    assert_scoped(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
+    scope_assert(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", "1"), s == "he11o");
+    scope_assert(str s = "hello", s.replace_all("he", "al"), s == "alllo");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
+    scope_assert(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
 
     // Shorter replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", ""), s == "heo");
-    assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
-    assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
-    assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
+    scope_assert(str s = "hello", s.replace_all("xx", "x"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", ""), s == "heo");
+    scope_assert(str s = "hello", s.replace_all("h", ""), s == "ello");
+    scope_assert(str s = "hello", s.replace_all("o", ""), s == "hell");
+    scope_assert(str s = "hello", s.replace_all("llo", "!"), s == "he!");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
 
     // Longer replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
-    assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
-    assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
-    assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    assert_scoped(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
+    scope_assert(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
+    scope_assert(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
+    scope_assert(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
+    scope_assert(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
+    scope_assert(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
+    scope_assert(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
     sz::look_up_table invert_case = sz::look_up_table::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
-    assert_scoped(str s = "hello", s.lookup(invert_case), s == "HELLO");
-    assert_scoped(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
-    assert_scoped(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
+    scope_assert(str s = "hello", s.lookup(invert_case), s == "HELLO");
+    scope_assert(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
+    scope_assert(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
 
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");
@@ -1688,6 +1694,386 @@ void test_search() {
     assert(rsplits[4] == "");
 }
 
+/**
+ *  @brief Tests UTF-8 specific functionality, including character counting, nth character finding,
+ *         character iteration, and Unicode-aware splitting.
+ */
+void test_utf8() {
+
+    // Test utf8_count() - character counting vs byte length
+    assert("hello"_sv.utf8_count() == 5);
+    assert("hello"_sv.size() == 5);
+
+    // ASCII text: bytes == characters
+    assert("Hello World"_sv.utf8_count() == 11);
+    assert(sz::string_view("").utf8_count() == 0);
+
+    // Mixed ASCII and multi-byte characters
+    assert(sz::string_view("Hello 世界").utf8_count() == 8); // "Hello " (6) + "世界" (2 chars)
+    assert(sz::string_view("Hello 世界").size() == 12);      // "Hello " (6) + "世界" (6 bytes)
+
+    // Emojis (4-byte UTF-8)
+    assert(sz::string_view("Hello 😀").utf8_count() == 7); // "Hello " (6) + emoji (1 char)
+    assert(sz::string_view("Hello 😀").size() == 10);      // "Hello " (6) + emoji (4 bytes)
+    assert(sz::string_view("😀😁😂").utf8_count() == 3);
+    assert(sz::string_view("😀😁😂").size() == 12);
+
+    // Cyrillic (2-byte UTF-8)
+    assert(sz::string_view("Привет").utf8_count() == 6);
+    assert(sz::string_view("Привет").size() == 12);
+
+    // Finding byte offset of nth character
+    {
+        sz::string_view text = "Hello";
+        assert(text.utf8_find_nth(0) == 0);                     // First char at byte 0
+        assert(text.utf8_find_nth(1) == 1);                     // Second char at byte 1
+        assert(text.utf8_find_nth(4) == 4);                     // Fifth char at byte 4
+        assert(text.utf8_find_nth(5) == sz::string_view::npos); // Beyond end
+        assert(text.utf8_find_nth(100) == sz::string_view::npos);
+    }
+
+    {
+        sz::string_view text = "Hello 世界";
+        assert(text.utf8_find_nth(0) == 0); // 'H' at byte 0
+        assert(text.utf8_find_nth(5) == 5); // ' ' at byte 5
+        assert(text.utf8_find_nth(6) == 6); // '世' at byte 6
+        assert(text.utf8_find_nth(7) == 9); // '界' at byte 9
+        assert(text.utf8_find_nth(8) == sz::string_view::npos);
+    }
+
+    {
+        sz::string_view text = "😀😁😂";
+        assert(text.utf8_find_nth(0) == 0); // First emoji at byte 0
+        assert(text.utf8_find_nth(1) == 4); // Second emoji at byte 4
+        assert(text.utf8_find_nth(2) == 8); // Third emoji at byte 8
+        assert(text.utf8_find_nth(3) == sz::string_view::npos);
+    }
+
+    // Iterate over UTF-32 codepoints
+    {
+        auto chars = [](char const *t) {
+            return sz::string_view(t).utf8_chars().template to<std::vector<sz_rune_t>>();
+        };
+
+        // Basic ASCII and edge cases
+        let_assert(auto c = chars("Hello"), c.size() == 5 && c[0] == 'H' && c[4] == 'o');
+        let_assert(auto c = chars(""), c.size() == 0);
+        let_assert(auto c = chars("A"), c.size() == 1 && c[0] == 'A');
+
+        // CJK (3-byte UTF-8)
+        let_assert(auto c = chars("世界"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x754C);
+        let_assert(auto c = chars("你好"), c.size() == 2 && c[0] == 0x4F60 && c[1] == 0x597D);
+
+        // Cyrillic (2-byte UTF-8)
+        let_assert(auto c = chars("Привет"), c.size() == 6 && c[0] == 0x041F && c[5] == 0x0442);
+
+        // Arabic/RTL (2-byte UTF-8)
+        let_assert(auto c = chars("مرحبا"), c.size() == 5 && c[0] == 0x0645 && c[4] == 0x0627);
+
+        // Hebrew/RTL (2-byte UTF-8)
+        let_assert(auto c = chars("שלום"), c.size() == 4 && c[0] == 0x05E9 && c[3] == 0x05DD);
+
+        // Thai (3-byte UTF-8)
+        let_assert(auto c = chars("สวัสดี"), c.size() == 6 && c[0] == 0x0E2A);
+
+        // Devanagari/Hindi (3-byte UTF-8)
+        let_assert(auto c = chars("नमस्ते"), c.size() == 6 && c[0] == 0x0928);
+
+        // Emoji: basic smileys (4-byte UTF-8)
+        let_assert(auto c = chars("😀😁😂"), c.size() == 3 && c[0] == 0x1F600 && c[2] == 0x1F602);
+
+        // Emoji: with variation selector
+        let_assert(auto c = chars("❤️"), c.size() == 2 && c[0] == 0x2764 && c[1] == 0xFE0F);
+
+        // Emoji: various categories
+        let_assert(auto c = chars("🚀🎉🔥"), c.size() == 3 && c[0] == 0x1F680);
+
+        // Maximum valid Unicode codepoint (U+10FFFF)
+        let_assert(auto c = chars("\xF4\x8F\xBF\xBF"), c.size() == 1 && c[0] == 0x10FFFF);
+
+        // Deseret alphabet (4-byte UTF-8, U+10400 range)
+        let_assert(auto c = chars("𐐷"), c.size() == 1 && c[0] == 0x10437);
+
+        // Mixed scripts
+        let_assert(auto c = chars("Hello世界"), c.size() == 7 && c[4] == 'o' && c[5] == 0x4E16);
+        let_assert(auto c = chars("a𐐷b"), c.size() == 3 && c[0] == 'a' && c[1] == 0x10437 && c[2] == 'b');
+
+        // Zero-width characters
+        let_assert(auto c = chars("a\u200Bb"), c.size() == 3 && c[0] == 'a' && c[1] == 0x200B && c[2] == 'b');
+        let_assert(auto c = chars("\uFEFF"), c.size() == 1 && c[0] == 0xFEFF); // BOM
+
+        // Combining diacritics (é as e + combining acute)
+        let_assert(auto c = chars("e\u0301"), c.size() == 2 && c[0] == 'e' && c[1] == 0x0301);
+
+        // Precomposed vs decomposed normalization
+        let_assert(auto c = chars("é"), c.size() == 1 && c[0] == 0x00E9); // Precomposed
+
+        // Test all byte-length transitions (stress Ice Lake waterfall approach)
+        // Missing transitions: 1→2, 2→1, 2→3, 3→2, 2→4, 4→2, 3→4, 4→3
+        let_assert(auto c = chars("aП"), c.size() == 2 && c[0] == 'a' && c[1] == 0x041F);       // 1→2
+        let_assert(auto c = chars("Пa"), c.size() == 2 && c[0] == 0x041F && c[1] == 'a');       // 2→1
+        let_assert(auto c = chars("П世"), c.size() == 2 && c[0] == 0x041F && c[1] == 0x4E16);   // 2→3
+        let_assert(auto c = chars("世П"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x041F);   // 3→2
+        let_assert(auto c = chars("П😀"), c.size() == 2 && c[0] == 0x041F && c[1] == 0x1F600);  // 2→4
+        let_assert(auto c = chars("😀П"), c.size() == 2 && c[0] == 0x1F600 && c[1] == 0x041F);  // 4→2
+        let_assert(auto c = chars("世😀"), c.size() == 2 && c[0] == 0x4E16 && c[1] == 0x1F600); // 3→4
+        let_assert(auto c = chars("😀世"), c.size() == 2 && c[0] == 0x1F600 && c[1] == 0x4E16); // 4→3
+
+        // Extended transitions with same-length runs
+        let_assert(auto c = chars("ПРС"), c.size() == 3 && c[0] == 0x041F && c[2] == 0x0421);    // 2→2→2
+        let_assert(auto c = chars("世界人"), c.size() == 3 && c[0] == 0x4E16 && c[2] == 0x4EBA); // 3→3→3
+
+        // Asymmetric alternating patterns (2:3, 3:2) - stress homogeneity assumption
+        let_assert(auto c = chars("aaПППaaППП"), c.size() == 10);           // 2 ASCII, 3 Cyrillic
+        let_assert(auto c = chars("aaaППaaaПП"), c.size() == 10);           // 3 ASCII, 2 Cyrillic
+        let_assert(auto c = chars("aa世世世aa世世世"), c.size() == 10);     // 2 ASCII, 3 CJK
+        let_assert(auto c = chars("ПП世世世ПП世世世"), c.size() == 10);     // 2 Cyrillic, 3 CJK
+        let_assert(auto c = chars("世世😀😀😀世世😀😀😀"), c.size() == 10); // 2 CJK, 3 Emoji
+        let_assert(auto c = chars("aaa😀😀aaa😀😀"), c.size() == 10);       // 3 ASCII, 2 Emoji
+
+        // Pathological mixed patterns
+        let_assert(auto c = chars("aaПППП世世世世😀😀😀😀😀"), c.size() == 15); // 2-4-4-5
+        let_assert(auto c = chars("aaПППaa😀😀😀😀世世世ПП"), c.size() == 16);  // 2-3-2-4-3-2
+
+        // Extended asymmetric: 30x "aaППП" = 150 chars, 210 bytes (crosses multiple 64-byte chunks)
+        scope_assert(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "aaППП",
+                     sz::string_view(asym_long).utf8_count() == 150);
+    }
+
+    // Test 64-byte chunk boundaries and batch limits
+    {
+        // Critical 63, 64, 65 byte boundaries
+        let_assert(std::string s63(63, 'a'), sz::string_view(s63).utf8_chars().size() == 63);
+        let_assert(std::string s64(64, 'a'), sz::string_view(s64).utf8_chars().size() == 64);
+        let_assert(std::string s65(65, 'a'), sz::string_view(s65).utf8_chars().size() == 65);
+
+        // ASCII batch limit: 16 characters max per Ice Lake iteration
+        let_assert(std::string s17(17, 'x'), sz::string_view(s17).utf8_chars().size() == 17);
+        let_assert(std::string s20(20, 'x'), sz::string_view(s20).utf8_chars().size() == 20);
+
+        // 2-byte batch limit: 32 characters (64 bytes) max per iteration
+        scope_assert(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "П",
+                     sz::string_view(cyr32).utf8_count() == 32);
+        scope_assert(std::string cyr33, for (int i = 0; i < 33; ++i) cyr33 += "П",
+                     sz::string_view(cyr33).utf8_count() == 33);
+
+        // 3-byte batch limit: 16 characters (48 bytes) max per iteration
+        scope_assert(std::string cjk16, for (int i = 0; i < 16; ++i) cjk16 += "世",
+                     sz::string_view(cjk16).utf8_count() == 16);
+        scope_assert(std::string cjk17, for (int i = 0; i < 17; ++i) cjk17 += "世",
+                     sz::string_view(cjk17).utf8_count() == 17);
+
+        // 4-byte batch limit: 16 characters (64 bytes) max per iteration
+        scope_assert(std::string emoji16, for (int i = 0; i < 16; ++i) emoji16 += "😀",
+                     sz::string_view(emoji16).utf8_count() == 16);
+        scope_assert(std::string emoji17, for (int i = 0; i < 17; ++i) emoji17 += "😀",
+                     sz::string_view(emoji17).utf8_count() == 17);
+
+        // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
+        scope_assert(std::string boundary_asym(60, 'a'), boundary_asym += "ПП世",
+                     sz::string_view(boundary_asym).utf8_count() == 63);
+
+        // Test sequences exceeding batch limits
+        // 100 consecutive 2-byte (exceeds 32-char limit 3x)
+        scope_assert(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "П",
+                     sz::string_view(cyr100).utf8_chars().size() == 100);
+
+        // 50 consecutive 3-byte (exceeds 16-char limit 3x)
+        scope_assert(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "世",
+                     sz::string_view(cjk50).utf8_chars().size() == 50);
+
+        // 50 consecutive 4-byte (exceeds 16-char limit 3x)
+        scope_assert(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "😀",
+                     sz::string_view(emoji50).utf8_chars().size() == 50);
+
+        // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
+        scope_assert(std::string overflow_asym, for (int i = 0; i < 20; ++i) overflow_asym += "aaПРС",
+                     sz::string_view(overflow_asym).utf8_count() == 100);
+
+        // Test transitions at chunk boundaries
+        // 63 bytes ASCII + 2-byte char (transition at 64-byte boundary)
+        scope_assert(std::string boundary_test(63, 'a'), boundary_test += "П",
+                     sz::string_view(boundary_test).utf8_chars().size() == 64);
+
+        // Asymmetric spanning boundary: 60 ASCII + 24 Cyrillic = 84 chars, 108 bytes
+        scope_assert(
+            std::string span_asym,
+            {
+                for (int i = 0; i < 30; ++i) span_asym += "aa";
+                for (int i = 0; i < 8; ++i) span_asym += "ПРС";
+            },
+            sz::string_view(span_asym).utf8_count() == 84);
+
+        // Transition exactly at 64-byte boundary
+        scope_assert(std::string exact_boundary(64, 'a'), exact_boundary += "П世😀",
+                     sz::string_view(exact_boundary).utf8_count() == 67);
+    }
+
+    // Split by Unicode newlines
+    {
+        auto lines = [](sz::string_view t) { return t.utf8_split_lines().template to<std::vector<std::string>>(); };
+
+        // Basic newline types
+        let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
+        let_assert(auto l = lines("a\r\nb\r\nc"), l.size() == 3 && l[1] == "b");
+        let_assert(auto l = lines("a\rb\rc"), l.size() == 3 && l[0] == "a");
+        let_assert(auto l = lines("a\r\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b"); // CRLF counts as one newline
+        let_assert(auto l = lines("a\r\n\r\nb"), l.size() == 3 && l[0] == "a" && l[1].empty() && l[2] == "b");
+        let_assert(auto l = lines("\r\na\r\n\r\nb\r\n"),
+                   l.size() == 5 && l[0].empty() && l[1] == "a" && l[2].empty() && l[3] == "b" && l[4].empty());
+
+        // Edge cases (trailing newlines are stripped)
+        let_assert(auto l = lines(""), l.size() == 0);
+        let_assert(auto l = lines("\n"), l.size() == 0);
+        let_assert(auto l = lines("\n\n"), l.size() == 1 && l[0] == "");
+        let_assert(auto l = lines("a\n"), l.size() == 1 && l[0] == "a");
+        let_assert(auto l = lines("\na"), l.size() == 2 && l[0] == "" && l[1] == "a");
+        let_assert(auto l = lines("a\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b");
+        let_assert(auto l = lines("single"), l.size() == 1 && l[0] == "single");
+
+        // Mixed newlines with non-ASCII content
+        let_assert(auto l = lines("Hello 世界\nПривет\r\n😀"),
+                   l.size() == 3 && l[0] == "Hello 世界" && l[1] == "Привет" && l[2] == "😀");
+
+        // Multiple line types
+        let_assert(auto l = lines("a\nb\r\nc\rd"), l.size() == 4 && l[3] == "d");
+
+        // Unicode line separators (U+2028, U+2029)
+        let_assert(auto l = lines("a\u2028b"), l.size() >= 1);
+        let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
+
+        // NUL bytes (U+0000) should NOT be treated as newlines
+        // Use `_sv` literals for size-aware NUL-containing strings
+        let_assert(auto l = lines("a\x00b"_sv), l.size() == 1);         // NUL in middle - NOT a newline
+        let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
+        let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
+        let_assert(auto l = lines("\x00\n"_sv), l.size() == 1);         // NUL before newline - find \n, not NUL
+        let_assert(auto l = lines("\n\x00"_sv), l.size() == 2);         // Newline before NUL - split correctly
+    }
+
+    // Split by Unicode whitespace (25 total Unicode White_Space characters)
+    {
+        auto words = [](sz::string_view t) { return t.utf8_split().template to<std::vector<std::string>>(); };
+
+        // Basic ASCII whitespace (6 single-byte chars)
+        let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
+        let_assert(auto w = words("a\tb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0009 TAB
+        let_assert(auto w = words("a\nb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000A LF
+        let_assert(auto w = words("a\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000B VT
+        let_assert(auto w = words("a\fb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000C FF
+        let_assert(auto w = words("a\rb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000D CR
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");  // U+0020 SPACE
+        let_assert(auto w = words("a\r\nb"),
+                   w.size() == 3 && w[0] == "a" && w[1].empty() && w[2] == "b"); // CR and LF are both spaces
+
+        // Multiple spaces and trimming
+        let_assert(auto w = words("  a  b  "), w.size() == 2 && w[0] == "a" && w[1] == "b");
+        let_assert(auto w = words("a    b"), w.size() == 2);
+        let_assert(auto w = words("a\tb\nc\rd"), w.size() == 4 && w[3] == "d");
+
+        // Double-byte whitespace (2 chars)
+        let_assert(auto w = words("a\u0085b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0085 NEL (Next Line)
+        let_assert(auto w = words("a\u00A0b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+00A0 NBSP (No-Break Space)
+
+        // Triple-byte whitespace (17 chars) - various space widths
+        let_assert(auto w = words("a\u1680b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+1680 OGHAM SPACE MARK
+        let_assert(auto w = words("a\u2000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2000 EN QUAD
+        let_assert(auto w = words("a\u2001b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2001 EM QUAD
+        let_assert(auto w = words("a\u2002b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2002 EN SPACE
+        let_assert(auto w = words("a\u2003b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2003 EM SPACE
+        let_assert(auto w = words("a\u2004b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2004 THREE-PER-EM SPACE
+        let_assert(auto w = words("a\u2005b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2005 FOUR-PER-EM SPACE
+        let_assert(auto w = words("a\u2006b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2006 SIX-PER-EM SPACE
+        let_assert(auto w = words("a\u2007b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2007 FIGURE SPACE
+        let_assert(auto w = words("a\u2008b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2008 PUNCTUATION SPACE
+        let_assert(auto w = words("a\u2009b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2009 THIN SPACE
+        let_assert(auto w = words("a\u200Ab"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+200A HAIR SPACE
+        let_assert(auto w = words("a\u2028b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2028 LINE SEPARATOR
+        let_assert(auto w = words("a\u2029b"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2029 PARAGRAPH SEPARATOR
+        let_assert(auto w = words("a\u202Fb"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+202F NARROW NO-BREAK SPACE
+        let_assert(auto w = words("a\u205Fb"),
+                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+205F MEDIUM MATHEMATICAL SPACE
+        let_assert(auto w = words("a\u3000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+3000 IDEOGRAPHIC SPACE
+
+        // Mixed byte-length whitespace patterns
+        let_assert(auto w = words("a \u00A0\u2000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // 1+2+3 byte mix
+        let_assert(auto w = words("a\t\u0085\u3000b"), w.size() == 2);                              // 1+2+3 byte mix
+        let_assert(auto w = words("Hello\u2000世界\u00A0Привет"), w.size() == 3); // Unicode content + spaces
+
+        // Edge cases
+        let_assert(auto w = words(""), w.size() == 0);
+        let_assert(auto w = words("   "), w.size() == 0);
+        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 0);         // All single-byte whitespace
+        let_assert(auto w = words("\u0085\u00A0"), w.size() == 0);       // All double-byte whitespace
+        let_assert(auto w = words("\u2000\u2001\u3000"), w.size() == 0); // All triple-byte whitespace
+        let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
+
+        // Non-ASCII content with regular spaces
+        let_assert(auto w = words("Hello 世界 Привет 😀"),
+                   w.size() == 4 && w[1] == "世界" && w[2] == "Привет" && w[3] == "😀");
+        let_assert(auto w = words("مرحبا بك"), w.size() == 2);
+        let_assert(auto w = words("שלום עולם"), w.size() == 2);
+
+        // Negative tests - characters that should NOT be treated as whitespace
+        // U+001C-U+001F are separators, not whitespace
+        let_assert(auto w = words("a\u001Cb"), w.size() == 1); // FILE SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Db"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Eb"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
+        let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
+
+        // NUL bytes (U+0000) should NOT be treated as whitespace
+        // Use `_sv` literals for size-aware NUL-containing strings
+        let_assert(auto w = word("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
+        let_assert(auto w = word("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
+        let_assert(auto w = word("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
+        let_assert(auto w = word("\x00 a"_sv), w.size() == 1);         // NUL before space - find space, not NUL
+        let_assert(auto w = word("a \x00"_sv), w.size() == 1);         // Space before NUL - find space, not NUL
+
+        // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
+        // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
+        let_assert(auto w = words("a\u200Bb"), w.size() == 2); // ZERO WIDTH SPACE
+        let_assert(auto w = words("a\u200Cb"), w.size() == 2); // ZERO WIDTH NON-JOINER
+        let_assert(auto w = words("a\u200Db"), w.size() == 2); // ZERO WIDTH JOINER
+
+        // Consecutive different whitespace types (stress SIMD pattern matching)
+        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b");
+        let_assert(auto w = words("a\u0020\u00A0\u2000\u3000b"), w.size() == 2); // 1+2+3+3 byte sequence
+
+        // Long sequences to test chunk boundaries
+        scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
+                     sz::string_view(long_ws).utf8_split().template to<std::vector<std::string>>().size() ==
+                         0); // 100 spaces = no words
+
+        scope_assert(
+            std::string long_mixed,
+            {
+                for (int i = 0; i < 50; ++i) long_mixed += "word ";
+                long_mixed.pop_back();
+            }, // Remove trailing space
+            sz::string_view(long_mixed).utf8_split().template to<std::vector<std::string>>().size() == 50); // 50 words
+    }
+
+    // Test with `sz::string` - not just `sz::string_view`
+    {
+        sz::string str = "Hello 世界";
+        assert(str.utf8_count() == 8);
+        assert(str.utf8_find_nth(6) == 6);
+        let_assert(auto c = str.utf8_chars().template to<std::vector<sz_rune_t>>(), c.size() == 8 && c[6] == 0x4E16);
+
+        sz::string multiline = "a\nb\nc";
+        let_assert(auto l = multiline.utf8_split_lines().template to<std::vector<std::string>>(),
+                   l.size() == 3 && l[1] == "b");
+
+        sz::string words_str = "foo bar baz";
+        let_assert(auto w = words_str.utf8_split().template to<std::vector<std::string>>(),
+                   w.size() == 3 && w[2] == "baz");
+    }
+}
+
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
 /**
@@ -1925,28 +2311,28 @@ void test_sorting_algorithms() {
     using order_t = std::vector<sz::sorted_idx_t>;
 
     // Basic tests with predetermined orders.
-    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
-    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
-    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"a", "b", "c", "d"}), sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
+    let_assert(strs_t x({"b", "c", "d", "a"}), sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
+    let_assert(strs_t x({"b", "a", "d", "c"}), sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    assert_scoped(strs_t x({"aa", "a", "aaa", "aa"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"aa", "a", "aaa", "aa"}), sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    assert_scoped(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}), (void)0,
-                  sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+    let_assert(strs_t x({"test", "t", "testing", "te", "tests", "testify", "tea", "team"}),
+               sz::argsort(x) == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // Single character vs multi-character strings with varied patterns
-    assert_scoped(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
-                  (void)0, sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+    let_assert(strs_t x({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}),
+               sz::argsort(x) == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    assert_scoped(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}), (void)0,
-                  sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+    let_assert(strs_t x({"100", "1", "10", "1000", "11", "111", "101", "110"}),
+               sz::argsort(x) == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes (this one is already correct)
-    assert_scoped(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}), (void)0,
-                  sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+    let_assert(strs_t x({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}),
+               sz::argsort(x) == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
@@ -2114,8 +2500,11 @@ int main(int argc, char const **argv) {
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
 
 #if SZ_USE_CUDA
@@ -2190,6 +2579,7 @@ int main(int argc, char const **argv) {
     test_stl_conversions();
     test_comparisons();
     test_search();
+    test_utf8();
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     test_search_with_misaligned_repetitions();
 #endif
