@@ -340,6 +340,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_size_t *runes_unpacked);
 #endif
 
+/**
+ *  SVE2 provides a lot of UTF-8 friendly instructions superior to NEON, including:
+ *  - svcmpeq_n: Compare vector elements to a scalar byte value without broadcast overhead.
+ *  - svmatch: Compare each value against up to 16 other byte values in a single instruction.
+ *  - svbrkb: Find byte positions of break characters in UTF-8 strings.
+ */
 #if SZ_USE_SVE2
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
@@ -1676,17 +1682,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
 
-    // Character sets for MATCH (LD1RQ replicates 128-bit pattern across vector)
-    sz_u8_t const all_first[16] = {'\n', '\v', '\f', '\r', 0xC2, 0xE2};
-    sz_u8_t const one_byte[16] = {'\n', '\v', '\f', '\r'};
-    sz_u8_t const third_byte[16] = {0xA8, 0xA9};
-    svuint8_t all_set = svld1rq_u8(svptrue_b8(), all_first);
-    svuint8_t one_set = svld1rq_u8(svptrue_b8(), one_byte);
-    svuint8_t third_set = svld1rq_u8(svptrue_b8(), third_byte);
+    // Character sets for MATCH (DUPQ replicates 128-bit pattern across vector, no stack/loads)
+    svuint8_t all_set = svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    svuint8_t one_set = svdupq_n_u8('\n', '\v', '\f', '\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     svuint8_t zeros = svdup_n_u8(0);
 
     for (sz_size_t offset = 0; offset < length; offset += step - 2) {
-        // Signed predicates handle edge cases naturally (negative → all-false)
         sz_i64_t remaining = (sz_i64_t)(length - offset);
         svbool_t pg = svwhilelt_b8((sz_i64_t)0, remaining);
         svbool_t pg_2 = svwhilelt_b8((sz_i64_t)0, remaining - 1);
@@ -1697,11 +1698,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
         // Fast rejection: any potential first byte?
         if (!svptest_any(pg, svmatch_u8(pg, text0, all_set))) continue;
 
-        // Shifted views via EXT (single load, no extra memory access)
         svuint8_t text1 = svext_u8(text0, zeros, 1);
         svuint8_t text2 = svext_u8(text0, zeros, 2);
 
-        // 1-byte: MATCH
+        // 1-byte newlines: MATCH against {\n, \v, \f, \r}
         svbool_t one = svmatch_u8(pg, text0, one_set);
 
         // 2-byte: \r\n, NEL (0xC2 0x85)
@@ -1709,9 +1709,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
         svbool_t nel = svand_b_z(pg_2, svcmpeq_n_u8(pg, text0, 0xC2), svcmpeq_n_u8(pg, text1, 0x85));
         svbool_t two = svorr_b_z(pg_2, rn, nel);
 
-        // 3-byte: 0xE2 0x80 + MATCH {0xA8, 0xA9}
+        // 3-byte: 0xE2 0x80 + {0xA8, 0xA9} - use OR instead of MATCH for 2-element set
         svbool_t e2_80 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x80));
-        svbool_t three = svand_b_z(pg_3, e2_80, svmatch_u8(pg, text2, third_set));
+        svbool_t third_ok = svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8), svcmpeq_n_u8(pg, text2, 0xA9));
+        svbool_t three = svand_b_z(pg_3, e2_80, third_ok);
 
         svbool_t any = svorr_b_z(pg, one, svorr_b_z(pg, two, three));
         if (svptest_any(pg, any)) {
@@ -1734,15 +1735,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
 
-    // Character sets for MATCH
-    sz_u8_t const all_first[16] = {' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3};
-    sz_u8_t const one_byte[16] = {' ', '\t', '\n', '\v', '\f', '\r'};
-    sz_u8_t const c2_second[16] = {0x85, 0xA0};
-    sz_u8_t const e2_80_third[16] = {0xA8, 0xA9, 0xAF};
-    svuint8_t all_set = svld1rq_u8(svptrue_b8(), all_first);
-    svuint8_t one_set = svld1rq_u8(svptrue_b8(), one_byte);
-    svuint8_t c2_set = svld1rq_u8(svptrue_b8(), c2_second);
-    svuint8_t e2_80_set = svld1rq_u8(svptrue_b8(), e2_80_third);
+    // Character sets for MATCH (DUPQ replicates 128-bit pattern, no stack/loads)
+    svuint8_t all_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, 0, 0, 0, 0, 0, 0);
+    svuint8_t one_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     svuint8_t zeros = svdup_n_u8(0);
 
     for (sz_size_t offset = 0; offset < length; offset += step - 2) {
@@ -1759,20 +1754,24 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
         svuint8_t text1 = svext_u8(text0, zeros, 1);
         svuint8_t text2 = svext_u8(text0, zeros, 2);
 
-        // 1-byte: MATCH
+        // 1-byte whitespace
         svbool_t one = svmatch_u8(pg, text0, one_set);
 
-        // 2-byte: C2 + {85, A0}
-        svbool_t two = svand_b_z(pg_2, svcmpeq_n_u8(pg, text0, 0xC2), svmatch_u8(pg, text1, c2_set));
+        // 2-byte: C2 + {85, A0} - use OR for 2-element set
+        svbool_t c2 = svcmpeq_n_u8(pg, text0, 0xC2);
+        svbool_t c2_ok = svorr_b_z(pg, svcmpeq_n_u8(pg, text1, 0x85), svcmpeq_n_u8(pg, text1, 0xA0));
+        svbool_t two = svand_b_z(pg_2, c2, c2_ok);
 
         // 3-byte: E1 9A 80 (Ogham)
         svbool_t e1_9a = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE1), svcmpeq_n_u8(pg, text1, 0x9A));
         svbool_t ogham = svand_b_z(pg_3, e1_9a, svcmpeq_n_u8(pg, text2, 0x80));
 
-        // 3-byte: E2 80 + {80-8D, A8, A9, AF}
+        // 3-byte: E2 80 + {80-8D, A8, A9, AF} - range check + OR for extras
         svbool_t e2_80 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x80));
         svbool_t e2_80_range = svand_b_z(pg, svcmpge_n_u8(pg, text2, 0x80), svcmple_n_u8(pg, text2, 0x8D));
-        svbool_t e2_80_ws = svand_b_z(pg_3, e2_80, svorr_b_z(pg, e2_80_range, svmatch_u8(pg, text2, e2_80_set)));
+        svbool_t e2_80_extra = svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8),
+                                         svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA9), svcmpeq_n_u8(pg, text2, 0xAF)));
+        svbool_t e2_80_ws = svand_b_z(pg_3, e2_80, svorr_b_z(pg, e2_80_range, e2_80_extra));
 
         // 3-byte: E2 81 9F (medium math space)
         svbool_t e2_81 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x81));
