@@ -1356,16 +1356,195 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
 #pragma endregion // Haswell Implementation
 
 #pragma region NEON Implementation
+#if SZ_USE_NEON
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("+simd")
+#endif
+
+SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_(uint8x16_t vec) {
+    // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+    // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
+}
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+
+    sz_u128_vec_t text_vec;
+    uint8x16_t n_vec = vdupq_n_u8('\n');
+    uint8x16_t v_vec = vdupq_n_u8('\v');
+    uint8x16_t f_vec = vdupq_n_u8('\f');
+    uint8x16_t r_vec = vdupq_n_u8('\r');
+    uint8x16_t xc2_vec = vdupq_n_u8(0xC2);
+    uint8x16_t x85_vec = vdupq_n_u8(0x85);
+    uint8x16_t xe2_vec = vdupq_n_u8(0xE2);
+    uint8x16_t x80_vec = vdupq_n_u8(0x80);
+    uint8x16_t xa8_vec = vdupq_n_u8(0xA8);
+    uint8x16_t xa9_vec = vdupq_n_u8(0xA9);
+
+    uint8x16_t drop1_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+    uint8x16_t drop2_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00};
+
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8((sz_u8_t const *)text);
+
+        // 1-byte matches
+        uint8x16_t n_cmp = vceqq_u8(text_vec.u8x16, n_vec);
+        uint8x16_t v_cmp = vceqq_u8(text_vec.u8x16, v_vec);
+        uint8x16_t f_cmp = vceqq_u8(text_vec.u8x16, f_vec);
+        uint8x16_t r_cmp = vceqq_u8(text_vec.u8x16, r_vec);
+        uint8x16_t one_vec = vorrq_u8(vorrq_u8(n_cmp, v_cmp), vorrq_u8(f_cmp, r_cmp));
+
+        // 2- & 3-byte matches with shifted views
+        uint8x16_t t1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
+        uint8x16_t t2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
+        uint8x16_t rn_vec = vandq_u8(r_cmp, vceqq_u8(t1, n_vec));
+        uint8x16_t xc285_vec = vandq_u8(vceqq_u8(text_vec.u8x16, xc2_vec), vceqq_u8(t1, x85_vec));
+        uint8x16_t two_vec = vandq_u8(vorrq_u8(rn_vec, xc285_vec), drop1_vec); // Ignore last split match
+
+        uint8x16_t xe2_cmp = vceqq_u8(text_vec.u8x16, xe2_vec);
+        uint8x16_t e280_vec = vandq_u8(xe2_cmp, vceqq_u8(t1, x80_vec));
+        uint8x16_t e280a8_vec = vandq_u8(e280_vec, vceqq_u8(t2, xa8_vec));
+        uint8x16_t e280a9_vec = vandq_u8(e280_vec, vceqq_u8(t2, xa9_vec));
+        uint8x16_t three_vec = vandq_u8(vorrq_u8(e280a8_vec, e280a9_vec), drop2_vec); // Ignore last two split matches
+
+        // Quick presence check
+        uint8x16_t combined_vec = vorrq_u8(one_vec, vorrq_u8(two_vec, three_vec));
+        if (vmaxvq_u8(combined_vec)) {
+
+            // Late mask extraction only when a match exists
+            sz_u64_t one_mask = sz_utf8_vreinterpretq_u8_u4_(one_vec);
+            sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_(two_vec);
+            sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_(three_vec);
+            sz_u64_t combined_mask = one_mask | two_mask | three_mask;
+
+            int bit_index = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)1 << bit_index;
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (two_mask | three_mask)) != 0;
+            length_value += (first_match_mask & three_mask) != 0;
+            *matched_length = length_value;
+            return text + (bit_index / 4);
+        }
+        text += 14;
+        length -= 14;
+    }
+
     return sz_utf8_find_newline_serial(text, length, matched_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+
+    sz_u128_vec_t text_vec;
+    uint8x16_t t_vec = vdupq_n_u8('\t');
+    uint8x16_t r_vec = vdupq_n_u8('\r');
+    uint8x16_t x20_vec = vdupq_n_u8(' ');
+    uint8x16_t xc2_vec = vdupq_n_u8(0xC2);
+    uint8x16_t x85_vec = vdupq_n_u8(0x85);
+    uint8x16_t xa0_vec = vdupq_n_u8(0xA0);
+    uint8x16_t xe1_vec = vdupq_n_u8(0xE1);
+    uint8x16_t xe2_vec = vdupq_n_u8(0xE2);
+    uint8x16_t xe3_vec = vdupq_n_u8(0xE3);
+    uint8x16_t x9a_vec = vdupq_n_u8(0x9A);
+    uint8x16_t x80_vec = vdupq_n_u8(0x80);
+    uint8x16_t x81_vec = vdupq_n_u8(0x81);
+    uint8x16_t x8d_vec = vdupq_n_u8(0x8D);
+    uint8x16_t xa8_vec = vdupq_n_u8(0xA8);
+    uint8x16_t xa9_vec = vdupq_n_u8(0xA9);
+    uint8x16_t xaf_vec = vdupq_n_u8(0xAF);
+    uint8x16_t x9f_vec = vdupq_n_u8(0x9F);
+
+    uint8x16_t drop1_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+    uint8x16_t drop2_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00};
+
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8((sz_u8_t const *)text);
+
+        // 1-byte matches
+        uint8x16_t x20_cmp = vceqq_u8(text_vec.u8x16, x20_vec);
+        uint8x16_t range_cmp = vandq_u8(vcgeq_u8(text_vec.u8x16, t_vec), vcleq_u8(text_vec.u8x16, r_vec));
+        uint8x16_t one_vec = vorrq_u8(x20_cmp, range_cmp);
+
+        // 2-byte matches
+        uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
+        uint8x16_t xc2_cmp = vceqq_u8(text_vec.u8x16, xc2_vec);
+        uint8x16_t two_vec =
+            vorrq_u8(vandq_u8(xc2_cmp, vceqq_u8(text1, x85_vec)), vandq_u8(xc2_cmp, vceqq_u8(text1, xa0_vec)));
+        two_vec = vandq_u8(two_vec, drop1_vec); // Ignore last split match
+
+        // 3-byte matches
+        uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
+        uint8x16_t xe1_cmp = vceqq_u8(text_vec.u8x16, xe1_vec);
+        uint8x16_t xe2_cmp = vceqq_u8(text_vec.u8x16, xe2_vec);
+        uint8x16_t xe3_cmp = vceqq_u8(text_vec.u8x16, xe3_vec);
+        uint8x16_t x80_ge_cmp = vcgeq_u8(text2, x80_vec);
+        uint8x16_t x8d_le_cmp = vcleq_u8(text2, x8d_vec);
+
+        uint8x16_t ogham_vec = vandq_u8(xe1_cmp, vandq_u8(vceqq_u8(text1, x9a_vec), vceqq_u8(text2, x80_vec)));
+        uint8x16_t range_e280_vec =
+            vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vandq_u8(x80_ge_cmp, x8d_le_cmp)));
+        uint8x16_t u2028_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xa8_vec)));
+        uint8x16_t u2029_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xa9_vec)));
+        uint8x16_t u202f_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xaf_vec)));
+        uint8x16_t u205f_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x81_vec), vceqq_u8(text2, x9f_vec)));
+        uint8x16_t ideographic_vec = vandq_u8(xe3_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, x80_vec)));
+        uint8x16_t three_vec = vorrq_u8(vorrq_u8(vorrq_u8(ogham_vec, range_e280_vec), vorrq_u8(u2028_vec, u2029_vec)),
+                                        vorrq_u8(vorrq_u8(u202f_vec, u205f_vec), ideographic_vec));
+        three_vec = vandq_u8(three_vec, drop2_vec); // Ignore last two split matches
+
+        uint8x16_t combined_vec = vorrq_u8(one_vec, vorrq_u8(two_vec, three_vec));
+        if (vmaxvq_u8(combined_vec)) {
+            // Late mask extraction only when a match exists
+            sz_u64_t one_mask = sz_utf8_vreinterpretq_u8_u4_(one_vec);
+            sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_(two_vec);
+            sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_(three_vec);
+            sz_u64_t combined_mask = one_mask | two_mask | three_mask;
+
+            int bit_index = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)1 << bit_index;
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (two_mask | three_mask)) != 0;
+            length_value += (first_match_mask & three_mask) != 0;
+            *matched_length = length_value;
+            return text + (bit_index / 4);
+        }
+        text += 14;
+        length -= 14;
+    }
+
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) { return sz_utf8_count_serial(text, length); }
+SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
+    sz_u128_vec_t text_vec, headers_vec, continuation_vec;
+    uint8x16_t continuation_mask_vec = vdupq_n_u8(0xC0);
+    uint8x16_t continuation_pattern_vec = vdupq_n_u8(0x80);
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t char_count = 0;
+
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8(text_u8);
+        headers_vec.u8x16 = vandq_u8(text_vec.u8x16, continuation_mask_vec);
+        continuation_vec.u8x16 = vceqq_u8(headers_vec.u8x16, continuation_pattern_vec);
+        // Convert 0xFF/0x00 into 1/0 and sum.
+        uint8x16_t start_flags = vshrq_n_u8(vmvnq_u8(continuation_vec.u8x16), 7);
+        uint16x8_t sum16 = vpaddlq_u8(start_flags);
+        uint32x4_t sum32 = vpaddlq_u16(sum16);
+        uint64x2_t sum64 = vpaddlq_u32(sum32);
+        char_count += vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1);
+        text_u8 += 16;
+        length -= 16;
+    }
+
+    if (length) char_count += sz_utf8_count_serial((sz_cptr_t)text_u8, length);
+    return char_count;
+}
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     return sz_utf8_find_nth_serial(text, length, n);
@@ -1377,6 +1556,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_size_t *runes_unpacked) {
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif // SZ_USE_NEON
 
 #pragma endregion // NEON Implementation
 
@@ -1389,6 +1574,8 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_ice(text, length);
 #elif SZ_USE_HASWELL
     return sz_utf8_count_haswell(text, length);
+#elif SZ_USE_NEON
+    return sz_utf8_count_neon(text, length);
 #else
     return sz_utf8_count_serial(text, length);
 #endif
@@ -1399,6 +1586,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_
     return sz_utf8_find_nth_ice(text, length, n);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_nth_haswell(text, length, n);
+#elif SZ_USE_NEON
+    return sz_utf8_find_nth_neon(text, length, n);
 #else
     return sz_utf8_find_nth_serial(text, length, n);
 #endif
@@ -1409,6 +1598,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
     return sz_utf8_find_newline_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_newline_haswell(text, length, matched_length);
+#elif SZ_USE_NEON
+    return sz_utf8_find_newline_neon(text, length, matched_length);
 #else
     return sz_utf8_find_newline_serial(text, length, matched_length);
 #endif
@@ -1419,6 +1610,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_find_whitespace_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_whitespace_haswell(text, length, matched_length);
+#elif SZ_USE_NEON
+    return sz_utf8_find_whitespace_neon(text, length, matched_length);
 #else
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 #endif
@@ -1430,6 +1623,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
     return sz_utf8_unpack_chunk_ice(text, length, runes, runes_capacity, runes_unpacked);
 #elif SZ_USE_HASWELL
     return sz_utf8_unpack_chunk_haswell(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_NEON
+    return sz_utf8_unpack_chunk_neon(text, length, runes, runes_capacity, runes_unpacked);
 #else
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 #endif
