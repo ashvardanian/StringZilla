@@ -929,8 +929,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     // 2-byte UTF-8: [lead, cont] where lead=110xxxxx (0xC0-0xDF), cont=10xxxxxx (0x80-0xBF)
     // In 16-bit little-endian: 0xCCLL where LL=lead, CC=cont
     // Mask: 0xC0E0 (cont & 0xC0, lead & 0xE0), Pattern: 0x80C0 (cont=0x80, lead=0xC0)
-    __mmask32 non_two_byte_mask =
-        _mm512_cmpneq_epi16_mask(_mm512_and_si512(text_vec.zmm, _mm512_set1_epi16(0xC0E0)), _mm512_set1_epi16(0x80C0));
+    __mmask32 non_two_byte_mask = _mm512_cmpneq_epi16_mask(
+        _mm512_and_si512(text_vec.zmm, _mm512_set1_epi16((short)0xC0E0)), _mm512_set1_epi16((short)0x80C0));
     sz_size_t two_byte_prefix_length = sz_u64_ctz(non_two_byte_mask);
     if (two_byte_prefix_length) {
         // Unpack the last 32 bytes of text into the next 32 runes.
@@ -1002,8 +1002,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     // For 4-byte UTF-8 sequences: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
     // With a homogeneous 4-byte prefix, we have perfect 4-byte alignment (up to 16 sequences in 64 bytes)
     sz_u512_vec_t four_byte_mask_vec, four_byte_pattern_vec;
-    four_byte_mask_vec.zmm = _mm512_set1_epi32(0xC0C0C0F8);    // Mask: [F8, C0, C0, C0] per 4-byte slot
-    four_byte_pattern_vec.zmm = _mm512_set1_epi32(0x808080F0); // Pattern: [F0, 80, 80, 80] per 4-byte slot
+    four_byte_mask_vec.zmm = _mm512_set1_epi32((int)0xC0C0C0F8);    // Mask: [F8, C0, C0, C0] per 4-byte slot
+    four_byte_pattern_vec.zmm = _mm512_set1_epi32((int)0x808080F0); // Pattern: [F0, 80, 80, 80] per 4-byte slot
 
     // Mask and check for 4-byte pattern in each 32-bit slot
     sz_u512_vec_t masked_quads;
