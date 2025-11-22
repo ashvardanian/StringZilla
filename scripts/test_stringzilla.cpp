@@ -1919,6 +1919,10 @@ void test_utf8() {
         let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
         let_assert(auto l = lines("a\r\nb\r\nc"), l.size() == 3 && l[1] == "b");
         let_assert(auto l = lines("a\rb\rc"), l.size() == 3 && l[0] == "a");
+        let_assert(auto l = lines("a\r\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b"); // CRLF counts as one newline
+        let_assert(auto l = lines("a\r\n\r\nb"), l.size() == 3 && l[0] == "a" && l[1].empty() && l[2] == "b");
+        let_assert(auto l = lines("\r\na\r\n\r\nb\r\n"),
+                   l.size() == 5 && l[0].empty() && l[1] == "a" && l[2].empty() && l[3] == "b" && l[4].empty());
 
         // Edge cases (trailing newlines are stripped)
         let_assert(auto l = lines(""), l.size() == 0);
@@ -1955,6 +1959,8 @@ void test_utf8() {
         let_assert(auto w = words("a\fb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000C FF
         let_assert(auto w = words("a\rb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000D CR
         let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");  // U+0020 SPACE
+        let_assert(auto w = words("a\r\nb"),
+                   w.size() == 3 && w[0] == "a" && w[1].empty() && w[2] == "b"); // CR and LF are both spaces
 
         // Multiple spaces and trimming
         let_assert(auto w = words("  a  b  "), w.size() == 2 && w[0] == "a" && w[1] == "b");
