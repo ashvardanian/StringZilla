@@ -1439,16 +1439,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, 
         uint8x16_t one_vec = vorrq_u8(vorrq_u8(n_cmp, v_cmp), vorrq_u8(f_cmp, r_cmp));
 
         // 2- & 3-byte matches with shifted views
-        uint8x16_t t1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
-        uint8x16_t t2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
-        uint8x16_t rn_vec = vandq_u8(r_cmp, vceqq_u8(t1, n_vec));
-        uint8x16_t xc285_vec = vandq_u8(vceqq_u8(text_vec.u8x16, xc2_vec), vceqq_u8(t1, x85_vec));
+        uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
+        uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
+        uint8x16_t rn_vec = vandq_u8(r_cmp, vceqq_u8(text1, n_vec));
+        uint8x16_t xc285_vec = vandq_u8(vceqq_u8(text_vec.u8x16, xc2_vec), vceqq_u8(text1, x85_vec));
         uint8x16_t two_vec = vandq_u8(vorrq_u8(rn_vec, xc285_vec), drop1_vec); // Ignore last split match
 
         uint8x16_t xe2_cmp = vceqq_u8(text_vec.u8x16, xe2_vec);
-        uint8x16_t e280_vec = vandq_u8(xe2_cmp, vceqq_u8(t1, x80_vec));
-        uint8x16_t e280a8_vec = vandq_u8(e280_vec, vceqq_u8(t2, xa8_vec));
-        uint8x16_t e280a9_vec = vandq_u8(e280_vec, vceqq_u8(t2, xa9_vec));
+        uint8x16_t e280_vec = vandq_u8(xe2_cmp, vceqq_u8(text1, x80_vec));
+        uint8x16_t e280a8_vec = vandq_u8(e280_vec, vceqq_u8(text2, xa8_vec));
+        uint8x16_t e280a9_vec = vandq_u8(e280_vec, vceqq_u8(text2, xa9_vec));
         uint8x16_t three_vec = vandq_u8(vorrq_u8(e280a8_vec, e280a9_vec), drop2_vec); // Ignore last two split matches
 
         // Quick presence check
@@ -1646,7 +1646,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
 
     // Count bytes that are NOT continuation bytes: (byte & 0xC0) != 0x80
     for (sz_size_t offset = 0; offset < length; offset += step) {
-        svbool_t pg = svwhilelt_b8(offset, length);
+        svbool_t pg = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
         svuint8_t text_vec = svld1_u8(pg, text_u8 + offset);
         svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
         char_count += svcntp_b8(pg, is_start);
@@ -1660,7 +1660,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_s
 
     // Find character start bytes: (byte & 0xC0) != 0x80
     for (sz_size_t offset = 0; offset < length; offset += step) {
-        svbool_t pg = svwhilelt_b8(offset, length);
+        svbool_t pg = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
         svuint8_t text_vec = svld1_u8(pg, text_u8 + offset);
         svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
         sz_size_t start_count = svcntp_b8(pg, is_start);
@@ -1683,8 +1683,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
     sz_size_t const step = svcntb();
 
     // Character sets for MATCH (DUPQ replicates 128-bit pattern across vector, no stack/loads)
-    svuint8_t all_set = svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    svuint8_t one_set = svdupq_n_u8('\n', '\v', '\f', '\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    svuint8_t all_set =
+        svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
+    svuint8_t one_set =
+        svdupq_n_u8('\n', '\v', '\f', '\r', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
     svuint8_t zeros = svdup_n_u8(0);
 
     for (sz_size_t offset = 0; offset < length; offset += step - 2) {
@@ -1736,8 +1738,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
     sz_size_t const step = svcntb();
 
     // Character sets for MATCH (DUPQ replicates 128-bit pattern, no stack/loads)
-    svuint8_t all_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, 0, 0, 0, 0, 0, 0);
-    svuint8_t one_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    svuint8_t all_set =
+        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, ' ', ' ', ' ', ' ', ' ', ' ');
+    svuint8_t one_set =
+        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
     svuint8_t zeros = svdup_n_u8(0);
 
     for (sz_size_t offset = 0; offset < length; offset += step - 2) {

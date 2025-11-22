@@ -1911,9 +1911,7 @@ void test_utf8() {
 
     // Split by Unicode newlines
     {
-        auto lines = [](char const *t) {
-            return sz::string_view(t).utf8_split_lines().template to<std::vector<std::string>>();
-        };
+        auto lines = [](sz::string_view t) { return t.utf8_split_lines().template to<std::vector<std::string>>(); };
 
         // Basic newline types
         let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
@@ -1943,13 +1941,19 @@ void test_utf8() {
         // Unicode line separators (U+2028, U+2029)
         let_assert(auto l = lines("a\u2028b"), l.size() >= 1);
         let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
+
+        // NUL bytes (U+0000) should NOT be treated as newlines
+        // Use `_sv` literals for size-aware NUL-containing strings
+        let_assert(auto l = lines("a\x00b"_sv), l.size() == 1);         // NUL in middle - NOT a newline
+        let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
+        let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
+        let_assert(auto l = lines("\x00\n"_sv), l.size() == 1);         // NUL before newline - find \n, not NUL
+        let_assert(auto l = lines("\n\x00"_sv), l.size() == 2);         // Newline before NUL - split correctly
     }
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
-        auto words = [](char const *t) {
-            return sz::string_view(t).utf8_split().template to<std::vector<std::string>>();
-        };
+        auto words = [](sz::string_view t) { return t.utf8_split().template to<std::vector<std::string>>(); };
 
         // Basic ASCII whitespace (6 single-byte chars)
         let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
@@ -2020,6 +2024,14 @@ void test_utf8() {
         let_assert(auto w = words("a\u001Db"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
         let_assert(auto w = words("a\u001Eb"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
         let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
+
+        // NUL bytes (U+0000) should NOT be treated as whitespace
+        // Use `_sv` literals for size-aware NUL-containing strings
+        let_assert(auto w = word("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
+        let_assert(auto w = word("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
+        let_assert(auto w = word("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
+        let_assert(auto w = word("\x00 a"_sv), w.size() == 1);         // NUL before space - find space, not NUL
+        let_assert(auto w = word("a \x00"_sv), w.size() == 1);         // Space before NUL - find space, not NUL
 
         // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
         // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
