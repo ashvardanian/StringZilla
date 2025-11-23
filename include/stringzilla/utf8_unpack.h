@@ -128,6 +128,40 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *  Folding is applied during matching without rewriting the entire haystack. Multi-codepoint expansions,
  *  contextual folds, and combining-mark adjustments are handled at comparison time.
  *
+ *  @section utf8_find_case_insensitive_algo Algorithmic Considerations
+ *
+ *  Case-insensitive search with full Unicode case folding is fundamentally harder than byte-level search
+ *  because one-to-many expansions (e.g., U+00DF -> "ss") break core assumptions of fast string algorithms:
+ *
+ *  - Boyer-Moore/Horspool skip tables assume 1:1 character mapping
+ *  - Two-Way critical factorization assumes fixed pattern length
+ *  - Rabin-Karp rolling hash assumes fixed character widths
+ *  - Volnitsky bigram hashing assumes consistent byte patterns
+ *
+ *  Industry approaches vary:
+ *
+ *  - ICU abandoned Boyer-Moore for Unicode, reverting to linear search for correctness
+ *  - ClickHouse uses Volnitsky with fallback to naive search for problematic characters
+ *  - ripgrep uses simple case folding only (no expansion handling)
+ *
+ *  Potential algorithmic improvements for future versions:
+ *
+ *  - Streaming comparison with small expansion buffer instead of pre-materializing folded needle
+ *  - Fingerprint-based filtering using rolling hash over folded codepoints
+ *  - Conservative skip distances that account for maximum expansion ratio (3:1)
+ *  - First-codepoint filtering to quickly reject non-matching positions
+ *
+ *  @see https://unicode-org.github.io/icu/userguide/collation/string-search.html
+ *       ICU String Search - discusses why Boyer-Moore was abandoned for Unicode
+ *  @see https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/Volnitsky.h
+ *       ClickHouse Volnitsky - hash-based substring search with UTF-8 case folding
+ *  @see https://github.com/lattera/glibc/blob/master/string/str-two-way.h
+ *       glibc Two-Way Algorithm - O(n) time, O(1) space string matching
+ *  @see https://arxiv.org/abs/2306.10714
+ *       Efficient Parameterized Pattern Matching in Sublinear Space
+ *  @see https://github.com/uni-algo/uni-algo
+ *       uni-algo - Unicode algorithms implementation with case-insensitive search
+ *
  *  @param[in] haystack UTF-8 string to be searched.
  *  @param[in] haystack_length Number of bytes in the haystack buffer.
  *  @param[in] needle UTF-8 substring to search for.
