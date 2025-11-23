@@ -2027,11 +2027,11 @@ void test_utf8() {
 
         // NUL bytes (U+0000) should NOT be treated as whitespace
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto w = word("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
-        let_assert(auto w = word("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
-        let_assert(auto w = word("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
-        let_assert(auto w = word("\x00 a"_sv), w.size() == 1);         // NUL before space - find space, not NUL
-        let_assert(auto w = word("a \x00"_sv), w.size() == 1);         // Space before NUL - find space, not NUL
+        let_assert(auto w = words("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
+        let_assert(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
+        let_assert(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
+        let_assert(auto w = words("\x00 a"_sv), w.size() == 1);         // NUL before space - find space, not NUL
+        let_assert(auto w = words("a \x00"_sv), w.size() == 1);         // Space before NUL - find space, not NUL
 
         // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
         // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
