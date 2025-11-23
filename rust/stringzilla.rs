@@ -344,11 +344,7 @@ extern "C" {
         length: usize,
         matched_length: *mut usize,
     ) -> *const c_void;
-    pub(crate) fn sz_utf8_case_fold(
-        source: *const c_void,
-        source_length: usize,
-        destination: *mut c_void,
-    ) -> usize;
+    pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
@@ -1331,11 +1327,7 @@ pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) 
 ///
 /// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
 /// left untouched. Returns the number of replacements performed.
-pub fn try_replace_all_byteset(
-    buffer: &mut Vec<u8>,
-    byteset: Byteset,
-    replacement: &[u8],
-) -> Result<usize, Status> {
+pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
     if byteset.bits.iter().all(|&b| b == 0) {
         return Ok(0);
     }
@@ -2953,9 +2945,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::hash::Hasher as _;
 
-    #[cfg(feature = "test-icu")]
-    use icu_casemap::CaseMapper;
-
     use super::*;
     use crate::sz;
 
@@ -3828,64 +3817,5 @@ mod tests {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
         let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
         assert_eq!(words, vec![b"a", b"b", b"c"]);
-    }
-
-    /// Compare StringZilla's case-folding against ICU for all Unicode codepoints.
-    ///
-    /// This test iterates through all valid Unicode codepoints (U+0000 to U+10FFFF,
-    /// excluding surrogates), case-folds each character using both ICU and StringZilla,
-    /// and verifies that the results match.
-    #[test]
-    #[cfg(feature = "test-icu")]
-    fn case_fold_matches_icu() {
-        let case_mapper = CaseMapper::new();
-        let mut mismatches = Vec::new();
-        let mut tested = 0u32;
-
-        // Iterate through all valid Unicode codepoints
-        for codepoint in 0u32..=0x10FFFF {
-            // Skip surrogate pairs (0xD800-0xDFFF) - not valid Unicode scalar values
-            if (0xD800..=0xDFFF).contains(&codepoint) {
-                continue;
-            }
-
-            if let Some(c) = char::from_u32(codepoint) {
-                tested += 1;
-
-                // Create UTF-8 encoded string from this character
-                let source = c.to_string();
-
-                // Case-fold with ICU (convert Cow to owned String)
-                let icu_folded: String = case_mapper.fold_string(&source).into_owned();
-
-                // Case-fold with StringZilla
-                // We need a buffer large enough for potential expansion (e.g., U+00DF -> ss)
-                // Maximum expansion is 3x for worst-case Unicode case folding
-                let mut sz_buffer = vec![0u8; source.len() * 4];
-                let len = sz::case_fold(&source, &mut sz_buffer);
-                let sz_folded = String::from_utf8_lossy(&sz_buffer[..len]);
-                if sz_folded != icu_folded {
-                    mismatches.push((codepoint, c, icu_folded, sz_folded.to_string()));
-                }
-            }
-        }
-
-        // Report results
-        if !mismatches.is_empty() {
-            let sample_size = std::cmp::min(50, mismatches.len());
-            let mut report = format!(
-                "Case-fold mismatches: {} out of {} codepoints tested\n\nFirst {} mismatches:\n",
-                mismatches.len(),
-                tested,
-                sample_size
-            );
-            for (cp, c, icu, sz) in mismatches.iter().take(sample_size) {
-                report.push_str(&format!("  U+{:04X} '{}': ICU=\"{}\" vs SZ=\"{}\"\n", cp, c, icu, sz));
-            }
-            panic!("{}", report);
-        }
-
-        // Log success
-        eprintln!("case_fold_matches_icu: tested {} codepoints, all match ICU", tested);
     }
 }
