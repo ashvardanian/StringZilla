@@ -63,6 +63,7 @@ typedef struct sz_implementations_t {
     sz_utf8_unpack_chunk_t utf8_unpack_chunk;
     sz_utf8_find_boundary_t utf8_find_newline;
     sz_utf8_find_boundary_t utf8_find_whitespace;
+    sz_utf8_case_fold_t utf8_case_fold;
 
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
@@ -110,6 +111,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
     impl->utf8_find_newline = sz_utf8_find_newline_serial;
     impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
+    impl->utf8_case_fold = sz_utf8_case_fold_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -165,6 +167,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
         impl->utf8_find_newline = sz_utf8_find_newline_haswell;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_haswell;
+        impl->utf8_case_fold = sz_utf8_case_fold_haswell;
     }
 #endif
 
@@ -204,6 +207,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_ice;
         impl->utf8_find_newline = sz_utf8_find_newline_ice;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_ice;
+        impl->utf8_case_fold = sz_utf8_case_fold_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -245,6 +249,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_neon;
         impl->utf8_find_newline = sz_utf8_find_newline_neon;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_neon;
+        impl->utf8_case_fold = sz_utf8_case_fold_neon;
     }
 #endif
 
@@ -483,6 +488,12 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
     return sz_dispatch_table.utf8_find_whitespace(text, length, matched_length);
+}
+
+SZ_DYNAMIC sz_status_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination,
+                                         sz_size_t destination_capacity, sz_size_t *destination_length) {
+    return sz_dispatch_table.utf8_case_fold(source, source_length, destination, destination_capacity,
+                                            destination_length);
 }
 
 // Provide overrides for the libc mem* functions

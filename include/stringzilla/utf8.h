@@ -9,6 +9,10 @@
  *  - `sz_utf8_find_nth` - skip to Nth UTF-8 character
  *  - `sz_utf8_find_newline` - skip to first newline (7 Unicode newline characters + CRLF)
  *  - `sz_utf8_find_whitespace` - skip to first whitespace (25 Unicode White_Space characters)
+ *
+ *  Work in progress:
+ *
+ *  - `sz_utf8_case_fold` - Unicode case folding for codepoints
  *  - `sz_utf8_find_case_insensitive` - case-insensitive substring search in UTF-8 strings
  *  - `sz_utf8_unpack_chunk` - convert UTF-8 to UTF-32 in a streaming manner
  *
@@ -224,6 +228,48 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
     sz_size_t *runes_unpacked);
 
 /**
+ *  @brief  Apply Unicode case folding to a UTF-8 string in-place or to a separate buffer.
+ *
+ *  This function reads a UTF-8 encoded source string, applies Unicode case folding to each
+ *  codepoint, and writes the result to the destination buffer. Case folding normalizes text
+ *  for case-insensitive comparisons by mapping uppercase letters to their lowercase equivalents
+ *  and handling special cases like German ß → ss expansion.
+ *
+ *  The destination buffer must be at least 1.5x the source length to accommodate potential
+ *  one-to-many expansions (e.g., ß → ss, ﬁ → fi). If the destination buffer is too small,
+ *  the function returns an error status.
+ *
+ *  @param[in] source UTF-8 string to be case-folded.
+ *  @param[in] source_length Number of bytes in the source buffer.
+ *  @param[out] destination Buffer to write the case-folded UTF-8 string.
+ *  @param[in] destination_capacity Size of the destination buffer in bytes.
+ *  @param[out] destination_length Number of bytes written to the destination buffer.
+ *  @return sz_success_k on success, sz_bad_alloc_k if destination buffer is too small,
+ *          sz_invalid_utf8_k if source contains invalid UTF-8 sequences.
+ *
+ *  @example Basic usage:
+ *  @code
+ *      char const *source = "HELLO WORLD";
+ *      char destination[32];
+ *      sz_size_t result_length;
+ *      sz_status_t status = sz_utf8_case_fold(source, 11, destination, 32, &result_length);
+ *      // destination now contains "hello world", result_length = 11
+ *  @endcode
+ *
+ *  @example Handling expansions:
+ *  @code
+ *      char const *source = "STRAẞE";  // German "street" with capital ß
+ *      char destination[32];
+ *      sz_size_t result_length;
+ *      sz_status_t status = sz_utf8_case_fold(source, strlen(source), destination, 32, &result_length);
+ *      // destination now contains "strasse" (ẞ expanded to ss)
+ *  @endcode
+ */
+SZ_DYNAMIC sz_status_t sz_utf8_case_fold(      //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+
+/**
  *  @brief  Case-insensitive substring search in UTF-8 strings.
  *
  *  In applications where the haystack remains largely static and memory/storage is cheap, it is recommended
@@ -287,6 +333,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
     sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_serial( //
+    sz_cptr_t source, sz_size_t source_length,  //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
+    sz_cptr_t haystack, sz_size_t haystack_length,        //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
 // Haswell (AVX2) implementations
 SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
@@ -297,6 +349,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
     sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity,   //
     sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_haswell( //
+    sz_cptr_t source, sz_size_t source_length,   //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_haswell( //
+    sz_cptr_t haystack, sz_size_t haystack_length,         //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
 // Ice Lake (AVX-512) implementations
 SZ_PUBLIC sz_size_t sz_utf8_count_ice(sz_cptr_t text, sz_size_t length);
@@ -307,6 +365,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_ice(   //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_ice( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
 // NEON (ARM) implementations - fall back to serial
 SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
@@ -317,6 +381,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_neon(  //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_neon( //
+    sz_cptr_t haystack, sz_size_t haystack_length,      //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
 #pragma endregion
 
@@ -565,862 +635,431 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
     return sz_true_k;
 }
 
-SZ_INTERNAL sz_rune_t sz_unicode_fold_codepoint_(sz_rune_t cp, sz_rune_t *expansion, sz_size_t *expansion_count) {
+/**
+ *  @brief  Encode a UTF-32 codepoint to UTF-8.
+ *
+ *  Writes 1-4 bytes to the output buffer depending on the codepoint value.
+ *  This is the inverse of @c sz_rune_parse.
+ *
+ *  @param[in] cp The UTF-32 codepoint to encode.
+ *  @param[out] out Output buffer (must have space for at least 4 bytes).
+ *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
+ */
+SZ_INTERNAL sz_size_t sz_rune_export_(sz_rune_t cp, sz_u8_t *out) {
+    if (cp <= 0x7F) {
+        out[0] = (sz_u8_t)cp;
+        return 1;
+    }
+    else if (cp <= 0x7FF) {
+        out[0] = (sz_u8_t)(0xC0 | (cp >> 6));
+        out[1] = (sz_u8_t)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    else if (cp <= 0xFFFF) {
+        // Reject surrogate codepoints
+        if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+        out[0] = (sz_u8_t)(0xE0 | (cp >> 12));
+        out[1] = (sz_u8_t)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (sz_u8_t)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    else if (cp <= 0x10FFFF) {
+        out[0] = (sz_u8_t)(0xF0 | (cp >> 18));
+        out[1] = (sz_u8_t)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (sz_u8_t)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (sz_u8_t)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0; // Invalid codepoint
+}
 
-    *expansion_count = 0;
+// clang-format off
+SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
+    // Offset +32 ranges
+    if (rune >= 0x0041 && rune <= 0x005A) { folded[0] = rune + 0x20; return 1; } // ASCII A-Z → a-z
+    if (rune >= 0x00C0 && rune <= 0x00D6) { folded[0] = rune + 0x20; return 1; } // Latin-1 À-Ö → à-ö
+    if (rune >= 0x00D8 && rune <= 0x00DE) { folded[0] = rune + 0x20; return 1; } // Latin-1 Ø-Þ → ø-þ
+    if (rune >= 0x0391 && rune <= 0x03A1) { folded[0] = rune + 0x20; return 1; } // Greek Α-Ρ → α-ρ
+    if (rune >= 0x03A3 && rune <= 0x03AB) { folded[0] = rune + 0x20; return 1; } // Greek Σ-Ϋ → σ-ϋ
+    if (rune >= 0x0410 && rune <= 0x042F) { folded[0] = rune + 0x20; return 1; } // Cyrillic А-Я → а-я
+    if (rune >= 0xFF21 && rune <= 0xFF3A) { folded[0] = rune + 0x20; return 1; } // Fullwidth Ａ-Ｚ → ａ-ｚ
+    if (rune >= 0x10D50 && rune <= 0x10D65) { folded[0] = rune + 0x20; return 1; } // Garay
+    if (rune >= 0x118A0 && rune <= 0x118BF) { folded[0] = rune + 0x20; return 1; } // Warang Citi
+    if (rune >= 0x16E40 && rune <= 0x16E5F) { folded[0] = rune + 0x20; return 1; } // Medefaidrin
+    // Offset +48 ranges
+    if (rune >= 0x0531 && rune <= 0x0556) { folded[0] = rune + 0x30; return 1; } // Armenian Ա-Ֆ → ա-ֆ
+    if (rune >= 0x2C00 && rune <= 0x2C2F) { folded[0] = rune + 0x30; return 1; } // Glagolitic Ⰰ-Ⱟ → ⰰ-ⱟ
+    // Other offset ranges
+    if (rune >= 0xAB70 && rune <= 0xABBF) { folded[0] = rune + 0xFFFF6830; return 1; } // Cherokee Ꭰ-Ᏼ (offset -38864)
+    if (rune >= 0x10400 && rune <= 0x10427) { folded[0] = rune + 0x28; return 1; } // Deseret 𐐀-𐐧 → 𐐨-𐑏 (+40)
+    if (rune >= 0x104B0 && rune <= 0x104D3) { folded[0] = rune + 0x28; return 1; } // Osage 𐒰-𐓓 → 𐓘-𐓻 (+40)
+    if (rune >= 0x13F8 && rune <= 0x13FD) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Cherokee Ᏸ-Ᏽ (-8)
+    if (rune >= 0x1F08 && rune <= 0x1F0F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἀ-Ἇ (-8)
+    if (rune >= 0x1F18 && rune <= 0x1F1D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἐ-Ἕ (-8)
+    if (rune >= 0x1F28 && rune <= 0x1F2F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἠ-Ἧ (-8)
+    if (rune >= 0x1F38 && rune <= 0x1F3F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἰ-Ἷ (-8)
+    if (rune >= 0x1F48 && rune <= 0x1F4D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ὀ-Ὅ (-8)
+    if (rune >= 0x1F68 && rune <= 0x1F6F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ὠ-Ὧ (-8)
+    if (rune >= 0x10C80 && rune <= 0x10CB2) { folded[0] = rune + 0x40; return 1; } // Old Hungarian (+64)
+    if (rune >= 0x1C90 && rune <= 0x1CBA) { folded[0] = rune + 0xFFFFF440; return 1; } // Georgian Mtavruli Ა-Ჺ (-3008)
+    if (rune >= 0x1CBD && rune <= 0x1CBF) { folded[0] = rune + 0xFFFFF440; return 1; } // Georgian Mtavruli Ჽ-Ჿ (-3008)
+    if (rune >= 0x10A0 && rune <= 0x10C5) { folded[0] = rune + 0x1C60; return 1; } // Georgian Ⴀ-Ⴥ (+7264)
+    if (rune >= 0x10570 && rune <= 0x1057A) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
+    if (rune >= 0x1057C && rune <= 0x1058A) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
+    if (rune >= 0x1058C && rune <= 0x10592) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
+    if (rune >= 0x1E900 && rune <= 0x1E921) { folded[0] = rune + 0x22; return 1; } // Adlam 𞤀-𞤡 → 𞤢-𞥃 (+34)
+    if (rune >= 0x24B6 && rune <= 0x24CF) { folded[0] = rune + 0x1A; return 1; } // Circled Ⓐ-Ⓩ → ⓐ-ⓩ (+26)
+    if (rune >= 0x16EA0 && rune <= 0x16EB8) { folded[0] = rune + 0x1B; return 1; } // Kawi (+27)
+    if (rune >= 0x2160 && rune <= 0x216F) { folded[0] = rune + 0x10; return 1; } // Roman numerals Ⅰ-Ⅿ → ⅰ-ⅿ (+16)
+    if (rune >= 0x0400 && rune <= 0x040F) { folded[0] = rune + 0x50; return 1; } // Cyrillic Ѐ-Џ → ѐ-џ (+80)
+    if (rune >= 0x03FD && rune <= 0x03FF) { folded[0] = rune + 0xFFFFFF7E; return 1; } // Greek Ͻ-Ͽ (-130)
+    if (rune >= 0x1FC8 && rune <= 0x1FCB) { folded[0] = rune + 0xFFFFFFAA; return 1; } // Greek Ὲ-Ή (-86)
+    if (rune >= 0x0388 && rune <= 0x038A) { folded[0] = rune + 0x25; return 1; } // Greek Έ-Ί (+37)
 
-    // Offset-based ranges
-    if (cp >= 0x0041 && cp <= 0x005A) return cp + 0x20;       // offset +32
-    if (cp >= 0x00C0 && cp <= 0x00D6) return cp + 0x20;       // offset +32
-    if (cp >= 0x00D8 && cp <= 0x00DE) return cp + 0x20;       // offset +32
-    if (cp >= 0x0391 && cp <= 0x03A1) return cp + 0x20;       // offset +32
-    if (cp >= 0x03A3 && cp <= 0x03AB) return cp + 0x20;       // offset +32
-    if (cp >= 0x0410 && cp <= 0x042F) return cp + 0x20;       // offset +32
-    if (cp >= 0xFF21 && cp <= 0xFF3A) return cp + 0x20;       // offset +32
-    if (cp >= 0x10D50 && cp <= 0x10D65) return cp + 0x20;     // offset +32
-    if (cp >= 0x118A0 && cp <= 0x118BF) return cp + 0x20;     // offset +32
-    if (cp >= 0x16E40 && cp <= 0x16E5F) return cp + 0x20;     // offset +32
-    if (cp >= 0x0531 && cp <= 0x0556) return cp + 0x30;       // offset +48
-    if (cp >= 0x2C00 && cp <= 0x2C2F) return cp + 0x30;       // offset +48
-    if (cp >= 0xAB70 && cp <= 0xABBF) return cp + 0xFFFF6830; // offset -38864
-    if (cp >= 0x10400 && cp <= 0x10427) return cp + 0x28;     // offset +40
-    if (cp >= 0x104B0 && cp <= 0x104D3) return cp + 0x28;     // offset +40
-    if (cp >= 0x13F8 && cp <= 0x13FD) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F08 && cp <= 0x1F0F) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F18 && cp <= 0x1F1D) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F28 && cp <= 0x1F2F) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F38 && cp <= 0x1F3F) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F48 && cp <= 0x1F4D) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x1F68 && cp <= 0x1F6F) return cp + 0xFFFFFFF8; // offset -8
-    if (cp >= 0x10C80 && cp <= 0x10CB2) return cp + 0x40;     // offset +64
-    if (cp >= 0x1C90 && cp <= 0x1CBA) return cp + 0xFFFFF440; // offset -3008
-    if (cp >= 0x1CBD && cp <= 0x1CBF) return cp + 0xFFFFF440; // offset -3008
-    if (cp >= 0x10A0 && cp <= 0x10C5) return cp + 0x1C60;     // offset +7264
-    if (cp >= 0x10570 && cp <= 0x1057A) return cp + 0x27;     // offset +39
-    if (cp >= 0x1057C && cp <= 0x1058A) return cp + 0x27;     // offset +39
-    if (cp >= 0x1058C && cp <= 0x10592) return cp + 0x27;     // offset +39
-    if (cp >= 0x1E900 && cp <= 0x1E921) return cp + 0x22;     // offset +34
-    if (cp >= 0x24B6 && cp <= 0x24CF) return cp + 0x1A;       // offset +26
-    if (cp >= 0x16EA0 && cp <= 0x16EB8) return cp + 0x1B;     // offset +27
-    if (cp >= 0x2160 && cp <= 0x216F) return cp + 0x10;       // offset +16
-    if (cp >= 0x0400 && cp <= 0x040F) return cp + 0x50;       // offset +80
-    if (cp >= 0x03FD && cp <= 0x03FF) return cp + 0xFFFFFF7E; // offset -130
-    if (cp >= 0x1FC8 && cp <= 0x1FCB) return cp + 0xFFFFFFAA; // offset -86
-    if (cp >= 0x0388 && cp <= 0x038A) return cp + 0x25;       // offset +37
+    // Even/odd +1 mappings: uppercase at even codepoint, lowercase at odd (or vice versa)
+    sz_u32_t is_even = ((rune & 1) == 0), is_odd = !is_even;
+    // Latin Extended-A: Ą Ć Ę Ł Ń Ś Ź Ż, Č Ď Ě Ň Ř Š Ť Ž, Ő Ű, Ş Ğ
+    if (rune >= 0x0100 && rune <= 0x012E && is_even) { folded[0] = rune + 1; return 1; } // Ā-Į
+    if (rune >= 0x0132 && rune <= 0x0136 && is_even) { folded[0] = rune + 1; return 1; } // Ĳ-Ķ
+    if (rune >= 0x0139 && rune <= 0x0147 && is_odd)  { folded[0] = rune + 1; return 1; } // Ĺ-Ň
+    if (rune >= 0x014A && rune <= 0x0176 && is_even) { folded[0] = rune + 1; return 1; } // Ŋ-Ŷ
+    if (rune >= 0x0179 && rune <= 0x017D && is_odd)  { folded[0] = rune + 1; return 1; } // Ź-Ž
+    // Latin Extended-B: Pinyin, Romanian, Serbian/Croatian
+    if (rune >= 0x01CD && rune <= 0x01DB && is_odd)  { folded[0] = rune + 1; return 1; } // Ǎ-Ǜ
+    if (rune >= 0x01DE && rune <= 0x01EE && is_even) { folded[0] = rune + 1; return 1; } // Ǟ-Ǯ
+    if (rune >= 0x01F8 && rune <= 0x01FE && is_even) { folded[0] = rune + 1; return 1; } // Ǹ-Ǿ
+    if (rune >= 0x0200 && rune <= 0x021E && is_even) { folded[0] = rune + 1; return 1; } // Ȁ-Ȟ
+    if (rune >= 0x0222 && rune <= 0x0232 && is_even) { folded[0] = rune + 1; return 1; } // Ȣ-Ȳ
+    if (rune >= 0x0246 && rune <= 0x024E && is_even) { folded[0] = rune + 1; return 1; } // Ɇ-Ɏ
+    // Greek archaic
+    if (rune >= 0x0370 && rune <= 0x0372 && is_even) { folded[0] = rune + 1; return 1; } // Ͱ-Ͳ
+    if (rune == 0x0376) { folded[0] = 0x0377; return 1; } // Ͷ → ͷ
+    if (rune >= 0x03D8 && rune <= 0x03EE && is_even) { folded[0] = rune + 1; return 1; } // Ϙ-Ϯ
+    // Cyrillic extended
+    if (rune >= 0x0460 && rune <= 0x0480 && is_even) { folded[0] = rune + 1; return 1; } // Ѡ-Ҁ
+    if (rune >= 0x048A && rune <= 0x04BE && is_even) { folded[0] = rune + 1; return 1; } // Ҋ-Ҿ
+    if (rune >= 0x04C1 && rune <= 0x04CD && is_odd)  { folded[0] = rune + 1; return 1; } // Ӂ-Ӎ
+    if (rune >= 0x04D0 && rune <= 0x04FE && is_even) { folded[0] = rune + 1; return 1; } // Ӑ-Ӿ
+    if (rune >= 0x0500 && rune <= 0x052E && is_even) { folded[0] = rune + 1; return 1; } // Ԁ-Ԯ
+    // Latin Extended Additional: Vietnamese Ạ Ả Ấ Ầ...
+    if (rune >= 0x1E00 && rune <= 0x1E94 && is_even) { folded[0] = rune + 1; return 1; } // Ḁ-Ẕ
+    if (rune >= 0x1EA0 && rune <= 0x1EFE && is_even) { folded[0] = rune + 1; return 1; } // Ạ-Ỿ
+    // Coptic
+    if (rune >= 0x2C80 && rune <= 0x2CE2 && is_even) { folded[0] = rune + 1; return 1; } // Ⲁ-Ⳣ
+    // Cyrillic Extended-B
+    if (rune >= 0xA640 && rune <= 0xA66C && is_even) { folded[0] = rune + 1; return 1; } // Ꙁ-Ꙭ
+    if (rune >= 0xA680 && rune <= 0xA69A && is_even) { folded[0] = rune + 1; return 1; } // Ꚁ-Ꚛ
+    // Latin Extended-D
+    if (rune >= 0xA722 && rune <= 0xA72E && is_even) { folded[0] = rune + 1; return 1; } // Ꜣ-Ꜯ
+    if (rune >= 0xA732 && rune <= 0xA76E && is_even) { folded[0] = rune + 1; return 1; } // Ꜳ-Ꝯ
+    if (rune >= 0xA77E && rune <= 0xA786 && is_even) { folded[0] = rune + 1; return 1; } // Ꝿ-Ꞇ
+    if (rune >= 0xA790 && rune <= 0xA792 && is_even) { folded[0] = rune + 1; return 1; } // Ꞑ-Ꞓ
+    if (rune >= 0xA796 && rune <= 0xA7A8 && is_even) { folded[0] = rune + 1; return 1; } // Ꞗ-Ꞩ
+    if (rune >= 0xA7B4 && rune <= 0xA7C2 && is_even) { folded[0] = rune + 1; return 1; } // Ꞵ-Ꟃ
+    if (rune == 0xA7C7 || rune == 0xA7C9) { folded[0] = rune + 1; return 1; } // Ꟈ, Ꟊ
+    if (rune >= 0xA7CC && rune <= 0xA7D8 && is_even) { folded[0] = rune + 1; return 1; } // Ꟍ-Ꟙ
+    if (rune == 0xA7DA) { folded[0] = 0xA7DB; return 1; } // Ꟛ → ꟛ
+    if (rune == 0xA7F5) { folded[0] = 0xA7F6; return 1; } // Ꟶ → ꟶ
 
-    // Irregular one-to-one mappings
-    switch (cp) {
-    case 0x00B5: return 0x03BC;   // 'µ' → 'μ'
-    case 0x0100: return 0x0101;   // 'Ā' → 'ā'
-    case 0x0102: return 0x0103;   // 'Ă' → 'ă'
-    case 0x0104: return 0x0105;   // 'Ą' → 'ą'
-    case 0x0106: return 0x0107;   // 'Ć' → 'ć'
-    case 0x0108: return 0x0109;   // 'Ĉ' → 'ĉ'
-    case 0x010A: return 0x010B;   // 'Ċ' → 'ċ'
-    case 0x010C: return 0x010D;   // 'Č' → 'č'
-    case 0x010E: return 0x010F;   // 'Ď' → 'ď'
-    case 0x0110: return 0x0111;   // 'Đ' → 'đ'
-    case 0x0112: return 0x0113;   // 'Ē' → 'ē'
-    case 0x0114: return 0x0115;   // 'Ĕ' → 'ĕ'
-    case 0x0116: return 0x0117;   // 'Ė' → 'ė'
-    case 0x0118: return 0x0119;   // 'Ę' → 'ę'
-    case 0x011A: return 0x011B;   // 'Ě' → 'ě'
-    case 0x011C: return 0x011D;   // 'Ĝ' → 'ĝ'
-    case 0x011E: return 0x011F;   // 'Ğ' → 'ğ'
-    case 0x0120: return 0x0121;   // 'Ġ' → 'ġ'
-    case 0x0122: return 0x0123;   // 'Ģ' → 'ģ'
-    case 0x0124: return 0x0125;   // 'Ĥ' → 'ĥ'
-    case 0x0126: return 0x0127;   // 'Ħ' → 'ħ'
-    case 0x0128: return 0x0129;   // 'Ĩ' → 'ĩ'
-    case 0x012A: return 0x012B;   // 'Ī' → 'ī'
-    case 0x012C: return 0x012D;   // 'Ĭ' → 'ĭ'
-    case 0x012E: return 0x012F;   // 'Į' → 'į'
-    case 0x0132: return 0x0133;   // 'Ĳ' → 'ĳ'
-    case 0x0134: return 0x0135;   // 'Ĵ' → 'ĵ'
-    case 0x0136: return 0x0137;   // 'Ķ' → 'ķ'
-    case 0x0139: return 0x013A;   // 'Ĺ' → 'ĺ'
-    case 0x013B: return 0x013C;   // 'Ļ' → 'ļ'
-    case 0x013D: return 0x013E;   // 'Ľ' → 'ľ'
-    case 0x013F: return 0x0140;   // 'Ŀ' → 'ŀ'
-    case 0x0141: return 0x0142;   // 'Ł' → 'ł'
-    case 0x0143: return 0x0144;   // 'Ń' → 'ń'
-    case 0x0145: return 0x0146;   // 'Ņ' → 'ņ'
-    case 0x0147: return 0x0148;   // 'Ň' → 'ň'
-    case 0x014A: return 0x014B;   // 'Ŋ' → 'ŋ'
-    case 0x014C: return 0x014D;   // 'Ō' → 'ō'
-    case 0x014E: return 0x014F;   // 'Ŏ' → 'ŏ'
-    case 0x0150: return 0x0151;   // 'Ő' → 'ő'
-    case 0x0152: return 0x0153;   // 'Œ' → 'œ'
-    case 0x0154: return 0x0155;   // 'Ŕ' → 'ŕ'
-    case 0x0156: return 0x0157;   // 'Ŗ' → 'ŗ'
-    case 0x0158: return 0x0159;   // 'Ř' → 'ř'
-    case 0x015A: return 0x015B;   // 'Ś' → 'ś'
-    case 0x015C: return 0x015D;   // 'Ŝ' → 'ŝ'
-    case 0x015E: return 0x015F;   // 'Ş' → 'ş'
-    case 0x0160: return 0x0161;   // 'Š' → 'š'
-    case 0x0162: return 0x0163;   // 'Ţ' → 'ţ'
-    case 0x0164: return 0x0165;   // 'Ť' → 'ť'
-    case 0x0166: return 0x0167;   // 'Ŧ' → 'ŧ'
-    case 0x0168: return 0x0169;   // 'Ũ' → 'ũ'
-    case 0x016A: return 0x016B;   // 'Ū' → 'ū'
-    case 0x016C: return 0x016D;   // 'Ŭ' → 'ŭ'
-    case 0x016E: return 0x016F;   // 'Ů' → 'ů'
-    case 0x0170: return 0x0171;   // 'Ű' → 'ű'
-    case 0x0172: return 0x0173;   // 'Ų' → 'ų'
-    case 0x0174: return 0x0175;   // 'Ŵ' → 'ŵ'
-    case 0x0176: return 0x0177;   // 'Ŷ' → 'ŷ'
-    case 0x0178: return 0x00FF;   // 'Ÿ' → 'ÿ'
-    case 0x0179: return 0x017A;   // 'Ź' → 'ź'
-    case 0x017B: return 0x017C;   // 'Ż' → 'ż'
-    case 0x017D: return 0x017E;   // 'Ž' → 'ž'
-    case 0x017F: return 0x0073;   // 'ſ' → 's'
-    case 0x0181: return 0x0253;   // 'Ɓ' → 'ɓ'
-    case 0x0182: return 0x0183;   // 'Ƃ' → 'ƃ'
-    case 0x0184: return 0x0185;   // 'Ƅ' → 'ƅ'
-    case 0x0186: return 0x0254;   // 'Ɔ' → 'ɔ'
-    case 0x0187: return 0x0188;   // 'Ƈ' → 'ƈ'
-    case 0x0189: return 0x0256;   // 'Ɖ' → 'ɖ'
-    case 0x018A: return 0x0257;   // 'Ɗ' → 'ɗ'
-    case 0x018B: return 0x018C;   // 'Ƌ' → 'ƌ'
-    case 0x018E: return 0x01DD;   // 'Ǝ' → 'ǝ'
-    case 0x018F: return 0x0259;   // 'Ə' → 'ə'
-    case 0x0190: return 0x025B;   // 'Ɛ' → 'ɛ'
-    case 0x0191: return 0x0192;   // 'Ƒ' → 'ƒ'
-    case 0x0193: return 0x0260;   // 'Ɠ' → 'ɠ'
-    case 0x0194: return 0x0263;   // 'Ɣ' → 'ɣ'
-    case 0x0196: return 0x0269;   // 'Ɩ' → 'ɩ'
-    case 0x0197: return 0x0268;   // 'Ɨ' → 'ɨ'
-    case 0x0198: return 0x0199;   // 'Ƙ' → 'ƙ'
-    case 0x019C: return 0x026F;   // 'Ɯ' → 'ɯ'
-    case 0x019D: return 0x0272;   // 'Ɲ' → 'ɲ'
-    case 0x019F: return 0x0275;   // 'Ɵ' → 'ɵ'
-    case 0x01A0: return 0x01A1;   // 'Ơ' → 'ơ'
-    case 0x01A2: return 0x01A3;   // 'Ƣ' → 'ƣ'
-    case 0x01A4: return 0x01A5;   // 'Ƥ' → 'ƥ'
-    case 0x01A6: return 0x0280;   // 'Ʀ' → 'ʀ'
-    case 0x01A7: return 0x01A8;   // 'Ƨ' → 'ƨ'
-    case 0x01A9: return 0x0283;   // 'Ʃ' → 'ʃ'
-    case 0x01AC: return 0x01AD;   // 'Ƭ' → 'ƭ'
-    case 0x01AE: return 0x0288;   // 'Ʈ' → 'ʈ'
-    case 0x01AF: return 0x01B0;   // 'Ư' → 'ư'
-    case 0x01B1: return 0x028A;   // 'Ʊ' → 'ʊ'
-    case 0x01B2: return 0x028B;   // 'Ʋ' → 'ʋ'
-    case 0x01B3: return 0x01B4;   // 'Ƴ' → 'ƴ'
-    case 0x01B5: return 0x01B6;   // 'Ƶ' → 'ƶ'
-    case 0x01B7: return 0x0292;   // 'Ʒ' → 'ʒ'
-    case 0x01B8: return 0x01B9;   // 'Ƹ' → 'ƹ'
-    case 0x01BC: return 0x01BD;   // 'Ƽ' → 'ƽ'
-    case 0x01C4: return 0x01C6;   // 'Ǆ' → 'ǆ'
-    case 0x01C5: return 0x01C6;   // 'ǅ' → 'ǆ'
-    case 0x01C7: return 0x01C9;   // 'Ǉ' → 'ǉ'
-    case 0x01C8: return 0x01C9;   // 'ǈ' → 'ǉ'
-    case 0x01CA: return 0x01CC;   // 'Ǌ' → 'ǌ'
-    case 0x01CB: return 0x01CC;   // 'ǋ' → 'ǌ'
-    case 0x01CD: return 0x01CE;   // 'Ǎ' → 'ǎ'
-    case 0x01CF: return 0x01D0;   // 'Ǐ' → 'ǐ'
-    case 0x01D1: return 0x01D2;   // 'Ǒ' → 'ǒ'
-    case 0x01D3: return 0x01D4;   // 'Ǔ' → 'ǔ'
-    case 0x01D5: return 0x01D6;   // 'Ǖ' → 'ǖ'
-    case 0x01D7: return 0x01D8;   // 'Ǘ' → 'ǘ'
-    case 0x01D9: return 0x01DA;   // 'Ǚ' → 'ǚ'
-    case 0x01DB: return 0x01DC;   // 'Ǜ' → 'ǜ'
-    case 0x01DE: return 0x01DF;   // 'Ǟ' → 'ǟ'
-    case 0x01E0: return 0x01E1;   // 'Ǡ' → 'ǡ'
-    case 0x01E2: return 0x01E3;   // 'Ǣ' → 'ǣ'
-    case 0x01E4: return 0x01E5;   // 'Ǥ' → 'ǥ'
-    case 0x01E6: return 0x01E7;   // 'Ǧ' → 'ǧ'
-    case 0x01E8: return 0x01E9;   // 'Ǩ' → 'ǩ'
-    case 0x01EA: return 0x01EB;   // 'Ǫ' → 'ǫ'
-    case 0x01EC: return 0x01ED;   // 'Ǭ' → 'ǭ'
-    case 0x01EE: return 0x01EF;   // 'Ǯ' → 'ǯ'
-    case 0x01F1: return 0x01F3;   // 'Ǳ' → 'ǳ'
-    case 0x01F2: return 0x01F3;   // 'ǲ' → 'ǳ'
-    case 0x01F4: return 0x01F5;   // 'Ǵ' → 'ǵ'
-    case 0x01F6: return 0x0195;   // 'Ƕ' → 'ƕ'
-    case 0x01F7: return 0x01BF;   // 'Ƿ' → 'ƿ'
-    case 0x01F8: return 0x01F9;   // 'Ǹ' → 'ǹ'
-    case 0x01FA: return 0x01FB;   // 'Ǻ' → 'ǻ'
-    case 0x01FC: return 0x01FD;   // 'Ǽ' → 'ǽ'
-    case 0x01FE: return 0x01FF;   // 'Ǿ' → 'ǿ'
-    case 0x0200: return 0x0201;   // 'Ȁ' → 'ȁ'
-    case 0x0202: return 0x0203;   // 'Ȃ' → 'ȃ'
-    case 0x0204: return 0x0205;   // 'Ȅ' → 'ȅ'
-    case 0x0206: return 0x0207;   // 'Ȇ' → 'ȇ'
-    case 0x0208: return 0x0209;   // 'Ȉ' → 'ȉ'
-    case 0x020A: return 0x020B;   // 'Ȋ' → 'ȋ'
-    case 0x020C: return 0x020D;   // 'Ȍ' → 'ȍ'
-    case 0x020E: return 0x020F;   // 'Ȏ' → 'ȏ'
-    case 0x0210: return 0x0211;   // 'Ȑ' → 'ȑ'
-    case 0x0212: return 0x0213;   // 'Ȓ' → 'ȓ'
-    case 0x0214: return 0x0215;   // 'Ȕ' → 'ȕ'
-    case 0x0216: return 0x0217;   // 'Ȗ' → 'ȗ'
-    case 0x0218: return 0x0219;   // 'Ș' → 'ș'
-    case 0x021A: return 0x021B;   // 'Ț' → 'ț'
-    case 0x021C: return 0x021D;   // 'Ȝ' → 'ȝ'
-    case 0x021E: return 0x021F;   // 'Ȟ' → 'ȟ'
-    case 0x0220: return 0x019E;   // 'Ƞ' → 'ƞ'
-    case 0x0222: return 0x0223;   // 'Ȣ' → 'ȣ'
-    case 0x0224: return 0x0225;   // 'Ȥ' → 'ȥ'
-    case 0x0226: return 0x0227;   // 'Ȧ' → 'ȧ'
-    case 0x0228: return 0x0229;   // 'Ȩ' → 'ȩ'
-    case 0x022A: return 0x022B;   // 'Ȫ' → 'ȫ'
-    case 0x022C: return 0x022D;   // 'Ȭ' → 'ȭ'
-    case 0x022E: return 0x022F;   // 'Ȯ' → 'ȯ'
-    case 0x0230: return 0x0231;   // 'Ȱ' → 'ȱ'
-    case 0x0232: return 0x0233;   // 'Ȳ' → 'ȳ'
-    case 0x023A: return 0x2C65;   // 'Ⱥ' → 'ⱥ'
-    case 0x023B: return 0x023C;   // 'Ȼ' → 'ȼ'
-    case 0x023D: return 0x019A;   // 'Ƚ' → 'ƚ'
-    case 0x023E: return 0x2C66;   // 'Ⱦ' → 'ⱦ'
-    case 0x0241: return 0x0242;   // 'Ɂ' → 'ɂ'
-    case 0x0243: return 0x0180;   // 'Ƀ' → 'ƀ'
-    case 0x0244: return 0x0289;   // 'Ʉ' → 'ʉ'
-    case 0x0245: return 0x028C;   // 'Ʌ' → 'ʌ'
-    case 0x0246: return 0x0247;   // 'Ɇ' → 'ɇ'
-    case 0x0248: return 0x0249;   // 'Ɉ' → 'ɉ'
-    case 0x024A: return 0x024B;   // 'Ɋ' → 'ɋ'
-    case 0x024C: return 0x024D;   // 'Ɍ' → 'ɍ'
-    case 0x024E: return 0x024F;   // 'Ɏ' → 'ɏ'
-    case 0x0345: return 0x03B9;   // 'ͅ' → 'ι'
-    case 0x0370: return 0x0371;   // 'Ͱ' → 'ͱ'
-    case 0x0372: return 0x0373;   // 'Ͳ' → 'ͳ'
-    case 0x0376: return 0x0377;   // 'Ͷ' → 'ͷ'
-    case 0x037F: return 0x03F3;   // 'Ϳ' → 'ϳ'
-    case 0x0386: return 0x03AC;   // 'Ά' → 'ά'
-    case 0x038C: return 0x03CC;   // 'Ό' → 'ό'
-    case 0x038E: return 0x03CD;   // 'Ύ' → 'ύ'
-    case 0x038F: return 0x03CE;   // 'Ώ' → 'ώ'
-    case 0x03C2: return 0x03C3;   // 'ς' → 'σ'
-    case 0x03CF: return 0x03D7;   // 'Ϗ' → 'ϗ'
-    case 0x03D0: return 0x03B2;   // 'ϐ' → 'β'
-    case 0x03D1: return 0x03B8;   // 'ϑ' → 'θ'
-    case 0x03D5: return 0x03C6;   // 'ϕ' → 'φ'
-    case 0x03D6: return 0x03C0;   // 'ϖ' → 'π'
-    case 0x03D8: return 0x03D9;   // 'Ϙ' → 'ϙ'
-    case 0x03DA: return 0x03DB;   // 'Ϛ' → 'ϛ'
-    case 0x03DC: return 0x03DD;   // 'Ϝ' → 'ϝ'
-    case 0x03DE: return 0x03DF;   // 'Ϟ' → 'ϟ'
-    case 0x03E0: return 0x03E1;   // 'Ϡ' → 'ϡ'
-    case 0x03E2: return 0x03E3;   // 'Ϣ' → 'ϣ'
-    case 0x03E4: return 0x03E5;   // 'Ϥ' → 'ϥ'
-    case 0x03E6: return 0x03E7;   // 'Ϧ' → 'ϧ'
-    case 0x03E8: return 0x03E9;   // 'Ϩ' → 'ϩ'
-    case 0x03EA: return 0x03EB;   // 'Ϫ' → 'ϫ'
-    case 0x03EC: return 0x03ED;   // 'Ϭ' → 'ϭ'
-    case 0x03EE: return 0x03EF;   // 'Ϯ' → 'ϯ'
-    case 0x03F0: return 0x03BA;   // 'ϰ' → 'κ'
-    case 0x03F1: return 0x03C1;   // 'ϱ' → 'ρ'
-    case 0x03F4: return 0x03B8;   // 'ϴ' → 'θ'
-    case 0x03F5: return 0x03B5;   // 'ϵ' → 'ε'
-    case 0x03F7: return 0x03F8;   // 'Ϸ' → 'ϸ'
-    case 0x03F9: return 0x03F2;   // 'Ϲ' → 'ϲ'
-    case 0x03FA: return 0x03FB;   // 'Ϻ' → 'ϻ'
-    case 0x0460: return 0x0461;   // 'Ѡ' → 'ѡ'
-    case 0x0462: return 0x0463;   // 'Ѣ' → 'ѣ'
-    case 0x0464: return 0x0465;   // 'Ѥ' → 'ѥ'
-    case 0x0466: return 0x0467;   // 'Ѧ' → 'ѧ'
-    case 0x0468: return 0x0469;   // 'Ѩ' → 'ѩ'
-    case 0x046A: return 0x046B;   // 'Ѫ' → 'ѫ'
-    case 0x046C: return 0x046D;   // 'Ѭ' → 'ѭ'
-    case 0x046E: return 0x046F;   // 'Ѯ' → 'ѯ'
-    case 0x0470: return 0x0471;   // 'Ѱ' → 'ѱ'
-    case 0x0472: return 0x0473;   // 'Ѳ' → 'ѳ'
-    case 0x0474: return 0x0475;   // 'Ѵ' → 'ѵ'
-    case 0x0476: return 0x0477;   // 'Ѷ' → 'ѷ'
-    case 0x0478: return 0x0479;   // 'Ѹ' → 'ѹ'
-    case 0x047A: return 0x047B;   // 'Ѻ' → 'ѻ'
-    case 0x047C: return 0x047D;   // 'Ѽ' → 'ѽ'
-    case 0x047E: return 0x047F;   // 'Ѿ' → 'ѿ'
-    case 0x0480: return 0x0481;   // 'Ҁ' → 'ҁ'
-    case 0x048A: return 0x048B;   // 'Ҋ' → 'ҋ'
-    case 0x048C: return 0x048D;   // 'Ҍ' → 'ҍ'
-    case 0x048E: return 0x048F;   // 'Ҏ' → 'ҏ'
-    case 0x0490: return 0x0491;   // 'Ґ' → 'ґ'
-    case 0x0492: return 0x0493;   // 'Ғ' → 'ғ'
-    case 0x0494: return 0x0495;   // 'Ҕ' → 'ҕ'
-    case 0x0496: return 0x0497;   // 'Җ' → 'җ'
-    case 0x0498: return 0x0499;   // 'Ҙ' → 'ҙ'
-    case 0x049A: return 0x049B;   // 'Қ' → 'қ'
-    case 0x049C: return 0x049D;   // 'Ҝ' → 'ҝ'
-    case 0x049E: return 0x049F;   // 'Ҟ' → 'ҟ'
-    case 0x04A0: return 0x04A1;   // 'Ҡ' → 'ҡ'
-    case 0x04A2: return 0x04A3;   // 'Ң' → 'ң'
-    case 0x04A4: return 0x04A5;   // 'Ҥ' → 'ҥ'
-    case 0x04A6: return 0x04A7;   // 'Ҧ' → 'ҧ'
-    case 0x04A8: return 0x04A9;   // 'Ҩ' → 'ҩ'
-    case 0x04AA: return 0x04AB;   // 'Ҫ' → 'ҫ'
-    case 0x04AC: return 0x04AD;   // 'Ҭ' → 'ҭ'
-    case 0x04AE: return 0x04AF;   // 'Ү' → 'ү'
-    case 0x04B0: return 0x04B1;   // 'Ұ' → 'ұ'
-    case 0x04B2: return 0x04B3;   // 'Ҳ' → 'ҳ'
-    case 0x04B4: return 0x04B5;   // 'Ҵ' → 'ҵ'
-    case 0x04B6: return 0x04B7;   // 'Ҷ' → 'ҷ'
-    case 0x04B8: return 0x04B9;   // 'Ҹ' → 'ҹ'
-    case 0x04BA: return 0x04BB;   // 'Һ' → 'һ'
-    case 0x04BC: return 0x04BD;   // 'Ҽ' → 'ҽ'
-    case 0x04BE: return 0x04BF;   // 'Ҿ' → 'ҿ'
-    case 0x04C0: return 0x04CF;   // 'Ӏ' → 'ӏ'
-    case 0x04C1: return 0x04C2;   // 'Ӂ' → 'ӂ'
-    case 0x04C3: return 0x04C4;   // 'Ӄ' → 'ӄ'
-    case 0x04C5: return 0x04C6;   // 'Ӆ' → 'ӆ'
-    case 0x04C7: return 0x04C8;   // 'Ӈ' → 'ӈ'
-    case 0x04C9: return 0x04CA;   // 'Ӊ' → 'ӊ'
-    case 0x04CB: return 0x04CC;   // 'Ӌ' → 'ӌ'
-    case 0x04CD: return 0x04CE;   // 'Ӎ' → 'ӎ'
-    case 0x04D0: return 0x04D1;   // 'Ӑ' → 'ӑ'
-    case 0x04D2: return 0x04D3;   // 'Ӓ' → 'ӓ'
-    case 0x04D4: return 0x04D5;   // 'Ӕ' → 'ӕ'
-    case 0x04D6: return 0x04D7;   // 'Ӗ' → 'ӗ'
-    case 0x04D8: return 0x04D9;   // 'Ә' → 'ә'
-    case 0x04DA: return 0x04DB;   // 'Ӛ' → 'ӛ'
-    case 0x04DC: return 0x04DD;   // 'Ӝ' → 'ӝ'
-    case 0x04DE: return 0x04DF;   // 'Ӟ' → 'ӟ'
-    case 0x04E0: return 0x04E1;   // 'Ӡ' → 'ӡ'
-    case 0x04E2: return 0x04E3;   // 'Ӣ' → 'ӣ'
-    case 0x04E4: return 0x04E5;   // 'Ӥ' → 'ӥ'
-    case 0x04E6: return 0x04E7;   // 'Ӧ' → 'ӧ'
-    case 0x04E8: return 0x04E9;   // 'Ө' → 'ө'
-    case 0x04EA: return 0x04EB;   // 'Ӫ' → 'ӫ'
-    case 0x04EC: return 0x04ED;   // 'Ӭ' → 'ӭ'
-    case 0x04EE: return 0x04EF;   // 'Ӯ' → 'ӯ'
-    case 0x04F0: return 0x04F1;   // 'Ӱ' → 'ӱ'
-    case 0x04F2: return 0x04F3;   // 'Ӳ' → 'ӳ'
-    case 0x04F4: return 0x04F5;   // 'Ӵ' → 'ӵ'
-    case 0x04F6: return 0x04F7;   // 'Ӷ' → 'ӷ'
-    case 0x04F8: return 0x04F9;   // 'Ӹ' → 'ӹ'
-    case 0x04FA: return 0x04FB;   // 'Ӻ' → 'ӻ'
-    case 0x04FC: return 0x04FD;   // 'Ӽ' → 'ӽ'
-    case 0x04FE: return 0x04FF;   // 'Ӿ' → 'ӿ'
-    case 0x0500: return 0x0501;   // 'Ԁ' → 'ԁ'
-    case 0x0502: return 0x0503;   // 'Ԃ' → 'ԃ'
-    case 0x0504: return 0x0505;   // 'Ԅ' → 'ԅ'
-    case 0x0506: return 0x0507;   // 'Ԇ' → 'ԇ'
-    case 0x0508: return 0x0509;   // 'Ԉ' → 'ԉ'
-    case 0x050A: return 0x050B;   // 'Ԋ' → 'ԋ'
-    case 0x050C: return 0x050D;   // 'Ԍ' → 'ԍ'
-    case 0x050E: return 0x050F;   // 'Ԏ' → 'ԏ'
-    case 0x0510: return 0x0511;   // 'Ԑ' → 'ԑ'
-    case 0x0512: return 0x0513;   // 'Ԓ' → 'ԓ'
-    case 0x0514: return 0x0515;   // 'Ԕ' → 'ԕ'
-    case 0x0516: return 0x0517;   // 'Ԗ' → 'ԗ'
-    case 0x0518: return 0x0519;   // 'Ԙ' → 'ԙ'
-    case 0x051A: return 0x051B;   // 'Ԛ' → 'ԛ'
-    case 0x051C: return 0x051D;   // 'Ԝ' → 'ԝ'
-    case 0x051E: return 0x051F;   // 'Ԟ' → 'ԟ'
-    case 0x0520: return 0x0521;   // 'Ԡ' → 'ԡ'
-    case 0x0522: return 0x0523;   // 'Ԣ' → 'ԣ'
-    case 0x0524: return 0x0525;   // 'Ԥ' → 'ԥ'
-    case 0x0526: return 0x0527;   // 'Ԧ' → 'ԧ'
-    case 0x0528: return 0x0529;   // 'Ԩ' → 'ԩ'
-    case 0x052A: return 0x052B;   // 'Ԫ' → 'ԫ'
-    case 0x052C: return 0x052D;   // 'Ԭ' → 'ԭ'
-    case 0x052E: return 0x052F;   // 'Ԯ' → 'ԯ'
-    case 0x10C7: return 0x2D27;   // 'Ⴧ' → 'ⴧ'
-    case 0x10CD: return 0x2D2D;   // 'Ⴭ' → 'ⴭ'
-    case 0x1C80: return 0x0432;   // 'ᲀ' → 'в'
-    case 0x1C81: return 0x0434;   // 'ᲁ' → 'д'
-    case 0x1C82: return 0x043E;   // 'ᲂ' → 'о'
-    case 0x1C83: return 0x0441;   // 'ᲃ' → 'с'
-    case 0x1C84: return 0x0442;   // 'ᲄ' → 'т'
-    case 0x1C85: return 0x0442;   // 'ᲅ' → 'т'
-    case 0x1C86: return 0x044A;   // 'ᲆ' → 'ъ'
-    case 0x1C87: return 0x0463;   // 'ᲇ' → 'ѣ'
-    case 0x1C88: return 0xA64B;   // 'ᲈ' → 'ꙋ'
-    case 0x1C89: return 0x1C8A;   // 'Ᲊ' → 'ᲊ'
-    case 0x1E00: return 0x1E01;   // 'Ḁ' → 'ḁ'
-    case 0x1E02: return 0x1E03;   // 'Ḃ' → 'ḃ'
-    case 0x1E04: return 0x1E05;   // 'Ḅ' → 'ḅ'
-    case 0x1E06: return 0x1E07;   // 'Ḇ' → 'ḇ'
-    case 0x1E08: return 0x1E09;   // 'Ḉ' → 'ḉ'
-    case 0x1E0A: return 0x1E0B;   // 'Ḋ' → 'ḋ'
-    case 0x1E0C: return 0x1E0D;   // 'Ḍ' → 'ḍ'
-    case 0x1E0E: return 0x1E0F;   // 'Ḏ' → 'ḏ'
-    case 0x1E10: return 0x1E11;   // 'Ḑ' → 'ḑ'
-    case 0x1E12: return 0x1E13;   // 'Ḓ' → 'ḓ'
-    case 0x1E14: return 0x1E15;   // 'Ḕ' → 'ḕ'
-    case 0x1E16: return 0x1E17;   // 'Ḗ' → 'ḗ'
-    case 0x1E18: return 0x1E19;   // 'Ḙ' → 'ḙ'
-    case 0x1E1A: return 0x1E1B;   // 'Ḛ' → 'ḛ'
-    case 0x1E1C: return 0x1E1D;   // 'Ḝ' → 'ḝ'
-    case 0x1E1E: return 0x1E1F;   // 'Ḟ' → 'ḟ'
-    case 0x1E20: return 0x1E21;   // 'Ḡ' → 'ḡ'
-    case 0x1E22: return 0x1E23;   // 'Ḣ' → 'ḣ'
-    case 0x1E24: return 0x1E25;   // 'Ḥ' → 'ḥ'
-    case 0x1E26: return 0x1E27;   // 'Ḧ' → 'ḧ'
-    case 0x1E28: return 0x1E29;   // 'Ḩ' → 'ḩ'
-    case 0x1E2A: return 0x1E2B;   // 'Ḫ' → 'ḫ'
-    case 0x1E2C: return 0x1E2D;   // 'Ḭ' → 'ḭ'
-    case 0x1E2E: return 0x1E2F;   // 'Ḯ' → 'ḯ'
-    case 0x1E30: return 0x1E31;   // 'Ḱ' → 'ḱ'
-    case 0x1E32: return 0x1E33;   // 'Ḳ' → 'ḳ'
-    case 0x1E34: return 0x1E35;   // 'Ḵ' → 'ḵ'
-    case 0x1E36: return 0x1E37;   // 'Ḷ' → 'ḷ'
-    case 0x1E38: return 0x1E39;   // 'Ḹ' → 'ḹ'
-    case 0x1E3A: return 0x1E3B;   // 'Ḻ' → 'ḻ'
-    case 0x1E3C: return 0x1E3D;   // 'Ḽ' → 'ḽ'
-    case 0x1E3E: return 0x1E3F;   // 'Ḿ' → 'ḿ'
-    case 0x1E40: return 0x1E41;   // 'Ṁ' → 'ṁ'
-    case 0x1E42: return 0x1E43;   // 'Ṃ' → 'ṃ'
-    case 0x1E44: return 0x1E45;   // 'Ṅ' → 'ṅ'
-    case 0x1E46: return 0x1E47;   // 'Ṇ' → 'ṇ'
-    case 0x1E48: return 0x1E49;   // 'Ṉ' → 'ṉ'
-    case 0x1E4A: return 0x1E4B;   // 'Ṋ' → 'ṋ'
-    case 0x1E4C: return 0x1E4D;   // 'Ṍ' → 'ṍ'
-    case 0x1E4E: return 0x1E4F;   // 'Ṏ' → 'ṏ'
-    case 0x1E50: return 0x1E51;   // 'Ṑ' → 'ṑ'
-    case 0x1E52: return 0x1E53;   // 'Ṓ' → 'ṓ'
-    case 0x1E54: return 0x1E55;   // 'Ṕ' → 'ṕ'
-    case 0x1E56: return 0x1E57;   // 'Ṗ' → 'ṗ'
-    case 0x1E58: return 0x1E59;   // 'Ṙ' → 'ṙ'
-    case 0x1E5A: return 0x1E5B;   // 'Ṛ' → 'ṛ'
-    case 0x1E5C: return 0x1E5D;   // 'Ṝ' → 'ṝ'
-    case 0x1E5E: return 0x1E5F;   // 'Ṟ' → 'ṟ'
-    case 0x1E60: return 0x1E61;   // 'Ṡ' → 'ṡ'
-    case 0x1E62: return 0x1E63;   // 'Ṣ' → 'ṣ'
-    case 0x1E64: return 0x1E65;   // 'Ṥ' → 'ṥ'
-    case 0x1E66: return 0x1E67;   // 'Ṧ' → 'ṧ'
-    case 0x1E68: return 0x1E69;   // 'Ṩ' → 'ṩ'
-    case 0x1E6A: return 0x1E6B;   // 'Ṫ' → 'ṫ'
-    case 0x1E6C: return 0x1E6D;   // 'Ṭ' → 'ṭ'
-    case 0x1E6E: return 0x1E6F;   // 'Ṯ' → 'ṯ'
-    case 0x1E70: return 0x1E71;   // 'Ṱ' → 'ṱ'
-    case 0x1E72: return 0x1E73;   // 'Ṳ' → 'ṳ'
-    case 0x1E74: return 0x1E75;   // 'Ṵ' → 'ṵ'
-    case 0x1E76: return 0x1E77;   // 'Ṷ' → 'ṷ'
-    case 0x1E78: return 0x1E79;   // 'Ṹ' → 'ṹ'
-    case 0x1E7A: return 0x1E7B;   // 'Ṻ' → 'ṻ'
-    case 0x1E7C: return 0x1E7D;   // 'Ṽ' → 'ṽ'
-    case 0x1E7E: return 0x1E7F;   // 'Ṿ' → 'ṿ'
-    case 0x1E80: return 0x1E81;   // 'Ẁ' → 'ẁ'
-    case 0x1E82: return 0x1E83;   // 'Ẃ' → 'ẃ'
-    case 0x1E84: return 0x1E85;   // 'Ẅ' → 'ẅ'
-    case 0x1E86: return 0x1E87;   // 'Ẇ' → 'ẇ'
-    case 0x1E88: return 0x1E89;   // 'Ẉ' → 'ẉ'
-    case 0x1E8A: return 0x1E8B;   // 'Ẋ' → 'ẋ'
-    case 0x1E8C: return 0x1E8D;   // 'Ẍ' → 'ẍ'
-    case 0x1E8E: return 0x1E8F;   // 'Ẏ' → 'ẏ'
-    case 0x1E90: return 0x1E91;   // 'Ẑ' → 'ẑ'
-    case 0x1E92: return 0x1E93;   // 'Ẓ' → 'ẓ'
-    case 0x1E94: return 0x1E95;   // 'Ẕ' → 'ẕ'
-    case 0x1E9B: return 0x1E61;   // 'ẛ' → 'ṡ'
-    case 0x1EA0: return 0x1EA1;   // 'Ạ' → 'ạ'
-    case 0x1EA2: return 0x1EA3;   // 'Ả' → 'ả'
-    case 0x1EA4: return 0x1EA5;   // 'Ấ' → 'ấ'
-    case 0x1EA6: return 0x1EA7;   // 'Ầ' → 'ầ'
-    case 0x1EA8: return 0x1EA9;   // 'Ẩ' → 'ẩ'
-    case 0x1EAA: return 0x1EAB;   // 'Ẫ' → 'ẫ'
-    case 0x1EAC: return 0x1EAD;   // 'Ậ' → 'ậ'
-    case 0x1EAE: return 0x1EAF;   // 'Ắ' → 'ắ'
-    case 0x1EB0: return 0x1EB1;   // 'Ằ' → 'ằ'
-    case 0x1EB2: return 0x1EB3;   // 'Ẳ' → 'ẳ'
-    case 0x1EB4: return 0x1EB5;   // 'Ẵ' → 'ẵ'
-    case 0x1EB6: return 0x1EB7;   // 'Ặ' → 'ặ'
-    case 0x1EB8: return 0x1EB9;   // 'Ẹ' → 'ẹ'
-    case 0x1EBA: return 0x1EBB;   // 'Ẻ' → 'ẻ'
-    case 0x1EBC: return 0x1EBD;   // 'Ẽ' → 'ẽ'
-    case 0x1EBE: return 0x1EBF;   // 'Ế' → 'ế'
-    case 0x1EC0: return 0x1EC1;   // 'Ề' → 'ề'
-    case 0x1EC2: return 0x1EC3;   // 'Ể' → 'ể'
-    case 0x1EC4: return 0x1EC5;   // 'Ễ' → 'ễ'
-    case 0x1EC6: return 0x1EC7;   // 'Ệ' → 'ệ'
-    case 0x1EC8: return 0x1EC9;   // 'Ỉ' → 'ỉ'
-    case 0x1ECA: return 0x1ECB;   // 'Ị' → 'ị'
-    case 0x1ECC: return 0x1ECD;   // 'Ọ' → 'ọ'
-    case 0x1ECE: return 0x1ECF;   // 'Ỏ' → 'ỏ'
-    case 0x1ED0: return 0x1ED1;   // 'Ố' → 'ố'
-    case 0x1ED2: return 0x1ED3;   // 'Ồ' → 'ồ'
-    case 0x1ED4: return 0x1ED5;   // 'Ổ' → 'ổ'
-    case 0x1ED6: return 0x1ED7;   // 'Ỗ' → 'ỗ'
-    case 0x1ED8: return 0x1ED9;   // 'Ộ' → 'ộ'
-    case 0x1EDA: return 0x1EDB;   // 'Ớ' → 'ớ'
-    case 0x1EDC: return 0x1EDD;   // 'Ờ' → 'ờ'
-    case 0x1EDE: return 0x1EDF;   // 'Ở' → 'ở'
-    case 0x1EE0: return 0x1EE1;   // 'Ỡ' → 'ỡ'
-    case 0x1EE2: return 0x1EE3;   // 'Ợ' → 'ợ'
-    case 0x1EE4: return 0x1EE5;   // 'Ụ' → 'ụ'
-    case 0x1EE6: return 0x1EE7;   // 'Ủ' → 'ủ'
-    case 0x1EE8: return 0x1EE9;   // 'Ứ' → 'ứ'
-    case 0x1EEA: return 0x1EEB;   // 'Ừ' → 'ừ'
-    case 0x1EEC: return 0x1EED;   // 'Ử' → 'ử'
-    case 0x1EEE: return 0x1EEF;   // 'Ữ' → 'ữ'
-    case 0x1EF0: return 0x1EF1;   // 'Ự' → 'ự'
-    case 0x1EF2: return 0x1EF3;   // 'Ỳ' → 'ỳ'
-    case 0x1EF4: return 0x1EF5;   // 'Ỵ' → 'ỵ'
-    case 0x1EF6: return 0x1EF7;   // 'Ỷ' → 'ỷ'
-    case 0x1EF8: return 0x1EF9;   // 'Ỹ' → 'ỹ'
-    case 0x1EFA: return 0x1EFB;   // 'Ỻ' → 'ỻ'
-    case 0x1EFC: return 0x1EFD;   // 'Ỽ' → 'ỽ'
-    case 0x1EFE: return 0x1EFF;   // 'Ỿ' → 'ỿ'
-    case 0x1F59: return 0x1F51;   // 'Ὑ' → 'ὑ'
-    case 0x1F5B: return 0x1F53;   // 'Ὓ' → 'ὓ'
-    case 0x1F5D: return 0x1F55;   // 'Ὕ' → 'ὕ'
-    case 0x1F5F: return 0x1F57;   // 'Ὗ' → 'ὗ'
-    case 0x1FB8: return 0x1FB0;   // 'Ᾰ' → 'ᾰ'
-    case 0x1FB9: return 0x1FB1;   // 'Ᾱ' → 'ᾱ'
-    case 0x1FBA: return 0x1F70;   // 'Ὰ' → 'ὰ'
-    case 0x1FBB: return 0x1F71;   // 'Ά' → 'ά'
-    case 0x1FBE: return 0x03B9;   // 'ι' → 'ι'
-    case 0x1FD8: return 0x1FD0;   // 'Ῐ' → 'ῐ'
-    case 0x1FD9: return 0x1FD1;   // 'Ῑ' → 'ῑ'
-    case 0x1FDA: return 0x1F76;   // 'Ὶ' → 'ὶ'
-    case 0x1FDB: return 0x1F77;   // 'Ί' → 'ί'
-    case 0x1FE8: return 0x1FE0;   // 'Ῠ' → 'ῠ'
-    case 0x1FE9: return 0x1FE1;   // 'Ῡ' → 'ῡ'
-    case 0x1FEA: return 0x1F7A;   // 'Ὺ' → 'ὺ'
-    case 0x1FEB: return 0x1F7B;   // 'Ύ' → 'ύ'
-    case 0x1FEC: return 0x1FE5;   // 'Ῥ' → 'ῥ'
-    case 0x1FF8: return 0x1F78;   // 'Ὸ' → 'ὸ'
-    case 0x1FF9: return 0x1F79;   // 'Ό' → 'ό'
-    case 0x1FFA: return 0x1F7C;   // 'Ὼ' → 'ὼ'
-    case 0x1FFB: return 0x1F7D;   // 'Ώ' → 'ώ'
-    case 0x2126: return 0x03C9;   // 'Ω' → 'ω'
-    case 0x212A: return 0x006B;   // 'K' → 'k'
-    case 0x212B: return 0x00E5;   // 'Å' → 'å'
-    case 0x2132: return 0x214E;   // 'Ⅎ' → 'ⅎ'
-    case 0x2183: return 0x2184;   // 'Ↄ' → 'ↄ'
-    case 0x2C60: return 0x2C61;   // 'Ⱡ' → 'ⱡ'
-    case 0x2C62: return 0x026B;   // 'Ɫ' → 'ɫ'
-    case 0x2C63: return 0x1D7D;   // 'Ᵽ' → 'ᵽ'
-    case 0x2C64: return 0x027D;   // 'Ɽ' → 'ɽ'
-    case 0x2C67: return 0x2C68;   // 'Ⱨ' → 'ⱨ'
-    case 0x2C69: return 0x2C6A;   // 'Ⱪ' → 'ⱪ'
-    case 0x2C6B: return 0x2C6C;   // 'Ⱬ' → 'ⱬ'
-    case 0x2C6D: return 0x0251;   // 'Ɑ' → 'ɑ'
-    case 0x2C6E: return 0x0271;   // 'Ɱ' → 'ɱ'
-    case 0x2C6F: return 0x0250;   // 'Ɐ' → 'ɐ'
-    case 0x2C70: return 0x0252;   // 'Ɒ' → 'ɒ'
-    case 0x2C72: return 0x2C73;   // 'Ⱳ' → 'ⱳ'
-    case 0x2C75: return 0x2C76;   // 'Ⱶ' → 'ⱶ'
-    case 0x2C7E: return 0x023F;   // 'Ȿ' → 'ȿ'
-    case 0x2C7F: return 0x0240;   // 'Ɀ' → 'ɀ'
-    case 0x2C80: return 0x2C81;   // 'Ⲁ' → 'ⲁ'
-    case 0x2C82: return 0x2C83;   // 'Ⲃ' → 'ⲃ'
-    case 0x2C84: return 0x2C85;   // 'Ⲅ' → 'ⲅ'
-    case 0x2C86: return 0x2C87;   // 'Ⲇ' → 'ⲇ'
-    case 0x2C88: return 0x2C89;   // 'Ⲉ' → 'ⲉ'
-    case 0x2C8A: return 0x2C8B;   // 'Ⲋ' → 'ⲋ'
-    case 0x2C8C: return 0x2C8D;   // 'Ⲍ' → 'ⲍ'
-    case 0x2C8E: return 0x2C8F;   // 'Ⲏ' → 'ⲏ'
-    case 0x2C90: return 0x2C91;   // 'Ⲑ' → 'ⲑ'
-    case 0x2C92: return 0x2C93;   // 'Ⲓ' → 'ⲓ'
-    case 0x2C94: return 0x2C95;   // 'Ⲕ' → 'ⲕ'
-    case 0x2C96: return 0x2C97;   // 'Ⲗ' → 'ⲗ'
-    case 0x2C98: return 0x2C99;   // 'Ⲙ' → 'ⲙ'
-    case 0x2C9A: return 0x2C9B;   // 'Ⲛ' → 'ⲛ'
-    case 0x2C9C: return 0x2C9D;   // 'Ⲝ' → 'ⲝ'
-    case 0x2C9E: return 0x2C9F;   // 'Ⲟ' → 'ⲟ'
-    case 0x2CA0: return 0x2CA1;   // 'Ⲡ' → 'ⲡ'
-    case 0x2CA2: return 0x2CA3;   // 'Ⲣ' → 'ⲣ'
-    case 0x2CA4: return 0x2CA5;   // 'Ⲥ' → 'ⲥ'
-    case 0x2CA6: return 0x2CA7;   // 'Ⲧ' → 'ⲧ'
-    case 0x2CA8: return 0x2CA9;   // 'Ⲩ' → 'ⲩ'
-    case 0x2CAA: return 0x2CAB;   // 'Ⲫ' → 'ⲫ'
-    case 0x2CAC: return 0x2CAD;   // 'Ⲭ' → 'ⲭ'
-    case 0x2CAE: return 0x2CAF;   // 'Ⲯ' → 'ⲯ'
-    case 0x2CB0: return 0x2CB1;   // 'Ⲱ' → 'ⲱ'
-    case 0x2CB2: return 0x2CB3;   // 'Ⲳ' → 'ⲳ'
-    case 0x2CB4: return 0x2CB5;   // 'Ⲵ' → 'ⲵ'
-    case 0x2CB6: return 0x2CB7;   // 'Ⲷ' → 'ⲷ'
-    case 0x2CB8: return 0x2CB9;   // 'Ⲹ' → 'ⲹ'
-    case 0x2CBA: return 0x2CBB;   // 'Ⲻ' → 'ⲻ'
-    case 0x2CBC: return 0x2CBD;   // 'Ⲽ' → 'ⲽ'
-    case 0x2CBE: return 0x2CBF;   // 'Ⲿ' → 'ⲿ'
-    case 0x2CC0: return 0x2CC1;   // 'Ⳁ' → 'ⳁ'
-    case 0x2CC2: return 0x2CC3;   // 'Ⳃ' → 'ⳃ'
-    case 0x2CC4: return 0x2CC5;   // 'Ⳅ' → 'ⳅ'
-    case 0x2CC6: return 0x2CC7;   // 'Ⳇ' → 'ⳇ'
-    case 0x2CC8: return 0x2CC9;   // 'Ⳉ' → 'ⳉ'
-    case 0x2CCA: return 0x2CCB;   // 'Ⳋ' → 'ⳋ'
-    case 0x2CCC: return 0x2CCD;   // 'Ⳍ' → 'ⳍ'
-    case 0x2CCE: return 0x2CCF;   // 'Ⳏ' → 'ⳏ'
-    case 0x2CD0: return 0x2CD1;   // 'Ⳑ' → 'ⳑ'
-    case 0x2CD2: return 0x2CD3;   // 'Ⳓ' → 'ⳓ'
-    case 0x2CD4: return 0x2CD5;   // 'Ⳕ' → 'ⳕ'
-    case 0x2CD6: return 0x2CD7;   // 'Ⳗ' → 'ⳗ'
-    case 0x2CD8: return 0x2CD9;   // 'Ⳙ' → 'ⳙ'
-    case 0x2CDA: return 0x2CDB;   // 'Ⳛ' → 'ⳛ'
-    case 0x2CDC: return 0x2CDD;   // 'Ⳝ' → 'ⳝ'
-    case 0x2CDE: return 0x2CDF;   // 'Ⳟ' → 'ⳟ'
-    case 0x2CE0: return 0x2CE1;   // 'Ⳡ' → 'ⳡ'
-    case 0x2CE2: return 0x2CE3;   // 'Ⳣ' → 'ⳣ'
-    case 0x2CEB: return 0x2CEC;   // 'Ⳬ' → 'ⳬ'
-    case 0x2CED: return 0x2CEE;   // 'Ⳮ' → 'ⳮ'
-    case 0x2CF2: return 0x2CF3;   // 'Ⳳ' → 'ⳳ'
-    case 0xA640: return 0xA641;   // 'Ꙁ' → 'ꙁ'
-    case 0xA642: return 0xA643;   // 'Ꙃ' → 'ꙃ'
-    case 0xA644: return 0xA645;   // 'Ꙅ' → 'ꙅ'
-    case 0xA646: return 0xA647;   // 'Ꙇ' → 'ꙇ'
-    case 0xA648: return 0xA649;   // 'Ꙉ' → 'ꙉ'
-    case 0xA64A: return 0xA64B;   // 'Ꙋ' → 'ꙋ'
-    case 0xA64C: return 0xA64D;   // 'Ꙍ' → 'ꙍ'
-    case 0xA64E: return 0xA64F;   // 'Ꙏ' → 'ꙏ'
-    case 0xA650: return 0xA651;   // 'Ꙑ' → 'ꙑ'
-    case 0xA652: return 0xA653;   // 'Ꙓ' → 'ꙓ'
-    case 0xA654: return 0xA655;   // 'Ꙕ' → 'ꙕ'
-    case 0xA656: return 0xA657;   // 'Ꙗ' → 'ꙗ'
-    case 0xA658: return 0xA659;   // 'Ꙙ' → 'ꙙ'
-    case 0xA65A: return 0xA65B;   // 'Ꙛ' → 'ꙛ'
-    case 0xA65C: return 0xA65D;   // 'Ꙝ' → 'ꙝ'
-    case 0xA65E: return 0xA65F;   // 'Ꙟ' → 'ꙟ'
-    case 0xA660: return 0xA661;   // 'Ꙡ' → 'ꙡ'
-    case 0xA662: return 0xA663;   // 'Ꙣ' → 'ꙣ'
-    case 0xA664: return 0xA665;   // 'Ꙥ' → 'ꙥ'
-    case 0xA666: return 0xA667;   // 'Ꙧ' → 'ꙧ'
-    case 0xA668: return 0xA669;   // 'Ꙩ' → 'ꙩ'
-    case 0xA66A: return 0xA66B;   // 'Ꙫ' → 'ꙫ'
-    case 0xA66C: return 0xA66D;   // 'Ꙭ' → 'ꙭ'
-    case 0xA680: return 0xA681;   // 'Ꚁ' → 'ꚁ'
-    case 0xA682: return 0xA683;   // 'Ꚃ' → 'ꚃ'
-    case 0xA684: return 0xA685;   // 'Ꚅ' → 'ꚅ'
-    case 0xA686: return 0xA687;   // 'Ꚇ' → 'ꚇ'
-    case 0xA688: return 0xA689;   // 'Ꚉ' → 'ꚉ'
-    case 0xA68A: return 0xA68B;   // 'Ꚋ' → 'ꚋ'
-    case 0xA68C: return 0xA68D;   // 'Ꚍ' → 'ꚍ'
-    case 0xA68E: return 0xA68F;   // 'Ꚏ' → 'ꚏ'
-    case 0xA690: return 0xA691;   // 'Ꚑ' → 'ꚑ'
-    case 0xA692: return 0xA693;   // 'Ꚓ' → 'ꚓ'
-    case 0xA694: return 0xA695;   // 'Ꚕ' → 'ꚕ'
-    case 0xA696: return 0xA697;   // 'Ꚗ' → 'ꚗ'
-    case 0xA698: return 0xA699;   // 'Ꚙ' → 'ꚙ'
-    case 0xA69A: return 0xA69B;   // 'Ꚛ' → 'ꚛ'
-    case 0xA722: return 0xA723;   // 'Ꜣ' → 'ꜣ'
-    case 0xA724: return 0xA725;   // 'Ꜥ' → 'ꜥ'
-    case 0xA726: return 0xA727;   // 'Ꜧ' → 'ꜧ'
-    case 0xA728: return 0xA729;   // 'Ꜩ' → 'ꜩ'
-    case 0xA72A: return 0xA72B;   // 'Ꜫ' → 'ꜫ'
-    case 0xA72C: return 0xA72D;   // 'Ꜭ' → 'ꜭ'
-    case 0xA72E: return 0xA72F;   // 'Ꜯ' → 'ꜯ'
-    case 0xA732: return 0xA733;   // 'Ꜳ' → 'ꜳ'
-    case 0xA734: return 0xA735;   // 'Ꜵ' → 'ꜵ'
-    case 0xA736: return 0xA737;   // 'Ꜷ' → 'ꜷ'
-    case 0xA738: return 0xA739;   // 'Ꜹ' → 'ꜹ'
-    case 0xA73A: return 0xA73B;   // 'Ꜻ' → 'ꜻ'
-    case 0xA73C: return 0xA73D;   // 'Ꜽ' → 'ꜽ'
-    case 0xA73E: return 0xA73F;   // 'Ꜿ' → 'ꜿ'
-    case 0xA740: return 0xA741;   // 'Ꝁ' → 'ꝁ'
-    case 0xA742: return 0xA743;   // 'Ꝃ' → 'ꝃ'
-    case 0xA744: return 0xA745;   // 'Ꝅ' → 'ꝅ'
-    case 0xA746: return 0xA747;   // 'Ꝇ' → 'ꝇ'
-    case 0xA748: return 0xA749;   // 'Ꝉ' → 'ꝉ'
-    case 0xA74A: return 0xA74B;   // 'Ꝋ' → 'ꝋ'
-    case 0xA74C: return 0xA74D;   // 'Ꝍ' → 'ꝍ'
-    case 0xA74E: return 0xA74F;   // 'Ꝏ' → 'ꝏ'
-    case 0xA750: return 0xA751;   // 'Ꝑ' → 'ꝑ'
-    case 0xA752: return 0xA753;   // 'Ꝓ' → 'ꝓ'
-    case 0xA754: return 0xA755;   // 'Ꝕ' → 'ꝕ'
-    case 0xA756: return 0xA757;   // 'Ꝗ' → 'ꝗ'
-    case 0xA758: return 0xA759;   // 'Ꝙ' → 'ꝙ'
-    case 0xA75A: return 0xA75B;   // 'Ꝛ' → 'ꝛ'
-    case 0xA75C: return 0xA75D;   // 'Ꝝ' → 'ꝝ'
-    case 0xA75E: return 0xA75F;   // 'Ꝟ' → 'ꝟ'
-    case 0xA760: return 0xA761;   // 'Ꝡ' → 'ꝡ'
-    case 0xA762: return 0xA763;   // 'Ꝣ' → 'ꝣ'
-    case 0xA764: return 0xA765;   // 'Ꝥ' → 'ꝥ'
-    case 0xA766: return 0xA767;   // 'Ꝧ' → 'ꝧ'
-    case 0xA768: return 0xA769;   // 'Ꝩ' → 'ꝩ'
-    case 0xA76A: return 0xA76B;   // 'Ꝫ' → 'ꝫ'
-    case 0xA76C: return 0xA76D;   // 'Ꝭ' → 'ꝭ'
-    case 0xA76E: return 0xA76F;   // 'Ꝯ' → 'ꝯ'
-    case 0xA779: return 0xA77A;   // 'Ꝺ' → 'ꝺ'
-    case 0xA77B: return 0xA77C;   // 'Ꝼ' → 'ꝼ'
-    case 0xA77D: return 0x1D79;   // 'Ᵹ' → 'ᵹ'
-    case 0xA77E: return 0xA77F;   // 'Ꝿ' → 'ꝿ'
-    case 0xA780: return 0xA781;   // 'Ꞁ' → 'ꞁ'
-    case 0xA782: return 0xA783;   // 'Ꞃ' → 'ꞃ'
-    case 0xA784: return 0xA785;   // 'Ꞅ' → 'ꞅ'
-    case 0xA786: return 0xA787;   // 'Ꞇ' → 'ꞇ'
-    case 0xA78B: return 0xA78C;   // 'Ꞌ' → 'ꞌ'
-    case 0xA78D: return 0x0265;   // 'Ɥ' → 'ɥ'
-    case 0xA790: return 0xA791;   // 'Ꞑ' → 'ꞑ'
-    case 0xA792: return 0xA793;   // 'Ꞓ' → 'ꞓ'
-    case 0xA796: return 0xA797;   // 'Ꞗ' → 'ꞗ'
-    case 0xA798: return 0xA799;   // 'Ꞙ' → 'ꞙ'
-    case 0xA79A: return 0xA79B;   // 'Ꞛ' → 'ꞛ'
-    case 0xA79C: return 0xA79D;   // 'Ꞝ' → 'ꞝ'
-    case 0xA79E: return 0xA79F;   // 'Ꞟ' → 'ꞟ'
-    case 0xA7A0: return 0xA7A1;   // 'Ꞡ' → 'ꞡ'
-    case 0xA7A2: return 0xA7A3;   // 'Ꞣ' → 'ꞣ'
-    case 0xA7A4: return 0xA7A5;   // 'Ꞥ' → 'ꞥ'
-    case 0xA7A6: return 0xA7A7;   // 'Ꞧ' → 'ꞧ'
-    case 0xA7A8: return 0xA7A9;   // 'Ꞩ' → 'ꞩ'
-    case 0xA7AA: return 0x0266;   // 'Ɦ' → 'ɦ'
-    case 0xA7AB: return 0x025C;   // 'Ɜ' → 'ɜ'
-    case 0xA7AC: return 0x0261;   // 'Ɡ' → 'ɡ'
-    case 0xA7AD: return 0x026C;   // 'Ɬ' → 'ɬ'
-    case 0xA7AE: return 0x026A;   // 'Ɪ' → 'ɪ'
-    case 0xA7B0: return 0x029E;   // 'Ʞ' → 'ʞ'
-    case 0xA7B1: return 0x0287;   // 'Ʇ' → 'ʇ'
-    case 0xA7B2: return 0x029D;   // 'Ʝ' → 'ʝ'
-    case 0xA7B3: return 0xAB53;   // 'Ꭓ' → 'ꭓ'
-    case 0xA7B4: return 0xA7B5;   // 'Ꞵ' → 'ꞵ'
-    case 0xA7B6: return 0xA7B7;   // 'Ꞷ' → 'ꞷ'
-    case 0xA7B8: return 0xA7B9;   // 'Ꞹ' → 'ꞹ'
-    case 0xA7BA: return 0xA7BB;   // 'Ꞻ' → 'ꞻ'
-    case 0xA7BC: return 0xA7BD;   // 'Ꞽ' → 'ꞽ'
-    case 0xA7BE: return 0xA7BF;   // 'Ꞿ' → 'ꞿ'
-    case 0xA7C0: return 0xA7C1;   // 'Ꟁ' → 'ꟁ'
-    case 0xA7C2: return 0xA7C3;   // 'Ꟃ' → 'ꟃ'
-    case 0xA7C4: return 0xA794;   // 'Ꞔ' → 'ꞔ'
-    case 0xA7C5: return 0x0282;   // 'Ʂ' → 'ʂ'
-    case 0xA7C6: return 0x1D8E;   // 'Ᶎ' → 'ᶎ'
-    case 0xA7C7: return 0xA7C8;   // 'Ꟈ' → 'ꟈ'
-    case 0xA7C9: return 0xA7CA;   // 'Ꟊ' → 'ꟊ'
-    case 0xA7CB: return 0x0264;   // 'Ɤ' → 'ɤ'
-    case 0xA7CC: return 0xA7CD;   // 'Ꟍ' → 'ꟍ'
-    case 0xA7CE: return 0xA7CF;   // '꟎' → '꟏'
-    case 0xA7D0: return 0xA7D1;   // 'Ꟑ' → 'ꟑ'
-    case 0xA7D2: return 0xA7D3;   // '꟒' → 'ꟓ'
-    case 0xA7D4: return 0xA7D5;   // '꟔' → 'ꟕ'
-    case 0xA7D6: return 0xA7D7;   // 'Ꟗ' → 'ꟗ'
-    case 0xA7D8: return 0xA7D9;   // 'Ꟙ' → 'ꟙ'
-    case 0xA7DA: return 0xA7DB;   // 'Ꟛ' → 'ꟛ'
-    case 0xA7DC: return 0x019B;   // 'Ƛ' → 'ƛ'
-    case 0xA7F5: return 0xA7F6;   // 'Ꟶ' → 'ꟶ'
-    case 0x10594: return 0x105BB; // '𐖔' → '𐖻'
-    case 0x10595: return 0x105BC; // '𐖕' → '𐖼'
+    // Irregular one-to-one mappings: ~90 cases that don't follow even/odd patterns
+    switch (rune) {
+    // Latin-1 Supplement & specials
+    case 0x00B5: folded[0] = 0x03BC; return 1; // µ → μ (micro sign to Greek mu)
+    case 0x0178: folded[0] = 0x00FF; return 1; // Ÿ → ÿ
+    case 0x017F: folded[0] = 0x0073; return 1; // ſ → s (long s)
+    // Latin Extended-B: African/IPA letters with irregular mappings (0x0181-0x01BF)
+    case 0x0181: folded[0] = 0x0253; return 1; // Ɓ → ɓ
+    case 0x0182: folded[0] = 0x0183; return 1; // Ƃ → ƃ
+    case 0x0184: folded[0] = 0x0185; return 1; // Ƅ → ƅ
+    case 0x0186: folded[0] = 0x0254; return 1; // Ɔ → ɔ
+    case 0x0187: folded[0] = 0x0188; return 1; // Ƈ → ƈ
+    case 0x0189: folded[0] = 0x0256; return 1; // Ɖ → ɖ
+    case 0x018A: folded[0] = 0x0257; return 1; // Ɗ → ɗ
+    case 0x018B: folded[0] = 0x018C; return 1; // Ƌ → ƌ
+    case 0x018E: folded[0] = 0x01DD; return 1; // Ǝ → ǝ
+    case 0x018F: folded[0] = 0x0259; return 1; // Ə → ə (schwa, Azerbaijani)
+    case 0x0190: folded[0] = 0x025B; return 1; // Ɛ → ɛ
+    case 0x0191: folded[0] = 0x0192; return 1; // Ƒ → ƒ
+    case 0x0193: folded[0] = 0x0260; return 1; // Ɠ → ɠ
+    case 0x0194: folded[0] = 0x0263; return 1; // Ɣ → ɣ
+    case 0x0196: folded[0] = 0x0269; return 1; // Ɩ → ɩ
+    case 0x0197: folded[0] = 0x0268; return 1; // Ɨ → ɨ
+    case 0x0198: folded[0] = 0x0199; return 1; // Ƙ → ƙ
+    case 0x019C: folded[0] = 0x026F; return 1; // Ɯ → ɯ
+    case 0x019D: folded[0] = 0x0272; return 1; // Ɲ → ɲ
+    case 0x019F: folded[0] = 0x0275; return 1; // Ɵ → ɵ
+    case 0x01A0: folded[0] = 0x01A1; return 1; // Ơ → ơ (Vietnamese)
+    case 0x01A2: folded[0] = 0x01A3; return 1; // Ƣ → ƣ
+    case 0x01A4: folded[0] = 0x01A5; return 1; // Ƥ → ƥ
+    case 0x01A6: folded[0] = 0x0280; return 1; // Ʀ → ʀ
+    case 0x01A7: folded[0] = 0x01A8; return 1; // Ƨ → ƨ
+    case 0x01A9: folded[0] = 0x0283; return 1; // Ʃ → ʃ
+    case 0x01AC: folded[0] = 0x01AD; return 1; // Ƭ → ƭ
+    case 0x01AE: folded[0] = 0x0288; return 1; // Ʈ → ʈ
+    case 0x01AF: folded[0] = 0x01B0; return 1; // Ư → ư (Vietnamese)
+    case 0x01B1: folded[0] = 0x028A; return 1; // Ʊ → ʊ
+    case 0x01B2: folded[0] = 0x028B; return 1; // Ʋ → ʋ
+    case 0x01B3: folded[0] = 0x01B4; return 1; // Ƴ → ƴ
+    case 0x01B5: folded[0] = 0x01B6; return 1; // Ƶ → ƶ
+    case 0x01B7: folded[0] = 0x0292; return 1; // Ʒ → ʒ
+    case 0x01B8: folded[0] = 0x01B9; return 1; // Ƹ → ƹ
+    case 0x01BC: folded[0] = 0x01BD; return 1; // Ƽ → ƽ
+
+    // Digraphs: Serbian/Croatian DŽ, LJ, NJ and DZ
+    case 0x01C4: folded[0] = 0x01C6; return 1; // Ǆ → ǆ
+    case 0x01C5: folded[0] = 0x01C6; return 1; // ǅ → ǆ (titlecase)
+    case 0x01C7: folded[0] = 0x01C9; return 1; // Ǉ → ǉ
+    case 0x01C8: folded[0] = 0x01C9; return 1; // ǈ → ǉ (titlecase)
+    case 0x01CA: folded[0] = 0x01CC; return 1; // Ǌ → ǌ
+    case 0x01CB: folded[0] = 0x01CC; return 1; // ǋ → ǌ (titlecase)
+    case 0x01F1: folded[0] = 0x01F3; return 1; // Ǳ → ǳ
+    case 0x01F2: folded[0] = 0x01F3; return 1; // ǲ → ǳ (titlecase)
+    // Latin Extended-B: isolated irregulars
+    case 0x01F4: folded[0] = 0x01F5; return 1; // Ǵ → ǵ (between ranges)
+    case 0x01F6: folded[0] = 0x0195; return 1; // Ƕ → ƕ (hwair)
+    case 0x01F7: folded[0] = 0x01BF; return 1; // Ƿ → ƿ (wynn)
+    case 0x0220: folded[0] = 0x019E; return 1; // Ƞ → ƞ
+    case 0x023A: folded[0] = 0x2C65; return 1; // Ⱥ → ⱥ
+    case 0x023B: folded[0] = 0x023C; return 1; // Ȼ → ȼ
+    case 0x023D: folded[0] = 0x019A; return 1; // Ƚ → ƚ
+    case 0x023E: folded[0] = 0x2C66; return 1; // Ⱦ → ⱦ
+    case 0x0241: folded[0] = 0x0242; return 1; // Ɂ → ɂ
+    case 0x0243: folded[0] = 0x0180; return 1; // Ƀ → ƀ
+    case 0x0244: folded[0] = 0x0289; return 1; // Ʉ → ʉ
+    case 0x0245: folded[0] = 0x028C; return 1; // Ʌ → ʌ
+
+    // Greek: combining iota, accented vowels, variant forms
+    case 0x0345: folded[0] = 0x03B9; return 1; // ͅ → ι (combining iota subscript)
+    case 0x037F: folded[0] = 0x03F3; return 1; // Ϳ → ϳ
+    case 0x0386: folded[0] = 0x03AC; return 1; // Ά → ά
+    case 0x038C: folded[0] = 0x03CC; return 1; // Ό → ό
+    case 0x038E: folded[0] = 0x03CD; return 1; // Ύ → ύ
+    case 0x038F: folded[0] = 0x03CE; return 1; // Ώ → ώ
+    case 0x03C2: folded[0] = 0x03C3; return 1; // ς → σ (final sigma)
+    case 0x03CF: folded[0] = 0x03D7; return 1; // Ϗ → ϗ
+    case 0x03D0: folded[0] = 0x03B2; return 1; // ϐ → β (beta symbol)
+    case 0x03D1: folded[0] = 0x03B8; return 1; // ϑ → θ (theta symbol)
+    case 0x03D5: folded[0] = 0x03C6; return 1; // ϕ → φ (phi symbol)
+    case 0x03D6: folded[0] = 0x03C0; return 1; // ϖ → π (pi symbol)
+    case 0x03F0: folded[0] = 0x03BA; return 1; // ϰ → κ (kappa symbol)
+    case 0x03F1: folded[0] = 0x03C1; return 1; // ϱ → ρ (rho symbol)
+    case 0x03F4: folded[0] = 0x03B8; return 1; // ϴ → θ
+    case 0x03F5: folded[0] = 0x03B5; return 1; // ϵ → ε (lunate epsilon)
+    case 0x03F7: folded[0] = 0x03F8; return 1; // Ϸ → ϸ
+    case 0x03F9: folded[0] = 0x03F2; return 1; // Ϲ → ϲ
+    case 0x03FA: folded[0] = 0x03FB; return 1; // Ϻ → ϻ
+    // Cyrillic: palochka (irregular +15 offset)
+    case 0x04C0: folded[0] = 0x04CF; return 1; // Ӏ → ӏ
+    // Georgian: large offsets to lowercase block
+    case 0x10C7: folded[0] = 0x2D27; return 1; // Ⴧ → ⴧ
+    case 0x10CD: folded[0] = 0x2D2D; return 1; // Ⴭ → ⴭ
+    // Cyrillic Extended-C: Old Slavonic variant forms (map to basic Cyrillic)
+    case 0x1C80: folded[0] = 0x0432; return 1; // ᲀ → в
+    case 0x1C81: folded[0] = 0x0434; return 1; // ᲁ → д
+    case 0x1C82: folded[0] = 0x043E; return 1; // ᲂ → о
+    case 0x1C83: folded[0] = 0x0441; return 1; // ᲃ → с
+    case 0x1C84: folded[0] = 0x0442; return 1; // ᲄ → т
+    case 0x1C85: folded[0] = 0x0442; return 1; // ᲅ → т
+    case 0x1C86: folded[0] = 0x044A; return 1; // ᲆ → ъ
+    case 0x1C87: folded[0] = 0x0463; return 1; // ᲇ → ѣ
+    case 0x1C88: folded[0] = 0xA64B; return 1; // ᲈ → ꙋ
+    case 0x1C89: folded[0] = 0x1C8A; return 1; // Ᲊ → ᲊ
+    // Latin Extended Additional: long s with dot above (irregular target)
+    case 0x1E9B: folded[0] = 0x1E61; return 1; // ẛ → ṡ
+
+    // Greek Extended: vowels with breathing marks (irregular offsets)
+    case 0x1F59: folded[0] = 0x1F51; return 1; // 'Ὑ' → 'ὑ'
+    case 0x1F5B: folded[0] = 0x1F53; return 1; // 'Ὓ' → 'ὓ'
+    case 0x1F5D: folded[0] = 0x1F55; return 1; // 'Ὕ' → 'ὕ'
+    case 0x1F5F: folded[0] = 0x1F57; return 1; // 'Ὗ' → 'ὗ'
+    case 0x1FB8: folded[0] = 0x1FB0; return 1; // 'Ᾰ' → 'ᾰ'
+    case 0x1FB9: folded[0] = 0x1FB1; return 1; // 'Ᾱ' → 'ᾱ'
+    case 0x1FBA: folded[0] = 0x1F70; return 1; // 'Ὰ' → 'ὰ'
+    case 0x1FBB: folded[0] = 0x1F71; return 1; // 'Ά' → 'ά'
+    case 0x1FBE: folded[0] = 0x03B9; return 1; // 'ι' → 'ι'
+    case 0x1FD8: folded[0] = 0x1FD0; return 1; // 'Ῐ' → 'ῐ'
+    case 0x1FD9: folded[0] = 0x1FD1; return 1; // 'Ῑ' → 'ῑ'
+    case 0x1FDA: folded[0] = 0x1F76; return 1; // 'Ὶ' → 'ὶ'
+    case 0x1FDB: folded[0] = 0x1F77; return 1; // 'Ί' → 'ί'
+    case 0x1FE8: folded[0] = 0x1FE0; return 1; // 'Ῠ' → 'ῠ'
+    case 0x1FE9: folded[0] = 0x1FE1; return 1; // 'Ῡ' → 'ῡ'
+    case 0x1FEA: folded[0] = 0x1F7A; return 1; // 'Ὺ' → 'ὺ'
+    case 0x1FEB: folded[0] = 0x1F7B; return 1; // 'Ύ' → 'ύ'
+    case 0x1FEC: folded[0] = 0x1FE5; return 1; // 'Ῥ' → 'ῥ'
+    case 0x1FF8: folded[0] = 0x1F78; return 1; // 'Ὸ' → 'ὸ'
+    case 0x1FF9: folded[0] = 0x1F79; return 1; // 'Ό' → 'ό'
+    case 0x1FFA: folded[0] = 0x1F7C; return 1; // 'Ὼ' → 'ὼ'
+    case 0x1FFB:
+        folded[0] = 0x1F7D; return 1; // 'Ώ' → 'ώ'
+    // Letterlike Symbols: compatibility mappings
+    case 0x2126: folded[0] = 0x03C9; return 1; // 'Ω' → 'ω'
+    case 0x212A: folded[0] = 0x006B; return 1; // 'K' → 'k'
+    case 0x212B: folded[0] = 0x00E5; return 1; // 'Å' → 'å'
+    case 0x2132: folded[0] = 0x214E; return 1; // 'Ⅎ' → 'ⅎ'
+    case 0x2183:
+        folded[0] = 0x2184; return 1; // 'Ↄ' → 'ↄ'
+
+    // Latin Extended-C: irregular mappings to IPA/other blocks
+    case 0x2C60: folded[0] = 0x2C61; return 1; // 'Ⱡ' → 'ⱡ'
+    case 0x2C62: folded[0] = 0x026B; return 1; // 'Ɫ' → 'ɫ'
+    case 0x2C63: folded[0] = 0x1D7D; return 1; // 'Ᵽ' → 'ᵽ'
+    case 0x2C64: folded[0] = 0x027D; return 1; // 'Ɽ' → 'ɽ'
+    case 0x2C67: folded[0] = 0x2C68; return 1; // 'Ⱨ' → 'ⱨ'
+    case 0x2C69: folded[0] = 0x2C6A; return 1; // 'Ⱪ' → 'ⱪ'
+    case 0x2C6B: folded[0] = 0x2C6C; return 1; // 'Ⱬ' → 'ⱬ'
+    case 0x2C6D: folded[0] = 0x0251; return 1; // 'Ɑ' → 'ɑ'
+    case 0x2C6E: folded[0] = 0x0271; return 1; // 'Ɱ' → 'ɱ'
+    case 0x2C6F: folded[0] = 0x0250; return 1; // 'Ɐ' → 'ɐ'
+    case 0x2C70: folded[0] = 0x0252; return 1; // 'Ɒ' → 'ɒ'
+    case 0x2C72: folded[0] = 0x2C73; return 1; // 'Ⱳ' → 'ⱳ'
+    case 0x2C75: folded[0] = 0x2C76; return 1; // 'Ⱶ' → 'ⱶ'
+    case 0x2C7E: folded[0] = 0x023F; return 1; // 'Ȿ' → 'ȿ'
+    case 0x2C7F:
+        folded[0] = 0x0240; return 1; // 'Ɀ' → 'ɀ'
+
+    // Coptic: irregular cases outside the even/odd range
+    case 0x2CEB: folded[0] = 0x2CEC; return 1; // 'Ⳬ' → 'ⳬ'
+    case 0x2CED: folded[0] = 0x2CEE; return 1; // 'Ⳮ' → 'ⳮ'
+    case 0x2CF2:
+        folded[0] = 0x2CF3; return 1; // 'Ⳳ' → 'ⳳ'
+
+    // Latin Extended-D: isolated irregulars with non-standard offsets
+    case 0xA779: folded[0] = 0xA77A; return 1; // 'Ꝺ' → 'ꝺ'
+    case 0xA77B: folded[0] = 0xA77C; return 1; // 'Ꝼ' → 'ꝼ'
+    case 0xA77D: folded[0] = 0x1D79; return 1; // 'Ᵹ' → 'ᵹ'
+    case 0xA78B: folded[0] = 0xA78C; return 1; // 'Ꞌ' → 'ꞌ'
+    case 0xA78D: folded[0] = 0x0265; return 1; // 'Ɥ' → 'ɥ'
+    case 0xA7AA: folded[0] = 0x0266; return 1; // 'Ɦ' → 'ɦ'
+    case 0xA7AB: folded[0] = 0x025C; return 1; // 'Ɜ' → 'ɜ'
+    case 0xA7AC: folded[0] = 0x0261; return 1; // 'Ɡ' → 'ɡ'
+    case 0xA7AD: folded[0] = 0x026C; return 1; // 'Ɬ' → 'ɬ'
+    case 0xA7AE: folded[0] = 0x026A; return 1; // 'Ɪ' → 'ɪ'
+    case 0xA7B0: folded[0] = 0x029E; return 1; // 'Ʞ' → 'ʞ'
+    case 0xA7B1: folded[0] = 0x0287; return 1; // 'Ʇ' → 'ʇ'
+    case 0xA7B2: folded[0] = 0x029D; return 1; // 'Ʝ' → 'ʝ'
+    case 0xA7B3: folded[0] = 0xAB53; return 1; // 'Ꭓ' → 'ꭓ'
+    case 0xA7C4: folded[0] = 0xA794; return 1; // 'Ꞔ' → 'ꞔ'
+    case 0xA7C5: folded[0] = 0x0282; return 1; // 'Ʂ' → 'ʂ'
+    case 0xA7C6: folded[0] = 0x1D8E; return 1; // 'Ᶎ' → 'ᶎ'
+    case 0xA7CB: folded[0] = 0x0264; return 1; // 'Ɤ' → 'ɤ'
+    case 0xA7DC:
+        folded[0] = 0x019B; return 1; // 'Ƛ' → 'ƛ'
+
+    // Vithkuqi: Albanian historical script
+    case 0x10594: folded[0] = 0x105BB; return 1; // '𐖔' → '𐖻'
+    case 0x10595: folded[0] = 0x105BC; return 1; // '𐖕' → '𐖼'
     }
 
     // One-to-many expansions
-    switch (cp) {
-    case 0x00DF: expansion[0] = 0x0073, expansion[1] = 0x0073, *expansion_count = 2; return 0x0073; // ß → ss
-    case 0x0130: expansion[0] = 0x0069, expansion[1] = 0x0307, *expansion_count = 2; return 0x0069; // İ → i + combining
-    case 0x0149: expansion[0] = 0x02BC, expansion[1] = 0x006E, *expansion_count = 2; return 0x02BC; // ŉ → ʼn
-    case 0x01F0: expansion[0] = 0x006A, expansion[1] = 0x030C, *expansion_count = 2; return 0x006A; // ǰ → j + combining
-    case 0x0390:
-        expansion[0] = 0x03B9, expansion[1] = 0x0308, expansion[2] = 0x0301, *expansion_count = 3;
-        return 0x03B9; // ΐ → ι + 2 combining
-    case 0x03B0:
-        expansion[0] = 0x03C5, expansion[1] = 0x0308, expansion[2] = 0x0301, *expansion_count = 3;
-        return 0x03C5; // ΰ → υ + 2 combining
-    case 0x0587: expansion[0] = 0x0565, expansion[1] = 0x0582, *expansion_count = 2; return 0x0565; // և → եւ
-    case 0x1E96: expansion[0] = 0x0068, expansion[1] = 0x0331, *expansion_count = 2; return 0x0068; // ẖ → h + combining
-    case 0x1E97: expansion[0] = 0x0074, expansion[1] = 0x0308, *expansion_count = 2; return 0x0074; // ẗ → t + combining
-    case 0x1E98: expansion[0] = 0x0077, expansion[1] = 0x030A, *expansion_count = 2; return 0x0077; // ẘ → w + combining
-    case 0x1E99: expansion[0] = 0x0079, expansion[1] = 0x030A, *expansion_count = 2; return 0x0079; // ẙ → y + combining
-    case 0x1E9A: expansion[0] = 0x0061, expansion[1] = 0x02BE, *expansion_count = 2; return 0x0061; // ẚ → aʾ
-    case 0x1E9E: expansion[0] = 0x0073, expansion[1] = 0x0073, *expansion_count = 2; return 0x0073; // ẞ → ss
-    case 0x1F50: expansion[0] = 0x03C5, expansion[1] = 0x0313, *expansion_count = 2; return 0x03C5; // ὐ → υ + combining
-    case 0x1F52:
-        expansion[0] = 0x03C5, expansion[1] = 0x0313, expansion[2] = 0x0300, *expansion_count = 3;
-        return 0x03C5; // ὒ → υ + 2 combining
-    case 0x1F54:
-        expansion[0] = 0x03C5, expansion[1] = 0x0313, expansion[2] = 0x0301, *expansion_count = 3;
-        return 0x03C5; // ὔ → υ + 2 combining
-    case 0x1F56:
-        expansion[0] = 0x03C5, expansion[1] = 0x0313, expansion[2] = 0x0342, *expansion_count = 3;
-        return 0x03C5; // ὖ → υ + 2 combining
-    case 0x1F80: expansion[0] = 0x1F00, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F00; // ᾀ → ἀι
-    case 0x1F81: expansion[0] = 0x1F01, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F01; // ᾁ → ἁι
-    case 0x1F82: expansion[0] = 0x1F02, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F02; // ᾂ → ἂι
-    case 0x1F83: expansion[0] = 0x1F03, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F03; // ᾃ → ἃι
-    case 0x1F84: expansion[0] = 0x1F04, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F04; // ᾄ → ἄι
-    case 0x1F85: expansion[0] = 0x1F05, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F05; // ᾅ → ἅι
-    case 0x1F86: expansion[0] = 0x1F06, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F06; // ᾆ → ἆι
-    case 0x1F87: expansion[0] = 0x1F07, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F07; // ᾇ → ἇι
-    case 0x1F88: expansion[0] = 0x1F00, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F00; // ᾈ → ἀι
-    case 0x1F89: expansion[0] = 0x1F01, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F01; // ᾉ → ἁι
-    case 0x1F8A: expansion[0] = 0x1F02, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F02; // ᾊ → ἂι
-    case 0x1F8B: expansion[0] = 0x1F03, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F03; // ᾋ → ἃι
-    case 0x1F8C: expansion[0] = 0x1F04, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F04; // ᾌ → ἄι
-    case 0x1F8D: expansion[0] = 0x1F05, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F05; // ᾍ → ἅι
-    case 0x1F8E: expansion[0] = 0x1F06, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F06; // ᾎ → ἆι
-    case 0x1F8F: expansion[0] = 0x1F07, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F07; // ᾏ → ἇι
-    case 0x1F90: expansion[0] = 0x1F20, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F20; // ᾐ → ἠι
-    case 0x1F91: expansion[0] = 0x1F21, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F21; // ᾑ → ἡι
-    case 0x1F92: expansion[0] = 0x1F22, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F22; // ᾒ → ἢι
-    case 0x1F93: expansion[0] = 0x1F23, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F23; // ᾓ → ἣι
-    case 0x1F94: expansion[0] = 0x1F24, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F24; // ᾔ → ἤι
-    case 0x1F95: expansion[0] = 0x1F25, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F25; // ᾕ → ἥι
-    case 0x1F96: expansion[0] = 0x1F26, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F26; // ᾖ → ἦι
-    case 0x1F97: expansion[0] = 0x1F27, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F27; // ᾗ → ἧι
-    case 0x1F98: expansion[0] = 0x1F20, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F20; // ᾘ → ἠι
-    case 0x1F99: expansion[0] = 0x1F21, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F21; // ᾙ → ἡι
-    case 0x1F9A: expansion[0] = 0x1F22, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F22; // ᾚ → ἢι
-    case 0x1F9B: expansion[0] = 0x1F23, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F23; // ᾛ → ἣι
-    case 0x1F9C: expansion[0] = 0x1F24, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F24; // ᾜ → ἤι
-    case 0x1F9D: expansion[0] = 0x1F25, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F25; // ᾝ → ἥι
-    case 0x1F9E: expansion[0] = 0x1F26, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F26; // ᾞ → ἦι
-    case 0x1F9F: expansion[0] = 0x1F27, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F27; // ᾟ → ἧι
-    case 0x1FA0: expansion[0] = 0x1F60, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F60; // ᾠ → ὠι
-    case 0x1FA1: expansion[0] = 0x1F61, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F61; // ᾡ → ὡι
-    case 0x1FA2: expansion[0] = 0x1F62, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F62; // ᾢ → ὢι
-    case 0x1FA3: expansion[0] = 0x1F63, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F63; // ᾣ → ὣι
-    case 0x1FA4: expansion[0] = 0x1F64, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F64; // ᾤ → ὤι
-    case 0x1FA5: expansion[0] = 0x1F65, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F65; // ᾥ → ὥι
-    case 0x1FA6: expansion[0] = 0x1F66, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F66; // ᾦ → ὦι
-    case 0x1FA7: expansion[0] = 0x1F67, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F67; // ᾧ → ὧι
-    case 0x1FA8: expansion[0] = 0x1F60, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F60; // ᾨ → ὠι
-    case 0x1FA9: expansion[0] = 0x1F61, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F61; // ᾩ → ὡι
-    case 0x1FAA: expansion[0] = 0x1F62, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F62; // ᾪ → ὢι
-    case 0x1FAB: expansion[0] = 0x1F63, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F63; // ᾫ → ὣι
-    case 0x1FAC: expansion[0] = 0x1F64, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F64; // ᾬ → ὤι
-    case 0x1FAD: expansion[0] = 0x1F65, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F65; // ᾭ → ὥι
-    case 0x1FAE: expansion[0] = 0x1F66, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F66; // ᾮ → ὦι
-    case 0x1FAF: expansion[0] = 0x1F67, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F67; // ᾯ → ὧι
-    case 0x1FB2: expansion[0] = 0x1F70, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F70; // ᾲ → ὰι
-    case 0x1FB3: expansion[0] = 0x03B1, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03B1; // ᾳ → αι
-    case 0x1FB4: expansion[0] = 0x03AC, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03AC; // ᾴ → άι
-    case 0x1FB6: expansion[0] = 0x03B1, expansion[1] = 0x0342, *expansion_count = 2; return 0x03B1; // ᾶ → α + combining
-    case 0x1FB7:
-        expansion[0] = 0x03B1, expansion[1] = 0x0342, expansion[2] = 0x03B9, *expansion_count = 3;
-        return 0x03B1; // ᾷ → α + 2 combining
-    case 0x1FBC: expansion[0] = 0x03B1, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03B1; // ᾼ → αι
-    case 0x1FC2: expansion[0] = 0x1F74, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F74; // ῂ → ὴι
-    case 0x1FC3: expansion[0] = 0x03B7, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03B7; // ῃ → ηι
-    case 0x1FC4: expansion[0] = 0x03AE, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03AE; // ῄ → ήι
-    case 0x1FC6: expansion[0] = 0x03B7, expansion[1] = 0x0342, *expansion_count = 2; return 0x03B7; // ῆ → η + combining
-    case 0x1FC7:
-        expansion[0] = 0x03B7, expansion[1] = 0x0342, expansion[2] = 0x03B9, *expansion_count = 3;
-        return 0x03B7; // ῇ → η + 2 combining
-    case 0x1FCC: expansion[0] = 0x03B7, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03B7; // ῌ → ηι
-    case 0x1FD2:
-        expansion[0] = 0x03B9, expansion[1] = 0x0308, expansion[2] = 0x0300, *expansion_count = 3;
-        return 0x03B9; // ῒ → ι + 2 combining
-    case 0x1FD3:
-        expansion[0] = 0x03B9, expansion[1] = 0x0308, expansion[2] = 0x0301, *expansion_count = 3;
-        return 0x03B9; // ΐ → ι + 2 combining
-    case 0x1FD6: expansion[0] = 0x03B9, expansion[1] = 0x0342, *expansion_count = 2; return 0x03B9; // ῖ → ι + combining
-    case 0x1FD7:
-        expansion[0] = 0x03B9, expansion[1] = 0x0308, expansion[2] = 0x0342, *expansion_count = 3;
-        return 0x03B9; // ῗ → ι + 2 combining
-    case 0x1FE2:
-        expansion[0] = 0x03C5, expansion[1] = 0x0308, expansion[2] = 0x0300, *expansion_count = 3;
-        return 0x03C5; // ῢ → υ + 2 combining
-    case 0x1FE3:
-        expansion[0] = 0x03C5, expansion[1] = 0x0308, expansion[2] = 0x0301, *expansion_count = 3;
-        return 0x03C5; // ΰ → υ + 2 combining
-    case 0x1FE4: expansion[0] = 0x03C1, expansion[1] = 0x0313, *expansion_count = 2; return 0x03C1; // ῤ → ρ + combining
-    case 0x1FE6: expansion[0] = 0x03C5, expansion[1] = 0x0342, *expansion_count = 2; return 0x03C5; // ῦ → υ + combining
-    case 0x1FE7:
-        expansion[0] = 0x03C5, expansion[1] = 0x0308, expansion[2] = 0x0342, *expansion_count = 3;
-        return 0x03C5; // ῧ → υ + 2 combining
-    case 0x1FF2: expansion[0] = 0x1F7C, expansion[1] = 0x03B9, *expansion_count = 2; return 0x1F7C; // ῲ → ὼι
-    case 0x1FF3: expansion[0] = 0x03C9, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03C9; // ῳ → ωι
-    case 0x1FF4: expansion[0] = 0x03CE, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03CE; // ῴ → ώι
-    case 0x1FF6: expansion[0] = 0x03C9, expansion[1] = 0x0342, *expansion_count = 2; return 0x03C9; // ῶ → ω + combining
-    case 0x1FF7:
-        expansion[0] = 0x03C9, expansion[1] = 0x0342, expansion[2] = 0x03B9, *expansion_count = 3;
-        return 0x03C9; // ῷ → ω + 2 combining
-    case 0x1FFC: expansion[0] = 0x03C9, expansion[1] = 0x03B9, *expansion_count = 2; return 0x03C9; // ῼ → ωι
-    case 0xFB00: expansion[0] = 0x0066, expansion[1] = 0x0066, *expansion_count = 2; return 0x0066; // ﬀ → ff
-    case 0xFB01: expansion[0] = 0x0066, expansion[1] = 0x0069, *expansion_count = 2; return 0x0066; // ﬁ → fi
-    case 0xFB02: expansion[0] = 0x0066, expansion[1] = 0x006C, *expansion_count = 2; return 0x0066; // ﬂ → fl
-    case 0xFB03:
-        expansion[0] = 0x0066, expansion[1] = 0x0066, expansion[2] = 0x0069, *expansion_count = 3;
-        return 0x0066; // ﬃ → ffi
-    case 0xFB04:
-        expansion[0] = 0x0066, expansion[1] = 0x0066, expansion[2] = 0x006C, *expansion_count = 3;
-        return 0x0066;                                                                              // ﬄ → ffl
-    case 0xFB05: expansion[0] = 0x0073, expansion[1] = 0x0074, *expansion_count = 2; return 0x0073; // ﬅ → st
-    case 0xFB06: expansion[0] = 0x0073, expansion[1] = 0x0074, *expansion_count = 2; return 0x0073; // ﬆ → st
-    case 0xFB13: expansion[0] = 0x0574, expansion[1] = 0x0576, *expansion_count = 2; return 0x0574; // ﬓ → մն
-    case 0xFB14: expansion[0] = 0x0574, expansion[1] = 0x0565, *expansion_count = 2; return 0x0574; // ﬔ → մե
-    case 0xFB15: expansion[0] = 0x0574, expansion[1] = 0x056B, *expansion_count = 2; return 0x0574; // ﬕ → մի
-    case 0xFB16: expansion[0] = 0x057E, expansion[1] = 0x0576, *expansion_count = 2; return 0x057E; // ﬖ → վն
-    case 0xFB17: expansion[0] = 0x0574, expansion[1] = 0x056D, *expansion_count = 2; return 0x0574; // ﬗ → մխ
+    switch (rune) {
+    case 0x00DF: folded[0] = 0x0073; folded[1] = 0x0073; return 2; // ß → ss (German)
+    case 0x0130: folded[0] = 0x0069; folded[1] = 0x0307; return 2; // İ → i + combining (Turkish)
+    case 0x0149: folded[0] = 0x02BC; folded[1] = 0x006E; return 2; // ŉ → ʼn (Afrikaans)
+    case 0x01F0: folded[0] = 0x006A; folded[1] = 0x030C; return 2; // ǰ → j + combining
+    case 0x0390: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΐ → ι + 2 combining (Greek)
+    case 0x03B0: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΰ → υ + 2 combining (Greek)
+    case 0x0587: folded[0] = 0x0565; folded[1] = 0x0582; return 2; // և → եdelays (Armenian)
+    case 0x1E96: folded[0] = 0x0068; folded[1] = 0x0331; return 2; // ẖ → h + combining
+    case 0x1E97: folded[0] = 0x0074; folded[1] = 0x0308; return 2; // ẗ → t + combining
+    case 0x1E98: folded[0] = 0x0077; folded[1] = 0x030A; return 2; // ẘ → w + combining
+    case 0x1E99: folded[0] = 0x0079; folded[1] = 0x030A; return 2; // ẙ → y + combining
+    case 0x1E9A: folded[0] = 0x0061; folded[1] = 0x02BE; return 2; // ẚ → aʾ
+    case 0x1E9E: folded[0] = 0x0073; folded[1] = 0x0073; return 2; // ẞ → ss (German capital Eszett)
+    case 0x1F50: folded[0] = 0x03C5; folded[1] = 0x0313; return 2; // ὐ → υ + combining (Greek)
+    case 0x1F52: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0300; return 3; // ὒ → υ + 2 combining
+    case 0x1F54: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0301; return 3; // ὔ → υ + 2 combining
+    case 0x1F56: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0342; return 3; // ὖ → υ + 2 combining
+    case 0x1F80: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2; // ᾀ → ἀι (Greek iota subscript)
+    case 0x1F81: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2; // ᾁ → ἁι
+    case 0x1F82: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2; // ᾂ → ἂι
+    case 0x1F83: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2; // ᾃ → ἃι
+    case 0x1F84: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2; // ᾄ → ἄι
+    case 0x1F85: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2; // ᾅ → ἅι
+    case 0x1F86: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2; // ᾆ → ἆι
+    case 0x1F87: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2; // ᾇ → ἇι
+    case 0x1F88: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2; // ᾈ → ἀι
+    case 0x1F89: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2; // ᾉ → ἁι
+    case 0x1F8A: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2; // ᾊ → ἂι
+    case 0x1F8B: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2; // ᾋ → ἃι
+    case 0x1F8C: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2; // ᾌ → ἄι
+    case 0x1F8D: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2; // ᾍ → ἅι
+    case 0x1F8E: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2; // ᾎ → ἆι
+    case 0x1F8F: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2; // ᾏ → ἇι
+    case 0x1F90: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2; // ᾐ → ἠι
+    case 0x1F91: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2; // ᾑ → ἡι
+    case 0x1F92: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2; // ᾒ → ἢι
+    case 0x1F93: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2; // ᾓ → ἣι
+    case 0x1F94: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2; // ᾔ → ἤι
+    case 0x1F95: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2; // ᾕ → ἥι
+    case 0x1F96: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2; // ᾖ → ἦι
+    case 0x1F97: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2; // ᾗ → ἧι
+    case 0x1F98: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2; // ᾘ → ἠι
+    case 0x1F99: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2; // ᾙ → ἡι
+    case 0x1F9A: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2; // ᾚ → ἢι
+    case 0x1F9B: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2; // ᾛ → ἣι
+    case 0x1F9C: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2; // ᾜ → ἤι
+    case 0x1F9D: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2; // ᾝ → ἥι
+    case 0x1F9E: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2; // ᾞ → ἦι
+    case 0x1F9F: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2; // ᾟ → ἧι
+    case 0x1FA0: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2; // ᾠ → ὠι
+    case 0x1FA1: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2; // ᾡ → ὡι
+    case 0x1FA2: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2; // ᾢ → ὢι
+    case 0x1FA3: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2; // ᾣ → ὣι
+    case 0x1FA4: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2; // ᾤ → ὤι
+    case 0x1FA5: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2; // ᾥ → ὥι
+    case 0x1FA6: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2; // ᾦ → ὦι
+    case 0x1FA7: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2; // ᾧ → ὧι
+    case 0x1FA8: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2; // ᾨ → ὠι
+    case 0x1FA9: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2; // ᾩ → ὡι
+    case 0x1FAA: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2; // ᾪ → ὢι
+    case 0x1FAB: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2; // ᾫ → ὣι
+    case 0x1FAC: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2; // ᾬ → ὤι
+    case 0x1FAD: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2; // ᾭ → ὥι
+    case 0x1FAE: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2; // ᾮ → ὦι
+    case 0x1FAF: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2; // ᾯ → ὧι
+    case 0x1FB2: folded[0] = 0x1F70; folded[1] = 0x03B9; return 2; // ᾲ → ὰι
+    case 0x1FB3: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2; // ᾳ → αι
+    case 0x1FB4: folded[0] = 0x03AC; folded[1] = 0x03B9; return 2; // ᾴ → άι
+    case 0x1FB6: folded[0] = 0x03B1; folded[1] = 0x0342; return 2; // ᾶ → α + combining
+    case 0x1FB7: folded[0] = 0x03B1; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ᾷ → α + 2 combining
+    case 0x1FBC: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2; // ᾼ → αι
+    case 0x1FC2: folded[0] = 0x1F74; folded[1] = 0x03B9; return 2; // ῂ → ὴι
+    case 0x1FC3: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2; // ῃ → ηι
+    case 0x1FC4: folded[0] = 0x03AE; folded[1] = 0x03B9; return 2; // ῄ → ήι
+    case 0x1FC6: folded[0] = 0x03B7; folded[1] = 0x0342; return 2; // ῆ → η + combining
+    case 0x1FC7: folded[0] = 0x03B7; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ῇ → η + 2 combining
+    case 0x1FCC: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2; // ῌ → ηι
+    case 0x1FD2: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0300; return 3; // ῒ → ι + 2 combining
+    case 0x1FD3: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΐ → ι + 2 combining
+    case 0x1FD6: folded[0] = 0x03B9; folded[1] = 0x0342; return 2; // ῖ → ι + combining
+    case 0x1FD7: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0342; return 3; // ῗ → ι + 2 combining
+    case 0x1FE2: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0300; return 3; // ῢ → υ + 2 combining
+    case 0x1FE3: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΰ → υ + 2 combining
+    case 0x1FE4: folded[0] = 0x03C1; folded[1] = 0x0313; return 2; // ῤ → ρ + combining
+    case 0x1FE6: folded[0] = 0x03C5; folded[1] = 0x0342; return 2; // ῦ → υ + combining
+    case 0x1FE7: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0342; return 3; // ῧ → υ + 2 combining
+    case 0x1FF2: folded[0] = 0x1F7C; folded[1] = 0x03B9; return 2; // ῲ → ὼι
+    case 0x1FF3: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2; // ῳ → ωι
+    case 0x1FF4: folded[0] = 0x03CE; folded[1] = 0x03B9; return 2; // ῴ → ώι
+    case 0x1FF6: folded[0] = 0x03C9; folded[1] = 0x0342; return 2; // ῶ → ω + combining
+    case 0x1FF7: folded[0] = 0x03C9; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ῷ → ω + 2 combining
+    case 0x1FFC: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2; // ῼ → ωι
+    case 0xFB00: folded[0] = 0x0066; folded[1] = 0x0066; return 2; // ﬀ → ff
+    case 0xFB01: folded[0] = 0x0066; folded[1] = 0x0069; return 2; // ﬁ → fi
+    case 0xFB02: folded[0] = 0x0066; folded[1] = 0x006C; return 2; // ﬂ → fl
+    case 0xFB03: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x0069; return 3; // ﬃ → ffi
+    case 0xFB04: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x006C; return 3; // ﬄ → ffl
+    case 0xFB05: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬅ → st
+    case 0xFB06: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬆ → st
+    case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մն
+    case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մե
+    case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մի
+    case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → վն
+    case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մխ
     }
 
-    return cp; // No folding
+    folded[0] = rune; return 1; // No folding
+    // clang-format on
 }
 
 /**
@@ -1446,9 +1085,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
     }
 
     // Pre-fold the needle into a buffer of codepoints
-    sz_rune_t folded_needle[1024]; // Should be enough for most needles
+    sz_rune_t folded_needle[1024];
     sz_size_t folded_needle_count = 0;
-
     sz_cptr_t needle_ptr = needle;
     sz_cptr_t needle_end = needle + needle_length;
 
@@ -1456,20 +1094,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
         sz_rune_t cp;
         sz_rune_length_t rune_length;
         sz_rune_parse(needle_ptr, &cp, &rune_length);
-        if (rune_length == 0) break; // Invalid UTF-8
+        if (rune_length == 0) break;
 
-        sz_rune_t expansion[4];
-        sz_size_t expansion_count = 0;
-        sz_rune_t folded = sz_unicode_fold_codepoint_(cp, expansion, &expansion_count);
-
-        // If expansion_count > 0, the expansion array contains ALL folded codepoints
-        // If expansion_count == 0, use the return value (simple one-to-one mapping)
-        if (expansion_count > 0) {
-            for (sz_size_t i = 0; i < expansion_count; i++) {
-                if (folded_needle_count < 1024) { folded_needle[folded_needle_count++] = expansion[i]; }
-            }
-        }
-        else { folded_needle[folded_needle_count++] = folded; }
+        // Apply case folding
+        sz_rune_t folded[4];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
+        for (sz_size_t i = 0; i < folded_count && folded_needle_count < 1024; ++i)
+            folded_needle[folded_needle_count++] = folded[i];
 
         needle_ptr += rune_length;
     }
@@ -1487,34 +1118,24 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
         sz_cptr_t match_start = haystack_ptr;
         sz_cptr_t match_ptr = haystack_ptr;
         sz_size_t needle_idx = 0;
+        sz_bool_t mismatch = sz_false_k;
 
         // Try to match the folded needle at this position
-        while (needle_idx < folded_needle_count && match_ptr < haystack_end) {
+        while (needle_idx < folded_needle_count && match_ptr < haystack_end && !mismatch) {
             sz_rune_t cp;
             sz_rune_length_t rune_length;
             sz_rune_parse(match_ptr, &cp, &rune_length);
-            if (rune_length == 0) break; // Invalid UTF-8
+            if (rune_length == 0) break;
 
-            sz_rune_t expansion[4];
-            sz_size_t expansion_count = 0;
-            sz_rune_t folded = sz_unicode_fold_codepoint_(cp, expansion, &expansion_count);
+            // Apply case folding
+            sz_rune_t folded[4];
+            sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
 
-            // If expansion_count > 0, check expansion array; otherwise check return value
-            if (expansion_count > 0) {
-                // Check all codepoints in the expansion array
-                for (sz_size_t i = 0; i < expansion_count && needle_idx < folded_needle_count; i++) {
-                    if (expansion[i] != folded_needle[needle_idx]) {
-                        needle_idx = folded_needle_count + 1; // Signal mismatch
-                        break;
-                    }
-                    needle_idx++;
-                }
-                if (needle_idx > folded_needle_count) break; // Mismatch occurred
-            }
-            else {
-                // Simple one-to-one mapping
-                if (folded != folded_needle[needle_idx]) {
-                    break; // Mismatch
+            // Compare all folded codepoints against the needle
+            for (sz_size_t i = 0; i < folded_count && needle_idx < folded_needle_count; ++i) {
+                if (folded[i] != folded_needle[needle_idx]) {
+                    mismatch = sz_true_k;
+                    break;
                 }
                 needle_idx++;
             }
@@ -1523,7 +1144,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
         }
 
         // Did we match the entire needle?
-        if (needle_idx == folded_needle_count) {
+        if (needle_idx == folded_needle_count && !mismatch) {
             *matched_length = (sz_size_t)(match_ptr - match_start);
             return match_start;
         }
@@ -1532,12 +1153,56 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
         sz_rune_t cp;
         sz_rune_length_t rune_length;
         sz_rune_parse(haystack_ptr, &cp, &rune_length);
-        if (rune_length == 0) break; // Invalid UTF-8
+        if (rune_length == 0) break;
         haystack_ptr += rune_length;
     }
 
     *matched_length = 0;
     return SZ_NULL_CHAR;
+}
+
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_serial( //
+    sz_cptr_t source, sz_size_t source_length,  //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
+
+    sz_u8_t const *src = (sz_u8_t const *)source;
+    sz_u8_t const *src_end = src + source_length;
+    sz_u8_t *dst = (sz_u8_t *)destination;
+    sz_u8_t *dst_end = dst + destination_capacity;
+    sz_u8_t *dst_start = dst;
+
+    while (src < src_end) {
+        // Decode one UTF-8 codepoint
+        sz_rune_t cp;
+        sz_rune_length_t rune_length;
+        sz_rune_parse((sz_cptr_t)src, &cp, &rune_length);
+        if (rune_length == 0) {
+            *destination_length = (sz_size_t)(dst - dst_start);
+            return sz_invalid_utf8_k;
+        }
+        src += rune_length;
+
+        // Apply case folding
+        sz_rune_t folded[4];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
+
+        // Encode all folded codepoints
+        for (sz_size_t i = 0; i < folded_count; ++i) {
+            if (dst + 4 > dst_end) {
+                *destination_length = (sz_size_t)(dst - dst_start);
+                return sz_bad_alloc_k;
+            }
+            sz_size_t written = sz_rune_export_(folded[i], dst);
+            if (written == 0) {
+                *destination_length = (sz_size_t)(dst - dst_start);
+                return sz_invalid_utf8_k;
+            }
+            dst += written;
+        }
+    }
+
+    *destination_length = (sz_size_t)(dst - dst_start);
+    return sz_success_k;
 }
 
 #pragma endregion // Serial Implementation
@@ -2011,6 +1676,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     return text;
 }
 
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_ice(   //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
+    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_ice( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+    return sz_utf8_find_case_insensitive_serial(haystack, haystack_length, needle, needle_length, matched_length);
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -2322,6 +1999,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_haswell( //
+    sz_cptr_t source, sz_size_t source_length,   //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
+    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_haswell( //
+    sz_cptr_t haystack, sz_size_t haystack_length,         //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+    return sz_utf8_find_case_insensitive_serial(haystack, haystack_length, needle, needle_length, matched_length);
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -2351,6 +2040,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
+}
+
+SZ_PUBLIC sz_status_t sz_utf8_case_fold_neon(  //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
+    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_neon( //
+    sz_cptr_t haystack, sz_size_t haystack_length,      //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+    return sz_utf8_find_case_insensitive_serial(haystack, haystack_length, needle, needle_length, matched_length);
 }
 
 #pragma endregion // NEON Implementation
@@ -2407,6 +2108,28 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
     return sz_utf8_unpack_chunk_haswell(text, length, runes, runes_capacity, runes_unpacked);
 #else
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
+#endif
+}
+
+SZ_DYNAMIC sz_status_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination,
+                                         sz_size_t destination_capacity, sz_size_t *destination_length) {
+#if SZ_USE_ICE
+    return sz_utf8_case_fold_ice(source, source_length, destination, destination_capacity, destination_length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_fold_haswell(source, source_length, destination, destination_capacity, destination_length);
+#else
+    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+#endif
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length, sz_size_t *matched_length) {
+#if SZ_USE_ICE
+    return sz_utf8_find_case_insensitive_ice(haystack, haystack_length, needle, needle_length, matched_length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_find_case_insensitive_haswell(haystack, haystack_length, needle, needle_length, matched_length);
+#else
+    return sz_utf8_find_case_insensitive_serial(haystack, haystack_length, needle, needle_length, matched_length);
 #endif
 }
 
