@@ -295,7 +295,14 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 #endif
 
 #if SZ_USE_SVE2
-    if (caps & sz_cap_sve2_k) { impl->bytesum = sz_bytesum_sve2; }
+    if (caps & sz_cap_sve2_k) {
+        impl->bytesum = sz_bytesum_sve2;
+
+        impl->utf8_count = sz_utf8_count_sve2;
+        impl->utf8_find_nth = sz_utf8_find_nth_sve2;
+        impl->utf8_find_newline = sz_utf8_find_newline_sve2;
+        impl->utf8_find_whitespace = sz_utf8_find_whitespace_sve2;
+    }
 #endif
 
 #if SZ_USE_SVE2_AES

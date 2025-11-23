@@ -10,12 +10,6 @@
  *  - `sz_utf8_find_newline` - skip to first newline (7 Unicode newline characters + CRLF)
  *  - `sz_utf8_find_whitespace` - skip to first whitespace (25 Unicode White_Space characters)
  *
- *  Work in progress:
- *
- *  - `sz_utf8_case_fold` - Unicode case folding for codepoints
- *  - `sz_utf8_find_case_insensitive` - case-insensitive substring search in UTF-8 strings
- *  - `sz_utf8_unpack_chunk` - convert UTF-8 to UTF-32 in a streaming manner
- *
  *  StringZilla focuses on analyzing character classes rather than UAX#14 (Line Breaking Algorithm) or UAX#29 (Text
  *  Segmentation) in full detail. It doesn't currently implement traditional "grapheme cluster", "word boundary",
  *  or "sentence boundary", but focuses on SIMD-optimized detection of newlines and whitespaces in UTF-8 strings.
@@ -164,229 +158,68 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 
-/**
- *  @brief  Validate UTF-8 encoding correctness per RFC 3629.
- *
- *  Checks continuation byte patterns (10xxxxxx), rejects overlong encodings, surrogates (U+D800-U+DFFF),
- *  values beyond U+10FFFF, and truncated sequences. Only accepts proper 1-4 byte UTF-8 sequences.
- *
- *  Overlong encodings occur when a codepoint is encoded with more bytes than necessary.
- *  For example, "/" (U+002F) can be incorrectly encoded as 0xC0 0xAF (2 bytes) or 0xE0 0x80 0xAF (3 bytes)
- *  instead of the valid 0x2F (1 byte). These create security vulnerabilities (directory traversal attacks)
- *  by bypassing filters that check for "/" in its canonical form.
- *
- *  Surrogates (U+D800-U+DFFF) are UTF-16 encoding artifacts - they're not actual Unicode characters.
- *  UTF-16 uses "surrogate pairs" (high surrogate + low surrogate) to represent codepoints beyond U+FFFF.
- *  UTF-8 encodes these codepoints directly in 4 bytes without needing surrogates, so the range
- *  U+D800-U+DFFF is permanently invalid in UTF-8 to prevent multiple representations of the same character.
- *
- *  @param[in] text String to validate.
- *  @param[in] length Number of bytes in the string.
- *  @return 1 if valid UTF-8, 0 if invalid.
- *
- *  @code
- *      if (!sz_utf8_valid(user_input, input_len)) {
- *          fprintf(stderr, "Invalid UTF-8 encoding\n");
- *          return ERROR;
- *      }
- *  @endcode
- *
- *  @note Invalid patterns include: overlong encodings (0xC0 0x80 for null), surrogates (0xED 0xA0 0x80),
- *        invalid continuation bytes, out-of-range codepoints (0xF4 0x90+), and truncated sequences.
- */
-SZ_DYNAMIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length);
-
-/**
- *  @brief  Unpack a UTF-8 string into UTF-32 codepoints.
- *
- *  This function is designed for streaming-like decoding with smart iterators built on top of it.
- *  The iterator would unpack a continuous slice of UTF-8 text into UTF-32 codepoints in chunks,
- *  yielding them upstream - only one at a time. This avoids allocating large buffers for the entire
- *  UTF-32 string, which can be 4x the size of the UTF-8 input.
- *
- *  This functionality is similar to the `simdutf` library's UTF-8 to UTF-32 conversion routines,
- *  but unlike most of them - performs no validity checks, and leverages an assumption that absolute
- *  majority of written text doesn't mix codepoints of every length in each register-sized chunk.
- *
- *  - English text and source code is predominantly 1-byte ASCII characters.
- *  - Broader European languages with diacritics mostly use 2-byte characters with 1-byte punctuation.
- *  - Chinese & Jamapanese mostly use 3-byte characters with rare punctuation, which can be 1- or 3-byte.
- *  - Korean uses 3-byte characters with 1-byte spaces; word are 2-6 syllables or 6-16 bytes.
- *
- *  It's a different story for emoji-heavy texts, which can mix 4-byte characters more frequently.
- *
- *  @param[in] text UTF-8 string to unpack.
- *  @param[in] length Number of bytes in the string (up to 64).
- *  @param[out] runes Output buffer for UTF-32 codepoints (recommended to be at least @b 64 entries wide).
- *  @param[in] runes_capacity Capacity of the @p runes buffer (number of sz_rune_t entries).
- *  @param[out] runes_unpacked Number of runes unpacked.
- *  @return Pointer to the byte after the last unpacked byte in @p text.
- */
-SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked);
-
-/**
- *  @brief  Apply Unicode case folding to a UTF-8 string in-place or to a separate buffer.
- *
- *  This function reads a UTF-8 encoded source string, applies Unicode case folding to each
- *  codepoint, and writes the result to the destination buffer. Case folding normalizes text
- *  for case-insensitive comparisons by mapping uppercase letters to their lowercase equivalents
- *  and handling special cases like German ß → ss expansion.
- *
- *  The destination buffer must be at least 1.5x the source length to accommodate potential
- *  one-to-many expansions (e.g., ß → ss, ﬁ → fi). If the destination buffer is too small,
- *  the function returns an error status.
- *
- *  @param[in] source UTF-8 string to be case-folded.
- *  @param[in] source_length Number of bytes in the source buffer.
- *  @param[out] destination Buffer to write the case-folded UTF-8 string.
- *  @param[in] destination_capacity Size of the destination buffer in bytes.
- *  @param[out] destination_length Number of bytes written to the destination buffer.
- *  @return sz_success_k on success, sz_bad_alloc_k if destination buffer is too small,
- *          sz_invalid_utf8_k if source contains invalid UTF-8 sequences.
- *
- *  @example Basic usage:
- *  @code
- *      char const *source = "HELLO WORLD";
- *      char destination[32];
- *      sz_size_t result_length;
- *      sz_status_t status = sz_utf8_case_fold(source, 11, destination, 32, &result_length);
- *      // destination now contains "hello world", result_length = 11
- *  @endcode
- *
- *  @example Handling expansions:
- *  @code
- *      char const *source = "STRAẞE";  // German "street" with capital ß
- *      char destination[32];
- *      sz_size_t result_length;
- *      sz_status_t status = sz_utf8_case_fold(source, strlen(source), destination, 32, &result_length);
- *      // destination now contains "strasse" (ẞ expanded to ss)
- *  @endcode
- */
-SZ_DYNAMIC sz_status_t sz_utf8_case_fold(      //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
-
-/**
- *  @brief  Case-insensitive substring search in UTF-8 strings.
- *
- *  In applications where the haystack remains largely static and memory/storage is cheap, it is recommended
- *  to pre-process the haystack into a case-folded version using Unicode Case Folding (e.g., via the ICU
- *  library) and subsequently use the simpler `sz_find()` function for repeated searches. This avoids the cost
- *  of performing full folding logic during every search operation.
- *
- *  This function applies full Unicode Case Folding as defined in the Unicode Standard (UAX #21 and
- *  CaseFolding.txt), covering all bicameral scripts, all offset-based one-to-one folds, all table-based
- *  one-to-one folds, and all normative one-to-many expansions.
- *
- *  The following character mappings are supported:
- *
- *  - ASCII Latin letters A–Z (U+0041–U+005A) are folded to a–z (U+0061–U+007A) using a trivial +32 offset.
- *  - Fullwidth Latin letters Ａ–Ｚ (U+FF21–U+FF3A) are folded to ａ–ｚ (U+FF41–U+FF5A) with the same +32 offset.
- *  - Cyrillic uppercase А–Я (U+0410–U+042F) are folded to а–я (U+0430–U+044F) using a +32 offset.
- *  - Armenian uppercase Ա–Ֆ (U+0531–U+0556) are folded to ա–ֆ (U+0561–U+0586) using a +48 offset.
- *  - Georgian Mtavruli letters Ა-Ჿ (U+1C90–U+1CBF, excluding 2) are folded to their Mkhedruli equivalents
- *    (U+10D0–U+10FF) using a fixed linear translation defined by the Unicode Standard.
- *  - Greek uppercase Α–Ω (U+0391–U+03A9) are folded to α–ω (U+03B1–U+03C9) via a +32 offset, with a normative
- *    context-sensitive rule for sigma: Σ (U+03A3) folds to σ (U+03C3) or ς (U+03C2) depending on word-final
- *    position, as required by SpecialCasing.txt.
- *  - Latin Extended characters include numerous one-to-one folds and several one-to-many expansions, including:
- *      ß  (U+00DF) → "ss" (U+0073 U+0073)
- *      ẞ  (U+1E9E) → "ss"
- *    as well as mixed-case digraphs and trigraphs normalized to lowercase sequences.
- *  - Turkish and Azerbaijani dotted/dotless-I rules follow SpecialCasing.txt, including:
- *      İ (U+0130)  → "i̇" (U+0069 U+0307)
- *      I (U+0049)  →  i   (U+0069)
- *      ı (U+0131)  →  ı   (already lowercase)
- *    with full locale-correct behavior.
- *  - Lithuanian accented I/J mappings that require combining-dot additions or removals are processed
- *    as multi-codepoint expansions exactly as specified in SpecialCasing.txt.
- *  - Additional bicameral scripts—Cherokee, Deseret, Osage, Warang Citi, Adlam—use their normative
- *    one-to-one uppercase-to-lowercase mappings defined in CaseFolding.txt.
- *
- *  Folding is applied during matching without rewriting the entire haystack. Multi-codepoint expansions,
- *  contextual folds, and combining-mark adjustments are handled at comparison time.
- *
- *  @param[in] haystack UTF-8 string to be searched.
- *  @param[in] haystack_length Number of bytes in the haystack buffer.
- *  @param[in] needle UTF-8 substring to search for.
- *  @param[in] needle_length Number of bytes in the needle substring.
- *  @param[out] matched_length Number of bytes in the matched region.
- *  @return Pointer to the first matching substring from @p haystack, or @c SZ_NULL_CHAR if not found.
- */
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive( //
-    sz_cptr_t haystack, sz_size_t haystack_length,  //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
-
 #pragma endregion
 
 #pragma region Platform-Specific Backends
 
-// Serial (portable) implementations
+/** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_find_newline */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
-    sz_cptr_t text, sz_size_t length,            //
-    sz_rune_t *runes, sz_size_t runes_capacity,  //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_serial( //
-    sz_cptr_t source, sz_size_t source_length,  //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
-    sz_cptr_t haystack, sz_size_t haystack_length,        //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
-// Haswell (AVX2) implementations
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_find_newline */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
-    sz_cptr_t text, sz_size_t length,             //
-    sz_rune_t *runes, sz_size_t runes_capacity,   //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_haswell( //
-    sz_cptr_t source, sz_size_t source_length,   //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_haswell( //
-    sz_cptr_t haystack, sz_size_t haystack_length,         //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+#endif
 
-// Ice Lake (AVX-512) implementations
+#if SZ_USE_ICE
+/** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_ice(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_find_newline */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_ice(   //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_ice( //
-    sz_cptr_t haystack, sz_size_t haystack_length,     //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+#endif
 
-// NEON (ARM) implementations - fall back to serial
+#if SZ_USE_NEON
+/** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_find_newline */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_neon(  //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
-SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_neon( //
-    sz_cptr_t haystack, sz_size_t haystack_length,      //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+#endif
+
+/**
+ *  SVE2 provides a lot of UTF-8 friendly instructions superior to NEON, including:
+ *  - svcmpeq_n: Compare vector elements to a scalar byte value without broadcast overhead.
+ *  - svmatch: Compare each value against up to 16 other byte values in a single instruction.
+ *  - svbrkb: Find byte positions of break characters in UTF-8 strings.
+ */
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_find_newline */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_whitespace */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+#endif
 
 #pragma endregion
 
@@ -1210,22 +1043,415 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
 #pragma endregion // Haswell Implementation
 
 #pragma region NEON Implementation
+#if SZ_USE_NEON
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("+simd")
+#endif
+
+SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_(uint8x16_t vec) {
+    // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+    // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
+}
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+
+    sz_u128_vec_t text_vec;
+    uint8x16_t n_vec = vdupq_n_u8('\n');
+    uint8x16_t v_vec = vdupq_n_u8('\v');
+    uint8x16_t f_vec = vdupq_n_u8('\f');
+    uint8x16_t r_vec = vdupq_n_u8('\r');
+    uint8x16_t xc2_vec = vdupq_n_u8(0xC2);
+    uint8x16_t x85_vec = vdupq_n_u8(0x85);
+    uint8x16_t xe2_vec = vdupq_n_u8(0xE2);
+    uint8x16_t x80_vec = vdupq_n_u8(0x80);
+    uint8x16_t xa8_vec = vdupq_n_u8(0xA8);
+    uint8x16_t xa9_vec = vdupq_n_u8(0xA9);
+
+    uint8x16_t drop1_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+    uint8x16_t drop2_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00};
+
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8((sz_u8_t const *)text);
+
+        // 1-byte matches
+        uint8x16_t n_cmp = vceqq_u8(text_vec.u8x16, n_vec);
+        uint8x16_t v_cmp = vceqq_u8(text_vec.u8x16, v_vec);
+        uint8x16_t f_cmp = vceqq_u8(text_vec.u8x16, f_vec);
+        uint8x16_t r_cmp = vceqq_u8(text_vec.u8x16, r_vec);
+        uint8x16_t one_vec = vorrq_u8(vorrq_u8(n_cmp, v_cmp), vorrq_u8(f_cmp, r_cmp));
+
+        // 2- & 3-byte matches with shifted views
+        uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
+        uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
+        uint8x16_t rn_vec = vandq_u8(r_cmp, vceqq_u8(text1, n_vec));
+        uint8x16_t xc285_vec = vandq_u8(vceqq_u8(text_vec.u8x16, xc2_vec), vceqq_u8(text1, x85_vec));
+        uint8x16_t two_vec = vandq_u8(vorrq_u8(rn_vec, xc285_vec), drop1_vec); // Ignore last split match
+
+        uint8x16_t xe2_cmp = vceqq_u8(text_vec.u8x16, xe2_vec);
+        uint8x16_t e280_vec = vandq_u8(xe2_cmp, vceqq_u8(text1, x80_vec));
+        uint8x16_t e280a8_vec = vandq_u8(e280_vec, vceqq_u8(text2, xa8_vec));
+        uint8x16_t e280a9_vec = vandq_u8(e280_vec, vceqq_u8(text2, xa9_vec));
+        uint8x16_t three_vec = vandq_u8(vorrq_u8(e280a8_vec, e280a9_vec), drop2_vec); // Ignore last two split matches
+
+        // Quick presence check
+        uint8x16_t combined_vec = vorrq_u8(one_vec, vorrq_u8(two_vec, three_vec));
+        if (vmaxvq_u8(combined_vec)) {
+
+            // Late mask extraction only when a match exists
+            sz_u64_t one_mask = sz_utf8_vreinterpretq_u8_u4_(one_vec);
+            sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_(two_vec);
+            sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_(three_vec);
+            sz_u64_t combined_mask = one_mask | two_mask | three_mask;
+
+            int bit_index = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)1 << bit_index;
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (two_mask | three_mask)) != 0;
+            length_value += (first_match_mask & three_mask) != 0;
+            *matched_length = length_value;
+            return text + (bit_index / 4);
+        }
+        text += 14;
+        length -= 14;
+    }
+
     return sz_utf8_find_newline_serial(text, length, matched_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+
+    sz_u128_vec_t text_vec;
+    uint8x16_t t_vec = vdupq_n_u8('\t');
+    uint8x16_t r_vec = vdupq_n_u8('\r');
+    uint8x16_t x20_vec = vdupq_n_u8(' ');
+    uint8x16_t xc2_vec = vdupq_n_u8(0xC2);
+    uint8x16_t x85_vec = vdupq_n_u8(0x85);
+    uint8x16_t xa0_vec = vdupq_n_u8(0xA0);
+    uint8x16_t xe1_vec = vdupq_n_u8(0xE1);
+    uint8x16_t xe2_vec = vdupq_n_u8(0xE2);
+    uint8x16_t xe3_vec = vdupq_n_u8(0xE3);
+    uint8x16_t x9a_vec = vdupq_n_u8(0x9A);
+    uint8x16_t x80_vec = vdupq_n_u8(0x80);
+    uint8x16_t x81_vec = vdupq_n_u8(0x81);
+    uint8x16_t x8d_vec = vdupq_n_u8(0x8D);
+    uint8x16_t xa8_vec = vdupq_n_u8(0xA8);
+    uint8x16_t xa9_vec = vdupq_n_u8(0xA9);
+    uint8x16_t xaf_vec = vdupq_n_u8(0xAF);
+    uint8x16_t x9f_vec = vdupq_n_u8(0x9F);
+
+    uint8x16_t drop1_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+    uint8x16_t drop2_vec = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00};
+
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8((sz_u8_t const *)text);
+
+        // 1-byte matches
+        uint8x16_t x20_cmp = vceqq_u8(text_vec.u8x16, x20_vec);
+        uint8x16_t range_cmp = vandq_u8(vcgeq_u8(text_vec.u8x16, t_vec), vcleq_u8(text_vec.u8x16, r_vec));
+        uint8x16_t one_vec = vorrq_u8(x20_cmp, range_cmp);
+
+        // 2-byte and 3-byte prefix indicators
+        uint8x16_t xc2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, xc2_vec), drop1_vec);
+        uint8x16_t xe1_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, xe1_vec), drop2_vec);
+        uint8x16_t xe2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, xe2_vec), drop2_vec);
+        uint8x16_t xe3_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, xe3_vec), drop2_vec);
+        uint8x16_t prefix_vec = vorrq_u8(vorrq_u8(xc2_cmp, xe1_cmp), vorrq_u8(xe2_cmp, xe3_cmp));
+
+        sz_u64_t one_mask = sz_utf8_vreinterpretq_u8_u4_(one_vec);
+        sz_u64_t prefix_mask = sz_utf8_vreinterpretq_u8_u4_(prefix_vec);
+
+        // Check for fast path: one-byte match before any prefix
+        if (one_mask) {
+            if (prefix_mask) {
+                int first_one_byte_offset = sz_u64_ctz(one_mask);
+                int first_prefix_offset = sz_u64_ctz(prefix_mask);
+                if (first_one_byte_offset < first_prefix_offset) {
+                    *matched_length = 1;
+                    return text + (first_one_byte_offset / 4);
+                }
+            }
+            else {
+                int first_one_byte_offset = sz_u64_ctz(one_mask);
+                *matched_length = 1;
+                return text + (first_one_byte_offset / 4);
+            }
+        }
+        else if (!prefix_mask) {
+            text += 14;
+            length -= 14;
+            continue;
+        }
+
+        // 2-byte matches
+        uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
+        uint8x16_t two_vec =
+            vorrq_u8(vandq_u8(xc2_cmp, vceqq_u8(text1, x85_vec)), vandq_u8(xc2_cmp, vceqq_u8(text1, xa0_vec)));
+
+        // 3-byte matches
+        uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
+        uint8x16_t x80_ge_cmp = vcgeq_u8(text2, x80_vec);
+        uint8x16_t x8d_le_cmp = vcleq_u8(text2, x8d_vec);
+
+        uint8x16_t ogham_vec = vandq_u8(xe1_cmp, vandq_u8(vceqq_u8(text1, x9a_vec), vceqq_u8(text2, x80_vec)));
+        uint8x16_t range_e280_vec =
+            vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vandq_u8(x80_ge_cmp, x8d_le_cmp)));
+        uint8x16_t u2028_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xa8_vec)));
+        uint8x16_t u2029_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xa9_vec)));
+        uint8x16_t u202f_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, xaf_vec)));
+        uint8x16_t u205f_vec = vandq_u8(xe2_cmp, vandq_u8(vceqq_u8(text1, x81_vec), vceqq_u8(text2, x9f_vec)));
+        uint8x16_t ideographic_vec = vandq_u8(xe3_cmp, vandq_u8(vceqq_u8(text1, x80_vec), vceqq_u8(text2, x80_vec)));
+        uint8x16_t three_vec = vorrq_u8(vorrq_u8(vorrq_u8(ogham_vec, range_e280_vec), vorrq_u8(u2028_vec, u2029_vec)),
+                                        vorrq_u8(vorrq_u8(u202f_vec, u205f_vec), ideographic_vec));
+
+        sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_(two_vec);
+        sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_(three_vec);
+        sz_u64_t combined_mask = one_mask | two_mask | three_mask;
+
+        if (combined_mask) {
+            int bit_index = sz_u64_ctz(combined_mask);
+            sz_u64_t first_match_mask = (sz_u64_t)1 << bit_index;
+            sz_size_t length_value = 1;
+            length_value += (first_match_mask & (two_mask | three_mask)) != 0;
+            length_value += (first_match_mask & three_mask) != 0;
+            *matched_length = length_value;
+            return text + (bit_index / 4);
+        }
+        text += 14;
+        length -= 14;
+    }
+
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) { return sz_utf8_count_serial(text, length); }
+SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
+    sz_u128_vec_t text_vec, headers_vec, continuation_vec;
+    uint8x16_t continuation_mask_vec = vdupq_n_u8(0xC0);
+    uint8x16_t continuation_pattern_vec = vdupq_n_u8(0x80);
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    uint64x2_t char_count_vec = vdupq_n_u64(0);
+    while (length >= 16) {
+        text_vec.u8x16 = vld1q_u8(text_u8);
+        headers_vec.u8x16 = vandq_u8(text_vec.u8x16, continuation_mask_vec);
+        continuation_vec.u8x16 = vceqq_u8(headers_vec.u8x16, continuation_pattern_vec);
+        // Convert 0xFF/0x00 into 1/0 and sum.
+        uint8x16_t start_flags = vshrq_n_u8(vmvnq_u8(continuation_vec.u8x16), 7);
+        uint16x8_t sum16 = vpaddlq_u8(start_flags);
+        uint32x4_t sum32 = vpaddlq_u16(sum16);
+        uint64x2_t sum64 = vpaddlq_u32(sum32);
+        char_count_vec = vaddq_u64(char_count_vec, sum64);
+        text_u8 += 16;
+        length -= 16;
+    }
+
+    sz_size_t char_count = vgetq_lane_u64(char_count_vec, 0) + vgetq_lane_u64(char_count_vec, 1);
+    if (length) char_count += sz_utf8_count_serial((sz_cptr_t)text_u8, length);
+    return char_count;
+}
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    // TODO: Implement a NEON-accelerated version of sz_utf8_find_nth in absense of PDEP instruction.
     return sz_utf8_find_nth_serial(text, length, n);
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif // SZ_USE_NEON
+
 #pragma endregion // NEON Implementation
+
+#pragma region SVE2 Implementation
+#if SZ_USE_SVE2
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("+sve+sve2")
+#endif
+
+SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t const step = svcntb();
+    sz_size_t char_count = 0;
+
+    // Count bytes that are NOT continuation bytes: (byte & 0xC0) != 0x80
+    for (sz_size_t offset = 0; offset < length; offset += step) {
+        svbool_t pg = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
+        svuint8_t text_vec = svld1_u8(pg, text_u8 + offset);
+        svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
+        char_count += svcntp_b8(pg, is_start);
+    }
+    return char_count;
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t const step = svcntb();
+
+    // Find character start bytes: (byte & 0xC0) != 0x80
+    for (sz_size_t offset = 0; offset < length; offset += step) {
+        svbool_t pg = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
+        svuint8_t text_vec = svld1_u8(pg, text_u8 + offset);
+        svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
+        sz_size_t start_count = svcntp_b8(pg, is_start);
+
+        if (n < start_count) {
+            // COMPACT gathers start-byte positions to front, CLASTB extracts nth
+            svuint8_t indices = svindex_u8(0, 1);
+            svuint8_t positions = svcompact_u8(is_start, indices);
+            sz_u8_t pos = svclastb_u8(svwhilele_b8((sz_u64_t)0, (sz_u64_t)n), 0, positions);
+            return (sz_cptr_t)(text_u8 + offset + pos);
+        }
+        n -= start_count;
+    }
+
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t const step = svcntb();
+
+    // Character sets for MATCH (DUPQ replicates 128-bit pattern across vector, no stack/loads)
+    svuint8_t all_set =
+        svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
+    svuint8_t one_set =
+        svdupq_n_u8('\n', '\v', '\f', '\r', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
+    svuint8_t zeros = svdup_n_u8(0);
+
+    for (sz_size_t offset = 0; offset < length; offset += step - 2) {
+        sz_i64_t remaining = (sz_i64_t)(length - offset);
+        svbool_t pg = svwhilelt_b8((sz_i64_t)0, remaining);
+        svbool_t pg_2 = svwhilelt_b8((sz_i64_t)0, remaining - 1);
+        svbool_t pg_3 = svwhilelt_b8((sz_i64_t)0, remaining - 2);
+
+        svuint8_t text0 = svld1_u8(pg, text_u8 + offset);
+
+        // Fast rejection: any potential first byte?
+        if (!svptest_any(pg, svmatch_u8(pg, text0, all_set))) continue;
+
+        svuint8_t text1 = svext_u8(text0, zeros, 1);
+        svuint8_t text2 = svext_u8(text0, zeros, 2);
+
+        // 1-byte newlines: MATCH against {\n, \v, \f, \r}
+        svbool_t one = svmatch_u8(pg, text0, one_set);
+
+        // 2-byte: \r\n, NEL (0xC2 0x85)
+        svbool_t rn = svand_b_z(pg_2, svcmpeq_n_u8(pg, text0, '\r'), svcmpeq_n_u8(pg, text1, '\n'));
+        svbool_t nel = svand_b_z(pg_2, svcmpeq_n_u8(pg, text0, 0xC2), svcmpeq_n_u8(pg, text1, 0x85));
+        svbool_t two = svorr_b_z(pg_2, rn, nel);
+
+        // 3-byte: 0xE2 0x80 + {0xA8, 0xA9} - use OR instead of MATCH for 2-element set
+        svbool_t e2_80 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x80));
+        svbool_t third_ok = svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8), svcmpeq_n_u8(pg, text2, 0xA9));
+        svbool_t three = svand_b_z(pg_3, e2_80, third_ok);
+
+        svbool_t any = svorr_b_z(pg, one, svorr_b_z(pg, two, three));
+        if (svptest_any(pg, any)) {
+            sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, any));
+            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)pos);
+
+            if (svptest_any(at_pos, three)) { *matched_length = 3; }
+            else if (svptest_any(at_pos, two)) { *matched_length = 2; }
+            else { *matched_length = 1; }
+
+            return (sz_cptr_t)(text_u8 + offset + pos);
+        }
+    }
+
+    *matched_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t const step = svcntb();
+
+    // Character sets for MATCH (DUPQ replicates 128-bit pattern, no stack/loads)
+    svuint8_t all_set =
+        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, ' ', ' ', ' ', ' ', ' ', ' ');
+    svuint8_t one_set =
+        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
+    svuint8_t zeros = svdup_n_u8(0);
+
+    for (sz_size_t offset = 0; offset < length; offset += step - 2) {
+        sz_i64_t remaining = (sz_i64_t)(length - offset);
+        svbool_t pg = svwhilelt_b8((sz_i64_t)0, remaining);
+        svbool_t pg_2 = svwhilelt_b8((sz_i64_t)0, remaining - 1);
+        svbool_t pg_3 = svwhilelt_b8((sz_i64_t)0, remaining - 2);
+
+        svuint8_t text0 = svld1_u8(pg, text_u8 + offset);
+
+        // Fast rejection
+        if (!svptest_any(pg, svmatch_u8(pg, text0, all_set))) continue;
+
+        svuint8_t text1 = svext_u8(text0, zeros, 1);
+        svuint8_t text2 = svext_u8(text0, zeros, 2);
+
+        // 1-byte whitespace
+        svbool_t one = svmatch_u8(pg, text0, one_set);
+
+        // 2-byte: C2 + {85, A0} - use OR for 2-element set
+        svbool_t c2 = svcmpeq_n_u8(pg, text0, 0xC2);
+        svbool_t c2_ok = svorr_b_z(pg, svcmpeq_n_u8(pg, text1, 0x85), svcmpeq_n_u8(pg, text1, 0xA0));
+        svbool_t two = svand_b_z(pg_2, c2, c2_ok);
+
+        // 3-byte: E1 9A 80 (Ogham)
+        svbool_t e1_9a = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE1), svcmpeq_n_u8(pg, text1, 0x9A));
+        svbool_t ogham = svand_b_z(pg_3, e1_9a, svcmpeq_n_u8(pg, text2, 0x80));
+
+        // 3-byte: E2 80 + {80-8D, A8, A9, AF} - range check + OR for extras
+        svbool_t e2_80 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x80));
+        svbool_t e2_80_range = svand_b_z(pg, svcmpge_n_u8(pg, text2, 0x80), svcmple_n_u8(pg, text2, 0x8D));
+        svbool_t e2_80_extra = svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8),
+                                         svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA9), svcmpeq_n_u8(pg, text2, 0xAF)));
+        svbool_t e2_80_ws = svand_b_z(pg_3, e2_80, svorr_b_z(pg, e2_80_range, e2_80_extra));
+
+        // 3-byte: E2 81 9F (medium math space)
+        svbool_t e2_81 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x81));
+        svbool_t mmsp = svand_b_z(pg_3, e2_81, svcmpeq_n_u8(pg, text2, 0x9F));
+
+        // 3-byte: E3 80 80 (ideographic space)
+        svbool_t e3_80 = svand_b_z(pg_3, svcmpeq_n_u8(pg, text0, 0xE3), svcmpeq_n_u8(pg, text1, 0x80));
+        svbool_t ideo = svand_b_z(pg_3, e3_80, svcmpeq_n_u8(pg, text2, 0x80));
+
+        svbool_t three = svorr_b_z(pg_3, svorr_b_z(pg_3, ogham, e2_80_ws), svorr_b_z(pg_3, mmsp, ideo));
+        svbool_t any = svorr_b_z(pg, one, svorr_b_z(pg, two, three));
+
+        if (svptest_any(pg, any)) {
+            sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, any));
+            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)pos);
+
+            if (svptest_any(at_pos, three)) { *matched_length = 3; }
+            else if (svptest_any(at_pos, two)) { *matched_length = 2; }
+            else { *matched_length = 1; }
+
+            return (sz_cptr_t)(text_u8 + offset + pos);
+        }
+    }
+
+    *matched_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif // SZ_USE_SVE2
+
+#pragma endregion // SVE2 Implementation
 
 #pragma region Dynamic Dispatch
 
@@ -1236,6 +1462,10 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_ice(text, length);
 #elif SZ_USE_HASWELL
     return sz_utf8_count_haswell(text, length);
+#elif SZ_USE_SVE2
+    return sz_utf8_count_sve2(text, length);
+#elif SZ_USE_NEON
+    return sz_utf8_count_neon(text, length);
 #else
     return sz_utf8_count_serial(text, length);
 #endif
@@ -1246,6 +1476,10 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_
     return sz_utf8_find_nth_ice(text, length, n);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_nth_haswell(text, length, n);
+#elif SZ_USE_SVE2
+    return sz_utf8_find_nth_sve2(text, length, n);
+#elif SZ_USE_NEON
+    return sz_utf8_find_nth_neon(text, length, n);
 #else
     return sz_utf8_find_nth_serial(text, length, n);
 #endif
@@ -1256,6 +1490,10 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
     return sz_utf8_find_newline_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_newline_haswell(text, length, matched_length);
+#elif SZ_USE_SVE2
+    return sz_utf8_find_newline_sve2(text, length, matched_length);
+#elif SZ_USE_NEON
+    return sz_utf8_find_newline_neon(text, length, matched_length);
 #else
     return sz_utf8_find_newline_serial(text, length, matched_length);
 #endif
@@ -1266,6 +1504,10 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_find_whitespace_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_whitespace_haswell(text, length, matched_length);
+#elif SZ_USE_SVE2
+    return sz_utf8_find_whitespace_sve2(text, length, matched_length);
+#elif SZ_USE_NEON
+    return sz_utf8_find_whitespace_neon(text, length, matched_length);
 #else
     return sz_utf8_find_whitespace_serial(text, length, matched_length);
 #endif

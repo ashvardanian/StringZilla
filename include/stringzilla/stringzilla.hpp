@@ -1046,6 +1046,33 @@ class range_utf8_chars {
             return temp;
         }
 
+        /**
+         *  @brief Advance the iterator by @p n UTF-8 codepoints, decoding new batches as needed.
+         *  @note This is forward-only; negative offsets are unsupported. Uses the fast C API to skip bytes.
+         */
+        iterator &operator+=(size_type n) noexcept {
+            if (n == 0 || octets_offset_ >= octets_length_) return *this;
+
+            sz_cptr_t ptr = sz_utf8_find_nth(octets_start_ + octets_offset_, octets_length_ - octets_offset_, n);
+            if (!ptr) {
+                // Past the end.
+                octets_offset_ = octets_length_;
+                runes_count_ = 0;
+                runes_offset_ = 0;
+                return *this;
+            }
+
+            octets_offset_ = static_cast<size_type>(ptr - octets_start_);
+            decode_batch_();
+            return *this;
+        }
+
+        iterator operator+(size_type n) const noexcept {
+            iterator tmp = *this;
+            tmp += n;
+            return tmp;
+        }
+
         bool operator==(iterator const &other) const noexcept {
             // Check if both iterators have exhausted their data
             bool this_at_end = (runes_count_ == 0 && octets_offset_ >= octets_length_);

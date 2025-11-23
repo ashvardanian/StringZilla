@@ -231,15 +231,22 @@ void bench_utf8_count(environment_t const &env) {
 #if SZ_USE_ICE
     bench_unary(env, "sz_utf8_count_ice", validator, utf8_count_from_sz<sz_utf8_count_ice> {env}).log(base);
 #endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_count_neon", validator, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
+#endif
 }
 
 void bench_utf8_unpack(environment_t const &env) {
 
-    auto validator = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env};
+    auto validator = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env, {}};
     bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", validator).log();
 
 #if SZ_USE_ICE
-    bench_unary(env, "sz_utf8_unpack_chunk_ice", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_ice> {env})
+    bench_unary(env, "sz_utf8_unpack_chunk_ice", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_ice> {env, {}})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_unpack_chunk_neon", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env, {}})
         .log(base);
 #endif
 }
