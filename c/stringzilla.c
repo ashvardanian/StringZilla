@@ -497,10 +497,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_dispatch_table.utf8_find_whitespace(text, length, matched_length);
 }
 
-SZ_DYNAMIC sz_status_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination,
-                                         sz_size_t destination_capacity, sz_size_t *destination_length) {
-    return sz_dispatch_table.utf8_case_fold(source, source_length, destination, destination_capacity,
-                                            destination_length);
+SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_dispatch_table.utf8_case_fold(source, source_length, destination);
 }
 
 // Provide overrides for the libc mem* functions

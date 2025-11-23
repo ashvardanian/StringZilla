@@ -4117,6 +4117,34 @@ class basic_string {
      */
     range_utf8_whitespace_splits<basic_string> utf8_split() const noexcept { return {*this}; }
 
+    /**
+     *  @brief Apply Unicode case folding to the string in-place.
+     *
+     *  Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+     *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
+     *
+     *  @return `true` if the operation was successful, `false` if memory allocation failed.
+     *  @note The string may grow due to expansions (e.g., U+00DF -> "ss"). Worst-case is 3x expansion.
+     */
+    bool try_utf8_case_fold() noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_external;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+
+        // Allocate result buffer (worst-case 3x expansion), fold into it, then swap
+        basic_string result;
+        if (!result.try_resize_and_overwrite(string_length * 3,
+                                             [string_start, string_length](char_type *buf, size_type) {
+                                                 return sz_utf8_case_fold(string_start, string_length, buf);
+                                             }))
+            return false;
+
+        swap(result);
+        return true;
+    }
+
   private:
     template <typename pattern_type>
     bool try_replace_all_(pattern_type pattern, string_view replacement) noexcept;

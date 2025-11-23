@@ -134,6 +134,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
     println!("cargo:rerun-if-changed=include/stringzilla/hash.h");
     println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
     println!("cargo:rerun-if-changed=include/stringzilla/utf8.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/utf8_unpack.h");
     println!("cargo:rerun-if-changed=include/stringzilla/types.h");
     println!("cargo:rerun-if-changed=include/stringzilla/memory.h");
     println!("cargo:rerun-if-changed=include/stringzilla/compare.h");

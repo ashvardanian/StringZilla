@@ -2075,17 +2075,9 @@ void test_utf8() {
 
     // Test Unicode case folding
     {
-        auto case_fold = [](char const *t) -> std::string {
-            sz::string_view src(t);
-            std::string result(src.size() * 2 + 8, '\0'); // 2x + extra for safety with expansions
-            sz_size_t result_len = 0;
-            sz_status_t status = sz_utf8_case_fold(src.data(), src.size(), result.data(), result.size(), &result_len);
-            if (status != sz_success_k) {
-                std::printf("case_fold failed: input len=%zu, status=%d\n", src.size(), (int)status);
-            }
-            assert(status == sz_success_k);
-            result.resize(result_len);
-            return result;
+        auto case_fold = [](sz::string s) -> sz::string {
+            assert(s.try_utf8_case_fold());
+            return s;
         };
 
         // ASCII uppercase to lowercase
@@ -2096,8 +2088,8 @@ void test_utf8() {
         assert(case_fold("") == "");       // empty string
 
         // German Eszett - one-to-many expansion
-        assert(case_fold("\xC3\x9F") == "ss");    // U+00DF ß -> ss
-        assert(case_fold("STRAẞE") == "strasse"); // Capital ẞ (U+1E9E) -> ss
+        assert(case_fold("\xC3\x9F") == "ss");    // U+00DF -> ss
+        assert(case_fold("STRAẞE") == "strasse"); // Capital U+1E9E -> ss
 
         // Cyrillic uppercase to lowercase
         assert(case_fold("ПРИВЕТ") == "привет");

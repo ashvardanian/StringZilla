@@ -781,7 +781,7 @@ typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
 typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_utf8_case_fold`. */
-typedef sz_status_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t, sz_size_t, sz_size_t *);
+typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
@@ -1034,32 +1034,32 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t 
  *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
  *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
  */
-SZ_PUBLIC sz_size_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
+SZ_PUBLIC sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
     if (rune <= 0x7F) {
         utf8s[0] = (sz_u8_t)rune;
-        return 1;
+        return sz_utf8_rune_1byte_k;
     }
     else if (rune <= 0x7FF) {
         utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
         utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return 2;
+        return sz_utf8_rune_2bytes_k;
     }
     else if (rune <= 0xFFFF) {
         // Reject surrogate codepoints
-        if (rune >= 0xD800 && rune <= 0xDFFF) return 0;
+        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k;
         utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
         utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
         utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return 3;
+        return sz_utf8_rune_3bytes_k;
     }
     else if (rune <= 0x10FFFF) {
         utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
         utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
         utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
         utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return 4;
+        return sz_utf8_rune_4bytes_k;
     }
-    return 0; // Invalid codepoint
+    return sz_utf8_invalid_k;
 }
 
 /**

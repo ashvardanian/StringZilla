@@ -9,8 +9,8 @@
  *  - `sz_utf8_find_case_insensitive` - case-insensitive substring search in UTF-8 strings
  *  - `sz_utf8_unpack_chunk` - convert UTF-8 to UTF-32 in a streaming manner
  */
-#ifndef STRINGZILLA_UTF8_H_
-#define STRINGZILLA_UTF8_H_
+#ifndef STRINGZILLA_UTF8_UNPACK_H_
+#define STRINGZILLA_UTF8_UNPACK_H_
 
 #include "types.h"
 
@@ -52,46 +52,41 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
     sz_size_t *runes_unpacked);
 
 /**
- *  @brief  Apply Unicode case folding to a UTF-8 string in-place or to a separate buffer.
+ *  @brief  Apply Unicode case folding to a UTF-8 string.
  *
- *  This function reads a UTF-8 encoded source string, applies Unicode case folding to each
- *  codepoint, and writes the result to the destination buffer. Case folding normalizes text
- *  for case-insensitive comparisons by mapping uppercase letters to their lowercase equivalents
- *  and handling special cases like German ß → ss expansion.
+ *  Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+ *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
  *
- *  The destination buffer must be at least 1.5x the source length to accommodate potential
- *  one-to-many expansions (e.g., ß → ss, ﬁ → fi). If the destination buffer is too small,
- *  the function returns an error status.
+ *  @section Buffer Sizing
+ *
+ *  The destination buffer must be at least `source_length * 3` bytes to guarantee sufficient space
+ *  for worst-case expansion. The maximum expansion ratio is 3:1 (3x), which occurs with Greek
+ *  characters that expand to three codepoints under case folding.
+ *
+ *  Worst-case example: U+0390 (2 bytes: CE 90) expands to U+03B9 + U+0308 + U+0301 (6 bytes total).
+ *  A string of N such characters would expand from 2N to 6N bytes (3x expansion).
  *
  *  @param[in] source UTF-8 string to be case-folded.
  *  @param[in] source_length Number of bytes in the source buffer.
  *  @param[out] destination Buffer to write the case-folded UTF-8 string.
- *  @param[in] destination_capacity Size of the destination buffer in bytes.
- *  @param[out] destination_length Number of bytes written to the destination buffer.
- *  @return sz_success_k on success, sz_bad_alloc_k if destination buffer is too small,
- *          sz_invalid_utf8_k if source contains invalid UTF-8 sequences.
+ *  @return Number of bytes written to the destination buffer.
+ *
+ *  @warning The caller must ensure the destination buffer is large enough. No bounds checking
+ *           is performed. Use `source_length * 3` for safety.
+ *  @warning The source must contain valid UTF-8. Behavior is undefined for invalid input.
  *
  *  @example Basic usage:
  *  @code
- *      char const *source = "HELLO WORLD";
- *      char destination[32];
- *      sz_size_t result_length;
- *      sz_status_t status = sz_utf8_case_fold(source, 11, destination, 32, &result_length);
- *      // destination now contains "hello world", result_length = 11
- *  @endcode
- *
- *  @example Handling expansions:
- *  @code
- *      char const *source = "STRAẞE";  // German "street" with capital ß
- *      char destination[32];
- *      sz_size_t result_length;
- *      sz_status_t status = sz_utf8_case_fold(source, strlen(source), destination, 32, &result_length);
- *      // destination now contains "strasse" (ẞ expanded to ss)
+ *      char const *source = "HELLO";
+ *      sz_size_t capacity = 5 * 3; // Safe overestimate
+ *      char destination[15];
+ *      sz_size_t result_length = sz_utf8_case_fold(source, 5, destination);
+ *      // destination now contains "hello", result_length = 5
  *  @endcode
  */
-SZ_DYNAMIC sz_status_t sz_utf8_case_fold(      //
+SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
     sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+    sz_ptr_t destination);
 
 /**
  *  @brief  Case-insensitive substring search in UTF-8 strings.
@@ -152,9 +147,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
     sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_serial( //
-    sz_cptr_t source, sz_size_t source_length,  //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(  //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
@@ -163,31 +158,27 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
     sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity,   //
     sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_haswell( //
-    sz_cptr_t source, sz_size_t source_length,   //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell( //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_haswell( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_ice(   //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice( //
+    sz_cptr_t text, sz_size_t length,         //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_ice( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked);
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_neon(  //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length);
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon( //
+    sz_cptr_t text, sz_size_t length,          //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_neon( //
     sz_cptr_t haystack, sz_size_t haystack_length,      //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
@@ -253,6 +244,30 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
     }
 
     return sz_true_k;
+}
+
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
+    sz_cptr_t text, sz_size_t length,            //
+    sz_rune_t *runes, sz_size_t runes_capacity,  //
+    sz_size_t *runes_unpacked) {
+
+    sz_cptr_t src = text;
+    sz_cptr_t src_end = text + length;
+    sz_size_t runes_written = 0;
+
+    // Process up to runes_capacity codepoints or end of input
+    while (src < src_end && runes_written < runes_capacity) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(src, &rune, &rune_length);
+        if (rune_length == sz_utf8_invalid_k) break;
+        if (src + rune_length > src_end) break; // Incomplete sequence
+        runes[runes_written++] = rune;
+        src += rune_length;
+    }
+
+    *runes_unpacked = runes_written;
+    return src;
 }
 
 // clang-format off
@@ -646,19 +661,6 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     // clang-format on
 }
 
-/**
- *  @brief  Case-insensitive UTF-8 substring search (serial implementation).
- *
- *  This function performs a case-insensitive search by case-folding both the needle and haystack
- *  according to Unicode case-folding rules. It handles one-to-many expansions (e.g., ß → ss).
- *
- *  @param haystack         The string to search in.
- *  @param haystack_length  The length of the haystack in bytes.
- *  @param needle           The substring to search for.
- *  @param needle_length    The length of the needle in bytes.
- *  @param matched_length   Output: the length of the matched substring in the haystack (in bytes).
- *  @return                 Pointer to the first match, or SZ_NULL_CHAR if not found.
- */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
@@ -745,48 +747,26 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_serial( //
-    sz_cptr_t source, sz_size_t source_length,  //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 
     sz_u8_t const *src = (sz_u8_t const *)source;
     sz_u8_t const *src_end = src + source_length;
     sz_u8_t *dst = (sz_u8_t *)destination;
-    sz_u8_t *dst_end = dst + destination_capacity;
     sz_u8_t *dst_start = dst;
 
     while (src < src_end) {
-        // Decode one UTF-8 codepoint
-        sz_rune_t cp;
+        sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse((sz_cptr_t)src, &cp, &rune_length);
-        if (rune_length == 0) {
-            *destination_length = (sz_size_t)(dst - dst_start);
-            return sz_invalid_utf8_k;
-        }
+        sz_rune_parse((sz_cptr_t)src, &rune, &rune_length);
+        sz_assert_(rune_length != sz_utf8_invalid_k && "Input text is not valid UTF-8");
         src += rune_length;
 
-        // Apply case folding
         sz_rune_t folded[4];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
-
-        // Encode all folded codepoints
-        for (sz_size_t i = 0; i < folded_count; ++i) {
-            if (dst + 4 > dst_end) {
-                *destination_length = (sz_size_t)(dst - dst_start);
-                return sz_bad_alloc_k;
-            }
-            sz_size_t written = sz_rune_export(folded[i], dst);
-            if (written == 0) {
-                *destination_length = (sz_size_t)(dst - dst_start);
-                return sz_invalid_utf8_k;
-            }
-            dst += written;
-        }
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
+        for (sz_size_t i = 0; i != folded_count; ++i) dst += sz_rune_export(folded[i], dst);
     }
 
-    *destination_length = (sz_size_t)(dst - dst_start);
-    return sz_success_k;
+    return (sz_size_t)(dst - dst_start);
 }
 
 #pragma endregion // Serial Implementation
@@ -940,10 +920,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
     return text;
 }
 
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_ice(   //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
-    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_utf8_case_fold_serial(source, source_length, destination);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_ice( //
@@ -976,10 +954,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_haswell( //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_haswell( //
-    sz_cptr_t source, sz_size_t source_length,   //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
-    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_utf8_case_fold_serial(source, source_length, destination);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_haswell( //
@@ -1005,10 +981,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
-SZ_PUBLIC sz_status_t sz_utf8_case_fold_neon(  //
-    sz_cptr_t source, sz_size_t source_length, //
-    sz_ptr_t destination, sz_size_t destination_capacity, sz_size_t *destination_length) {
-    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_utf8_case_fold_serial(source, source_length, destination);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_neon( //
@@ -1034,14 +1008,13 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination,
-                                         sz_size_t destination_capacity, sz_size_t *destination_length) {
+SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICE
-    return sz_utf8_case_fold_ice(source, source_length, destination, destination_capacity, destination_length);
+    return sz_utf8_case_fold_ice(source, source_length, destination);
 #elif SZ_USE_HASWELL
-    return sz_utf8_case_fold_haswell(source, source_length, destination, destination_capacity, destination_length);
+    return sz_utf8_case_fold_haswell(source, source_length, destination);
 #else
-    return sz_utf8_case_fold_serial(source, source_length, destination, destination_capacity, destination_length);
+    return sz_utf8_case_fold_serial(source, source_length, destination);
 #endif
 }
 
@@ -1064,4 +1037,4 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive(sz_cptr_t haystack, sz_size_t
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_H_
+#endif // STRINGZILLA_UTF8_UNPACK_H_
