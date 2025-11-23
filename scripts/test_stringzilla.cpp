@@ -2054,6 +2054,52 @@ void test_utf8() {
         let_assert(auto w = words_str.utf8_split().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }
+
+    // Test Unicode case folding
+    {
+        auto case_fold = [](char const *t) -> std::string {
+            sz::string_view src(t);
+            std::string result(src.size() * 2 + 8, '\0'); // 2x + extra for safety with expansions
+            sz_size_t result_len = 0;
+            sz_status_t status = sz_utf8_case_fold(src.data(), src.size(), result.data(), result.size(), &result_len);
+            if (status != sz_success_k) {
+                std::printf("case_fold failed: input len=%zu, status=%d\n", src.size(), (int)status);
+            }
+            assert(status == sz_success_k);
+            result.resize(result_len);
+            return result;
+        };
+
+        // ASCII uppercase to lowercase
+        assert(case_fold("HELLO WORLD") == "hello world");
+        assert(case_fold("ABC") == "abc");
+        assert(case_fold("abc") == "abc"); // already lowercase
+        assert(case_fold("123") == "123"); // no change for digits
+        assert(case_fold("") == "");       // empty string
+
+        // German Eszett - one-to-many expansion
+        assert(case_fold("\xC3\x9F") == "ss");    // U+00DF ß -> ss
+        assert(case_fold("STRAẞE") == "strasse"); // Capital ẞ (U+1E9E) -> ss
+
+        // Cyrillic uppercase to lowercase
+        assert(case_fold("ПРИВЕТ") == "привет");
+
+        // Greek uppercase to lowercase
+        assert(case_fold("ΑΒΓΔ") == "αβγδ");
+
+        // Latin Extended characters
+        assert(case_fold("ÀÁÂ") == "àáâ");
+
+        // Armenian
+        assert(case_fold("Ա") == "ա"); // U+0531 -> U+0561
+
+        // Mixed case preservation for non-alphabetic
+        assert(case_fold("Hello 123 World!") == "hello 123 world!");
+
+        // Unicode characters without case folding should pass through unchanged
+        assert(case_fold("日本語") == "日本語"); // Japanese (no case)
+        assert(case_fold("中文") == "中文");     // Chinese (no case)
+    }
 }
 
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)

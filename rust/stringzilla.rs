@@ -344,6 +344,13 @@ extern "C" {
         length: usize,
         matched_length: *mut usize,
     ) -> *const c_void;
+    pub(crate) fn sz_utf8_case_fold(
+        source: *const c_void,
+        source_length: usize,
+        destination: *mut c_void,
+        destination_capacity: usize,
+        destination_length: *mut usize,
+    ) -> Status;
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
@@ -869,6 +876,62 @@ where
             buffer_slice.as_ptr() as *const c_void,
             table.as_ptr() as _,
         );
+    }
+}
+
+/// Applies Unicode case folding to a UTF-8 string, writing the result to a destination buffer.
+///
+/// Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+/// to their lowercase equivalents and handling special cases like German ß → ss expansion.
+///
+/// # Arguments
+///
+/// * `source`: The UTF-8 string to case-fold.
+/// * `destination`: The destination buffer to write the case-folded string.
+///
+/// # Returns
+///
+/// Returns `Ok(length)` with the number of bytes written on success, or an error status.
+///
+/// # Errors
+///
+/// * `Status::BadAlloc` - If the destination buffer is too small.
+/// * `Status::InvalidUtf8` - If the source contains invalid UTF-8 sequences.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let source = "HELLO WORLD";
+/// let mut dest = [0u8; 32];
+/// let result = sz::case_fold(source, &mut dest);
+/// assert!(result.is_ok());
+/// let len = result.unwrap();
+/// assert_eq!(&dest[..len], b"hello world");
+/// ```
+///
+pub fn case_fold<T, D>(source: T, destination: &mut D) -> Result<usize, Status>
+where
+    T: AsRef<[u8]>,
+    D: AsMut<[u8]> + ?Sized,
+{
+    let source_ref = source.as_ref();
+    let dest_slice = destination.as_mut();
+    let mut dest_length: usize = 0;
+
+    let status = unsafe {
+        sz_utf8_case_fold(
+            source_ref.as_ptr() as *const c_void,
+            source_ref.len(),
+            dest_slice.as_mut_ptr() as *mut c_void,
+            dest_slice.len(),
+            &mut dest_length as *mut usize,
+        )
+    };
+
+    match status {
+        Status::Success => Ok(dest_length),
+        _ => Err(status),
     }
 }
 
@@ -2719,6 +2782,8 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::hash::Hasher as _;
 
+    use icu_casemap::CaseMapper;
+
     use super::*;
     use crate::sz;
 
@@ -3541,5 +3606,71 @@ mod tests {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
         let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
         assert_eq!(words, vec![b"a", b"b", b"c"]);
+    }
+
+    /// Compare StringZilla's case-folding against ICU for all Unicode codepoints.
+    ///
+    /// This test iterates through all valid Unicode codepoints (U+0000 to U+10FFFF,
+    /// excluding surrogates), case-folds each character using both ICU and StringZilla,
+    /// and verifies that the results match.
+    #[test]
+    fn case_fold_matches_icu() {
+        let case_mapper = CaseMapper::new();
+        let mut mismatches = Vec::new();
+        let mut tested = 0u32;
+
+        // Iterate through all valid Unicode codepoints
+        for codepoint in 0u32..=0x10FFFF {
+            // Skip surrogate pairs (0xD800-0xDFFF) - not valid Unicode scalar values
+            if (0xD800..=0xDFFF).contains(&codepoint) {
+                continue;
+            }
+
+            if let Some(c) = char::from_u32(codepoint) {
+                tested += 1;
+
+                // Create UTF-8 encoded string from this character
+                let source = c.to_string();
+
+                // Case-fold with ICU (convert Cow to owned String)
+                let icu_folded: String = case_mapper.fold_string(&source).into_owned();
+
+                // Case-fold with StringZilla
+                // We need a buffer large enough for potential expansion (e.g., ß → ss)
+                // Maximum expansion is 3x for cases like ﬃ → ffi
+                let mut sz_buffer = vec![0u8; source.len() * 4];
+                let sz_result = sz::case_fold(&source, &mut sz_buffer);
+
+                match sz_result {
+                    Ok(len) => {
+                        let sz_folded = String::from_utf8_lossy(&sz_buffer[..len]);
+                        if sz_folded != icu_folded {
+                            mismatches.push((codepoint, c, icu_folded, sz_folded.to_string()));
+                        }
+                    }
+                    Err(status) => {
+                        mismatches.push((codepoint, c, icu_folded, format!("ERROR: {:?}", status)));
+                    }
+                }
+            }
+        }
+
+        // Report results
+        if !mismatches.is_empty() {
+            let sample_size = std::cmp::min(50, mismatches.len());
+            let mut report = format!(
+                "Case-fold mismatches: {} out of {} codepoints tested\n\nFirst {} mismatches:\n",
+                mismatches.len(),
+                tested,
+                sample_size
+            );
+            for (cp, c, icu, sz) in mismatches.iter().take(sample_size) {
+                report.push_str(&format!("  U+{:04X} '{}': ICU=\"{}\" vs SZ=\"{}\"\n", cp, c, icu, sz));
+            }
+            panic!("{}", report);
+        }
+
+        // Log success
+        eprintln!("case_fold_matches_icu: tested {} codepoints, all match ICU", tested);
     }
 }
