@@ -977,49 +977,89 @@ typedef union sz_u512_vec_t {
 
 #pragma region UTF8
 
-/** @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer. */
-SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
+/**
+ *  @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer.
+ *  @param[in] utf8 Pointer to the beginning of a UTF8-encoded string.
+ *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
+ *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @note This function does not perform any bounds checking on the input string.
+ */
+SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
     sz_u8_t const *current = (sz_u8_t const *)utf8;
     sz_u8_t leading_byte = *current++;
-    sz_rune_t ch;
-    sz_rune_length_t ch_length;
+    sz_rune_t rune;
+    sz_rune_length_t rune_length;
 
     // TODO: This can be made entirely branchless using 32-bit SWAR.
     // Single-byte rune (0xxxxxxx)
     if (leading_byte < 0x80U) {
-        ch = leading_byte;
-        ch_length = sz_utf8_rune_1byte_k;
+        rune = leading_byte;
+        rune_length = sz_utf8_rune_1byte_k;
     }
     // Two-byte rune (110xxxxx 10xxxxxx)
     else if ((leading_byte & 0xE0U) == 0xC0U) {
-        ch = (leading_byte & 0x1FU) << 6; // bottom 5 bits from the first byte
-        ch |= (*current++ & 0x3FU);       // bottom 6 bits from the second byte
-        ch_length = sz_utf8_rune_2bytes_k;
+        rune = (leading_byte & 0x1FU) << 6; // bottom 5 bits from the first byte
+        rune |= (*current++ & 0x3FU);       // bottom 6 bits from the second byte
+        rune_length = sz_utf8_rune_2bytes_k;
     }
     // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF0U) == 0xE0U) {
-        ch = (leading_byte & 0x0FU) << 12; // bottom 4 bits from the first byte
-        ch |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the second byte
-        ch |= (*current++ & 0x3FU);        // bottom 6 bits from the third byte
-        ch_length = sz_utf8_rune_3bytes_k;
+        rune = (leading_byte & 0x0FU) << 12; // bottom 4 bits from the first byte
+        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the second byte
+        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the third byte
+        rune_length = sz_utf8_rune_3bytes_k;
     }
     // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF8U) == 0xF0U) {
-        ch = (leading_byte & 0x07U) << 18; // bottom 3 bits from the first byte
-        ch |= (*current++ & 0x3FU) << 12;  // bottom 6 bits from the second byte
-        ch |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the third byte
-        ch |= (*current++ & 0x3FU);        // bottom 6 bits from the fourth byte
+        rune = (leading_byte & 0x07U) << 18; // bottom 3 bits from the first byte
+        rune |= (*current++ & 0x3FU) << 12;  // bottom 6 bits from the second byte
+        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the third byte
+        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the fourth byte
         // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
-        if (ch > 0x10FFFFU) { ch = 0U, ch_length = sz_utf8_invalid_k; }
-        else { ch_length = sz_utf8_rune_4bytes_k; }
+        if (rune > 0x10FFFFU) { rune = 0U, rune_length = sz_utf8_invalid_k; }
+        else { rune_length = sz_utf8_rune_4bytes_k; }
     }
     // Invalid UTF8 rune.
     else {
-        ch = 0U;
-        ch_length = sz_utf8_invalid_k;
+        rune = 0U;
+        rune_length = sz_utf8_invalid_k;
     }
-    *code = ch;
-    *code_length = ch_length;
+    *runes = rune;
+    *runes_lengths = rune_length;
+}
+
+/**
+ *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
+ *  @param[in] rune The UTF-32 codepoint to encode.
+ *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
+ *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
+ */
+SZ_PUBLIC sz_size_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
+    if (rune <= 0x7F) {
+        utf8s[0] = (sz_u8_t)rune;
+        return 1;
+    }
+    else if (rune <= 0x7FF) {
+        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
+        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return 2;
+    }
+    else if (rune <= 0xFFFF) {
+        // Reject surrogate codepoints
+        if (rune >= 0xD800 && rune <= 0xDFFF) return 0;
+        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return 3;
+    }
+    else if (rune <= 0x10FFFF) {
+        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return 4;
+    }
+    return 0; // Invalid codepoint
 }
 
 /**
