@@ -387,6 +387,149 @@ void test_sha256_equivalence(                                                   
     }
 }
 
+/**
+ *  @brief  Tests UTF-8 functions across different SIMD backends against the serial implementation.
+ *
+ *  Generates random strings containing:
+ *  - ASCII content (1-byte)
+ *  - Multi-byte UTF-8 characters (2, 3, 4-byte) - correct and broken ones
+ *  - All 25 Unicode White_Space characters (including all newlines) + CRLF sequences - correct and partial ones
+ *
+ *  For each generated string, compares:
+ *  - sz_utf8_count: character counting
+ *  - sz_utf8_find_newline: newline detection (position and matched length)
+ *  - sz_utf8_find_whitespace: whitespace detection (position and matched length)
+ */
+void test_utf8_equivalence(                                 //
+    sz_utf8_count_t count_base, sz_utf8_count_t count_simd, //
+    sz_utf8_find_boundary_t newline_base,                   //
+    sz_utf8_find_boundary_t newline_simd,                   //
+    sz_utf8_find_boundary_t whitespace_base,                //
+    sz_utf8_find_boundary_t whitespace_simd,                //
+    std::size_t min_text_lentgh = 4000, std::size_t min_iterations = 10000) {
+
+    auto check = [&](std::string const &text) {
+        sz_cptr_t data = text.data();
+        sz_size_t len = text.size();
+
+        // Test `sz_utf8_count` equivalence
+        sz_size_t count_result_base = count_base(data, len);
+        sz_size_t count_result_simd = count_simd(data, len);
+        assert(count_result_base == count_result_simd);
+
+        // Test `sz_utf8_find_newline` equivalence by scanning the entire string
+        sz_cptr_t pos = data;
+        sz_size_t remaining = len;
+        while (remaining > 0) {
+            sz_size_t matched_base = 0, matched_simd = 0;
+            sz_cptr_t found_base = newline_base(pos, remaining, &matched_base);
+            sz_cptr_t found_simd = newline_simd(pos, remaining, &matched_simd);
+            assert(found_base == found_simd && "Mismatch in newline detection");
+            if (found_base == SZ_NULL_CHAR) break;
+            assert(matched_base == matched_simd);
+            sz_size_t offset = (found_base - pos) + matched_base;
+            pos += offset;
+            remaining -= offset;
+        }
+
+        // Test `sz_utf8_find_whitespace` equivalence by scanning the entire string
+        pos = data;
+        remaining = len;
+        while (remaining > 0) {
+            sz_size_t matched_base = 0, matched_simd = 0;
+            sz_cptr_t found_base = whitespace_base(pos, remaining, &matched_base);
+            sz_cptr_t found_simd = whitespace_simd(pos, remaining, &matched_simd);
+            assert(found_base == found_simd && "Mismatched position in whitespace detection");
+            if (found_base == SZ_NULL_CHAR) break;
+            assert(matched_base == matched_simd);
+            sz_size_t offset = (found_base - pos) + matched_base;
+            pos += offset;
+            remaining -= offset;
+        }
+    };
+
+    // Strings that shouldn't affect the control flow
+    static char const *utf8_content[] = {
+        // Various ASCII strings
+        "",
+        "a",
+        "hello",
+        "012",
+        "3456789",
+        // 2-byte Cyrillic П (U+041F), Armenian Ս (U+054D), and Greek Pi π (U+03C0)
+        "\xD0\x9F",
+        "\xD5\xA5",
+        "\xCF\x80",
+        // 3-byte characters
+        "\xE0\xA4\xB9", // Hindi ह (U+0939)
+        "\xE1\x88\xB4", // Ethiopic ሴ (U+1234)
+        "\xE2\x9C\x94", // Check mark ✔ (U+2714)
+        // 4-byte emojis: U+1F600 (😀), U+1F601 (😁), U+1F602 (😂)
+        "\xF0\x9F\x98\x80",
+        "\xF0\x9F\x98\x81",
+        "\xF0\x9F\x98\x82",
+        // Characters with bytes in 0x80-0x8F range (tests unsigned comparison in SIMD)
+        "\xE2\x82\x80", // U+2080 SUBSCRIPT ZERO (has 0x80 suffix, NOT whitespace)
+        "\xE2\x84\x8A", // U+210A SCRIPT SMALL G (has 0x8A like HAIR SPACE suffix)
+        "\xE2\x84\x8D", // U+210D DOUBLE-STRUCK H (has 0x8D suffix)
+        // Near-miss characters (same prefix as whitespace but different suffix)
+        "\xE2\x80\xB0", // U+2030 PER MILLE SIGN (E2 80 prefix like whitespace range)
+        "\xE2\x80\xBB", // U+203B REFERENCE MARK (E2 80 prefix)
+        "\xE2\x81\xA0", // U+2060 WORD JOINER (E2 81 prefix like MMSP)
+        "\xE3\x80\x81", // U+3001 IDEOGRAPHIC COMMA (E3 80 prefix like IDEOGRAPHIC SPACE)
+        "\xE3\x80\x82", // U+3002 IDEOGRAPHIC FULL STOP
+        // More 4-byte sequences for boundary handling
+        "\xF0\x9F\x8E\x89", // U+1F389 PARTY POPPER 🎉
+        "\xF0\x9F\x92\xA9", // U+1F4A9 PILE OF POO 💩
+    };
+
+    // Special characters that will affect control flow
+    static char const *special_chars[26] = {
+        "\x09",         "\x0A",         "\x0B",         "\x0C",         "\x0D",         " ", // 1-byte (6)
+        "\xC2\x85",     "\xC2\xA0",     "\r\n",                                              // 2-byte (2)
+        "\xE1\x9A\x80", "\xE2\x80\x80", "\xE2\x80\x81", "\xE2\x80\x82", "\xE2\x80\x83",      // 3-byte
+        "\xE2\x80\x84", "\xE2\x80\x85", "\xE2\x80\x86", "\xE2\x80\x87", "\xE2\x80\x88",      // 3-byte
+        "\xE2\x80\x89", "\xE2\x80\x8A", "\xE2\x80\xA8", "\xE2\x80\xA9", "\xE2\x80\xAF",      // 3-byte
+        "\xE2\x81\x9F", "\xE3\x80\x80",                                                      // 3-byte
+    };
+
+    auto &rng = global_random_generator();
+    std::size_t const utf8_content_count = sizeof(utf8_content) / sizeof(utf8_content[0]);
+    std::size_t const spaecial_chars_count = sizeof(special_chars) / sizeof(special_chars[0]);
+    std::size_t const total_strings_to_sample = utf8_content_count + spaecial_chars_count;
+    std::uniform_int_distribution<std::size_t> content_dist(0, total_strings_to_sample - 1);
+
+    // Generate and test many random strings
+    for (std::size_t iteration = 0; iteration < min_iterations; ++iteration) {
+        std::string text;
+
+        // Build up a random string of at least `min_text_length` bytes
+        while (text.size() < min_text_lentgh) {
+            std::size_t random_content_index = content_dist(rng);
+            if (random_content_index < utf8_content_count) { text.append(utf8_content[random_content_index]); }
+            else { text.append(special_chars[random_content_index - utf8_content_count]); }
+        }
+        check(text);
+
+        // Now, let's replace 10% of bytes in the sequence with a NUL character, thus breaking many valid codepoints
+        std::size_t num_bytes_to_corrupt = text.size() / 10;
+        std::uniform_int_distribution<std::size_t> pos_dist(0, text.size() - 1);
+        for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
+            std::size_t pos = pos_dist(rng);
+            text[pos] = '\0';
+        }
+        check(text);
+
+        // Swap 10% of bytes at random positions, creating malformed UTF-8 sequences
+        for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
+            std::size_t pos1 = pos_dist(rng);
+            std::size_t pos2 = pos_dist(rng);
+            std::swap(text[pos1], text[pos2]);
+        }
+        check(text);
+    }
+}
+
 void test_equivalence() {
 
     // Ensure the seed affects hash results
@@ -452,6 +595,40 @@ void test_equivalence() {
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
     );
+#endif
+
+    // Test UTF-8 functions
+#if SZ_USE_HASWELL
+    test_utf8_equivalence(                           //
+        sz_utf8_count_serial, sz_utf8_count_haswell, //
+        sz_utf8_find_newline_serial,                 //
+        sz_utf8_find_newline_haswell,                //
+        sz_utf8_find_whitespace_serial,              //
+        sz_utf8_find_whitespace_haswell);
+#endif
+#if SZ_USE_ICE
+    test_utf8_equivalence(                       //
+        sz_utf8_count_serial, sz_utf8_count_ice, //
+        sz_utf8_find_newline_serial,             //
+        sz_utf8_find_newline_ice,                //
+        sz_utf8_find_whitespace_serial,          //
+        sz_utf8_find_whitespace_ice);
+#endif
+#if SZ_USE_NEON
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_neon, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_neon,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_neon);
+#endif
+#if SZ_USE_SVE2
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_sve2, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_sve2,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_sve2);
 #endif
 };
 
