@@ -32,8 +32,8 @@
  #define SZ_USE_NEON 0
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
- #define SZ_USE_MISALIGNED_LOADS 0
  */
+#define SZ_USE_MISALIGNED_LOADS 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
@@ -1922,11 +1922,11 @@ void test_utf8() {
         let_assert(auto l = lines("\r\na\r\n\r\nb\r\n"),
                    l.size() == 5 && l[0].empty() && l[1] == "a" && l[2].empty() && l[3] == "b" && l[4].empty());
 
-        // Edge cases (trailing newlines are stripped)
-        let_assert(auto l = lines(""), l.size() == 0);
-        let_assert(auto l = lines("\n"), l.size() == 0);
-        let_assert(auto l = lines("\n\n"), l.size() == 1 && l[0] == "");
-        let_assert(auto l = lines("a\n"), l.size() == 1 && l[0] == "a");
+        // Edge cases - N delimiters yield N+1 segments
+        let_assert(auto l = lines(""), l.size() == 1 && l[0] == "");
+        let_assert(auto l = lines("\n"), l.size() == 2 && l[0] == "" && l[1] == "");
+        let_assert(auto l = lines("\n\n"), l.size() == 3 && l[0] == "" && l[1] == "" && l[2] == "");
+        let_assert(auto l = lines("a\n"), l.size() == 2 && l[0] == "a" && l[1] == "");
         let_assert(auto l = lines("\na"), l.size() == 2 && l[0] == "" && l[1] == "a");
         let_assert(auto l = lines("a\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b");
         let_assert(auto l = lines("single"), l.size() == 1 && l[0] == "single");
@@ -1942,13 +1942,12 @@ void test_utf8() {
         let_assert(auto l = lines("a\u2028b"), l.size() >= 1);
         let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
 
-        // NUL bytes (U+0000) should NOT be treated as newlines
         // Use `_sv` literals for size-aware NUL-containing strings
         let_assert(auto l = lines("a\x00b"_sv), l.size() == 1);         // NUL in middle - NOT a newline
         let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
         let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
-        let_assert(auto l = lines("\x00\n"_sv), l.size() == 1);         // NUL before newline - find \n, not NUL
-        let_assert(auto l = lines("\n\x00"_sv), l.size() == 2);         // Newline before NUL - split correctly
+        let_assert(auto l = lines("\x00\n"_sv), l.size() == 2); // NUL before newline - find \n, yields 2 segments
+        let_assert(auto l = lines("\n\x00"_sv), l.size() == 2); // Newline before NUL - split correctly
     }
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
@@ -1966,9 +1965,9 @@ void test_utf8() {
         let_assert(auto w = words("a\r\nb"),
                    w.size() == 3 && w[0] == "a" && w[1].empty() && w[2] == "b"); // CR and LF are both spaces
 
-        // Multiple spaces and trimming
-        let_assert(auto w = words("  a  b  "), w.size() == 2 && w[0] == "a" && w[1] == "b");
-        let_assert(auto w = words("a    b"), w.size() == 2);
+        // Multiple spaces - N delimiters yield N+1 segments
+        let_assert(auto w = words("  a  b  "), w.size() == 7); // 6 spaces: "" "" "a" "" "b" "" ""
+        let_assert(auto w = words("a    b"), w.size() == 5);   // 4 spaces: "a" "" "" "" "b"
         let_assert(auto w = words("a\tb\nc\rd"), w.size() == 4 && w[3] == "d");
 
         // Double-byte whitespace (2 chars)
@@ -2000,16 +1999,16 @@ void test_utf8() {
         let_assert(auto w = words("a\u3000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+3000 IDEOGRAPHIC SPACE
 
         // Mixed byte-length whitespace patterns
-        let_assert(auto w = words("a \u00A0\u2000b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // 1+2+3 byte mix
-        let_assert(auto w = words("a\t\u0085\u3000b"), w.size() == 2);                              // 1+2+3 byte mix
+        let_assert(auto w = words("a \u00A0\u2000b"), w.size() == 4);             // 1+2+3 byte mix: "a" "" "" "b"
+        let_assert(auto w = words("a\t\u0085\u3000b"), w.size() == 4);            // 1+2+3 byte mix: "a" "" "" "b"
         let_assert(auto w = words("Hello\u2000世界\u00A0Привет"), w.size() == 3); // Unicode content + spaces
 
         // Edge cases
-        let_assert(auto w = words(""), w.size() == 0);
-        let_assert(auto w = words("   "), w.size() == 0);
-        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 0);         // All single-byte whitespace
-        let_assert(auto w = words("\u0085\u00A0"), w.size() == 0);       // All double-byte whitespace
-        let_assert(auto w = words("\u2000\u2001\u3000"), w.size() == 0); // All triple-byte whitespace
+        let_assert(auto w = words(""), w.size() == 1 && w[0] == "");
+        let_assert(auto w = words("   "), w.size() == 4);                // "" "" "" ""
+        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 6);         // All single-byte whitespace
+        let_assert(auto w = words("\u0085\u00A0"), w.size() == 3);       // All double-byte whitespace
+        let_assert(auto w = words("\u2000\u2001\u3000"), w.size() == 4); // All triple-byte whitespace
         let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
 
         // Non-ASCII content with regular spaces
@@ -2018,20 +2017,18 @@ void test_utf8() {
         let_assert(auto w = words("مرحبا بك"), w.size() == 2);
         let_assert(auto w = words("שלום עולם"), w.size() == 2);
 
-        // Negative tests - characters that should NOT be treated as whitespace
         // U+001C-U+001F are separators, not whitespace
         let_assert(auto w = words("a\u001Cb"), w.size() == 1); // FILE SEPARATOR - correctly NOT split
         let_assert(auto w = words("a\u001Db"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
         let_assert(auto w = words("a\u001Eb"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
         let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
 
-        // NUL bytes (U+0000) should NOT be treated as whitespace
         // Use `_sv` literals for size-aware NUL-containing strings
         let_assert(auto w = words("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
         let_assert(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
         let_assert(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
-        let_assert(auto w = words("\x00 a"_sv), w.size() == 1);         // NUL before space - find space, not NUL
-        let_assert(auto w = words("a \x00"_sv), w.size() == 1);         // Space before NUL - find space, not NUL
+        let_assert(auto w = words("\x00 a"_sv), w.size() == 2);         // NUL before space - yields 2 segments
+        let_assert(auto w = words("a \x00"_sv), w.size() == 2);         // Space before NUL - yields 2 segments
 
         // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
         // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
@@ -2039,14 +2036,14 @@ void test_utf8() {
         let_assert(auto w = words("a\u200Cb"), w.size() == 2); // ZERO WIDTH NON-JOINER
         let_assert(auto w = words("a\u200Db"), w.size() == 2); // ZERO WIDTH JOINER
 
-        // Consecutive different whitespace types (stress SIMD pattern matching)
-        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b");
-        let_assert(auto w = words("a\u0020\u00A0\u2000\u3000b"), w.size() == 2); // 1+2+3+3 byte sequence
+        // Consecutive different whitespace types - N delimiters yield N+1 segments
+        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 6);                // 5 whitespace chars between a and b
+        let_assert(auto w = words("a\u0020\u00A0\u2000\u3000b"), w.size() == 5); // 1+2+3+3 byte: 4 delims -> 5 segs
 
-        // Long sequences to test chunk boundaries
+        // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
         scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
                      sz::string_view(long_ws).utf8_split().template to<std::vector<std::string>>().size() ==
-                         0); // 100 spaces = no words
+                         101); // 100 spaces = 101 empty segments
 
         scope_assert(
             std::string long_mixed,

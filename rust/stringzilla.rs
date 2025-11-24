@@ -3818,4 +3818,38 @@ mod tests {
         let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
         assert_eq!(words, vec![b"a", b"b", b"c"]);
     }
+
+    #[test]
+    fn iter_newline_utf8_splits_trailing_newline() {
+        // "\r\na\r\n\r\nb\r\n" should produce ["", "a", "", "b", ""]
+        let text = b"\r\na\r\n\r\nb\r\n";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 5, "Expected 5 lines");
+        let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b""];
+        assert_eq!(lines, expected);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_no_trailing() {
+        let text = b"a\nb\nc";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_empty_string() {
+        let text = b"";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines, vec![b""]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_single_newline() {
+        let text = b"\n";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines, vec![b"", b""]);
+    }
 }

@@ -775,10 +775,10 @@ class range_splits {
     range_splits(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
+        char const *start_;      // Start of current segment
+        char const *end_;        // End of haystack (immutable)
+        size_type match_length_; // Length of current segment
         matcher_type matcher_;
-        string_view_type remaining_;
-        std::size_t length_within_remaining_;
-        bool reached_tail_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
@@ -787,24 +787,38 @@ class range_splits {
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
         using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
-            auto position = matcher_(remaining_);
-            length_within_remaining_ = position != string_type::npos ? position : remaining_.size();
-            reached_tail_ = false;
+        iterator(string_view_type haystack, matcher_type matcher) noexcept
+            : start_(haystack.data()), end_(haystack.data() + haystack.size()), match_length_(0), matcher_(matcher) {
+            auto position = matcher_(haystack);
+            match_length_ = position != string_type::npos ? position : haystack.size();
         }
 
         iterator(string_view_type haystack, matcher_type matcher, end_sentinel_type) noexcept
-            : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
+            : start_(haystack.data() + haystack.size() + 1), end_(haystack.data() + haystack.size()), match_length_(0),
+              matcher_(matcher) {}
 
         pointer operator->() const noexcept = delete;
-        value_type operator*() const noexcept { return remaining_.substr(0, length_within_remaining_); }
+        value_type operator*() const noexcept { return string_view_type(start_, match_length_); }
 
         iterator &operator++() noexcept {
-            remaining_.remove_prefix(length_within_remaining_);
-            reached_tail_ = remaining_.empty();
-            remaining_.remove_prefix(matcher_.needle_length() * !reached_tail_);
-            auto position = matcher_(remaining_);
-            length_within_remaining_ = position != string_type::npos ? position : remaining_.size();
+            start_ += match_length_;
+            if (start_ > end_) return *this;
+            // If we were at the end (yielded final empty segment), move past to terminate
+            if (start_ == end_) {
+                ++start_;
+                match_length_ = 0;
+                return *this;
+            }
+            // Skip delimiter
+            start_ += matcher_.needle_length();
+            if (start_ > end_) {
+                match_length_ = 0;
+                return *this;
+            }
+            // Find next delimiter
+            string_view_type remaining(start_, static_cast<size_type>(end_ - start_));
+            auto position = matcher_(remaining);
+            match_length_ = position != string_type::npos ? position : remaining.size();
             return *this;
         }
 
@@ -814,15 +828,11 @@ class range_splits {
             return temp;
         }
 
-        bool operator!=(iterator const &other) const noexcept {
-            return (remaining_.begin() != other.remaining_.begin()) || (reached_tail_ != other.reached_tail_);
-        }
-        bool operator==(iterator const &other) const noexcept {
-            return (remaining_.begin() == other.remaining_.begin()) && (reached_tail_ == other.reached_tail_);
-        }
-        bool operator!=(end_sentinel_type) const noexcept { return !remaining_.empty() || !reached_tail_; }
-        bool operator==(end_sentinel_type) const noexcept { return remaining_.empty() && reached_tail_; }
-        bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
+        bool operator!=(iterator const &other) const noexcept { return start_ != other.start_; }
+        bool operator==(iterator const &other) const noexcept { return start_ == other.start_; }
+        bool operator!=(end_sentinel_type) const noexcept { return start_ <= end_; }
+        bool operator==(end_sentinel_type) const noexcept { return start_ > end_; }
+        bool is_last() const noexcept { return start_ + match_length_ == end_; }
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
@@ -882,10 +892,10 @@ class range_rsplits {
     range_rsplits(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
+        char const *start_;      // Start of haystack (immutable)
+        char const *end_;        // Current end position (moves backward)
+        size_type match_length_; // Length of current segment
         matcher_type matcher_;
-        string_view_type remaining_;
-        std::size_t length_within_remaining_;
-        bool reached_tail_;
 
       public:
         using iterator_category = std::forward_iterator_tag;
@@ -894,30 +904,39 @@ class range_rsplits {
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
         using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-        iterator(string_view_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
-            auto position = matcher_(remaining_);
-            length_within_remaining_ = position != string_type::npos
-                                           ? remaining_.size() - position - matcher_.needle_length()
-                                           : remaining_.size();
-            reached_tail_ = false;
+        iterator(string_view_type haystack, matcher_type matcher) noexcept
+            : start_(haystack.data()), end_(haystack.data() + haystack.size()), match_length_(0), matcher_(matcher) {
+            auto position = matcher_(haystack);
+            match_length_ =
+                position != string_type::npos ? haystack.size() - position - matcher_.needle_length() : haystack.size();
         }
 
-        iterator(string_view_type haystack, matcher_type matcher, end_sentinel_type) noexcept
-            : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
+        iterator(string_view_type, matcher_type matcher, end_sentinel_type) noexcept
+            : start_(reinterpret_cast<char const *>(1)), end_(nullptr), match_length_(0), matcher_(matcher) {}
 
         pointer operator->() const noexcept = delete;
-        value_type operator*() const noexcept {
-            return remaining_.substr(remaining_.size() - length_within_remaining_);
-        }
+        value_type operator*() const noexcept { return string_view_type(end_ - match_length_, match_length_); }
 
         iterator &operator++() noexcept {
-            remaining_.remove_suffix(length_within_remaining_);
-            reached_tail_ = remaining_.empty();
-            remaining_.remove_suffix(matcher_.needle_length() * !reached_tail_);
-            auto position = matcher_(remaining_);
-            length_within_remaining_ = position != string_type::npos
-                                           ? remaining_.size() - position - matcher_.needle_length()
-                                           : remaining_.size();
+            end_ -= match_length_;
+            if (end_ < start_) return *this;
+            // If we were at the start (yielded final empty segment), signal termination
+            if (end_ == start_) {
+                end_ = nullptr;
+                start_ = reinterpret_cast<char const *>(1);
+                return *this;
+            }
+            // Skip delimiter
+            end_ -= matcher_.needle_length();
+            if (end_ < start_) {
+                match_length_ = 0;
+                return *this;
+            }
+            // Find next delimiter (searching backwards)
+            string_view_type remaining(start_, static_cast<size_type>(end_ - start_));
+            auto position = matcher_(remaining);
+            match_length_ = position != string_type::npos ? remaining.size() - position - matcher_.needle_length()
+                                                          : remaining.size();
             return *this;
         }
 
@@ -927,15 +946,11 @@ class range_rsplits {
             return temp;
         }
 
-        bool operator!=(iterator const &other) const noexcept {
-            return (remaining_.end() != other.remaining_.end()) || (reached_tail_ != other.reached_tail_);
-        }
-        bool operator==(iterator const &other) const noexcept {
-            return (remaining_.end() == other.remaining_.end()) && (reached_tail_ == other.reached_tail_);
-        }
-        bool operator!=(end_sentinel_type) const noexcept { return !remaining_.empty() || !reached_tail_; }
-        bool operator==(end_sentinel_type) const noexcept { return remaining_.empty() && reached_tail_; }
-        bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
+        bool operator!=(iterator const &other) const noexcept { return end_ != other.end_; }
+        bool operator==(iterator const &other) const noexcept { return end_ == other.end_; }
+        bool operator!=(end_sentinel_type) const noexcept { return end_ >= start_; }
+        bool operator==(end_sentinel_type) const noexcept { return end_ < start_; }
+        bool is_last() const noexcept { return end_ - match_length_ == start_; }
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
@@ -1146,8 +1161,9 @@ class range_utf8_line_splits {
     range_utf8_line_splits(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
-        string_view_type remaining_; // Remaining text to process
-        string_view_type current_;   // Current line segment
+        char const *start_;      // Start of current segment
+        char const *end_;        // End of original text (immutable)
+        size_type match_length_; // Length of current segment to yield
 
       public:
         using iterator_category = std::forward_iterator_tag;
@@ -1156,34 +1172,42 @@ class range_utf8_line_splits {
         using pointer = string_view_type;
         using reference = string_view_type;
 
-        iterator() noexcept : remaining_(), current_() {}
-        iterator(string_view_type text) noexcept : remaining_(text), current_() { ++(*this); }
-        iterator(string_view_type, end_sentinel_type) noexcept : remaining_(), current_() {}
+        iterator() noexcept : start_(nullptr), end_(nullptr), match_length_(0) {}
+        iterator(string_view_type text) noexcept
+            : start_(text.data()), end_(text.data() + text.size()), match_length_(0) {
+            // Find first segment length
+            size_type newline_length = 0;
+            char const *newline_ptr =
+                sz_utf8_find_newline(start_, static_cast<size_type>(end_ - start_), &newline_length);
+            match_length_ =
+                newline_ptr ? static_cast<size_type>(newline_ptr - start_) : static_cast<size_type>(end_ - start_);
+        }
+        iterator(string_view_type text, end_sentinel_type) noexcept
+            : start_(text.data() + text.size() + 1), end_(text.data() + text.size()), match_length_(0) {}
 
-        reference operator*() const noexcept { return current_; }
-        pointer operator->() const noexcept { return current_; }
+        reference operator*() const noexcept { return string_view_type(start_, match_length_); }
+        pointer operator->() const noexcept { return string_view_type(start_, match_length_); }
 
         iterator &operator++() noexcept {
-            // If remaining is empty and current is empty, we're past the end
-            if (remaining_.size() == 0 && current_.size() == 0) return *this;
-
-            size_type newline_length = 0;
-            char const *newline_ptr = sz_utf8_find_newline(remaining_.data(), remaining_.size(), &newline_length);
-
-            if (newline_ptr) {
-                // Found newline: current line is from start of remaining_ to newline_ptr
-                size_type line_length = static_cast<size_type>(newline_ptr - remaining_.data());
-                current_ = string_view_type(remaining_.data(), line_length);
-                // Advance remaining_ past the newline
-                remaining_ =
-                    string_view_type(newline_ptr + newline_length, remaining_.size() - line_length - newline_length);
+            start_ += match_length_;
+            if (start_ > end_) return *this;
+            // If we were at the end (yielded final empty segment), move past to terminate
+            if (start_ == end_) {
+                ++start_;
+                match_length_ = 0;
+                return *this;
             }
-            // No more newlines: last segment
-            else {
-                current_ = remaining_;
-                // Mark as "yielded last element" by making remaining_ empty
-                remaining_ = string_view_type(remaining_.data() + remaining_.size(), 0);
+            // Skip delimiter at current position
+            size_type delim_len = 0;
+            char const *delim = sz_utf8_find_newline(start_, static_cast<size_type>(end_ - start_), &delim_len);
+            if (delim == start_) start_ += delim_len;
+            if (start_ > end_) {
+                match_length_ = 0;
+                return *this;
             }
+            // Find next delimiter
+            delim = sz_utf8_find_newline(start_, static_cast<size_type>(end_ - start_), &delim_len);
+            match_length_ = delim ? static_cast<size_type>(delim - start_) : static_cast<size_type>(end_ - start_);
             return *this;
         }
 
@@ -1194,18 +1218,16 @@ class range_utf8_line_splits {
         }
 
         bool operator==(iterator const &other) const noexcept {
-            // Both at end: remaining is empty and we've yielded everything (current is also tracked)
-            bool this_at_end = (remaining_.size() == 0 && current_.size() == 0);
-            bool other_at_end = (other.remaining_.size() == 0 && other.current_.size() == 0);
+            bool this_at_end = start_ > end_;
+            bool other_at_end = other.start_ > other.end_;
             if (this_at_end && other_at_end) return true;
             if (this_at_end || other_at_end) return false;
-            // Both active: compare positions
-            return remaining_.data() == other.remaining_.data();
+            return start_ == other.start_;
         }
 
         bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(end_sentinel_type) const noexcept { return remaining_.size() == 0 && current_.size() == 0; }
-        bool operator!=(end_sentinel_type) const noexcept { return !(*this == end_sentinel_type {}); }
+        bool operator==(end_sentinel_type) const noexcept { return start_ > end_; }
+        bool operator!=(end_sentinel_type) const noexcept { return start_ <= end_; }
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
@@ -1230,8 +1252,7 @@ class range_utf8_line_splits {
  *  @brief A range of string slices split by UTF-8 whitespace characters.
  *
  *  Splits on all 25 Unicode "White_Space" characters.
- *  Consecutive whitespace is treated as a single delimiter.
- *  Empty segments are skipped (similar to Python's str.split()).
+ *  N whitespace delimiters yield N+1 segments (including empty segments).
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
@@ -1252,8 +1273,9 @@ class range_utf8_whitespace_splits {
     range_utf8_whitespace_splits(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
-        string_view_type remaining_; // Remaining text to process (data() == nullptr means end)
-        string_view_type current_;   // Current word segment
+        char const *start_;      // Start of current segment
+        char const *end_;        // End of original text (immutable)
+        size_type match_length_; // Length of current segment
 
       public:
         using iterator_category = std::forward_iterator_tag;
@@ -1262,52 +1284,40 @@ class range_utf8_whitespace_splits {
         using pointer = string_view_type;
         using reference = string_view_type;
 
-        iterator() noexcept : remaining_(), current_() {}
-        iterator(string_view_type text) noexcept : remaining_(text), current_() { ++(*this); }
-        iterator(string_view_type, end_sentinel_type) noexcept : remaining_(), current_() {}
+        iterator() noexcept : start_(nullptr), end_(nullptr), match_length_(0) {}
+        iterator(string_view_type text) noexcept
+            : start_(text.data()), end_(text.data() + text.size()), match_length_(0) {
+            // Find first segment length
+            size_type ws_len = 0;
+            char const *ws = sz_utf8_find_whitespace(start_, static_cast<size_type>(end_ - start_), &ws_len);
+            match_length_ = ws ? static_cast<size_type>(ws - start_) : static_cast<size_type>(end_ - start_);
+        }
+        iterator(string_view_type text, end_sentinel_type) noexcept
+            : start_(text.data() + text.size() + 1), end_(text.data() + text.size()), match_length_(0) {}
 
-        reference operator*() const noexcept { return current_; }
-        pointer operator->() const noexcept { return current_; }
+        reference operator*() const noexcept { return string_view_type(start_, match_length_); }
+        pointer operator->() const noexcept { return string_view_type(start_, match_length_); }
 
         iterator &operator++() noexcept {
-            // If remaining is empty and current is empty, we're past the end
-            if (remaining_.size() == 0 && current_.size() == 0) return *this;
-
-            // Find next non-empty segment (skip consecutive whitespace)
-            while (remaining_.size() > 0) {
-                size_type ws_length = 0;
-                char const *ws_ptr = sz_utf8_find_whitespace(remaining_.data(), remaining_.size(), &ws_length);
-
-                if (ws_ptr) {
-                    size_type offset = static_cast<size_type>(ws_ptr - remaining_.data());
-                    if (offset > 0) {
-                        // Non-empty segment before whitespace
-                        current_ = string_view_type(remaining_.data(), offset);
-                        // Advance remaining_ past word and whitespace
-                        remaining_ = string_view_type(ws_ptr + ws_length, remaining_.size() - offset - ws_length);
-                        return *this;
-                    }
-                    else {
-                        // Skip leading/consecutive whitespace
-                        remaining_ = string_view_type(ws_ptr + ws_length, remaining_.size() - ws_length);
-                    }
-                }
-                // No more whitespace - last segment
-                else {
-                    if (remaining_.size() > 0) {
-                        current_ = remaining_;
-                        // Mark as "yielded last element" by making remaining_ empty
-                        remaining_ = string_view_type(remaining_.data() + remaining_.size(), 0);
-                        return *this;
-                    }
-                    // Shouldn't reach here, but handle it
-                    break;
-                }
+            start_ += match_length_;
+            if (start_ > end_) return *this;
+            // If we were at the end (yielded final empty segment), move past to terminate
+            if (start_ == end_) {
+                ++start_;
+                match_length_ = 0;
+                return *this;
             }
-
-            // Exhausted remaining_ without finding non-empty segment (all whitespace)
-            current_ = string_view_type();
-            remaining_ = string_view_type();
+            // Skip delimiter at current position
+            size_type ws_len = 0;
+            char const *ws = sz_utf8_find_whitespace(start_, static_cast<size_type>(end_ - start_), &ws_len);
+            if (ws == start_) start_ += ws_len;
+            if (start_ > end_) {
+                match_length_ = 0;
+                return *this;
+            }
+            // Find next delimiter
+            ws = sz_utf8_find_whitespace(start_, static_cast<size_type>(end_ - start_), &ws_len);
+            match_length_ = ws ? static_cast<size_type>(ws - start_) : static_cast<size_type>(end_ - start_);
             return *this;
         }
 
@@ -1317,19 +1327,10 @@ class range_utf8_whitespace_splits {
             return temp;
         }
 
-        bool operator==(iterator const &other) const noexcept {
-            // Both at end: remaining is empty and we've yielded everything
-            bool this_at_end = (remaining_.size() == 0 && current_.size() == 0);
-            bool other_at_end = (other.remaining_.size() == 0 && other.current_.size() == 0);
-            if (this_at_end && other_at_end) return true;
-            if (this_at_end || other_at_end) return false;
-            // Both active: compare positions
-            return remaining_.data() == other.remaining_.data();
-        }
-
-        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(end_sentinel_type) const noexcept { return remaining_.size() == 0 && current_.size() == 0; }
-        bool operator!=(end_sentinel_type) const noexcept { return !(*this == end_sentinel_type {}); }
+        bool operator!=(iterator const &other) const noexcept { return start_ != other.start_; }
+        bool operator==(iterator const &other) const noexcept { return start_ == other.start_; }
+        bool operator!=(end_sentinel_type) const noexcept { return start_ <= end_; }
+        bool operator==(end_sentinel_type) const noexcept { return start_ > end_; }
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
