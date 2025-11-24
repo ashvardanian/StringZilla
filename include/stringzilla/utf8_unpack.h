@@ -317,6 +317,7 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     if (rune >= 0x10D50 && rune <= 0x10D65) { folded[0] = rune + 0x20; return 1; } // Garay
     if (rune >= 0x118A0 && rune <= 0x118BF) { folded[0] = rune + 0x20; return 1; } // Warang Citi
     if (rune >= 0x16E40 && rune <= 0x16E5F) { folded[0] = rune + 0x20; return 1; } // Medefaidrin
+    if (rune >= 0x16EA0 && rune <= 0x16EB8) { folded[0] = rune + 0x1B; return 1; } // Beria Erfe
     // 2-byte character ranges with +48 translations
     if (rune >= 0x0531 && rune <= 0x0556) { folded[0] = rune + 0x30; return 1; } // Armenian Ա-Ֆ → ա-ֆ
     if (rune >= 0x2C00 && rune <= 0x2C2F) { folded[0] = rune + 0x30; return 1; } // Glagolitic Ⰰ-Ⱟ → ⰰ-ⱟ
@@ -347,7 +348,6 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     if (rune >= 0x1057C && rune <= 0x1058A) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
     if (rune >= 0x1058C && rune <= 0x10592) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
     if (rune >= 0x1E900 && rune <= 0x1E921) { folded[0] = rune + 0x22; return 1; } // Adlam 𞤀-𞤡 → 𞤢-𞥃 (+34)
-    if (rune >= 0x16EA0 && rune <= 0x16EB8) { folded[0] = rune + 0x1B; return 1; } // Kawi (+27)
 
     // Even/odd +1 mappings: uppercase at even codepoint, lowercase at odd (or vice versa)
     sz_u32_t is_even = ((rune & 1) == 0), is_odd = !is_even;
@@ -390,7 +390,12 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     if (rune >= 0xA796 && rune <= 0xA7A8 && is_even) { folded[0] = rune + 1; return 1; } // Ꞗ-Ꞩ
     if (rune >= 0xA7B4 && rune <= 0xA7C2 && is_even) { folded[0] = rune + 1; return 1; } // Ꞵ-Ꟃ
     if (rune == 0xA7C7 || rune == 0xA7C9) { folded[0] = rune + 1; return 1; } // Ꟈ, Ꟊ
-    if (rune >= 0xA7CC && rune <= 0xA7D8 && is_even) { folded[0] = rune + 1; return 1; } // Ꟍ-Ꟙ
+    // Latin Extended-D: Only specific even codepoints
+    if (rune == 0xA7CC || rune == 0xA7CE || rune == 0xA7D0 || rune == 0xA7D2 ||
+        rune == 0xA7D4 || rune == 0xA7D6 || rune == 0xA7D8) {
+        folded[0] = rune + 1;
+        return 1;
+    }
     if (rune == 0xA7DA) { folded[0] = 0xA7DB; return 1; } // Ꟛ → ꟛ
     if (rune == 0xA7F5) { folded[0] = 0xA7F6; return 1; } // Ꟶ → ꟶ
 

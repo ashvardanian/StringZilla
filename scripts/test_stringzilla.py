@@ -1447,5 +1447,188 @@ def test_invalid_utf8_handling():
         assert len(str_result) > 0
 
 
+def test_unit_utf8_case_fold():
+    """Test basic case folding functionality."""
+    # ASCII
+    assert sz.utf8_case_fold("HELLO") == b"hello"
+    assert sz.utf8_case_fold("Hello World") == b"hello world"
+    assert sz.utf8_case_fold("") == b""
+    assert sz.utf8_case_fold("already lowercase") == b"already lowercase"
+
+    # German sharp S expansion (ß → ss)
+    assert sz.utf8_case_fold("Straße") == b"strasse"
+    assert sz.utf8_case_fold("GROSSE") == b"grosse"
+
+    # Method form on Str
+    assert sz.Str("HELLO").utf8_case_fold() == b"hello"
+
+    # Bytes input
+    assert sz.utf8_case_fold(b"HELLO") == b"hello"
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        ("A", b"a"),
+        ("Z", b"z"),
+        ("ß", b"ss"),  # German sharp S (U+00DF)
+        ("ẞ", b"ss"),  # Capital sharp S (U+1E9E)
+        ("ﬁ", b"fi"),  # fi ligature (U+FB01)
+        ("ﬀ", b"ff"),  # ff ligature (U+FB00)
+        ("ﬂ", b"fl"),  # fl ligature (U+FB02)
+        ("ﬃ", b"ffi"),  # ffi ligature (U+FB03)
+        ("ﬄ", b"ffl"),  # ffl ligature (U+FB04)
+        ("Σ", "σ".encode("utf-8")),  # Greek Sigma
+        ("Ω", "ω".encode("utf-8")),  # Greek Omega
+        ("Ä", "ä".encode("utf-8")),  # German umlaut
+        ("É", "é".encode("utf-8")),  # French accent
+        ("Ñ", "ñ".encode("utf-8")),  # Spanish tilde
+    ],
+)
+def test_utf8_case_fold_expansions(input_str, expected):
+    """Test case folding with specific known transformations including expansions."""
+    assert sz.utf8_case_fold(input_str) == expected
+
+
+def _parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
+    """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
+
+    Uses status C (common) and F (full) mappings for full case folding.
+    """
+    folds = {}
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(";")
+            if len(parts) < 3:
+                continue
+            status = parts[1].strip()
+            # C = common, F = full (for expansions like ß → ss)
+            # Skip S (simple) and T (Turkic) for full case folding
+            if status not in ("C", "F"):
+                continue
+            try:
+                codepoint = int(parts[0].strip(), 16)
+                # Mapping can be multiple codepoints separated by spaces (e.g., "0073 0073" for ß → ss)
+                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
+                # Convert target codepoints to UTF-8 bytes
+                folded_str = "".join(chr(cp) for cp in target_cps)
+                folds[codepoint] = folded_str.encode("utf-8")
+            except (ValueError, IndexError):
+                continue
+    return folds
+
+
+def _get_case_folding_rules(version: str = "17.0.0") -> Dict[int, bytes]:
+    """Download and parse Unicode CaseFolding.txt, caching in temp directory.
+
+    Args:
+        version: Unicode version string (e.g., "17.0.0")
+
+    Returns:
+        Dict mapping codepoints to their folded UTF-8 bytes
+    """
+    import urllib.request
+
+    cache_path = os.path.join(tempfile.gettempdir(), f"CaseFolding-{version}.txt")
+
+    # Use cached file if it exists
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
+        try:
+            urllib.request.urlretrieve(url, cache_path)
+        except Exception as e:
+            pytest.skip(f"Could not download CaseFolding.txt from {url}: {e}")
+
+    return _parse_case_folding_file(cache_path)
+
+
+def test_utf8_case_fold_all_codepoints():
+    """Compare StringZilla case folding with Unicode 17.0 CaseFolding.txt rules.
+
+    This test downloads the official Unicode 17.0 case folding data file to validate
+    StringZilla's implementation, independent of Python's Unicode version.
+    The file is cached in the system temp directory for subsequent runs.
+    """
+    # Load Unicode 17.0 case folding rules (downloads and caches automatically)
+    unicode_folds = _get_case_folding_rules("17.0.0")
+    print(f"\nLoaded {len(unicode_folds)} case folding rules from Unicode 17.0")
+
+    mismatches = []
+    missing_folds = []
+    extra_folds = []
+
+    for codepoint in range(0x110000):
+        # Skip surrogates (not valid in UTF-8)
+        if 0xD800 <= codepoint <= 0xDFFF:
+            continue
+
+        try:
+            char = chr(codepoint)
+            char_bytes = char.encode("utf-8")
+            sz_folded = sz.utf8_case_fold(char)
+
+            # Get expected folding from Unicode 17.0 rules
+            # If not in the table, character maps to itself
+            expected = unicode_folds.get(codepoint, char_bytes)
+
+            if sz_folded != expected:
+                entry = (f"U+{codepoint:04X}", repr(char), expected.hex(), sz_folded.hex())
+                if codepoint in unicode_folds and sz_folded == char_bytes:
+                    missing_folds.append(entry)  # StringZilla didn't fold but should have
+                elif codepoint not in unicode_folds and sz_folded != char_bytes:
+                    extra_folds.append(entry)  # StringZilla folded but shouldn't have
+                else:
+                    mismatches.append(entry)  # Both fold but to different targets
+        except (ValueError, UnicodeEncodeError):
+            continue
+
+    # Report statistics
+    print(f"  Missing folds (StringZilla should fold): {len(missing_folds)}")
+    print(f"  Extra folds (StringZilla shouldn't fold): {len(extra_folds)}")
+    print(f"  Wrong target (both fold differently): {len(mismatches)}")
+
+    if missing_folds:
+        print(f"  First 5 missing: {missing_folds[:5]}")
+    if extra_folds:
+        print(f"  First 5 extra: {extra_folds[:5]}")
+    if mismatches:
+        print(f"  First 5 wrong: {mismatches[:5]}")
+
+    total_errors = len(mismatches) + len(missing_folds) + len(extra_folds)
+    assert total_errors == 0, (
+        f"Found {total_errors} case folding errors vs Unicode 17.0: "
+        f"{len(mismatches)} wrong targets, {len(missing_folds)} missing, {len(extra_folds)} extra. "
+        f"First 10 overall: {(mismatches + missing_folds + extra_folds)[:10]}"
+    )
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_case_fold_random_strings(seed_value: int):
+    """Test case folding on random multi-codepoint strings."""
+    seed(seed_value)
+
+    # Test with ASCII uppercase
+    for _ in range(50):
+        length = randint(1, 100)
+        test_str = "".join(chr(randint(0x41, 0x5A)) for _ in range(length))  # A-Z
+        python_folded = test_str.casefold().encode("utf-8")
+        sz_folded = sz.utf8_case_fold(test_str)
+        assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
+
+    # Test with Latin Extended characters
+    for _ in range(50):
+        length = randint(1, 50)
+        # Mix of ASCII uppercase and Latin Extended (includes ß, etc.)
+        codepoints = [randint(0x41, 0x5A) for _ in range(length)]
+        codepoints += [randint(0xC0, 0xFF) for _ in range(length // 2)]
+        test_str = "".join(chr(cp) for cp in codepoints)
+        python_folded = test_str.casefold().encode("utf-8")
+        sz_folded = sz.utf8_case_fold(test_str)
+        assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", "-s", __file__]))
