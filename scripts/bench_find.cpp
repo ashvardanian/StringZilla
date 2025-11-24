@@ -683,6 +683,18 @@ void bench_utf8_find_boundary(environment_t const &env) {
                                         matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_neon>>(env))
         .log(base_whitespace);
 #endif
+#if SZ_USE_SVE2
+    bench_unary( //
+        env, "sz_utf8_find_newline_sve2", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_sve2>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_sve2", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_sve2>>(env))
+        .log(base_whitespace);
+#endif
 }
 
 #pragma endregion

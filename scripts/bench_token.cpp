@@ -234,6 +234,9 @@ void bench_utf8_count(environment_t const &env) {
 #if SZ_USE_NEON
     bench_unary(env, "sz_utf8_count_neon", validator, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
 #endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_count_sve2", validator, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);
+#endif
 }
 
 void bench_utf8_unpack(environment_t const &env) {
