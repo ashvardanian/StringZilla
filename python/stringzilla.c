@@ -206,6 +206,9 @@ typedef struct {
     /// @brief  Should we include the newline characters in the resulting slices?
     sz_bool_t keepends;
 
+    /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
+    sz_bool_t skip_empty;
+
 } Utf8SplitLinesIterator;
 
 /**
@@ -222,6 +225,9 @@ typedef struct {
     sz_cptr_t start;        //< Current position in text
     sz_cptr_t end;          //< End of text (immutable)
     sz_size_t match_length; //< Length of current segment to yield
+
+    /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
+    sz_bool_t skip_empty;
 
 } Utf8SplitWhitespaceIterator;
 
@@ -3983,6 +3989,7 @@ static char const doc_utf8_splitlines_iter[] = //
     "Args:\n"
     "  text (Str or str or bytes): The string object.\n"
     "  keepends (bool, optional): Include line endings in results (default is False).\n"
+    "  skip_empty (bool, optional): Skip empty lines (default is False).\n"
     "Returns:\n"
     "  iterator: An iterator yielding lines as Str objects.\n"
     "\n"
@@ -3995,7 +4002,7 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t min_args = !is_member;
-    Py_ssize_t max_args = !is_member + 1;
+    Py_ssize_t max_args = !is_member + 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
         PyErr_Format(PyExc_TypeError, "utf8_splitlines_iter() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
@@ -4003,6 +4010,7 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
 
     PyObject *text_obj = is_member ? self : args[0];
     PyObject *keepends_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+    PyObject *skip_empty_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
 
     // Parse keyword arguments
     if (args_names_tuple) {
@@ -4011,12 +4019,16 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "keepends") == 0 && !keepends_obj) { keepends_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) {
+                skip_empty_obj = value;
+            }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
 
     sz_string_view_t text;
     int keepends = 0;
+    int skip_empty = 0;
 
     // Validate and convert `text`
     if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
@@ -4033,6 +4045,15 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
         }
     }
 
+    // Validate and convert `skip_empty`
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            wrap_current_exception("The skip_empty argument must be a boolean");
+            return NULL;
+        }
+    }
+
     // Create the iterator
     Utf8SplitLinesIterator *result_obj =
         (Utf8SplitLinesIterator *)Utf8SplitLinesIteratorType.tp_alloc(&Utf8SplitLinesIteratorType, 0);
@@ -4042,6 +4063,7 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
     result_obj->start = text.start;
     result_obj->end = text.start + text.length;
     result_obj->keepends = keepends;
+    result_obj->skip_empty = skip_empty;
 
     // Find first segment length
     sz_size_t newline_length = 0;
@@ -4062,6 +4084,7 @@ static char const doc_utf8_split_iter[] = //
     "\n"
     "Args:\n"
     "  text (Str or str or bytes): The string object.\n"
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"
     "Returns:\n"
     "  iterator: An iterator yielding non-whitespace tokens as Str objects.\n"
     "\n"
@@ -4076,25 +4099,42 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t min_args = !is_member;
-    Py_ssize_t max_args = !is_member;
+    Py_ssize_t max_args = !is_member + 1;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_split_iter() takes exactly %zd argument(s)", min_args);
-        return NULL;
-    }
-
-    // No keyword arguments expected
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_split_iter() takes no keyword arguments");
+        PyErr_Format(PyExc_TypeError, "utf8_split_iter() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
     PyObject *text_obj = is_member ? self : args[0];
+    PyObject *skip_empty_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    // Parse keyword arguments
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) { skip_empty_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+        }
+    }
+
     sz_string_view_t text;
+    int skip_empty = 0;
 
     // Validate and convert `text`
     if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
+    }
+
+    // Validate and convert `skip_empty`
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            wrap_current_exception("The skip_empty argument must be a boolean");
+            return NULL;
+        }
     }
 
     // Create the iterator
@@ -4105,6 +4145,7 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     result_obj->text_obj = text_obj;
     result_obj->start = text.start;
     result_obj->end = text.start + text.length;
+    result_obj->skip_empty = skip_empty;
     // Find first segment length
     sz_size_t ws_len = 0;
     sz_cptr_t ws = sz_utf8_find_whitespace(result_obj->start, text.length, &ws_len);
@@ -4740,51 +4781,54 @@ static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    // Build the result from current state
+    // Find next non-empty segment (or any segment if skip_empty is false)
     sz_string_view_t result_memory;
-    result_memory.start = self->start;
-    result_memory.length = self->match_length;
+    do {
+        // Build the result from current state
+        result_memory.start = self->start;
+        result_memory.length = self->match_length;
 
-    // Include newline in result if keepends is set
-    if (self->keepends && self->start + self->match_length < self->end) {
-        sz_size_t newline_length = 0;
-        sz_cptr_t newline_ptr =
-            sz_utf8_find_newline(self->start + self->match_length,
-                                 (sz_size_t)(self->end - self->start - self->match_length), &newline_length);
-        if (newline_ptr == self->start + self->match_length) { result_memory.length += newline_length; }
-    }
+        // Include newline in result if keepends is set
+        if (self->keepends && self->start + self->match_length < self->end) {
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start + self->match_length,
+                                     (sz_size_t)(self->end - self->start - self->match_length), &newline_length);
+            if (newline_ptr == self->start + self->match_length) { result_memory.length += newline_length; }
+        }
 
-    // Advance to next segment
-    self->start += self->match_length;
+        // Advance to next segment
+        self->start += self->match_length;
 
-    // Skip delimiter at current position (if any)
-    if (self->start < self->end) {
-        sz_size_t newline_length = 0;
-        sz_cptr_t newline_ptr =
-            sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
-        if (newline_ptr == self->start) { self->start += newline_length; }
-    }
-    // Handle the case where we're exactly at end after consuming content
-    else if (self->start == self->end) {
-        // We've consumed all content - signal termination after this empty segment
-        self->start = self->end + 1;
-        self->match_length = 0;
-        // But we still return the current result
-        result_obj->memory = result_memory;
-        result_obj->parent = self->text_obj;
-        Py_INCREF(self->text_obj);
-        return (PyObject *)result_obj;
-    }
+        // Skip delimiter at current position (if any)
+        if (self->start < self->end) {
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
+            if (newline_ptr == self->start) { self->start += newline_length; }
+        }
+        // Handle the case where we're exactly at end after consuming content
+        else if (self->start == self->end) {
+            self->start = self->end + 1;
+            self->match_length = 0;
+        }
 
-    // If we're now past end, we're done after this
-    if (self->start > self->end) { self->match_length = 0; }
-    else {
-        // Find next delimiter to determine segment length
-        sz_size_t newline_length = 0;
-        sz_cptr_t newline_ptr =
-            sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
-        self->match_length =
-            newline_ptr ? (sz_size_t)(newline_ptr - self->start) : (sz_size_t)(self->end - self->start);
+        // If we're now past end, we're done after this
+        if (self->start > self->end) { self->match_length = 0; }
+        else {
+            // Find next delimiter to determine segment length
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
+            self->match_length =
+                newline_ptr ? (sz_size_t)(newline_ptr - self->start) : (sz_size_t)(self->end - self->start);
+        }
+    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
+
+    // If we exhausted all segments while skipping empties, free and return NULL
+    if (self->skip_empty && result_memory.length == 0) {
+        Py_DECREF(result_obj);
+        return NULL;
     }
 
     // Set its properties based on the slice
@@ -4854,33 +4898,42 @@ static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterato
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    // Current segment to yield
+    // Find next non-empty segment (or any segment if skip_empty is false)
     sz_string_view_t result_memory;
-    result_memory.start = self->start;
-    result_memory.length = self->match_length;
+    do {
+        // Current segment to yield
+        result_memory.start = self->start;
+        result_memory.length = self->match_length;
 
-    // Advance to next segment
-    self->start += self->match_length;
-    if (self->start > self->end) {
-        // Already yielding final segment, mark termination
-        self->match_length = 0;
-    }
-    else if (self->start == self->end) {
-        // At end - move past to terminate after yielding this segment
-        self->start = self->end + 1;
-        self->match_length = 0;
-    }
-    else {
-        // Skip delimiter at current position
-        sz_size_t ws_len = 0;
-        sz_cptr_t ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
-        if (ws == self->start) self->start += ws_len;
-        if (self->start > self->end) { self->match_length = 0; }
-        else {
-            // Find next delimiter
-            ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
-            self->match_length = ws ? (sz_size_t)(ws - self->start) : (sz_size_t)(self->end - self->start);
+        // Advance to next segment
+        self->start += self->match_length;
+        if (self->start > self->end) {
+            // Already yielding final segment, mark termination
+            self->match_length = 0;
         }
+        else if (self->start == self->end) {
+            // At end - move past to terminate after yielding this segment
+            self->start = self->end + 1;
+            self->match_length = 0;
+        }
+        else {
+            // Skip delimiter at current position
+            sz_size_t ws_len = 0;
+            sz_cptr_t ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
+            if (ws == self->start) self->start += ws_len;
+            if (self->start > self->end) { self->match_length = 0; }
+            else {
+                // Find next delimiter
+                ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
+                self->match_length = ws ? (sz_size_t)(ws - self->start) : (sz_size_t)(self->end - self->start);
+            }
+        }
+    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
+
+    // If we exhausted all segments while skipping empties, free and return NULL
+    if (self->skip_empty && result_memory.length == 0) {
+        Py_DECREF(result_obj);
+        return NULL;
     }
 
     // Set its properties based on the slice
