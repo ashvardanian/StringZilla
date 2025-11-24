@@ -1943,7 +1943,9 @@ void test_utf8() {
         let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto l = lines("a\x00b"_sv), l.size() == 1);         // NUL in middle - NOT a newline
+        let_assert(auto l = lines("a\x00"
+                                  "b"_sv),
+                   l.size() == 1);                                      // NUL in middle - NOT a newline
         let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
         let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
         let_assert(auto l = lines("\x00\n"_sv), l.size() == 2); // NUL before newline - find \n, yields 2 segments
@@ -2024,7 +2026,9 @@ void test_utf8() {
         let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto w = words("a\x00b"_sv), w.size() == 1);         // NUL in middle - NOT split
+        let_assert(auto w = words("a\x00"
+                                  "b"_sv),
+                   w.size() == 1);                                      // NUL in middle - NOT split
         let_assert(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
         let_assert(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
         let_assert(auto w = words("\x00 a"_sv), w.size() == 2);         // NUL before space - yields 2 segments
