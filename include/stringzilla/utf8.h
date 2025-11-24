@@ -752,6 +752,15 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_si
 #pragma GCC target("avx2,bmi,bmi2,popcnt")
 #endif
 
+/**
+ *  @brief  Unsigned byte greater-than-or-equal comparison for AVX2.
+ *
+ *  AVX2 lacks unsigned comparison intrinsics like `_mm256_cmpge_epu8`.
+ *  This uses the identity: a >= b  ⟺  max(a, b) == a
+ *  Since `_mm256_max_epu8` treats bytes as unsigned, this gives correct results.
+ */
+SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_(__m256i a, __m256i b) { return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a); }
+
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
     // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
@@ -914,8 +923,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         __m256i x_9a_cmp = _mm256_cmpeq_epi8(text_vec, x_9a_vec);
         __m256i x_80_cmp = _mm256_cmpeq_epi8(text_vec, x_80_vec);
         __m256i x_81_cmp = _mm256_cmpeq_epi8(text_vec, x_81_vec);
-        __m256i x_80_ge_cmp = _mm256_cmpgt_epi8(text_vec, _mm256_set1_epi8((char)0x7F)); // >= 0x80
-        __m256i x_8d_le_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x8E), text_vec); // <= 0x8D
+        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_(text_vec, x_80_vec);                     // >= 0x80
+        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_(_mm256_set1_epi8((char)0x8D), text_vec); // <= 0x8D
         __m256i x_8d_range = _mm256_and_si256(x_80_ge_cmp, x_8d_le_cmp);
         __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_vec, x_a8_vec);
         __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_vec, x_a9_vec);
