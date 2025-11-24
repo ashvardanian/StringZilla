@@ -3279,7 +3279,7 @@ SZ_PUBLIC void sz_hash_state_init_neon(sz_hash_state_t *state, sz_u64_t seed) {
     state->ins_length = 0;
 }
 
-SZ_INTERNAL void sz_hash_state_update_neon_(sz_hash_state_t *state) {
+SZ_INTERNAL void sz_hash_state_update_neon_(sz_hash_state_internal_t_ *state) {
     uint8x16_t const order = vld1q_u8(sz_hash_u8x16x4_shuffle_());
     state->aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[0], state->ins.u8x16s[0]);
     uint8x16_t sum_shuffled0 = vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[0]), order);
@@ -3295,7 +3295,7 @@ SZ_INTERNAL void sz_hash_state_update_neon_(sz_hash_state_t *state) {
     state->sum.u64x2s[3] = vaddq_u64(vreinterpretq_u64_u8(sum_shuffled3), state->ins.u64x2s[3]);
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_t const *state) {
+SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_internal_t_ const *state) {
     // Mix the length into the key
     uint64x2_t key_with_length = vaddq_u64(state->key.u64x2, vsetq_lane_u64(state->ins_length, vdupq_n_u64(0), 0));
     // Combine the "sum" and the "AES" blocks
@@ -3426,7 +3426,21 @@ SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state_ptr, sz_cptr_t t
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state) {
     // This whole function is identical to Haswell.
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_neon_(state);
+    if (length >= 64) {
+        // Load the public state into the internal representation for finalization
+        sz_hash_state_internal_t_ internal_state;
+        internal_state.aes.u8x16s[0] = vld1q_u8(state->aes + 0);
+        internal_state.aes.u8x16s[1] = vld1q_u8(state->aes + 16);
+        internal_state.aes.u8x16s[2] = vld1q_u8(state->aes + 32);
+        internal_state.aes.u8x16s[3] = vld1q_u8(state->aes + 48);
+        internal_state.sum.u8x16s[0] = vld1q_u8(state->sum + 0);
+        internal_state.sum.u8x16s[1] = vld1q_u8(state->sum + 16);
+        internal_state.sum.u8x16s[2] = vld1q_u8(state->sum + 32);
+        internal_state.sum.u8x16s[3] = vld1q_u8(state->sum + 48);
+        internal_state.key.u8x16 = vld1q_u8(state->key);
+        internal_state.ins_length = state->ins_length;
+        return sz_hash_state_finalize_neon_(&internal_state);
+    }
 
     // Switch back to a smaller "minimal" state for small inputs
     sz_hash_minimal_t_ minimal_state;
@@ -3521,8 +3535,8 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         return sz_hash_minimal_finalize_neon_(&state, length);
     }
     else {
-        sz_align_(64) sz_hash_state_t state;
-        sz_hash_state_init_neon(&state, seed);
+        sz_align_(64) sz_hash_state_internal_t_ state;
+        sz_hash_state_init_neon((sz_hash_state_t *)&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(start + state.ins_length + 0));
             state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(start + state.ins_length + 16));
