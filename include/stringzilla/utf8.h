@@ -1305,17 +1305,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_s
         svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
         sz_size_t start_count = svcntp_b8(pg, is_start);
 
-        if (n < start_count) {
-            // COMPACT gathers start-byte positions to front, CLASTB extracts nth
-            svuint8_t indices = svindex_u8(0, 1);
-            svuint8_t positions = svcompact_u8(is_start, indices);
-            sz_u8_t pos = svclastb_u8(svwhilele_b8((sz_u64_t)0, (sz_u64_t)n), 0, positions);
-            return (sz_cptr_t)(text_u8 + offset + pos);
-        }
+        // When we find the chunk containing the Nth character, let serial handle extraction.
+        // There is no `svcompact_u8` in SVE2 (only 32/64-bit variants), and no direct instruction
+        // to find the position of the Nth set bit in a predicate.
+        if (n < start_count) return sz_utf8_find_nth_serial((sz_cptr_t)(text_u8 + offset), length - offset, n);
         n -= start_count;
     }
 
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
