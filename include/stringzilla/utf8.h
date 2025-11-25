@@ -1398,6 +1398,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
         svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
     svuint8_t multi_byte_prefix_set =
         svdupq_n_u8(0xC2, 0xE1, 0xE2, 0xE3, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2);
+    // Valid third bytes for E2 80 XX: U+2000-U+200D (0x80-0x8D), U+2028 (0xA8), U+2029 (0xA9), U+202F (0xAF)
+    svuint8_t e280_third_bytes =
+        svdupq_n_u8(0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0xA8, 0xA9);
 
     // Early return for short inputs
     if (length < 3) return sz_utf8_find_whitespace_serial(text, length, matched_length);
@@ -1449,18 +1452,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
         svbool_t ogham_mask = svand_b_z(pg, svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE1), svcmpeq_n_u8(pg, text1, 0x9A)),
                                         svcmpeq_n_u8(pg, text2, 0x80));
 
-        // 3-byte: E2 80 XX - various Unicode spaces
+        // 3-byte: E2 80 XX - various Unicode spaces (U+2000-U+200D, U+2028, U+2029, U+202F)
         svbool_t x_e2_mask = svcmpeq_n_u8(pg, text0, 0xE2);
-        svbool_t x_80_mask = svcmpeq_n_u8(pg, text1, 0x80);
-        svbool_t x_e280_mask = svand_b_z(pg, x_e2_mask, x_80_mask);
-        // U+2000 to U+200D: E2 80 [80-8D]
-        svbool_t range_e280_mask =
-            svand_b_z(pg, x_e280_mask, svand_b_z(pg, svcmpge_n_u8(pg, text2, 0x80), svcmple_n_u8(pg, text2, 0x8D)));
-        // U+2028: E2 80 A8 (LINE SEPARATOR)
-        svbool_t line_mask = svand_b_z(pg, x_e280_mask, svcmpeq_n_u8(pg, text2, 0xA8));
-        // U+2029: E2 80 A9 (PARAGRAPH SEPARATOR)
-        svbool_t paragraph_mask = svand_b_z(pg, x_e280_mask, svcmpeq_n_u8(pg, text2, 0xA9));
-        // U+202F: E2 80 AF (NARROW NO-BREAK SPACE)
+        svbool_t x_e280_mask = svand_b_z(pg, x_e2_mask, svcmpeq_n_u8(pg, text1, 0x80));
+        svbool_t x_e280xx_mask = svand_b_z(pg, x_e280_mask, svmatch_u8(pg, text2, e280_third_bytes));
+        // U+202F: E2 80 AF (NARROW NO-BREAK SPACE) - doesn't fit in the 16-byte set
         svbool_t nnbsp_mask = svand_b_z(pg, x_e280_mask, svcmpeq_n_u8(pg, text2, 0xAF));
         // U+205F: E2 81 9F (MEDIUM MATHEMATICAL SPACE)
         svbool_t mmsp_mask =
@@ -1471,19 +1467,19 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
             svand_b_z(pg, svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE3), svcmpeq_n_u8(pg, text1, 0x80)),
                       svcmpeq_n_u8(pg, text2, 0x80));
 
-        svbool_t three_byte_mask = svorr_b_z(
-            pg, svorr_b_z(pg, svorr_b_z(pg, ogham_mask, range_e280_mask), svorr_b_z(pg, line_mask, paragraph_mask)),
-            svorr_b_z(pg, svorr_b_z(pg, nnbsp_mask, mmsp_mask), ideographic_mask));
+        svbool_t three_byte_mask = svorr_b_z(pg, svorr_b_z(pg, ogham_mask, svorr_b_z(pg, x_e280xx_mask, nnbsp_mask)),
+                                             svorr_b_z(pg, mmsp_mask, ideographic_mask));
         svbool_t combined_mask = svorr_b_z(pg, one_byte_mask, svorr_b_z(pg, two_byte_mask, three_byte_mask));
 
         if (svptest_any(pg, combined_mask)) {
             sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, combined_mask));
             svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)pos);
-
-            if (svptest_any(at_pos, three_byte_mask)) { *matched_length = 3; }
-            else if (svptest_any(at_pos, two_byte_mask)) { *matched_length = 2; }
-            else { *matched_length = 1; }
-
+            sz_size_t has_two_byte = svptest_any(at_pos, two_byte_mask);
+            sz_size_t has_three_byte = svptest_any(at_pos, three_byte_mask);
+            sz_size_t length_value = 1;
+            length_value += has_two_byte | has_three_byte;
+            length_value += has_three_byte;
+            *matched_length = length_value;
             return (sz_cptr_t)(text_u8 + offset + pos);
         }
         offset += step;
