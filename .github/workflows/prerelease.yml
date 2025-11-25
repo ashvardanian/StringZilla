@@ -802,7 +802,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-13, windows-2022]
+        os: [ubuntu-24.04, macos-15, windows-2022]
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
       - uses: actions/checkout@v5
