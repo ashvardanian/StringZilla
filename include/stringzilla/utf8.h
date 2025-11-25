@@ -1322,6 +1322,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
 
+    // Early return for short inputs
+    if (length < step) return sz_utf8_find_newline_serial(text, length, matched_length);
+
     // SVE2 kernels are a bit different from both NEON and Ice Lake due to presence of
     // a few very convenient and cheap instructions. Most importantly, we have `svmatch` instruction
     // that can match against a set of bytes in one go, similar to many invocations of `vceqq` in NEON
@@ -1330,26 +1333,25 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
         svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
     svuint8_t one_byte_set =
         svdupq_n_u8('\n', '\v', '\f', '\r', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
+    svuint8_t zeros = svdup_n_u8(0);
 
-    // Process in chunks, leaving last 2 bytes for serial to handle boundary cases cleanly.
-    // The serial fallback handles strings shorter than 3 bytes entirely.
-    if (length < 3) return sz_utf8_find_newline_serial(text, length, matched_length);
-
-    sz_size_t const safe_length = length - 2;
+    // We load full `step` bytes but only match on first `step - 2` positions.
+    // This allows using svext for shifted views without extra loads.
+    sz_size_t const usable_step = step - 2;
     sz_size_t offset = 0;
-    while (offset < safe_length) {
-        svbool_t pg = svwhilelt_b8_u64((sz_u64_t)offset, (sz_u64_t)safe_length);
-        svuint8_t text0 = svld1_u8(pg, text_u8 + offset);
+    while (offset + step <= length) {
+        svbool_t pg = svwhilelt_b8_u64(0, usable_step);             // First step-2 lanes active
+        svuint8_t text0 = svld1_u8(svptrue_b8(), text_u8 + offset); // Load full step bytes
 
         // Fast rejection: any potential first byte?
         if (!svptest_any(pg, svmatch_u8(pg, text0, prefix_byte_set))) {
-            offset += step;
+            offset += usable_step;
             continue;
         }
 
-        // With 2 bytes reserved for serial fallback, we can safely load shifted views directly.
-        svuint8_t text1 = svld1_u8(pg, text_u8 + offset + 1);
-        svuint8_t text2 = svld1_u8(pg, text_u8 + offset + 2);
+        // Shifted views via svext - zeros fill unused lanes at end, but pg masks them out
+        svuint8_t text1 = svext_u8(text0, zeros, 1);
+        svuint8_t text2 = svext_u8(text0, zeros, 2);
 
         // 1-byte matches
         svbool_t one_byte_mask = svmatch_u8(pg, text0, one_byte_set);
@@ -1380,67 +1382,50 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
             *matched_length = length_value;
             return (sz_cptr_t)(text_u8 + offset + pos);
         }
-        offset += step;
+        offset += usable_step;
     }
 
-    // Handle remaining bytes (last 2 plus any stragglers) with serial fallback
-    return sz_utf8_find_newline_serial(text + safe_length, length - safe_length, matched_length);
+    // Handle remaining bytes with serial fallback
+    return sz_utf8_find_newline_serial(text + offset, length - offset, matched_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
 
+    // Early return for short inputs
+    if (length < step) return sz_utf8_find_whitespace_serial(text, length, matched_length);
+
     // Character sets for MATCH (DUPQ replicates 128-bit pattern, no stack/loads)
-    svuint8_t any_whitespace_byte_set =
+    svuint8_t any_byte_set =
         svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, ' ', ' ', ' ', ' ', ' ', ' ');
     svuint8_t one_byte_set =
         svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
-    svuint8_t multi_byte_prefix_set =
-        svdupq_n_u8(0xC2, 0xE1, 0xE2, 0xE3, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2, 0xC2);
-    // Valid third bytes for E2 80 XX: U+2000-U+200D (0x80-0x8D), U+2028 (0xA8), U+2029 (0xA9), U+202F (0xAF)
+    // Valid third bytes for E2 80 XX: U+2000-U+200D (0x80-0x8D), U+2028 (0xA8), U+2029 (0xA9)
     svuint8_t e280_third_bytes =
         svdupq_n_u8(0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0xA8, 0xA9);
+    svuint8_t zeros = svdup_n_u8(0);
 
-    // Early return for short inputs
-    if (length < 3) return sz_utf8_find_whitespace_serial(text, length, matched_length);
-
-    sz_size_t const safe_length = length - 2;
+    // We load full `step` bytes but only match on first `step - 2` positions.
+    // This allows using svext for shifted views without extra loads.
+    sz_size_t const usable_step = step - 2;
     sz_size_t offset = 0;
-    while (offset < safe_length) {
-        svbool_t pg = svwhilelt_b8_u64((sz_u64_t)offset, (sz_u64_t)safe_length);
-        svuint8_t text0 = svld1_u8(pg, text_u8 + offset);
+    while (offset + step <= length) {
+        svbool_t pg = svwhilelt_b8_u64(0, usable_step);             // First step-2 lanes active
+        svuint8_t text0 = svld1_u8(svptrue_b8(), text_u8 + offset); // Load full step bytes
 
         // Fast rejection: skip if no whitespace-related bytes at all
-        if (!svptest_any(pg, svmatch_u8(pg, text0, any_whitespace_byte_set))) {
-            offset += step;
+        if (!svptest_any(pg, svmatch_u8(pg, text0, any_byte_set))) {
+            offset += usable_step;
             continue;
         }
 
         // 1-byte whitespace: space, tab, newlines
         svbool_t one_byte_mask = svmatch_u8(pg, text0, one_byte_set);
 
-        // Fast path: if we have a 1-byte match and it comes before any multi-byte prefix, return it
-        if (svptest_any(pg, one_byte_mask)) {
-            svbool_t multi_byte_prefix_mask = svmatch_u8(pg, text0, multi_byte_prefix_set);
-            if (!svptest_any(pg, multi_byte_prefix_mask)) {
-                // No multi-byte prefix in this chunk - return first 1-byte match immediately
-                sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, one_byte_mask));
-                *matched_length = 1;
-                return (sz_cptr_t)(text_u8 + offset + pos);
-            }
-            // Check if 1-byte match comes before any multi-byte prefix
-            sz_size_t one_byte_pos = svcntp_b8(pg, svbrkb_b_z(pg, one_byte_mask));
-            sz_size_t multi_byte_prefix_pos = svcntp_b8(pg, svbrkb_b_z(pg, multi_byte_prefix_mask));
-            if (one_byte_pos < multi_byte_prefix_pos) {
-                *matched_length = 1;
-                return (sz_cptr_t)(text_u8 + offset + one_byte_pos);
-            }
-        }
-
-        // With 2 bytes reserved for serial fallback, we can safely load shifted views directly.
-        svuint8_t text1 = svld1_u8(pg, text_u8 + offset + 1);
-        svuint8_t text2 = svld1_u8(pg, text_u8 + offset + 2);
+        // Shifted views via svext - zeros fill unused lanes at end, but pg masks them out
+        svuint8_t text1 = svext_u8(text0, zeros, 1);
+        svuint8_t text2 = svext_u8(text0, zeros, 2);
 
         // 2-byte: C2 + {85, A0} (NEL, NBSP)
         svbool_t x_c2_mask = svcmpeq_n_u8(pg, text0, 0xC2);
@@ -1482,11 +1467,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
             *matched_length = length_value;
             return (sz_cptr_t)(text_u8 + offset + pos);
         }
-        offset += step;
+        offset += usable_step;
     }
 
     // Handle remaining bytes with serial fallback
-    return sz_utf8_find_whitespace_serial(text + safe_length, length - safe_length, matched_length);
+    return sz_utf8_find_whitespace_serial(text + offset, length - offset, matched_length);
 }
 
 #if defined(__clang__)
