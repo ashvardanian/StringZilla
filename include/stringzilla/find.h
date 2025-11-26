@@ -1999,7 +1999,7 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
     return sz_find_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_WESTMERE
     return sz_find_byte_westmere(haystack, h_length, needle);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE // ? actually faster than NEON on most machines
     return sz_find_byte_sve(haystack, h_length, needle);
 #elif SZ_USE_NEON
     return sz_find_byte_neon(haystack, h_length, needle);
@@ -2015,7 +2015,7 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cp
     return sz_rfind_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_WESTMERE
     return sz_rfind_byte_westmere(haystack, h_length, needle);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE // ? actually faster than NEON on most machines
     return sz_rfind_byte_sve(haystack, h_length, needle);
 #elif SZ_USE_NEON
     return sz_rfind_byte_neon(haystack, h_length, needle);
@@ -2031,7 +2031,7 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
     return sz_find_haswell(haystack, h_length, needle, n_length);
 #elif SZ_USE_WESTMERE
     return sz_find_westmere(haystack, h_length, needle, n_length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     return sz_find_sve(haystack, h_length, needle, n_length);
 #elif SZ_USE_NEON
     return sz_find_neon(haystack, h_length, needle, n_length);

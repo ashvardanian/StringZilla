@@ -1469,7 +1469,7 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_copy_skylake(target, source, length);
 #elif SZ_USE_HASWELL
     sz_copy_haswell(target, source, length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     sz_copy_sve(target, source, length);
 #elif SZ_USE_NEON
     sz_copy_neon(target, source, length);
@@ -1483,7 +1483,7 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_move_skylake(target, source, length);
 #elif SZ_USE_HASWELL
     sz_move_haswell(target, source, length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     sz_move_sve(target, source, length);
 #elif SZ_USE_NEON
     sz_move_neon(target, source, length);
@@ -1497,7 +1497,7 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_fill_skylake(target, length, value);
 #elif SZ_USE_HASWELL
     sz_fill_haswell(target, length, value);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     sz_fill_sve(target, length, value);
 #elif SZ_USE_NEON
     sz_fill_neon(target, length, value);
@@ -1511,6 +1511,8 @@ SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, s
     sz_lookup_ice(target, length, source, lut);
 #elif SZ_USE_HASWELL
     sz_lookup_haswell(target, length, source, lut);
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
+    sz_lookup_sve(target, length, source, lut);
 #elif SZ_USE_NEON
     sz_lookup_neon(target, length, source, lut);
 #else

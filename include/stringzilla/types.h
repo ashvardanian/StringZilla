@@ -319,6 +319,11 @@
 #endif
 #endif
 
+/**  SVE isn't a silver bullet. Oftentimes its still slower and with this flag you can disable it. */
+#if !defined(SZ_ENFORCE_SVE_OVER_NEON)
+#define SZ_ENFORCE_SVE_OVER_NEON (0)
+#endif
+
 #if !defined(SZ_USE_CUDA)
 #if defined(__NVCC__)
 #define SZ_USE_CUDA (1)

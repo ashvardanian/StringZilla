@@ -1520,7 +1520,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
     return sz_utf8_find_newline_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_newline_haswell(text, length, matched_length);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2 && SZ_ENFORCE_SVE_OVER_NEON
     return sz_utf8_find_newline_sve2(text, length, matched_length);
 #elif SZ_USE_NEON
     return sz_utf8_find_newline_neon(text, length, matched_length);
@@ -1534,7 +1534,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_find_whitespace_ice(text, length, matched_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_whitespace_haswell(text, length, matched_length);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2 && SZ_ENFORCE_SVE_OVER_NEON
     return sz_utf8_find_whitespace_sve2(text, length, matched_length);
 #elif SZ_USE_NEON
     return sz_utf8_find_whitespace_neon(text, length, matched_length);

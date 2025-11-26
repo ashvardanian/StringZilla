@@ -273,16 +273,19 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
-        impl->equal = sz_equal_sve;
-        impl->order = sz_order_sve;
+        if (SZ_ENFORCE_SVE_OVER_NEON) {
+            impl->equal = sz_equal_sve;
+            impl->order = sz_order_sve;
 
-        impl->copy = sz_copy_sve;
-        impl->move = sz_move_sve;
-        impl->fill = sz_fill_sve;
-        impl->lookup = sz_lookup_sve;
+            impl->copy = sz_copy_sve;
+            impl->move = sz_move_sve;
+            impl->fill = sz_fill_sve;
+            impl->lookup = sz_lookup_sve;
 
-        impl->find = sz_find_sve;
-        // TODO: impl->rfind = sz_rfind_sve;
+            impl->find = sz_find_sve;
+            // TODO: impl->rfind = sz_rfind_sve;
+        }
+
         impl->find_byte = sz_find_byte_sve;
         impl->rfind_byte = sz_rfind_byte_sve;
 
@@ -300,8 +303,11 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_sve2;
         impl->utf8_find_nth = sz_utf8_find_nth_sve2;
-        impl->utf8_find_newline = sz_utf8_find_newline_sve2;
-        impl->utf8_find_whitespace = sz_utf8_find_whitespace_sve2;
+
+        if (SZ_ENFORCE_SVE_OVER_NEON) {
+            impl->utf8_find_newline = sz_utf8_find_newline_sve2;
+            impl->utf8_find_whitespace = sz_utf8_find_whitespace_sve2;
+        }
     }
 #endif
 
