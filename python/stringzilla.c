@@ -110,6 +110,8 @@ static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
 static PyTypeObject SplitIteratorType;
+static PyTypeObject Utf8SplitLinesIteratorType;
+static PyTypeObject Utf8SplitWhitespaceIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -183,6 +185,51 @@ typedef struct {
     sz_bool_t reached_tail;
 
 } SplitIterator;
+
+/**
+ *  @brief  Iterator for splitting a UTF-8 string by Unicode newline characters.
+ *
+ *  Uses sz_utf8_find_newline to find newlines, supporting all 7 Unicode newline
+ *  characters plus CRLF sequences.
+ *
+ *  Termination: when start > end (not start == end, which is a valid state yielding empty segment).
+ */
+typedef struct {
+    PyObject ob_base;
+
+    PyObject *text_obj; //< For reference counting
+
+    sz_cptr_t start;        //< Current position (start of current segment)
+    sz_cptr_t end;          //< End of original text (immutable)
+    sz_size_t match_length; //< Length of current segment to yield
+
+    /// @brief  Should we include the newline characters in the resulting slices?
+    sz_bool_t keepends;
+
+    /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
+    sz_bool_t skip_empty;
+
+} Utf8SplitLinesIterator;
+
+/**
+ *  @brief  Iterator for splitting a UTF-8 string by Unicode whitespace characters.
+ *
+ *  Uses sz_utf8_find_whitespace to find whitespace, supporting all 25 Unicode
+ *  White_Space characters. N whitespace delimiters yield N+1 segments (including empties).
+ */
+typedef struct {
+    PyObject ob_base;
+
+    PyObject *text_obj; //< For reference counting
+
+    sz_cptr_t start;        //< Current position in text
+    sz_cptr_t end;          //< End of text (immutable)
+    sz_size_t match_length; //< Length of current segment to yield
+
+    /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
+    sz_bool_t skip_empty;
+
+} Utf8SplitWhitespaceIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -3151,6 +3198,72 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
     }
 }
 
+static char const doc_utf8_case_fold[] = //
+    "Apply Unicode case folding to a UTF-8 string.\n"
+    "\n"
+    "Case folding normalizes text for case-insensitive comparisons,\n"
+    "handling one-to-many expansions (e.g., German sharp S to 'ss').\n"
+    "\n"
+    "Args:\n"
+    "    text (Str or str or bytes): The input UTF-8 string.\n"
+    "\n"
+    "Returns:\n"
+    "    bytes: The case-folded UTF-8 string.\n"
+    "\n"
+    "Example:\n"
+    "    >>> sz.utf8_case_fold('HELLO')\n"
+    "    b'hello'\n"
+    "    >>> sz.utf8_case_fold('Stra\\u00dfe')  # German sharp S\n"
+    "    b'strasse'";
+
+static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
+
+    if (positional_args_count != nargs_expected) {
+        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd argument(s)", nargs_expected);
+        return NULL;
+    }
+
+    // Reject keyword arguments
+    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
+        PyErr_SetString(PyExc_TypeError, "utf8_case_fold() takes no keyword arguments");
+        return NULL;
+    }
+
+    PyObject *str_obj = is_member ? self : args[0];
+
+    sz_string_view_t str;
+    if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
+        wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+
+    // Allocate buffer with 3x capacity for maximum expansion (e.g., some Greek characters)
+    sz_size_t max_result_length = str.length * 3;
+    if (max_result_length == 0) { return PyBytes_FromStringAndSize("", 0); }
+
+    PyObject *result_bytes = PyBytes_FromStringAndSize(NULL, max_result_length);
+    if (!result_bytes) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for case-folded string");
+        return NULL;
+    }
+
+    sz_ptr_t destination = (sz_ptr_t)PyBytes_AS_STRING(result_bytes);
+    sz_size_t actual_length = sz_utf8_case_fold(str.start, str.length, destination);
+
+    // Resize to actual length if smaller than allocated
+    if (actual_length < max_result_length) {
+        if (_PyBytes_Resize(&result_bytes, actual_length) < 0) {
+            Py_XDECREF(result_bytes);
+            return NULL;
+        }
+    }
+
+    return result_bytes;
+}
+
 static char const doc_find_first_of[] = //
     "Find the index of the first occurrence of any character from another string.\n"
     "\n"
@@ -3820,6 +3933,228 @@ static PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *a
                                          sz_true_k, sz_true_k);
 }
 
+static char const doc_utf8_count[] = //
+    "Count the number of UTF-8 characters in a string.\n"
+    "\n"
+    "Unlike len() which returns bytes, this counts actual Unicode characters,\n"
+    "handling multi-byte UTF-8 sequences correctly.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "Returns:\n"
+    "  int: Number of UTF-8 characters in the string.\n"
+    "\n"
+    "Example:\n"
+    "  >>> sz.utf8_count('hello')  # 5 ASCII chars = 5\n"
+    "  5\n"
+    "  >>> sz.utf8_count('\xc3\xa9')  # 1 char (e-acute) = 1\n"
+    "  1";
+
+static PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t min_args = !is_member;
+    Py_ssize_t max_args = !is_member;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_count() takes exactly %zd argument(s)", min_args);
+        return NULL;
+    }
+
+    // No keyword arguments expected
+    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
+        PyErr_SetString(PyExc_TypeError, "utf8_count() takes no keyword arguments");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    sz_string_view_t text;
+
+    // Validate and convert `text`
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    sz_size_t count = sz_utf8_count(text.start, text.length);
+    return PyLong_FromSize_t(count);
+}
+
+static char const doc_utf8_splitlines_iter[] = //
+    "Create an iterator for splitting a string by Unicode newline characters.\n"
+    "\n"
+    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"
+    "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  keepends (bool, optional): Include line endings in results (default is False).\n"
+    "  skip_empty (bool, optional): Skip empty lines (default is False).\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding lines as Str objects.\n"
+    "\n"
+    "Recognized newlines:\n"
+    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)";
+
+static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *args_names_tuple) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t min_args = !is_member;
+    Py_ssize_t max_args = !is_member + 2;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_splitlines_iter() requires %zd to %zd arguments", min_args, max_args);
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *keepends_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+    PyObject *skip_empty_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
+
+    // Parse keyword arguments
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "keepends") == 0 && !keepends_obj) { keepends_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) {
+                skip_empty_obj = value;
+            }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+        }
+    }
+
+    sz_string_view_t text;
+    int keepends = 0;
+    int skip_empty = 0;
+
+    // Validate and convert `text`
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Validate and convert `keepends`
+    if (keepends_obj) {
+        keepends = PyObject_IsTrue(keepends_obj);
+        if (keepends == -1) {
+            wrap_current_exception("The keepends argument must be a boolean");
+            return NULL;
+        }
+    }
+
+    // Validate and convert `skip_empty`
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            wrap_current_exception("The skip_empty argument must be a boolean");
+            return NULL;
+        }
+    }
+
+    // Create the iterator
+    Utf8SplitLinesIterator *result_obj =
+        (Utf8SplitLinesIterator *)Utf8SplitLinesIteratorType.tp_alloc(&Utf8SplitLinesIteratorType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->text_obj = text_obj;
+    result_obj->start = text.start;
+    result_obj->end = text.start + text.length;
+    result_obj->keepends = keepends;
+    result_obj->skip_empty = skip_empty;
+
+    // Find first segment length
+    sz_size_t newline_length = 0;
+    sz_cptr_t newline_ptr =
+        sz_utf8_find_newline(result_obj->start, (sz_size_t)(result_obj->end - result_obj->start), &newline_length);
+    result_obj->match_length =
+        newline_ptr ? (sz_size_t)(newline_ptr - result_obj->start) : (sz_size_t)(result_obj->end - result_obj->start);
+
+    Py_INCREF(text_obj);
+    return (PyObject *)result_obj;
+}
+
+static char const doc_utf8_split_iter[] = //
+    "Create an iterator for splitting a string by Unicode whitespace.\n"
+    "\n"
+    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"
+    "Splits on runs of whitespace, similar to Python's str.split() with no separator.\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding non-whitespace tokens as Str objects.\n"
+    "\n"
+    "Recognized whitespace:\n"
+    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"
+    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"
+    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)";
+
+static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t min_args = !is_member;
+    Py_ssize_t max_args = !is_member + 1;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_split_iter() requires %zd to %zd arguments", min_args, max_args);
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *skip_empty_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    // Parse keyword arguments
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) { skip_empty_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+        }
+    }
+
+    sz_string_view_t text;
+    int skip_empty = 0;
+
+    // Validate and convert `text`
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Validate and convert `skip_empty`
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            wrap_current_exception("The skip_empty argument must be a boolean");
+            return NULL;
+        }
+    }
+
+    // Create the iterator
+    Utf8SplitWhitespaceIterator *result_obj =
+        (Utf8SplitWhitespaceIterator *)Utf8SplitWhitespaceIteratorType.tp_alloc(&Utf8SplitWhitespaceIteratorType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->text_obj = text_obj;
+    result_obj->start = text.start;
+    result_obj->end = text.start + text.length;
+    result_obj->skip_empty = skip_empty;
+    // Find first segment length
+    sz_size_t ws_len = 0;
+    sz_cptr_t ws = sz_utf8_find_whitespace(result_obj->start, text.length, &ws_len);
+    result_obj->match_length = ws ? (sz_size_t)(ws - result_obj->start) : text.length;
+
+    Py_INCREF(text_obj);
+    return (PyObject *)result_obj;
+}
+
 static char const doc_splitlines[] = //
     "Split a string by line breaks.\n"
     "\n"
@@ -4278,6 +4613,12 @@ static PyMethodDef Str_methods[] = {
     {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
     {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
+    // UTF-8 aware operations
+    {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
+    {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
+    {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
@@ -4426,6 +4767,224 @@ static PyTypeObject SplitIteratorType = {
     .tp_doc = doc_SplitIterator,
     .tp_iter = SplitIteratorType_iter,
     .tp_iternext = (iternextfunc)SplitIteratorType_next,
+};
+
+#pragma endregion
+
+#pragma region UTF8 Split Lines Iterator
+
+static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
+    // Termination: start > end means we're done
+    if (self->start > self->end) return NULL;
+
+    // Create a new `Str` object
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    // Find next non-empty segment (or any segment if skip_empty is false)
+    sz_string_view_t result_memory;
+    do {
+        // Build the result from current state
+        result_memory.start = self->start;
+        result_memory.length = self->match_length;
+
+        // Include newline in result if keepends is set
+        if (self->keepends && self->start + self->match_length < self->end) {
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start + self->match_length,
+                                     (sz_size_t)(self->end - self->start - self->match_length), &newline_length);
+            if (newline_ptr == self->start + self->match_length) { result_memory.length += newline_length; }
+        }
+
+        // Advance to next segment
+        self->start += self->match_length;
+
+        // Skip delimiter at current position (if any)
+        if (self->start < self->end) {
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
+            if (newline_ptr == self->start) { self->start += newline_length; }
+        }
+        // Handle the case where we're exactly at end after consuming content
+        else if (self->start == self->end) {
+            self->start = self->end + 1;
+            self->match_length = 0;
+        }
+
+        // If we're now past end, we're done after this
+        if (self->start > self->end) { self->match_length = 0; }
+        else {
+            // Find next delimiter to determine segment length
+            sz_size_t newline_length = 0;
+            sz_cptr_t newline_ptr =
+                sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start), &newline_length);
+            self->match_length =
+                newline_ptr ? (sz_size_t)(newline_ptr - self->start) : (sz_size_t)(self->end - self->start);
+        }
+    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
+
+    // If we exhausted all segments while skipping empties, free and return NULL
+    if (self->skip_empty && result_memory.length == 0) {
+        Py_DECREF(result_obj);
+        return NULL;
+    }
+
+    // Set its properties based on the slice
+    result_obj->memory = result_memory;
+    result_obj->parent = self->text_obj;
+
+    // Increment the reference count of the parent
+    Py_INCREF(self->text_obj);
+    return (PyObject *)result_obj;
+}
+
+static void Utf8SplitLinesIteratorType_dealloc(Utf8SplitLinesIterator *self) {
+    Py_XDECREF(self->text_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8SplitLinesIteratorType_iter(PyObject *self) {
+    Py_INCREF(self); // Iterator should return itself in __iter__.
+    return self;
+}
+
+static char const doc_Utf8SplitLinesIterator[] = //
+    "Utf8SplitLinesIterator(string, ...)\\n"
+    "\\n"
+    "UTF-8 aware line-splitting iterator using Unicode newline characters.\\n"
+    "Provides lazy evaluation of line splits without materializing all results.\\n"
+    "\\n"
+    "Created by:\\n"
+    "  - Str.utf8_splitlines_iter()\\n"
+    "  - sz.utf8_splitlines_iter()\\n"
+    "\\n"
+    "Recognized newlines (7 characters + CRLF):\\n"
+    "  - U+000A LINE FEED (\\\\n)\\n"
+    "  - U+000B VERTICAL TAB (\\\\v)\\n"
+    "  - U+000C FORM FEED (\\\\f)\\n"
+    "  - U+000D CARRIAGE RETURN (\\\\r)\\n"
+    "  - U+0085 NEXT LINE\\n"
+    "  - U+2028 LINE SEPARATOR\\n"
+    "  - U+2029 PARAGRAPH SEPARATOR\\n"
+    "  - CRLF (\\\\r\\\\n) as single newline\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> s = sz.Str('line1\\\\nline2\\\\nline3')\\n"
+    "  >>> for line in s.utf8_splitlines_iter():\\n"
+    "  ...     print(line)";
+
+static PyTypeObject Utf8SplitLinesIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitLinesIterator",
+    .tp_basicsize = sizeof(Utf8SplitLinesIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8SplitLinesIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8SplitLinesIterator,
+    .tp_iter = Utf8SplitLinesIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8SplitLinesIteratorType_next,
+};
+
+#pragma endregion
+
+#pragma region UTF8 Split Whitespace Iterator
+
+static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterator *self) {
+    // Termination: start > end
+    if (self->start > self->end) return NULL;
+
+    // Create a new `Str` object for the current segment
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    // Find next non-empty segment (or any segment if skip_empty is false)
+    sz_string_view_t result_memory;
+    do {
+        // Current segment to yield
+        result_memory.start = self->start;
+        result_memory.length = self->match_length;
+
+        // Advance to next segment
+        self->start += self->match_length;
+        if (self->start > self->end) {
+            // Already yielding final segment, mark termination
+            self->match_length = 0;
+        }
+        else if (self->start == self->end) {
+            // At end - move past to terminate after yielding this segment
+            self->start = self->end + 1;
+            self->match_length = 0;
+        }
+        else {
+            // Skip delimiter at current position
+            sz_size_t ws_len = 0;
+            sz_cptr_t ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
+            if (ws == self->start) self->start += ws_len;
+            if (self->start > self->end) { self->match_length = 0; }
+            else {
+                // Find next delimiter
+                ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
+                self->match_length = ws ? (sz_size_t)(ws - self->start) : (sz_size_t)(self->end - self->start);
+            }
+        }
+    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
+
+    // If we exhausted all segments while skipping empties, free and return NULL
+    if (self->skip_empty && result_memory.length == 0) {
+        Py_DECREF(result_obj);
+        return NULL;
+    }
+
+    // Set its properties based on the slice
+    result_obj->memory = result_memory;
+    result_obj->parent = self->text_obj;
+
+    // Increment the reference count of the parent
+    Py_INCREF(self->text_obj);
+    return (PyObject *)result_obj;
+}
+
+static void Utf8SplitWhitespaceIteratorType_dealloc(Utf8SplitWhitespaceIterator *self) {
+    Py_XDECREF(self->text_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8SplitWhitespaceIteratorType_iter(PyObject *self) {
+    Py_INCREF(self); // Iterator should return itself in __iter__.
+    return self;
+}
+
+static char const doc_Utf8SplitWhitespaceIterator[] = //
+    "Utf8SplitWhitespaceIterator(string, ...)\\n"
+    "\\n"
+    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\\n"
+    "Provides lazy evaluation similar to Python's str.split() with no separator.\\n"
+    "\\n"
+    "Created by:\\n"
+    "  - Str.utf8_split_iter()\\n"
+    "  - sz.utf8_split_iter()\\n"
+    "\\n"
+    "Recognized whitespace (25 Unicode White_Space characters):\\n"
+    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\\n"
+    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\\n"
+    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\\n"
+    "  - CJK: IDEOGRAPHIC SPACE\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> s = sz.Str('hello   world\\\\tfoo')\\n"
+    "  >>> list(s.utf8_split_iter())\\n"
+    "  ['hello', 'world', 'foo']";
+
+static PyTypeObject Utf8SplitWhitespaceIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitWhitespaceIterator",
+    .tp_basicsize = sizeof(Utf8SplitWhitespaceIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8SplitWhitespaceIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8SplitWhitespaceIterator,
+    .tp_iter = Utf8SplitWhitespaceIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8SplitWhitespaceIteratorType_next,
 };
 
 #pragma endregion
@@ -6383,6 +6942,12 @@ static PyMethodDef stringzilla_methods[] = {
     {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
     {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
+    // UTF-8 aware operations
+    {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
+    {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
+    {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
@@ -6423,6 +6988,8 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&FileType) < 0) return NULL;
     if (PyType_Ready(&StrsType) < 0) return NULL;
     if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 
@@ -6498,6 +7065,29 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&SplitIteratorType);
     if (PyModule_AddObject(m, "SplitIterator", (PyObject *)&SplitIteratorType) < 0) {
+        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&Utf8SplitLinesIteratorType);
+    if (PyModule_AddObject(m, "Utf8SplitLinesIterator", (PyObject *)&Utf8SplitLinesIteratorType) < 0) {
+        Py_XDECREF(&Utf8SplitLinesIteratorType);
+        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&Utf8SplitWhitespaceIteratorType);
+    if (PyModule_AddObject(m, "Utf8SplitWhitespaceIterator", (PyObject *)&Utf8SplitWhitespaceIteratorType) < 0) {
+        Py_XDECREF(&Utf8SplitWhitespaceIteratorType);
+        Py_XDECREF(&Utf8SplitLinesIteratorType);
         Py_XDECREF(&SplitIteratorType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);

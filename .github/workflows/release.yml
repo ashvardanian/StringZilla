@@ -110,7 +110,7 @@ jobs:
 
   build_wheels_stringzilla_macos:
     name: Build StringZilla ${{ matrix.python-version }} for macOS
-    runs-on: macos-13
+    runs-on: macos-15
     needs: versioning
     strategy:
       fail-fast: false
@@ -137,7 +137,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-stringzilla-macos-13-${{ strategy.job-index }}
+          name: cibw-wheels-stringzilla-macos-15-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -211,7 +211,7 @@ jobs:
 
   build_wheels_stringzillas_cpus_macos:
     name: Build StringZillas-CPUs ${{ matrix.python-version }} for macOS
-    runs-on: macos-13
+    runs-on: macos-15
     needs: versioning
     strategy:
       fail-fast: false
@@ -239,7 +239,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-stringzillas-cpus-macos-13-${{ strategy.job-index }}
+          name: cibw-wheels-stringzillas-cpus-macos-15-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 

@@ -1485,6 +1485,13 @@ __`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
 > One can explicitly disable certain families of PTX instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
 
+__`SZ_ENFORCE_SVE_OVER_NEON`__:
+
+> SVE and SVE2 are expected to supersede NEON on ARM architectures.
+> Still, oftentimes the equivalent SVE kernels are slower due to equally small register files and higher complexity of the instructions.
+> By default, when both SVE and NEON are available, SVE is used selectively only for the algorithms that benefit from it.
+> If you want to enforce SVE usage everywhere, define this flag.
+
 __`SZ_DYNAMIC_DISPATCH`__:
 
 > By default, StringZilla is a header-only library.

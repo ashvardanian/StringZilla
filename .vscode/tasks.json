@@ -7,16 +7,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -25,16 +21,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -49,16 +41,12 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
       }
     },
     {
@@ -67,16 +55,47 @@
       "args": [],
       "type": "shell",
       "osx": {
-        "environment": [
-          {
-            "name": "CMAKE_CXX_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang++"
-          },
-          {
-            "name": "CMAKE_C_COMPILER",
-            "value": "$(brew --prefix llvm)/bin/clang"
+        "options": {
+          "env": {
+            "CMAKE_CXX_COMPILER": "$(brew --prefix llvm)/bin/clang++",
+            "CMAKE_C_COMPILER": "$(brew --prefix llvm)/bin/clang"
           }
-        ]
+        }
+      }
+    },
+    {
+      "label": "Build Current File: Debug",
+      "command": "cmake",
+      "args": [
+        "-DFILE=${file}",
+        "-DBUILD_TYPE=Debug",
+        "-P",
+        "${workspaceFolder}/.vscode/build_current.cmake"
+      ],
+      "type": "shell",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Current File: Release",
+      "command": "cmake",
+      "args": [
+        "-DFILE=${file}",
+        "-DBUILD_TYPE=Release",
+        "-P",
+        "${workspaceFolder}/.vscode/build_current.cmake"
+      ],
+      "type": "shell",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
       }
     }
   ]

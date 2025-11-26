@@ -58,6 +58,13 @@ typedef struct sz_implementations_t {
     sz_find_byteset_t find_byteset;
     sz_find_byteset_t rfind_byteset;
 
+    sz_utf8_count_t utf8_count;
+    sz_utf8_find_nth_t utf8_find_nth;
+    sz_utf8_unpack_chunk_t utf8_unpack_chunk;
+    sz_utf8_find_boundary_t utf8_find_newline;
+    sz_utf8_find_boundary_t utf8_find_whitespace;
+    sz_utf8_case_fold_t utf8_case_fold;
+
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
     sz_pgrams_sort_t pgrams_sort;
@@ -98,6 +105,13 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     impl->rfind_byte = sz_rfind_byte_serial;
     impl->find_byteset = sz_find_byteset_serial;
     impl->rfind_byteset = sz_rfind_byteset_serial;
+
+    impl->utf8_count = sz_utf8_count_serial;
+    impl->utf8_find_nth = sz_utf8_find_nth_serial;
+    impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
+    impl->utf8_find_newline = sz_utf8_find_newline_serial;
+    impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
+    impl->utf8_case_fold = sz_utf8_case_fold_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -147,6 +161,13 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->rfind = sz_rfind_haswell;
         impl->find_byteset = sz_find_byteset_haswell;
         impl->rfind_byteset = sz_rfind_byteset_haswell;
+
+        impl->utf8_count = sz_utf8_count_haswell;
+        impl->utf8_find_nth = sz_utf8_find_nth_haswell;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
+        impl->utf8_find_newline = sz_utf8_find_newline_haswell;
+        impl->utf8_find_whitespace = sz_utf8_find_whitespace_haswell;
+        impl->utf8_case_fold = sz_utf8_case_fold_haswell;
     }
 #endif
 
@@ -180,6 +201,13 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     if (caps & sz_cap_ice_k) {
         impl->find_byteset = sz_find_byteset_ice;
         impl->rfind_byteset = sz_rfind_byteset_ice;
+
+        impl->utf8_count = sz_utf8_count_ice;
+        impl->utf8_find_nth = sz_utf8_find_nth_ice;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_ice;
+        impl->utf8_find_newline = sz_utf8_find_newline_ice;
+        impl->utf8_find_whitespace = sz_utf8_find_whitespace_ice;
+        impl->utf8_case_fold = sz_utf8_case_fold_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -215,6 +243,13 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->rfind_byte = sz_rfind_byte_neon;
         impl->find_byteset = sz_find_byteset_neon;
         impl->rfind_byteset = sz_rfind_byteset_neon;
+
+        impl->utf8_count = sz_utf8_count_neon;
+        impl->utf8_find_nth = sz_utf8_find_nth_neon;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_neon;
+        impl->utf8_find_newline = sz_utf8_find_newline_neon;
+        impl->utf8_find_whitespace = sz_utf8_find_whitespace_neon;
+        impl->utf8_case_fold = sz_utf8_case_fold_neon;
     }
 #endif
 
@@ -238,16 +273,19 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
-        impl->equal = sz_equal_sve;
-        impl->order = sz_order_sve;
+        if (SZ_ENFORCE_SVE_OVER_NEON) {
+            impl->equal = sz_equal_sve;
+            impl->order = sz_order_sve;
 
-        impl->copy = sz_copy_sve;
-        impl->move = sz_move_sve;
-        impl->fill = sz_fill_sve;
-        impl->lookup = sz_lookup_sve;
-	
-        impl->find = sz_find_sve;
-        // TODO: impl->rfind = sz_rfind_sve;
+            impl->copy = sz_copy_sve;
+            impl->move = sz_move_sve;
+            impl->fill = sz_fill_sve;
+            impl->lookup = sz_lookup_sve;
+
+            impl->find = sz_find_sve;
+            // TODO: impl->rfind = sz_rfind_sve;
+        }
+
         impl->find_byte = sz_find_byte_sve;
         impl->rfind_byte = sz_rfind_byte_sve;
 
@@ -260,7 +298,17 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 #endif
 
 #if SZ_USE_SVE2
-    if (caps & sz_cap_sve2_k) { impl->bytesum = sz_bytesum_sve2; }
+    if (caps & sz_cap_sve2_k) {
+        impl->bytesum = sz_bytesum_sve2;
+
+        impl->utf8_count = sz_utf8_count_sve2;
+        impl->utf8_find_nth = sz_utf8_find_nth_sve2;
+
+        if (SZ_ENFORCE_SVE_OVER_NEON) {
+            impl->utf8_find_newline = sz_utf8_find_newline_sve2;
+            impl->utf8_find_whitespace = sz_utf8_find_whitespace_sve2;
+        }
+    }
 #endif
 
 #if SZ_USE_SVE2_AES
@@ -432,6 +480,31 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
                                              sz_size_t *first_positions, sz_size_t *second_positions) {
     return sz_dispatch_table.sequence_intersect(first_array, second_array, alloc, seed, intersection_size,
                                                 first_positions, second_positions);
+}
+
+SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
+    return sz_dispatch_table.utf8_count(text, length);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    return sz_dispatch_table.utf8_find_nth(text, length, n);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
+                                          sz_size_t *runes_unpacked) {
+    return sz_dispatch_table.utf8_unpack_chunk(text, length, runes, runes_capacity, runes_unpacked);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.utf8_find_newline(text, length, matched_length);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    return sz_dispatch_table.utf8_find_whitespace(text, length, matched_length);
+}
+
+SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_dispatch_table.utf8_case_fold(source, source_length, destination);
 }
 
 // Provide overrides for the libc mem* functions

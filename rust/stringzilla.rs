@@ -47,6 +47,86 @@ pub struct Byteset {
     bits: [u64; 4],
 }
 
+/// Represents a byte span with offset and length.
+///
+/// Used for matches of UTF-8 characters, substrings, or any byte-level operations.
+/// Stores the byte offset from the start of the text and the length in bytes.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{IndexSpan, find_newline_utf8};
+///
+/// let text = "Hello\nWorld";
+/// if let Some(span) = find_newline_utf8(text) {
+///     assert_eq!(span.offset, 5);
+///     assert_eq!(span.length, 1);
+///     let matched = span.extract(text.as_bytes());
+///     assert_eq!(matched, b"\n");
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IndexSpan {
+    /// Byte offset from the start of the text
+    pub offset: usize,
+    /// Length in bytes of the matched span
+    pub length: usize,
+}
+
+impl IndexSpan {
+    /// Creates a new IndexSpan with the given offset and length.
+    #[inline]
+    pub fn new(offset: usize, length: usize) -> Self {
+        Self { offset, length }
+    }
+
+    /// Returns the range of bytes covered by this span.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let span = IndexSpan::new(5, 3);
+    /// assert_eq!(span.range(), 5..8);
+    /// ```
+    #[inline]
+    pub fn range(&self) -> core::ops::Range<usize> {
+        self.offset..self.offset + self.length
+    }
+
+    /// Extracts the matched bytes from the source text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let text = b"Hello World";
+    /// let span = IndexSpan::new(6, 5);
+    /// assert_eq!(span.extract(text), b"World");
+    /// ```
+    #[inline]
+    pub fn extract<'a>(&self, text: &'a [u8]) -> &'a [u8] {
+        &text[self.range()]
+    }
+
+    /// Returns the end offset (offset + length).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::stringzilla::IndexSpan;
+    ///
+    /// let span = IndexSpan::new(5, 3);
+    /// assert_eq!(span.end(), 8);
+    /// ```
+    #[inline]
+    pub fn end(&self) -> usize {
+        self.offset + self.length
+    }
+}
+
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
 /// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
@@ -247,6 +327,24 @@ extern "C" {
         haystack_length: usize,
         byteset: *const c_void,
     ) -> *const c_void;
+
+    pub(crate) fn sz_utf8_count(text: *const c_void, length: usize) -> usize;
+    pub(crate) fn sz_utf8_find_nth(text: *const c_void, length: usize, n: usize) -> *const c_void;
+    pub(crate) fn sz_utf8_unpack_chunk(
+        text: *const c_void,
+        length: usize,
+        runes: *mut u32,
+        runes_capacity: usize,
+        runes_unpacked: *mut usize,
+    ) -> *const c_void;
+    pub(crate) fn sz_utf8_find_newline(text: *const c_void, length: usize, matched_length: *mut usize)
+        -> *const c_void;
+    pub(crate) fn sz_utf8_find_whitespace(
+        text: *const c_void,
+        length: usize,
+        matched_length: *mut usize,
+    ) -> *const c_void;
+    pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
@@ -775,6 +873,52 @@ where
     }
 }
 
+/// Applies Unicode case folding to a UTF-8 string, writing the result to a destination buffer.
+///
+/// Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+/// to their lowercase equivalents and handling special cases like German U+00DF -> ss expansion.
+///
+/// # Arguments
+///
+/// * `source`: The UTF-8 string to case-fold.
+/// * `destination`: The destination buffer to write the case-folded string.
+///
+/// # Returns
+///
+/// Returns the number of bytes written to the destination buffer.
+///
+/// # Safety
+///
+/// The caller must ensure the destination buffer is large enough.
+/// Use `source.len() * 3` bytes for worst-case 3:1 expansion ratio.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let source = "HELLO WORLD";
+/// let mut dest = [0u8; 32];
+/// let len = sz::case_fold(source, &mut dest);
+/// assert_eq!(&dest[..len], b"hello world");
+/// ```
+///
+pub fn case_fold<T, D>(source: T, destination: &mut D) -> usize
+where
+    T: AsRef<[u8]>,
+    D: AsMut<[u8]> + ?Sized,
+{
+    let source_ref = source.as_ref();
+    let dest_slice = destination.as_mut();
+
+    unsafe {
+        sz_utf8_case_fold(
+            source_ref.as_ptr() as *const c_void,
+            source_ref.len(),
+            dest_slice.as_mut_ptr() as *mut c_void,
+        )
+    }
+}
+
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
 /// This function is designed to provide a high-quality hash value for use in
 /// hash tables, data structures, and cryptographic applications.
@@ -1028,6 +1172,569 @@ where
     N: AsRef<[u8]>,
 {
     rfind_byteset(haystack, Byteset::from(needles).inverted())
+}
+
+fn replace_all_with_finder<F, R>(
+    buffer: &mut Vec<u8>,
+    needle_length: usize,
+    replacement: &[u8],
+    mut find_next: F,
+    mut find_prev: R,
+) -> Result<usize, Status>
+where
+    F: FnMut(&[u8], usize) -> Option<usize>,
+    R: FnMut(&[u8], usize) -> Option<usize>,
+{
+    if needle_length == 0 || buffer.is_empty() {
+        return Ok(0);
+    }
+
+    // Case 1: needle and replacement are the same length – overwrite each match in place.
+    if needle_length == replacement.len() {
+        let mut replaced = 0;
+        let mut search_from = 0;
+        while let Some(pos) = find_next(buffer.as_slice(), search_from) {
+            copy(&mut buffer[pos..pos + needle_length], &replacement);
+            search_from = pos + needle_length;
+            replaced += 1;
+        }
+        return Ok(replaced);
+    }
+
+    // Case 2: replacement is shorter – compact forward to minimize memmoves and avoid allocations.
+    if needle_length > replacement.len() {
+        let mut replaced = 0;
+        let mut read = 0;
+        let mut write = 0;
+        let len = buffer.len();
+
+        while let Some(pos) = find_next(buffer.as_slice(), read) {
+            if pos > read {
+                let chunk = pos - read;
+                unsafe {
+                    sz_move(
+                        buffer.as_mut_ptr().add(write) as *const c_void,
+                        buffer.as_ptr().add(read) as *const c_void,
+                        chunk,
+                    );
+                }
+                write += chunk;
+            }
+            copy(&mut buffer[write..write + replacement.len()], replacement);
+            write += replacement.len();
+            read = pos + needle_length;
+            replaced += 1;
+        }
+
+        if read < len {
+            let chunk = len - read;
+            unsafe {
+                sz_move(
+                    buffer.as_mut_ptr().add(write) as *const c_void,
+                    buffer.as_ptr().add(read) as *const c_void,
+                    chunk,
+                );
+            }
+            write += len - read;
+        }
+        buffer.truncate(write);
+        return Ok(replaced);
+    }
+
+    // Case 3: replacement is longer – collect match positions once, resize once, then rewrite from the back.
+    let mut match_count = 0usize;
+    let mut search_from = 0;
+    while let Some(pos) = find_next(buffer.as_slice(), search_from) {
+        match_count += 1;
+        search_from = pos + needle_length;
+    }
+
+    if match_count == 0 {
+        return Ok(0);
+    }
+
+    let original_len = buffer.len();
+    let delta = replacement.len() - needle_length;
+    let added = match match_count.checked_mul(delta) {
+        Some(v) => v,
+        None => return Err(Status::OverflowRisk),
+    };
+    let new_len = match original_len.checked_add(added) {
+        Some(v) => v,
+        None => return Err(Status::OverflowRisk),
+    };
+    if let Err(_) = buffer.try_reserve_exact(added) {
+        return Err(Status::BadAlloc);
+    }
+    buffer.resize(new_len, 0);
+
+    let mut read_end = original_len;
+    let mut write_end = new_len;
+
+    while let Some(pos) = find_prev(buffer.as_slice(), read_end) {
+        let match_end = pos + needle_length;
+        let tail_len = read_end - match_end;
+        if tail_len > 0 {
+            unsafe {
+                sz_move(
+                    buffer.as_mut_ptr().add(write_end - tail_len) as *const c_void,
+                    buffer.as_ptr().add(match_end) as *const c_void,
+                    tail_len,
+                );
+            }
+        }
+        write_end -= tail_len;
+        write_end -= replacement.len();
+        copy(&mut buffer[write_end..write_end + replacement.len()], replacement);
+        read_end = pos;
+    }
+
+    debug_assert_eq!(write_end, read_end, "replace_all backfill mismatch");
+    Ok(match_count)
+}
+
+/// Tries to replace all non-overlapping occurrences of `needle` inside `buffer` in place.
+///
+/// The algorithm mirrors the C++ `replace_all` logic:
+/// - equal-length replacements simply overwrite matches,
+/// - shorter replacements compact forward without allocating,
+/// - longer replacements count matches once, resize once, and rewrite from the back.
+///
+/// Returns the number of replacements performed.
+pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
+    replace_all_with_finder(
+        buffer,
+        needle.len(),
+        replacement,
+        |haystack, start| {
+            if start >= haystack.len() {
+                None
+            } else {
+                find(&haystack[start..], needle).map(|offset| start + offset)
+            }
+        },
+        |haystack, end| {
+            if end == 0 {
+                None
+            } else {
+                rfind(&haystack[..end], needle)
+            }
+        },
+    )
+}
+
+/// Tries to replace all non-overlapping bytes in `buffer` that belong to `byteset` with `replacement`.
+///
+/// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
+/// left untouched. Returns the number of replacements performed.
+pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
+    if byteset.bits.iter().all(|&b| b == 0) {
+        return Ok(0);
+    }
+
+    replace_all_with_finder(
+        buffer,
+        1,
+        replacement,
+        |haystack, start| {
+            if start >= haystack.len() {
+                None
+            } else {
+                find_byteset(&haystack[start..], byteset).map(|offset| start + offset)
+            }
+        },
+        |haystack, end| {
+            if end == 0 {
+                None
+            } else {
+                rfind_byteset(&haystack[..end], byteset)
+            }
+        },
+    )
+}
+
+/// Finds the first newline character in UTF-8 encoded text.
+///
+/// Searches for any of the 8 Unicode newline characters:
+/// - U+000A (LF - Line Feed `\n`)
+/// - U+000B (VT - Vertical Tab `\v`)
+/// - U+000C (FF - Form Feed `\f`)
+/// - U+000D (CR - Carriage Return `\r`, handles `\r\n` as single newline)
+/// - U+001C (FILE SEPARATOR)
+/// - U+001D (GROUP SEPARATOR)
+/// - U+001E (RECORD SEPARATOR)
+/// - U+0085 (NEL - Next Line)
+/// - U+2028 (LINE SEPARATOR)
+/// - U+2029 (PARAGRAPH SEPARATOR)
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+///
+/// # Returns
+///
+/// An `Option<IndexSpan>` containing the byte offset and length of the matched newline.
+/// The length can be 1-3 bytes for single characters, or 2 bytes for CRLF sequence.
+///
+/// Returns `None` if no newline is found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello\nWorld";
+/// let span = sz::find_newline_utf8(text).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+///
+/// let text_crlf = "Hello\r\nWorld";
+/// let span = sz::find_newline_utf8(text_crlf).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 2);
+///
+/// let text_unicode = "Hello\u{2028}World"; // LINE SEPARATOR
+/// let span = sz::find_newline_utf8(text_unicode).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 3);
+/// ```
+pub fn find_newline_utf8<T>(text: T) -> Option<IndexSpan>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+    let mut matched_length: usize = 0;
+
+    let result = unsafe { sz_utf8_find_newline(text_pointer, text_length, &mut matched_length as *mut usize) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(IndexSpan::new(offset, matched_length))
+    }
+}
+
+/// Finds the first whitespace character in UTF-8 encoded text.
+///
+/// Searches for any of the 29 Unicode whitespace characters (includes all newlines
+/// per Unicode standard, plus spaces, tabs, and various Unicode space characters).
+///
+/// The complete set includes:
+/// - All 8 newline characters (see [`find_newline_utf8`])
+/// - U+0009 (CHARACTER TABULATION `\t`)
+/// - U+001F (UNIT SEPARATOR)
+/// - U+0020 (SPACE)
+/// - U+00A0 (NO-BREAK SPACE)
+/// - U+1680 (OGHAM SPACE MARK)
+/// - U+2000-U+200A (11 various spaces)
+/// - U+202F (NARROW NO-BREAK SPACE)
+/// - U+205F (MEDIUM MATHEMATICAL SPACE)
+/// - U+3000 (IDEOGRAPHIC SPACE)
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+///
+/// # Returns
+///
+/// An `Option<IndexSpan>` containing the byte offset and length of the matched whitespace.
+/// The length can be 1-3 bytes depending on the UTF-8 character.
+///
+/// Returns `None` if no whitespace is found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello World";
+/// let span = sz::find_whitespace_utf8(text).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+///
+/// let text_unicode = "Hello\u{3000}World"; // IDEOGRAPHIC SPACE
+/// let span = sz::find_whitespace_utf8(text_unicode).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 3);
+///
+/// // Whitespace includes newlines
+/// let text_newline = "Hello\nWorld";
+/// let span = sz::find_whitespace_utf8(text_newline).unwrap();
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+/// ```
+pub fn find_whitespace_utf8<T>(text: T) -> Option<IndexSpan>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+    let mut matched_length: usize = 0;
+
+    let result = unsafe { sz_utf8_find_whitespace(text_pointer, text_length, &mut matched_length as *mut usize) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(IndexSpan::new(offset, matched_length))
+    }
+}
+
+/// Counts the number of UTF-8 characters in the text.
+///
+/// This function efficiently counts UTF-8 characters by identifying character start bytes
+/// (non-continuation bytes). Uses SIMD acceleration when available.
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to count characters in.
+///
+/// # Returns
+///
+/// The number of UTF-8 characters (codepoints) in the text.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello";
+/// assert_eq!(sz::count_utf8(text), 5);
+///
+/// let text_unicode = "Hello🌍";
+/// assert_eq!(sz::count_utf8(text_unicode), 6);
+///
+/// let text_cjk = "你好世界";
+/// assert_eq!(sz::count_utf8(text_cjk), 4);
+/// ```
+pub fn count_utf8<T>(text: T) -> usize
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+
+    unsafe { sz_utf8_count(text_pointer, text_length) }
+}
+
+/// Finds the byte offset of the Nth UTF-8 character (0-indexed).
+///
+/// This function efficiently locates the Nth UTF-8 character without decoding
+/// the entire string. Uses SIMD acceleration when available.
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to search.
+/// * `n`: The 0-based index of the character to find.
+///
+/// # Returns
+///
+/// An `Option<usize>` containing the byte offset of the Nth character.
+/// Returns `None` if the string has fewer than N+1 characters.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello";
+/// assert_eq!(sz::find_nth_utf8(text, 0), Some(0)); // 'H'
+/// assert_eq!(sz::find_nth_utf8(text, 4), Some(4)); // 'o'
+/// assert_eq!(sz::find_nth_utf8(text, 5), None);
+///
+/// let text_unicode = "Hello🌍";
+/// assert_eq!(sz::find_nth_utf8(text_unicode, 5), Some(5)); // 🌍 starts at byte 5
+/// assert_eq!(sz::find_nth_utf8(text_unicode, 6), None);
+/// ```
+pub fn find_nth_utf8<T>(text: T, n: usize) -> Option<usize>
+where
+    T: AsRef<[u8]>,
+{
+    let text_ref = text.as_ref();
+    let text_pointer = text_ref.as_ptr() as *const c_void;
+    let text_length = text_ref.len();
+
+    let result = unsafe { sz_utf8_find_nth(text_pointer, text_length, n) };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
+            .try_into()
+            .unwrap();
+        Some(offset)
+    }
+}
+
+/// Lazy UTF-8 character view with SIMD-accelerated operations.
+///
+/// Provides O(1) construction with lazy character counting and efficient random access.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello🌍";
+/// let view = sz::Utf8View::new(text.as_bytes());
+///
+/// // Lazy character count (computed once, then cached)
+/// assert_eq!(view.len(), 6);
+///
+/// // Random access to byte offset of Nth character
+/// assert_eq!(view.offset_of(5), Some(5)); // 🌍 at byte 5
+///
+/// // Iterate over characters
+/// let chars: Vec<char> = view.iter().collect();
+/// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+/// ```
+pub struct Utf8View<'a> {
+    octets: &'a [u8],
+    cached_len: core::cell::Cell<Option<usize>>,
+}
+
+impl<'a> Utf8View<'a> {
+    /// Creates a new UTF-8 view (O(1) - no scanning).
+    pub fn new(octets: &'a [u8]) -> Self {
+        Self {
+            octets,
+            cached_len: core::cell::Cell::new(None),
+        }
+    }
+
+    /// Returns the number of UTF-8 characters (lazy evaluation, cached after first call).
+    pub fn len(&self) -> usize {
+        if let Some(len) = self.cached_len.get() {
+            return len;
+        }
+        let len = count_utf8(self.octets);
+        self.cached_len.set(Some(len));
+        len
+    }
+
+    /// Checks if the view is empty.
+    pub fn is_empty(&self) -> bool {
+        self.octets.is_empty()
+    }
+
+    /// Gets the byte offset of the Nth character (0-indexed, SIMD-accelerated).
+    pub fn offset_of(&self, n: usize) -> Option<usize> {
+        find_nth_utf8(self.octets, n)
+    }
+
+    /// Returns an iterator over UTF-8 characters.
+    pub fn iter(&self) -> Utf8Chars<'a> {
+        Utf8Chars::new(self.octets)
+    }
+}
+
+/// Iterator over UTF-8 characters using batched decoding.
+///
+/// Decodes up to 64 bytes at a time into UTF-32 codepoints, then yields them one at a time.
+/// This is much more efficient than decoding character-by-character.
+///
+/// Typically created through [`Utf8View::iter()`].
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let text = "Hello🌍";
+/// let view = sz::Utf8View::new(text.as_bytes());
+/// let chars: Vec<char> = view.iter().collect();
+/// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+/// ```
+pub struct Utf8Chars<'a> {
+    octets: &'a [u8],
+    octets_offset: usize,
+    runes: [u32; 64],
+    runes_count: usize,
+    runes_offset: usize,
+}
+
+impl<'a> Utf8Chars<'a> {
+    fn new(octets: &'a [u8]) -> Self {
+        let mut iter = Self {
+            octets,
+            octets_offset: 0,
+            runes: [0; 64],
+            runes_count: 0,
+            runes_offset: 0,
+        };
+        // Decode first batch
+        iter.decode_batch();
+        iter
+    }
+
+    /// Decodes the next batch of UTF-8 bytes into the runes buffer.
+    fn decode_batch(&mut self) {
+        if self.octets_offset >= self.octets.len() {
+            self.runes_count = 0;
+            return;
+        }
+
+        let remaining = self.octets.len() - self.octets_offset;
+        let chunk_size = remaining.min(64);
+        let octets_ptr = unsafe { self.octets.as_ptr().add(self.octets_offset) as *const c_void };
+
+        let mut unpacked_count: usize = 0;
+
+        let next_ptr = unsafe {
+            sz_utf8_unpack_chunk(
+                octets_ptr,
+                chunk_size,
+                self.runes.as_mut_ptr(),
+                64, // Capacity of runes buffer
+                &mut unpacked_count as *mut usize,
+            )
+        };
+
+        // Update position
+        let bytes_consumed: usize = unsafe {
+            let offset = (next_ptr as *const u8).offset_from(octets_ptr as *const u8);
+            debug_assert!(offset >= 0, "sz_utf8_unpack_chunk returned a pointer before the input");
+            offset.try_into().expect("offset should be non-negative")
+        };
+        self.octets_offset += bytes_consumed;
+        self.runes_count = unpacked_count;
+        self.runes_offset = 0;
+    }
+}
+
+impl<'a> Iterator for Utf8Chars<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        // If runes buffer is exhausted, decode next batch
+        if self.runes_offset >= self.runes_count {
+            self.decode_batch();
+            if self.runes_count == 0 {
+                return None;
+            }
+        }
+
+        let codepoint = self.runes[self.runes_offset];
+        self.runes_offset += 1;
+        char::from_u32(codepoint)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // Lower bound: remaining runes in current buffer
+        let lower = self.runes_count.saturating_sub(self.runes_offset);
+        // Upper bound: unknown without counting entire string
+        (lower, None)
+    }
 }
 
 /// Randomizes the contents of a given byte slice `text` using characters from
@@ -1628,6 +2335,136 @@ impl<'a> Iterator for RangeRSplits<'a> {
     }
 }
 
+/// An iterator over substrings of UTF-8 text split by newline characters.
+///
+/// This iterator yields slices between newline characters. The newline characters themselves
+/// are not included in the yielded slices. Handles all 8 Unicode newline characters including
+/// CRLF as a single delimiter.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeNewlineUtf8Splits};
+///
+/// let text = b"Hello\nWorld\r\nRust";
+/// let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+/// assert_eq!(lines, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
+/// ```
+pub struct RangeNewlineUtf8Splits<'a> {
+    text: &'a [u8],
+    position: usize,
+    finished: bool,
+}
+
+impl<'a> RangeNewlineUtf8Splits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        Self {
+            text,
+            position: 0,
+            finished: false,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        if self.position >= self.text.len() {
+            if self.position == self.text.len() && !self.finished {
+                // Return empty slice for trailing newline case
+                self.finished = true;
+                return Some(&self.text[self.text.len()..]);
+            }
+            return None;
+        }
+
+        let start = self.position;
+
+        // Search for next newline
+        if let Some(span) = find_newline_utf8(&self.text[self.position..]) {
+            let end = self.position + span.offset;
+            self.position = end + span.length;
+            Some(&self.text[start..end])
+        } else {
+            // No more newlines, return rest of text
+            self.finished = true;
+            self.position = self.text.len();
+            Some(&self.text[start..])
+        }
+    }
+}
+
+/// An iterator over words in UTF-8 text split by whitespace characters.
+///
+/// This iterator yields non-empty slices between whitespace characters. The whitespace
+/// characters themselves are not included. Handles all 29 Unicode whitespace characters.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeWhitespaceUtf8Splits};
+///
+/// let text = b"Hello  World\tRust";
+/// let words: Vec<&[u8]> = RangeWhitespaceUtf8Splits::new(text).collect();
+/// assert_eq!(words, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
+/// ```
+pub struct RangeWhitespaceUtf8Splits<'a> {
+    text: &'a [u8],
+    position: usize,
+}
+
+impl<'a> RangeWhitespaceUtf8Splits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        Self { text, position: 0 }
+    }
+}
+
+impl<'a> Iterator for RangeWhitespaceUtf8Splits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.text.len() {
+            return None;
+        }
+
+        // Skip leading whitespace
+        while self.position < self.text.len() {
+            if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
+                if span.offset == 0 {
+                    // Whitespace at current position, skip it
+                    self.position += span.length;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if self.position >= self.text.len() {
+            return None;
+        }
+
+        let start = self.position;
+
+        // Find next whitespace or end of text
+        if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
+            let end = self.position + span.offset;
+            self.position = end + span.length;
+            Some(&self.text[start..end])
+        } else {
+            // No more whitespace, return rest of text
+            self.position = self.text.len();
+            Some(&self.text[start..])
+        }
+    }
+}
+
 /// Trait for unary string operations that only operate on `self` without needle parameters.
 /// These operations include hash computation and byte sum calculation.
 ///
@@ -1671,6 +2508,106 @@ pub trait StringZillableUnary {
     /// assert_ne!(s1.sz_hash(), s2.sz_hash());
     /// ```
     fn sz_hash(&self) -> u64;
+
+    /// Finds the first newline character in UTF-8 encoded text.
+    ///
+    /// Returns an `IndexSpan` containing the byte offset and length of the matched newline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello\nWorld";
+    /// let span = text.sz_utf8_find_newline().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 1);
+    ///
+    /// let text_crlf = "Hello\r\nWorld";
+    /// let span = text_crlf.sz_utf8_find_newline().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 2);
+    /// ```
+    fn sz_utf8_find_newline(&self) -> Option<IndexSpan>;
+
+    /// Finds the first whitespace character in UTF-8 encoded text.
+    ///
+    /// Returns an `IndexSpan` containing the byte offset and length of the matched whitespace.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello World";
+    /// let span = text.sz_utf8_find_whitespace().unwrap();
+    /// assert_eq!(span.offset, 5);
+    /// assert_eq!(span.length, 1);
+    /// ```
+    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan>;
+
+    /// Returns a lazy UTF-8 character view with SIMD-accelerated operations.
+    ///
+    /// The view provides:
+    /// - `.len()` for character count (lazy: computed on first call, cached)
+    /// - `.offset_of(n)` for random access to Nth character offset
+    /// - `.iter()` for efficient batched iteration over characters
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello🌍";
+    /// let view = text.sz_utf8_chars();
+    ///
+    /// // Lazy character count
+    /// assert_eq!(view.len(), 6);
+    ///
+    /// // Random access (byte offset of Nth character)
+    /// assert_eq!(view.offset_of(5), Some(5)); // 🌍 at byte 5
+    ///
+    /// // Efficient batched iteration
+    /// let chars: Vec<char> = view.iter().collect();
+    /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
+    /// ```
+    fn sz_utf8_chars(&self) -> Utf8View<'_>;
+
+    /// Returns an iterator over lines split by UTF-8 newline characters.
+    ///
+    /// The iterator yields slices between newlines. Handles all Unicode newline characters
+    /// including CRLF as a single delimiter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello\nWorld\r\nRust";
+    /// let lines: Vec<&str> = text.sz_utf8_newline_splits()
+    ///     .map(|line| std::str::from_utf8(line).unwrap())
+    ///     .collect();
+    /// assert_eq!(lines, vec!["Hello", "World", "Rust"]);
+    /// ```
+    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_>;
+
+    /// Returns an iterator over words split by UTF-8 whitespace characters.
+    ///
+    /// The iterator yields non-empty slices between whitespace. Handles all 29 Unicode
+    /// whitespace characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz::StringZillableUnary;
+    ///
+    /// let text = "Hello  World\tRust";
+    /// let words: Vec<&str> = text.sz_utf8_whitespace_splits()
+    ///     .map(|word| std::str::from_utf8(word).unwrap())
+    ///     .collect();
+    /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
+    /// ```
+    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -1917,6 +2854,26 @@ where
 
     fn sz_hash(&self) -> u64 {
         hash(self)
+    }
+
+    fn sz_utf8_find_newline(&self) -> Option<IndexSpan> {
+        find_newline_utf8(self)
+    }
+
+    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan> {
+        find_whitespace_utf8(self)
+    }
+
+    fn sz_utf8_chars(&self) -> Utf8View<'_> {
+        Utf8View::new(self.as_ref())
+    }
+
+    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_> {
+        RangeNewlineUtf8Splits::new(self.as_ref())
+    }
+
+    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_> {
+        RangeWhitespaceUtf8Splits::new(self.as_ref())
     }
 }
 
@@ -2535,5 +3492,364 @@ mod tests {
 
         let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
         lookup(&mut less_long, &long, lut);
+    }
+
+    #[test]
+    fn replace_all_same_length() {
+        let mut buffer = b"abcabc".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"ab", b"XY").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"XYcXYc");
+    }
+
+    #[test]
+    fn replace_all_shrinks() {
+        let mut buffer = b"aaaa".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"aa", b"b").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"bb");
+    }
+
+    #[test]
+    fn replace_all_grows() {
+        let mut buffer = b"aba".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"a", b"XYZ").unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(buffer, b"XYZbXYZ");
+    }
+
+    #[test]
+    fn replace_all_byteset_basic() {
+        let mut buffer = b"hello world".to_vec();
+        let vowels = sz::Byteset::from("aeiou");
+        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"_").unwrap();
+        assert_eq!(replaced, 3);
+        assert_eq!(buffer, b"h_ll_ w_rld");
+    }
+
+    #[test]
+    fn replace_all_byteset_grows() {
+        let mut buffer = b"yzz".to_vec();
+        let vowels = sz::Byteset::from("y");
+        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"(y)").unwrap();
+        assert_eq!(replaced, 1);
+        assert_eq!(buffer, b"(y)zz");
+    }
+
+    #[test]
+    fn replace_all_noop_on_empty_pattern() {
+        let mut buffer = b"unchanged".to_vec();
+        let replaced = sz::try_replace_all(&mut buffer, b"", b"anything").unwrap();
+        assert_eq!(replaced, 0);
+        assert_eq!(buffer, b"unchanged");
+    }
+
+    #[test]
+    fn find_newline_utf8_lf() {
+        let text = "Hello\nWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_crlf() {
+        let text = "Hello\r\nWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_newline_utf8_vt() {
+        let text = "Hello\x0BWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_ff() {
+        let text = "Hello\x0CWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_cr() {
+        let text = "Hello\rWorld";
+        let span = sz::find_newline_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_file_separator_not_detected() {
+        // U+001C (FILE SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
+        let text = "Hello\x1CWorld";
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "FILE SEPARATOR should not be detected as newline");
+    }
+
+    #[test]
+    fn find_newline_utf8_group_separator_not_detected() {
+        // U+001D (GROUP SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
+        let text = "Hello\x1DWorld";
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "GROUP SEPARATOR should not be detected as newline");
+    }
+
+    #[test]
+    fn find_newline_utf8_record_separator_not_detected() {
+        // U+001E (RECORD SEPARATOR) is intentionally NOT detected as a newline
+        // These are data structure delimiters used in formats like USV, not line breaks
+        let text = "Hello\x1EWorld";
+        let span = sz::find_newline_utf8(text);
+        assert!(span.is_none(), "RECORD SEPARATOR should not be detected as newline");
+    }
+
+    #[test]
+    fn find_newline_utf8_nel() {
+        // U+0085 (NEL - Next Line) is 2 bytes in UTF-8: C2 85
+        let text = "Hello\u{0085}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_newline_utf8_line_separator() {
+        // U+2028 (LINE SEPARATOR) is 3 bytes in UTF-8: E2 80 A8
+        let text = "Hello\u{2028}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_newline_utf8_paragraph_separator() {
+        // U+2029 (PARAGRAPH SEPARATOR) is 3 bytes in UTF-8: E2 80 A9
+        let text = "Hello\u{2029}World";
+        let result = sz::find_newline_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_newline_utf8_not_found() {
+        let text = "Hello World";
+        assert_eq!(sz::find_newline_utf8(text), None);
+    }
+
+    #[test]
+    fn find_newline_utf8_empty() {
+        let text = "";
+        assert_eq!(sz::find_newline_utf8(text), None);
+    }
+
+    #[test]
+    fn find_newline_utf8_trait_method() {
+        use crate::sz::StringZillableUnary;
+        let text = "Hello\nWorld";
+        let span = text.sz_utf8_find_newline().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_newline_utf8_trait_method_string() {
+        use crate::sz::StringZillableUnary;
+        let text = String::from("Hello\nWorld");
+        let span = text.sz_utf8_find_newline().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_space() {
+        let text = "Hello World";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_tab() {
+        let text = "Hello\tWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_newline() {
+        // Whitespace should include newlines
+        let text = "Hello\nWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_cr() {
+        // Whitespace should include CR (finds CR as 1-byte, not CRLF as 2-byte)
+        let text = "Hello\r\nWorld";
+        let span = sz::find_whitespace_utf8(text).unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_nbsp() {
+        // U+00A0 (NO-BREAK SPACE) is 2 bytes in UTF-8: C2 A0
+        let text = "Hello\u{00A0}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 2);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_ideographic() {
+        // U+3000 (IDEOGRAPHIC SPACE) is 3 bytes in UTF-8: E3 80 80
+        let text = "Hello\u{3000}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_en_quad() {
+        // U+2000 (EN QUAD) is 3 bytes in UTF-8: E2 80 80
+        let text = "Hello\u{2000}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_ogham() {
+        // U+1680 (OGHAM SPACE MARK) is 3 bytes in UTF-8: E1 9A 80
+        let text = "Hello\u{1680}World";
+        let result = sz::find_whitespace_utf8(text);
+        assert!(result.is_some());
+        let span = result.unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 3);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_not_found() {
+        let text = "HelloWorld";
+        assert_eq!(sz::find_whitespace_utf8(text), None);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_empty() {
+        let text = "";
+        assert_eq!(sz::find_whitespace_utf8(text), None);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method() {
+        use crate::sz::StringZillableUnary;
+        let text = "Hello World";
+        let span = text.sz_utf8_find_whitespace().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method_string() {
+        use crate::sz::StringZillableUnary;
+        let text = String::from("Hello World");
+        let span = text.sz_utf8_find_whitespace().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn find_whitespace_utf8_trait_method_bytes() {
+        use crate::sz::StringZillableUnary;
+        let text = b"Hello World";
+        let span = text.sz_utf8_find_whitespace().unwrap();
+        assert_eq!(span.offset, 5);
+        assert_eq!(span.length, 1);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits() {
+        let text = b"a\nb\r\nc\n\nd";
+        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines, vec![b"a", b"b", b"c", &b""[..], b"d"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_unicode() {
+        let text = "Hello\u{2028}World".as_bytes(); // LINE SEPARATOR
+        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines, vec!["Hello".as_bytes(), "World".as_bytes()]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits() {
+        let text = b"  a \t b\n\nc  ";
+        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        assert_eq!(words, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits_unicode() {
+        let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
+        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        assert_eq!(words, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_trailing_newline() {
+        // "\r\na\r\n\r\nb\r\n" should produce ["", "a", "", "b", ""]
+        let text = b"\r\na\r\n\r\nb\r\n";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 5, "Expected 5 lines");
+        let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b""];
+        assert_eq!(lines, expected);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_no_trailing() {
+        let text = b"a\nb\nc";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_empty_string() {
+        let text = b"";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines, vec![b""]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_single_newline() {
+        let text = b"\n";
+        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines, vec![b"", b""]);
     }
 }

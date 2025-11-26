@@ -16,13 +16,11 @@ pip install stringzilla
 
 Currently implemented:
 
-- `sz_wc`: 3x faster `wc` word count.
-- `sz_split`: 4x faster `split` file splitting.
-
-What other interfaces should we add?
-Levenshtein distances?
-Fuzzy search?
-Are there common alternatives to emulate?
+- `sz-wc`: 3x faster `wc` word count with almost identical UNIX behavior
+- `sz-split`: 4x faster `split` file splitting with almost identical UNIX behavior
+- `sz-dedup`: Deduplicate lines
+- `sz-sort`: Sort lines
+- `sz-find`: Find all inclusion of a substring in a file.
 
 ## `wc`: Word Count
 

@@ -75,6 +75,7 @@ struct matcher_from_sz_find {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -140,6 +141,7 @@ struct matcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.begin(), haystack.end(), searcher_);
+        do_not_optimize(match);
         if (match == haystack.end()) return std::string_view::npos; // No match found
         return (size_type)(match - haystack.begin());
     }
@@ -157,6 +159,7 @@ struct rmatcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.rbegin(), haystack.rend(), searcher_);
+        do_not_optimize(match);
         if (match == haystack.rend()) return std::string_view::npos; // No match found
         auto offset_from_end = match - haystack.rbegin();
         auto offset_from_start = haystack.size() - offset_from_end - needle_.size();
@@ -180,6 +183,7 @@ auto callable_for_substring_search(environment_t const &env) {
         std::size_t count_bytes = haystack.size();
         std::size_t count_matches = matches.size();
         std::size_t count_operations = count_bytes * needle.size();
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches, count_operations};
     };
 }
@@ -289,6 +293,7 @@ struct matcher_from_sz_find_byte {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &needle_);
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -345,6 +350,7 @@ struct matcher_from_std_find {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::find(haystack.begin(), haystack.end(), needle_);
+        do_not_optimize(match);
         return (size_type)(match - haystack.begin());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -362,6 +368,7 @@ auto callable_for_byte_search(environment_t const &env) {
         // As a checksum, mix the counts together
         std::size_t count_matches = count_whitespaces + count_newlines + count_nulls;
         std::size_t count_bytes = haystack.size() * 3; // We've traversed the input 3 times
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches};
     };
 }
@@ -453,6 +460,7 @@ struct matcher_from_sz_find_byteset {
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto ptr = find_func_(haystack.data(), haystack.size(), &needles_.raw());
+        do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return ptr - haystack.data();
     }
@@ -471,6 +479,7 @@ struct matcher_strcspn_t {
     inline size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = strcspn(haystack.data(), needles_.data());
+        do_not_optimize(match);
         if (match == haystack.size()) return std::string_view::npos; // No match found
         return match;
     }
@@ -509,14 +518,19 @@ template <template <typename, typename> class range_template_, typename matcher_
 auto callable_for_byteset_search(environment_t const &env) {
     using matcher_t = matcher_type_;
     using matches_t = range_template_<std::string_view, matcher_t>;
+
+    static byteset_type_ const byteset_tabs("\n\r\v\f", 4);
+    static byteset_type_ const byteset_html("</>&'\"=[]", 9);
+    static byteset_type_ const byteset_digits("0123456789", 10);
     return [&env](std::size_t token_index) -> call_result_t {
         std::string_view haystack = env.tokens[token_index];
-        std::size_t count_tabs = matches_t(haystack, matcher_t(byteset_type_("\n\r\v\f", 4))).size();
-        std::size_t count_html = matches_t(haystack, matcher_t(byteset_type_("</>&'\"=[]", 9))).size();
-        std::size_t count_digits = matches_t(haystack, matcher_t(byteset_type_("0123456789", 10))).size();
+        std::size_t count_tabs = matches_t(haystack, matcher_t(byteset_tabs)).size();
+        std::size_t count_html = matches_t(haystack, matcher_t(byteset_html)).size();
+        std::size_t count_digits = matches_t(haystack, matcher_t(byteset_digits)).size();
         // As a checksum, mix the counts together
         std::size_t count_matches = count_tabs + count_html + count_digits;
         std::size_t count_bytes = haystack.size() * 3; // We've traversed the input 3 times
+        do_not_optimize(count_matches);
         return call_result_t {count_bytes, count_matches};
     };
 }
@@ -593,6 +607,98 @@ void bench_byteset_search(environment_t const &env) {
 
 #pragma endregion // Byteset Search
 
+#pragma region UTF8 Tokenization
+
+/**
+ *  @brief  Wraps an individual hardware-specific search backend into something similar
+ *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ */
+template <sz_utf8_find_boundary_t find_func_>
+struct matcher_from_sz_utf8_find_boundary {
+    using size_type = std::size_t;
+    size_type last_match_length_ = 0;
+
+    constexpr matcher_from_sz_utf8_find_boundary() noexcept {}
+    inline size_type operator()(std::string_view haystack) noexcept {
+        auto ptr = find_func_(haystack.data(), haystack.size(), &last_match_length_);
+        do_not_optimize(ptr);
+        if (!ptr) return std::string_view::npos; // No match found
+        return ptr - haystack.data();
+    }
+    size_type needle_length() const noexcept { return last_match_length_; }
+    size_type skip_length() const noexcept { return last_match_length_; }
+};
+
+template <template <typename, typename> class range_template_, typename matcher_type_>
+auto callable_for_utf8_find_boundary(environment_t const &env) {
+    using matcher_t = matcher_type_;
+    using matches_t = range_template_<std::string_view, matcher_t>;
+    return [&env](std::size_t token_index) -> call_result_t {
+        std::string_view haystack = env.tokens[token_index];
+        std::size_t count_matches = matches_t(haystack, matcher_t()).size();
+        std::size_t count_bytes = haystack.size();
+        do_not_optimize(count_matches);
+        return call_result_t {count_bytes, count_matches};
+    };
+}
+
+/**
+ *  @brief Find all UTF-8 token boundaries - newlines, whitespaces, punctuation delimiters, etc.
+ *  @warning Notice, there are no runtime-dependant "needles", we know the Unicode spec ahead of time :)
+ */
+void bench_utf8_find_boundary(environment_t const &env) {
+
+    // First, benchmark the serial function
+    auto base_newline_call =
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_serial>>(env);
+    auto base_whitespace_call =
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_serial>>(env);
+    bench_result_t base_newline = bench_unary(env, "sz_utf8_find_newline_serial", base_newline_call).log();
+    bench_result_t base_whitespace = bench_unary(env, "sz_utf8_find_whitespace_serial", base_whitespace_call).log();
+
+    // Conditionally include SIMD-accelerated backends
+#if SZ_USE_ICE
+    bench_unary( //
+        env, "sz_utf8_find_newline_ice", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_ice>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_ice", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_ice>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_NEON
+    bench_unary( //
+        env, "sz_utf8_find_newline_neon", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_neon>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_neon", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_neon>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_SVE2
+    bench_unary( //
+        env, "sz_utf8_find_newline_sve2", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_sve2>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_sve2", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_sve2>>(env))
+        .log(base_whitespace);
+#endif
+}
+
+#pragma endregion
+
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla!\n");
 
@@ -603,6 +709,7 @@ int main(int argc, char const **argv) {
         environment_t::tokenization_t::words_k);
 
     std::printf("Starting search benchmarks...\n");
+    bench_utf8_find_boundary(env);
     bench_substring_search(env);
     bench_byte_search(env);
     bench_byteset_search(env);

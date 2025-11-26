@@ -1447,5 +1447,350 @@ def test_invalid_utf8_handling():
         assert len(str_result) > 0
 
 
+def test_unit_utf8_case_fold():
+    """Test basic case folding functionality."""
+    # ASCII
+    assert sz.utf8_case_fold("HELLO") == b"hello"
+    assert sz.utf8_case_fold("Hello World") == b"hello world"
+    assert sz.utf8_case_fold("") == b""
+    assert sz.utf8_case_fold("already lowercase") == b"already lowercase"
+
+    # German sharp S expansion (ß → ss)
+    assert sz.utf8_case_fold("Straße") == b"strasse"
+    assert sz.utf8_case_fold("GROSSE") == b"grosse"
+
+    # Method form on Str
+    assert sz.Str("HELLO").utf8_case_fold() == b"hello"
+
+    # Bytes input
+    assert sz.utf8_case_fold(b"HELLO") == b"hello"
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        ("A", b"a"),
+        ("Z", b"z"),
+        ("ß", b"ss"),  # German sharp S (U+00DF)
+        ("ẞ", b"ss"),  # Capital sharp S (U+1E9E)
+        ("ﬁ", b"fi"),  # fi ligature (U+FB01)
+        ("ﬀ", b"ff"),  # ff ligature (U+FB00)
+        ("ﬂ", b"fl"),  # fl ligature (U+FB02)
+        ("ﬃ", b"ffi"),  # ffi ligature (U+FB03)
+        ("ﬄ", b"ffl"),  # ffl ligature (U+FB04)
+        ("Σ", "σ".encode("utf-8")),  # Greek Sigma
+        ("Ω", "ω".encode("utf-8")),  # Greek Omega
+        ("Ä", "ä".encode("utf-8")),  # German umlaut
+        ("É", "é".encode("utf-8")),  # French accent
+        ("Ñ", "ñ".encode("utf-8")),  # Spanish tilde
+    ],
+)
+def test_utf8_case_fold_expansions(input_str, expected):
+    """Test case folding with specific known transformations including expansions."""
+    assert sz.utf8_case_fold(input_str) == expected
+
+
+def _parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
+    """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
+
+    Uses status C (common) and F (full) mappings for full case folding.
+    """
+    folds = {}
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(";")
+            if len(parts) < 3:
+                continue
+            status = parts[1].strip()
+            # C = common, F = full (for expansions like ß → ss)
+            # Skip S (simple) and T (Turkic) for full case folding
+            if status not in ("C", "F"):
+                continue
+            try:
+                codepoint = int(parts[0].strip(), 16)
+                # Mapping can be multiple codepoints separated by spaces (e.g., "0073 0073" for ß → ss)
+                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
+                # Convert target codepoints to UTF-8 bytes
+                folded_str = "".join(chr(cp) for cp in target_cps)
+                folds[codepoint] = folded_str.encode("utf-8")
+            except (ValueError, IndexError):
+                continue
+    return folds
+
+
+def _get_case_folding_rules(version: str = "17.0.0") -> Dict[int, bytes]:
+    """Download and parse Unicode CaseFolding.txt, caching in temp directory.
+
+    Args:
+        version: Unicode version string (e.g., "17.0.0")
+
+    Returns:
+        Dict mapping codepoints to their folded UTF-8 bytes
+    """
+    import urllib.request
+
+    cache_path = os.path.join(tempfile.gettempdir(), f"CaseFolding-{version}.txt")
+
+    # Use cached file if it exists
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
+        try:
+            urllib.request.urlretrieve(url, cache_path)
+        except Exception as e:
+            pytest.skip(f"Could not download CaseFolding.txt from {url}: {e}")
+
+    return _parse_case_folding_file(cache_path)
+
+
+def test_utf8_case_fold_all_codepoints():
+    """Compare StringZilla case folding with Unicode 17.0 CaseFolding.txt rules.
+
+    This test downloads the official Unicode 17.0 case folding data file to validate
+    StringZilla's implementation, independent of Python's Unicode version.
+    The file is cached in the system temp directory for subsequent runs.
+    """
+    # Load Unicode 17.0 case folding rules (downloads and caches automatically)
+    unicode_folds = _get_case_folding_rules("17.0.0")
+
+    mismatches = []
+    missing_folds = []
+    extra_folds = []
+
+    for codepoint in range(0x110000):
+        # Skip surrogates (not valid in UTF-8)
+        if 0xD800 <= codepoint <= 0xDFFF:
+            continue
+
+        try:
+            char = chr(codepoint)
+            char_bytes = char.encode("utf-8")
+            sz_folded = sz.utf8_case_fold(char)
+
+            # Get expected folding from Unicode 17.0 rules
+            # If not in the table, character maps to itself
+            expected = unicode_folds.get(codepoint, char_bytes)
+
+            if sz_folded != expected:
+                entry = (f"U+{codepoint:04X}", repr(char), expected.hex(), sz_folded.hex())
+                if codepoint in unicode_folds and sz_folded == char_bytes:
+                    missing_folds.append(entry)  # StringZilla didn't fold but should have
+                elif codepoint not in unicode_folds and sz_folded != char_bytes:
+                    extra_folds.append(entry)  # StringZilla folded but shouldn't have
+                else:
+                    mismatches.append(entry)  # Both fold but to different targets
+        except (ValueError, UnicodeEncodeError):
+            continue
+
+    total_errors = len(mismatches) + len(missing_folds) + len(extra_folds)
+    assert total_errors == 0, (
+        f"Case folding errors vs Unicode 17.0 ({len(unicode_folds)} rules): "
+        f"{len(mismatches)} wrong targets, {len(missing_folds)} missing, {len(extra_folds)} extra. "
+        f"First 10: {(mismatches + missing_folds + extra_folds)[:10]}"
+    )
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_case_fold_random_strings(seed_value: int):
+    """Test case folding on random multi-codepoint strings."""
+    seed(seed_value)
+
+    # Test with ASCII uppercase
+    for _ in range(50):
+        length = randint(1, 100)
+        test_str = "".join(chr(randint(0x41, 0x5A)) for _ in range(length))  # A-Z
+        python_folded = test_str.casefold().encode("utf-8")
+        sz_folded = sz.utf8_case_fold(test_str)
+        assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
+
+    # Test with Latin Extended characters
+    for _ in range(50):
+        length = randint(1, 50)
+        # Mix of ASCII uppercase and Latin Extended (includes ß, etc.)
+        codepoints = [randint(0x41, 0x5A) for _ in range(length)]
+        codepoints += [randint(0xC0, 0xFF) for _ in range(length // 2)]
+        test_str = "".join(chr(cp) for cp in codepoints)
+        python_folded = test_str.casefold().encode("utf-8")
+        sz_folded = sz.utf8_case_fold(test_str)
+        assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
+
+
+def test_unit_utf8_count():
+    """Test UTF-8 character counting (codepoints, not bytes)."""
+    # ASCII strings: len == utf8_count
+    assert sz.utf8_count("hello") == 5
+    assert sz.utf8_count("") == 0
+    assert sz.utf8_count("a") == 1
+
+    # Multi-byte UTF-8: character count != byte count
+    assert sz.utf8_count("café") == 4  # é is 2 bytes but 1 char
+    assert sz.utf8_count("日本語") == 3  # Each CJK char is 3 bytes
+    assert sz.utf8_count("🎉") == 1  # Emoji is 4 bytes but 1 char
+    assert sz.utf8_count("👨‍👩‍👧") == 5  # Family emoji: 3 people + 2 ZWJ
+
+    # Mixed ASCII and multi-byte
+    assert sz.utf8_count("hello世界") == 7  # 5 ASCII + 2 CJK
+    assert sz.utf8_count("naïve") == 5  # ï is 2 bytes
+
+    # Method form on Str
+    assert sz.Str("café").utf8_count() == 4
+
+    # Bytes input
+    assert sz.utf8_count(b"caf\xc3\xa9") == 4  # café in UTF-8 bytes
+
+    # Various multi-byte sequences
+    assert sz.utf8_count("αβγδ") == 4  # Greek letters (2 bytes each)
+    assert sz.utf8_count("АБВГ") == 4  # Cyrillic letters (2 bytes each)
+    assert sz.utf8_count("𐍈") == 1  # Gothic letter (4 bytes)
+
+
+def test_utf8_splitlines_iter():
+    """Test UTF-8 line splitting iterator."""
+    # Basic newline characters
+    assert list(sz.utf8_splitlines_iter("a\nb\nc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_splitlines_iter("a\rb\rc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_splitlines_iter("a\r\nb\r\nc")) == [Str("a"), Str("b"), Str("c")]
+
+    # CRLF treated as single delimiter
+    result = list(sz.utf8_splitlines_iter("line1\r\nline2"))
+    assert len(result) == 2
+    assert result[0] == Str("line1")
+    assert result[1] == Str("line2")
+
+    # Empty string: yields one empty Str (differs from Python's splitlines which returns [])
+    assert list(sz.utf8_splitlines_iter("")) == [Str("")]
+
+    # No newlines
+    assert list(sz.utf8_splitlines_iter("hello")) == [Str("hello")]
+
+    # Consecutive newlines create empty lines
+    result = list(sz.utf8_splitlines_iter("a\n\nb"))
+    assert len(result) == 3
+    assert result[1] == Str("")  # Empty line between
+
+    # Trailing newline: includes trailing empty (differs from Python which omits it)
+    result = list(sz.utf8_splitlines_iter("a\nb\n"))
+    assert len(result) == 3
+    assert result[2] == Str("")
+
+    # keepends=True
+    result = list(sz.utf8_splitlines_iter("a\nb\nc", keepends=True))
+    assert result[0] == Str("a\n")
+    assert result[1] == Str("b\n")
+    assert result[2] == Str("c")  # Last line has no newline
+
+    # keepends=True with CRLF
+    result = list(sz.utf8_splitlines_iter("a\r\nb", keepends=True))
+    assert result[0] == Str("a\r\n")
+    assert result[1] == Str("b")
+
+    # Unicode newlines: vertical tab, form feed
+    assert len(list(sz.utf8_splitlines_iter("a\vb\fc"))) == 3
+
+    # Unicode newlines: NEL (U+0085), Line Separator (U+2028), Paragraph Separator (U+2029)
+    nel = "\u0085"
+    line_sep = "\u2028"
+    para_sep = "\u2029"
+    assert len(list(sz.utf8_splitlines_iter(f"a{nel}b"))) == 2
+    assert len(list(sz.utf8_splitlines_iter(f"a{line_sep}b"))) == 2
+    assert len(list(sz.utf8_splitlines_iter(f"a{para_sep}b"))) == 2
+
+    # Method form on Str
+    result = list(sz.Str("a\nb").utf8_splitlines_iter())
+    assert result == [Str("a"), Str("b")]
+
+    # skip_empty=True skips ALL empty segments (leading, middle, trailing)
+    # This differs from Python's splitlines() which keeps middle empty lines
+    assert list(sz.utf8_splitlines_iter("", skip_empty=True)) == []
+    assert list(sz.utf8_splitlines_iter("a\nb\n", skip_empty=True)) == [Str("a"), Str("b")]
+    assert list(sz.utf8_splitlines_iter("a\n\nb", skip_empty=True)) == [Str("a"), Str("b")]  # skips middle empty
+    assert list(sz.utf8_splitlines_iter("\na\n", skip_empty=True)) == [Str("a")]  # skips leading & trailing
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["hello\nworld", "a\r\nb\nc", "no newline", "trailing\n"],
+)
+def test_utf8_splitlines_iter_matches_python(text):
+    """Verify skip_empty=True matches Python's splitlines() for cases without middle empty lines."""
+    py_result = text.splitlines()
+    sz_result = [str(s) for s in sz.utf8_splitlines_iter(text, skip_empty=True)]
+    assert sz_result == py_result
+
+
+def test_utf8_split_iter():
+    """Test UTF-8 whitespace splitting iterator."""
+    # Basic whitespace: space, tab, newline
+    result = list(sz.utf8_split_iter("hello world"))
+    assert result == [Str("hello"), Str("world")]
+
+    result = list(sz.utf8_split_iter("a\tb\nc"))
+    assert result == [Str("a"), Str("b"), Str("c")]
+
+    # Empty string: yields one empty Str (differs from Python's split which returns [])
+    assert list(sz.utf8_split_iter("")) == [Str("")]
+
+    # String with only whitespace: yields empty strings between delimiters
+    # (differs from Python's split() which returns [] for whitespace-only strings)
+    result = list(sz.utf8_split_iter("   "))
+    assert all(str(s) == "" for s in result)
+
+    # Consecutive whitespace creates empty strings between each delimiter
+    # (differs from Python's split() which treats consecutive whitespace as single delimiter)
+    result = list(sz.utf8_split_iter("a   b"))
+    assert len(result) == 4  # a, '', '', b
+    assert str(result[0]) == "a"
+    assert str(result[-1]) == "b"
+
+    # Leading/trailing whitespace creates empty strings
+    result = list(sz.utf8_split_iter("  hello  "))
+    assert "hello" in [str(s) for s in result]
+
+    # No whitespace
+    assert list(sz.utf8_split_iter("hello")) == [Str("hello")]
+
+    # Unicode whitespace: NO-BREAK SPACE (U+00A0)
+    nbsp = "\u00a0"
+    result = list(sz.utf8_split_iter(f"a{nbsp}b"))
+    assert len(result) == 2
+    assert str(result[0]) == "a"
+    assert str(result[1]) == "b"
+
+    # Unicode whitespace: IDEOGRAPHIC SPACE (U+3000)
+    ideo_space = "\u3000"
+    result = list(sz.utf8_split_iter(f"日本{ideo_space}語"))
+    assert len(result) == 2
+    assert str(result[0]) == "日本"
+    assert str(result[1]) == "語"
+
+    # Unicode whitespace: EN SPACE (U+2002), EM SPACE (U+2003)
+    en_space = "\u2002"
+    em_space = "\u2003"
+    result = list(sz.utf8_split_iter(f"a{en_space}b{em_space}c"))
+    assert len(result) == 3
+    assert str(result[0]) == "a"
+    assert str(result[1]) == "b"
+    assert str(result[2]) == "c"
+
+    # Method form on Str
+    result = list(sz.Str("hello world").utf8_split_iter())
+    assert len(result) == 2
+    assert str(result[0]) == "hello"
+    assert str(result[1]) == "world"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["hello world", "  spaced  ", "a\tb\nc", "no-spaces", "   ", ""],
+)
+def test_utf8_split_iter_matches_python(text):
+    """Verify skip_empty=True matches Python's split() behavior."""
+    py_result = text.split()
+    sz_result = [str(s) for s in sz.utf8_split_iter(text, skip_empty=True)]
+    assert sz_result == py_result
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", "-s", __file__]))

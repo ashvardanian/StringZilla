@@ -526,7 +526,7 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_equal_skylake(a, b, length);
 #elif SZ_USE_HASWELL
     return sz_equal_haswell(a, b, length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     return sz_equal_sve(a, b, length);
 #elif SZ_USE_NEON
     return sz_equal_neon(a, b, length);
@@ -540,7 +540,7 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
     return sz_order_skylake(a, a_length, b, b_length);
 #elif SZ_USE_HASWELL
     return sz_order_haswell(a, a_length, b, b_length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     return sz_order_sve(a, a_length, b, b_length);
 #elif SZ_USE_NEON
     return sz_order_neon(a, a_length, b, b_length);

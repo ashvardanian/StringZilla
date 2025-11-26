@@ -205,6 +205,41 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, s
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
+/**
+ *  @brief  Finds the first occurence of a UTF-8 whitespace or punctuation character in a string.
+ *
+ *  Delimiters include all of the above, plus common "punctuation" characters, "symbols", and "separators",
+ *  as defined by the "Unicode UAX #29" word segmentation standard and implemented in the ICU.
+ *  - around 30 ASCII characters
+ *  - around 130 2-byte characters
+ *  - around 4.3k 3-byte characters
+ *  - around 4.1k 4-byte characters
+ *
+ *  @param[in] text String to be scanned.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[out] matched_length Number of bytes in the matched newline delimiter.
+ *  @return Pointer to the first matching newline character from @p text.
+ */
+SZ_DYNAMIC sz_cptr_t sz_find_delimiter_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+
+/** @copydoc sz_find_delimiters_utf8 */
+SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+
+#if SZ_USE_HASWELL
+/** @copydoc sz_find_delimiters_utf8 */
+SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+#endif
+
+#if SZ_USE_ICE
+/** @copydoc sz_find_delimiters_utf8 */
+SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_ice(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+#endif
+
+#if SZ_USE_NEON
+/** @copydoc sz_find_delimiters_utf8 */
+SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+#endif
+
 #pragma endregion // Core API
 
 #pragma region Helper Shortcuts
@@ -1582,7 +1617,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_by
 #pragma GCC target("+simd")
 #endif
 
-SZ_INTERNAL sz_u64_t sz_vreinterpretq_u8_u4_(uint8x16_t vec) {
+SZ_INTERNAL sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
@@ -1599,7 +1634,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+        matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         if (matches) return h + sz_u64_ctz(matches) / 4;
 
         h += 16, h_length -= 16;
@@ -1616,7 +1651,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_
     while (h_length >= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
-        matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+        matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
         h_length -= 16;
     }
@@ -1641,7 +1676,7 @@ SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
     uint8x16_t matches_vec = vorrq_u8(matches_top_vec, matches_bottom_vec);
     // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
     matches_vec = vtstq_u8(matches_vec, byte_mask_vec);
-    return sz_vreinterpretq_u8_u4_(matches_vec);
+    return sz_find_vreinterpretq_u8_u4_(matches_vec);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -1666,7 +1701,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
             h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 1));
             matches_vec.u8x16 =
                 vandq_u8(vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+            matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             if (matches) return h + sz_u64_ctz(matches) / 4;
         }
     }
@@ -1688,7 +1723,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                     vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                     vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+            matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             if (matches) return h + sz_u64_ctz(matches) / 4;
         }
     }
@@ -1712,7 +1747,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                     vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                     vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+            matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
                 if (sz_equal_neon(h + potential_offset, n, n_length)) return h + potential_offset;
@@ -1752,7 +1787,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        matches = sz_vreinterpretq_u8_u4_(matches_vec.u8x16);
+        matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz(matches) / 4;
             if (sz_equal_neon(h + h_length - n_length - potential_offset, n, n_length))
@@ -1964,7 +1999,7 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
     return sz_find_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_WESTMERE
     return sz_find_byte_westmere(haystack, h_length, needle);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE // ? actually faster than NEON on most machines
     return sz_find_byte_sve(haystack, h_length, needle);
 #elif SZ_USE_NEON
     return sz_find_byte_neon(haystack, h_length, needle);
@@ -1980,7 +2015,7 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cp
     return sz_rfind_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_WESTMERE
     return sz_rfind_byte_westmere(haystack, h_length, needle);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE // ? actually faster than NEON on most machines
     return sz_rfind_byte_sve(haystack, h_length, needle);
 #elif SZ_USE_NEON
     return sz_rfind_byte_neon(haystack, h_length, needle);
@@ -1996,7 +2031,7 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
     return sz_find_haswell(haystack, h_length, needle, n_length);
 #elif SZ_USE_WESTMERE
     return sz_find_westmere(haystack, h_length, needle, n_length);
-#elif SZ_USE_SVE
+#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
     return sz_find_sve(haystack, h_length, needle, n_length);
 #elif SZ_USE_NEON
     return sz_find_neon(haystack, h_length, needle, n_length);

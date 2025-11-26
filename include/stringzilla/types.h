@@ -294,7 +294,7 @@
 
 /*  AES is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_AES)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_AES)
+#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define SZ_USE_NEON_AES (1)
 #else
 #define SZ_USE_NEON_AES (0)
@@ -303,7 +303,7 @@
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_NEON_SHA)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SHA2)
+#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define SZ_USE_NEON_SHA (1)
 #else
 #define SZ_USE_NEON_SHA (0)
@@ -317,6 +317,11 @@
 #else
 #define SZ_USE_SVE2_AES (0)
 #endif
+#endif
+
+/**  SVE isn't a silver bullet. Oftentimes its still slower and with this flag you can disable it. */
+#if !defined(SZ_ENFORCE_SVE_OVER_NEON)
+#define SZ_ENFORCE_SVE_OVER_NEON (0)
 #endif
 
 #if !defined(SZ_USE_CUDA)
@@ -771,6 +776,18 @@ typedef sz_u64_t (*sz_hash_state_digest_t)(struct sz_hash_state_t const *);
 /** @brief Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
+/** @brief Signature of `sz_utf8_count`. */
+typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
+
+/** @brief Signature of `sz_utf8_find_nth`. */
+typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
+
+/** @brief Signature of `sz_utf8_unpack_chunk`. */
+typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
+
+/** @brief Signature of `sz_utf8_case_fold`. */
+typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
+
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
@@ -809,6 +826,9 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
+
+/** @brief Signature of `sz_utf8_find_newline`, `sz_utf8_find_whitespace`. */
+typedef sz_cptr_t (*sz_utf8_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_sequence_argsort`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
@@ -962,49 +982,89 @@ typedef union sz_u512_vec_t {
 
 #pragma region UTF8
 
-/** @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer. */
-SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
+/**
+ *  @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer.
+ *  @param[in] utf8 Pointer to the beginning of a UTF8-encoded string.
+ *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
+ *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @note This function does not perform any bounds checking on the input string.
+ */
+SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
     sz_u8_t const *current = (sz_u8_t const *)utf8;
     sz_u8_t leading_byte = *current++;
-    sz_rune_t ch;
-    sz_rune_length_t ch_length;
+    sz_rune_t rune;
+    sz_rune_length_t rune_length;
 
     // TODO: This can be made entirely branchless using 32-bit SWAR.
+    // Single-byte rune (0xxxxxxx)
     if (leading_byte < 0x80U) {
-        // Single-byte rune (0xxxxxxx)
-        ch = leading_byte;
-        ch_length = sz_utf8_rune_1byte_k;
+        rune = leading_byte;
+        rune_length = sz_utf8_rune_1byte_k;
     }
+    // Two-byte rune (110xxxxx 10xxxxxx)
     else if ((leading_byte & 0xE0U) == 0xC0U) {
-        // Two-byte rune (110xxxxx 10xxxxxx)
-        ch = (leading_byte & 0x1FU) << 6;
-        ch |= (*current++ & 0x3FU);
-        ch_length = sz_utf8_rune_2bytes_k;
+        rune = (leading_byte & 0x1FU) << 6; // bottom 5 bits from the first byte
+        rune |= (*current++ & 0x3FU);       // bottom 6 bits from the second byte
+        rune_length = sz_utf8_rune_2bytes_k;
     }
+    // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF0U) == 0xE0U) {
-        // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x0FU) << 12;
-        ch |= (*current++ & 0x3FU) << 6;
-        ch |= (*current++ & 0x3FU);
-        ch_length = sz_utf8_rune_3bytes_k;
+        rune = (leading_byte & 0x0FU) << 12; // bottom 4 bits from the first byte
+        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the second byte
+        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the third byte
+        rune_length = sz_utf8_rune_3bytes_k;
     }
+    // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
     else if ((leading_byte & 0xF8U) == 0xF0U) {
-        // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x07U) << 18;
-        ch |= (*current++ & 0x3FU) << 12;
-        ch |= (*current++ & 0x3FU) << 6;
-        ch |= (*current++ & 0x3FU);
+        rune = (leading_byte & 0x07U) << 18; // bottom 3 bits from the first byte
+        rune |= (*current++ & 0x3FU) << 12;  // bottom 6 bits from the second byte
+        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the third byte
+        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the fourth byte
         // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
-        if (ch > 0x10FFFFU) { ch = 0U, ch_length = sz_utf8_invalid_k; }
-        else { ch_length = sz_utf8_rune_4bytes_k; }
+        if (rune > 0x10FFFFU) { rune = 0U, rune_length = sz_utf8_invalid_k; }
+        else { rune_length = sz_utf8_rune_4bytes_k; }
     }
+    // Invalid UTF8 rune.
     else {
-        // Invalid UTF8 rune.
-        ch = 0U;
-        ch_length = sz_utf8_invalid_k;
+        rune = 0U;
+        rune_length = sz_utf8_invalid_k;
     }
-    *code = ch;
-    *code_length = ch_length;
+    *runes = rune;
+    *runes_lengths = rune_length;
+}
+
+/**
+ *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
+ *  @param[in] rune The UTF-32 codepoint to encode.
+ *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
+ *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
+ */
+SZ_PUBLIC sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
+    if (rune <= 0x7F) {
+        utf8s[0] = (sz_u8_t)rune;
+        return sz_utf8_rune_1byte_k;
+    }
+    else if (rune <= 0x7FF) {
+        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
+        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_2bytes_k;
+    }
+    else if (rune <= 0xFFFF) {
+        // Reject surrogate codepoints
+        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k;
+        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_3bytes_k;
+    }
+    else if (rune <= 0x10FFFF) {
+        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_4bytes_k;
+    }
+    return sz_utf8_invalid_k;
 }
 
 /**
