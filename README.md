@@ -27,13 +27,13 @@ It __accelerates exact and fuzzy string matching, hashing, edit distance computa
 - 🐂 __[C](#basic-usage-with-c-99-and-newer):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
 - 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
 - 🧮 __[CUDA](#cuda):__ Process in-bulk with `<stringzillas/stringzillas.cuh>` in CUDA C++ 17
-- 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
-- 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
-- 🦫 __[Go](#quick-start-golang-🦫):__ Use the `StringZilla` cGo module
-- 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
-- 🟨 __[JavaScript](#quick-start-javascript-🟨):__ Use the `StringZilla` library
+- 🐍 __[Python](#quick-start-python):__ Upgrade your `str` to faster `Str`
+- 🦀 __[Rust](#quick-start-rust):__ Use the `StringZilla` traits crate
+- 🦫 __[Go](#quick-start-golang):__ Use the `StringZilla` cGo module
+- 🍎 __[Swift](#quick-start-swift):__ Use the `String+StringZilla` extension
+- 🟨 __[JavaScript](#quick-start-javascript):__ Use the `StringZilla` library
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
-- 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
+- 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
 - 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
@@ -343,7 +343,7 @@ Consider contributing if you need a feature that's not yet implemented.
 > ⚪ are considered.
 > ❌ are not intended.
 
-## Quick Start: Python 🐍
+## Quick Start: Python
 
 Python bindings are available on PyPI for Python 3.8+, and can be installed with `pip`.
 
@@ -751,7 +751,7 @@ arr = pa.Array.from_buffers(
 That means you can convert `Str` to `pyarrow.Buffer` and `Strs` to `pyarrow.Array` without extra copies.
 For more details on the tape-like layouts, refer to the [StringTape](https://github.com/ashvardanian/StringTape) repository.
 
-## Quick Start: C/C++ 🛠️
+## Quick Start: C/C++
 
 The C library is header-only, so you can just copy the `stringzilla.h` header into your project.
 Same applies to C++, where you would copy the `stringzilla.hpp` header.
@@ -1527,7 +1527,7 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 > It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.
 > You can also disable the shared library build, if you don't need it.
 
-## Quick Start: Rust 🦀
+## Quick Start: Rust
 
 StringZilla is available as a Rust crate, with documentation available on [docs.rs/stringzilla](https://docs.rs/stringzilla).
 You can immediately check the installed version and the used hardware capabilities with following commands:
@@ -1760,7 +1760,7 @@ assert!(hashes.iter().any(|&h| h != u32::MAX));  // Verify computation occurred
 assert!(counts.iter().any(|&c| c != u32::MAX));
 ```
 
-## Quick Start: JavaScript 🟨
+## Quick Start: JavaScript
 
 Install the Node.js package and use zero-copy `Buffer` APIs.
 
@@ -1833,7 +1833,7 @@ const digestBuffer = hasher.digest();     // returns Buffer (32 bytes)
 const digestHex = hasher.hexdigest();     // returns string (64 hex chars)
 ```
 
-## Quick Start: Swift 🍏
+## Quick Start: Swift
 
 StringZilla can be added as a dependency in the Swift Package Manager.
 In your `Package.swift` file, add the following:
@@ -1891,7 +1891,7 @@ let digestBytes = hasher.digest()     // [UInt8] (32 bytes)
 let digestHex = hasher.hexdigest()    // String (64 hex chars)
 ```
 
-## Quick Start: GoLang 🦫
+## Quick Start: GoLang
 
 Add the Go binding as a module dependency:
 
@@ -2003,7 +2003,7 @@ size := hasher.Size()               // 32
 blockSize := hasher.BlockSize()     // 64
 ```
 
-## Algorithms & Design Decisions 📚
+## Algorithms & Design Decisions
 
 StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
