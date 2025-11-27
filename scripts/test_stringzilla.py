@@ -37,6 +37,16 @@ from typing import Optional, Sequence, Dict
 
 import pytest
 
+# Import shared Unicode data loading functions
+from test_helpers import (
+    UNICODE_VERSION,
+    get_unicode_xml_data,
+    parse_case_folding_file,
+    get_case_folding_rules,
+    get_case_folding_rules_as_codepoints,
+    get_normalization_props,
+)
+
 import stringzilla as sz
 from stringzilla import Str, Strs
 
@@ -1490,59 +1500,9 @@ def test_utf8_case_fold_expansions(input_str, expected):
     assert sz.utf8_case_fold(input_str) == expected
 
 
-def _parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
-    """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
-
-    Uses status C (common) and F (full) mappings for full case folding.
-    """
-    folds = {}
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split(";")
-            if len(parts) < 3:
-                continue
-            status = parts[1].strip()
-            # C = common, F = full (for expansions like ß → ss)
-            # Skip S (simple) and T (Turkic) for full case folding
-            if status not in ("C", "F"):
-                continue
-            try:
-                codepoint = int(parts[0].strip(), 16)
-                # Mapping can be multiple codepoints separated by spaces (e.g., "0073 0073" for ß → ss)
-                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
-                # Convert target codepoints to UTF-8 bytes
-                folded_str = "".join(chr(cp) for cp in target_cps)
-                folds[codepoint] = folded_str.encode("utf-8")
-            except (ValueError, IndexError):
-                continue
-    return folds
-
-
-def _get_case_folding_rules(version: str = "17.0.0") -> Dict[int, bytes]:
-    """Download and parse Unicode CaseFolding.txt, caching in temp directory.
-
-    Args:
-        version: Unicode version string (e.g., "17.0.0")
-
-    Returns:
-        Dict mapping codepoints to their folded UTF-8 bytes
-    """
-    import urllib.request
-
-    cache_path = os.path.join(tempfile.gettempdir(), f"CaseFolding-{version}.txt")
-
-    # Use cached file if it exists
-    if not os.path.exists(cache_path):
-        url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
-        try:
-            urllib.request.urlretrieve(url, cache_path)
-        except Exception as e:
-            pytest.skip(f"Could not download CaseFolding.txt from {url}: {e}")
-
-    return _parse_case_folding_file(cache_path)
+# Backward compatibility aliases
+_parse_case_folding_file = parse_case_folding_file
+_get_case_folding_rules = get_case_folding_rules
 
 
 def test_utf8_case_fold_all_codepoints():

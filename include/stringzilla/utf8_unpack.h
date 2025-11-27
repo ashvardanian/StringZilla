@@ -98,7 +98,8 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *
  *  This function applies full Unicode Case Folding as defined in the Unicode Standard (UAX #21 and
  *  CaseFolding.txt), covering all bicameral scripts, all offset-based one-to-one folds, all table-based
- *  one-to-one folds, and all normative one-to-many expansions.
+ *  one-to-one folds, and all normative one-to-many expansions. It doesn't however perform any normalization,
+ *  like NFKC or NFC, so combining marks are treated as-is.
  *
  *  The following character mappings are supported:
  *
@@ -142,14 +143,10 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *
  *  - ICU abandoned Boyer-Moore for Unicode, reverting to linear search for correctness
  *  - ClickHouse uses Volnitsky with fallback to naive search for problematic characters
- *  - ripgrep uses simple case folding only (no expansion handling)
+ *  - RipGrep uses simple case folding only (no expansion handling) leveraging the Rust RegEx engine
  *
- *  Potential algorithmic improvements for future versions:
- *
- *  - Streaming comparison with small expansion buffer instead of pre-materializing folded needle
- *  - Fingerprint-based filtering using rolling hash over folded codepoints
- *  - Conservative skip distances that account for maximum expansion ratio (3:1)
- *  - First-codepoint filtering to quickly reject non-matching positions
+ *  StringZilla implements several algorithms. Most importantly it first locates the longest expansion-free
+ *  slice of the needle to locate against.
  *
  *  @see https://unicode-org.github.io/icu/userguide/collation/string-search.html
  *       ICU String Search - discusses why Boyer-Moore was abandoned for Unicode
