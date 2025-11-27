@@ -100,7 +100,9 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *  This function applies full Unicode Case Folding as defined in the Unicode Standard (UAX #21 and
  *  CaseFolding.txt), covering all bicameral scripts, all offset-based one-to-one folds, all table-based
  *  one-to-one folds, and all normative one-to-many expansions. It doesn't however perform any normalization,
- *  like NFKC or NFC, so combining marks are treated as-is.
+ *  like NFKC or NFC, so combining marks are treated as-is. StringZilla is intentionally locale-independent:
+ *  case folding produces identical results regardless of runtime locale settings, ensuring deterministic
+ *  behavior across platforms and simplifying use in multi-threaded and distributed systems.
  *
  *  The following character mappings are supported:
  *
@@ -110,20 +112,18 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *  - Armenian uppercase Ա–Ֆ (U+0531–U+0556) are folded to ա–ֆ (U+0561–U+0586) using a +48 offset.
  *  - Georgian Mtavruli letters Ა-Ჿ (U+1C90–U+1CBF, excluding 2) are folded to their Mkhedruli equivalents
  *    (U+10D0–U+10FF) using a fixed linear translation defined by the Unicode Standard.
- *  - Greek uppercase Α–Ω (U+0391–U+03A9) are folded to α–ω (U+03B1–U+03C9) via a +32 offset, with a normative
- *    context-sensitive rule for sigma: Σ (U+03A3) folds to σ (U+03C3) or ς (U+03C2) depending on word-final
- *    position, as required by SpecialCasing.txt.
+ *  - Greek uppercase Α–Ω (U+0391–U+03A9) are folded to α–ω (U+03B1–U+03C9) via a +32 offset.
+ *    Both Σ (U+03A3) and ς (U+03C2, final sigma) fold to σ (U+03C3) for consistent matching.
  *  - Latin Extended characters include numerous one-to-one folds and several one-to-many expansions, including:
- *      ß  (U+00DF) → "ss" (U+0073 U+0073)
+ *      ß  (U+00DF) → "ss"  (U+0073 U+0073)
  *      ẞ  (U+1E9E) → "ss"
  *    as well as mixed-case digraphs and trigraphs normalized to lowercase sequences.
- *  - Turkish and Azerbaijani dotted/dotless-I rules follow SpecialCasing.txt, including:
- *      İ (U+0130)  → "i̇" (U+0069 U+0307)
- *      I (U+0049)  →  i   (U+0069)
- *      ı (U+0131)  →  ı   (already lowercase)
- *    with full locale-correct behavior.
- *  - Lithuanian accented I/J mappings that require combining-dot additions or removals are processed
- *    as multi-codepoint expansions exactly as specified in SpecialCasing.txt.
+ *  - Turkic dotted/dotless-I characters are handled per Unicode Case Folding (not locale-specific):
+ *      İ (U+0130)  → "i̇"   (U+0069 U+0307) — Full case folding with combining dot
+ *      I (U+0049)  →  i    (U+0069)        — Standard folding (not Turkic I→ı)
+ *      ı (U+0131)  →  ı    (already lowercase, unchanged)
+ *  - Lithuanian accented I/J characters with combining dots are processed as multi-codepoint expansions
+ *    per CaseFolding.txt.
  *  - Additional bicameral scripts—Cherokee, Deseret, Osage, Warang Citi, Adlam—use their normative
  *    one-to-one uppercase-to-lowercase mappings defined in CaseFolding.txt.
  *
