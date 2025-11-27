@@ -33,7 +33,7 @@ It __accelerates exact and fuzzy string matching, hashing, edit distance computa
 - 🍎 __[Swift](#quick-start-swift):__ Use the `String+StringZilla` extension
 - 🟨 __[JavaScript](#quick-start-javascript):__ Use the `StringZilla` library
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
-- 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-)
+- 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
 - 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
@@ -2003,7 +2003,7 @@ size := hasher.Size()               // 32
 blockSize := hasher.BlockSize()     // 64
 ```
 
-## Algorithms & Design Decisions 📚
+## Algorithms & Design Decisions
 
 StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
