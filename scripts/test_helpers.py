@@ -51,6 +51,16 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
     tree = ET.parse(cache_path)
     return tree.getroot()
 
+def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
+    """Return all assigned/defined codepoints in Unicode."""
+    root = get_unicode_xml_data(version)
+    ns = {"ucd": "http://www.unicode.org/ns/2003/ucd/1.0"}
+    codepoints = []
+    for char in root.findall(".//ucd:char", ns):
+        cp_str = char.get("cp")
+        if cp_str:
+            codepoints.append(int(cp_str, 16))
+    return sorted(codepoints)
 
 def parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
     """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
