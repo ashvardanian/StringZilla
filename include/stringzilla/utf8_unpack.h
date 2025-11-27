@@ -7,6 +7,7 @@
  *
  *  - `sz_utf8_case_fold` - Unicode case folding for codepoints
  *  - `sz_utf8_find_case_insensitive` - case-insensitive substring search in UTF-8 strings
+ *  - `sz_utf8_order_case_insensitive` - case-insensitive lexicographical comparison of UTF-8 strings
  *  - `sz_utf8_unpack_chunk` - convert UTF-8 to UTF-32 in a streaming manner
  */
 #ifndef STRINGZILLA_UTF8_UNPACK_H_
@@ -169,6 +170,9 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive( //
     sz_cptr_t haystack, sz_size_t haystack_length,  //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+
+SZ_DYNAMIC sz_ordering_t sz_utf8_order_case_insensitive(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                        sz_size_t b_length);
 
 #pragma endregion
 
@@ -697,6 +701,69 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     // clang-format on
 }
 
+/**
+ *  @brief  Iterator state for streaming through folded UTF-8 runes.
+ *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently.
+ */
+typedef struct {
+    sz_cptr_t ptr;           // Current position in UTF-8 string
+    sz_cptr_t end;           // End of string
+    sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions
+    sz_size_t pending_count; // Number of pending folded runes
+    sz_size_t pending_idx;   // Current index into pending buffer
+} sz_utf8_folded_iter_t;
+
+/** @brief Initialize a folded rune iterator. */
+SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *it, sz_cptr_t str, sz_size_t len) {
+    it->ptr = str;
+    it->end = str + len;
+    it->pending_count = 0;
+    it->pending_idx = 0;
+}
+
+/** @brief Get next folded rune. Returns `sz_false_k` when exhausted or on invalid UTF-8. */
+SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
+    // Refill pending buffer if exhausted
+    if (it->pending_idx >= it->pending_count) {
+        if (it->ptr >= it->end) return sz_false_k;
+
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(it->ptr, &rune, &rune_length);
+        if (rune_length == sz_utf8_invalid_k) return sz_false_k;
+
+        it->ptr += rune_length;
+        it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
+        it->pending_idx = 0;
+    }
+
+    *out_rune = it->pending[it->pending_idx++];
+    return sz_true_k;
+}
+
+/**
+ *  @brief  Helper to verify a case-insensitive match by comparing folded runes.
+ *  @return sz_true_k if all folded runes match, sz_false_k otherwise.
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
+    sz_cptr_t needle, sz_size_t needle_length,                //
+    sz_cptr_t window_start, sz_cptr_t window_end) {
+
+    sz_utf8_folded_iter_t needle_iterator, haystack_iterator;
+    sz_utf8_folded_iter_init_(&needle_iterator, needle, needle_length);
+    sz_utf8_folded_iter_init_(&haystack_iterator, window_start, (sz_size_t)(window_end - window_start));
+
+    sz_rune_t needle_rune, haystack_rune;
+    for (;;) {
+        sz_bool_t loaded_from_needle = sz_utf8_folded_iter_next_(&needle_iterator, &needle_rune);
+        sz_bool_t loaded_from_haystack = sz_utf8_folded_iter_next_(&haystack_iterator, &haystack_rune);
+
+        if (!loaded_from_needle && !loaded_from_haystack) return sz_true_k;  // Both exhausted = match
+        if (!loaded_from_needle || !loaded_from_haystack) return sz_false_k; // One exhausted early = no match
+        if (needle_rune != haystack_rune) return sz_false_k;
+    }
+}
+
 SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
@@ -706,77 +773,78 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_case_insensitive_serial( //
         return haystack;
     }
 
-    // Pre-fold the needle into a buffer of codepoints
-    sz_rune_t folded_needle[1024];
-    sz_size_t folded_needle_count = 0;
-    sz_cptr_t needle_ptr = needle;
-    sz_cptr_t needle_end = needle + needle_length;
-
-    while (needle_ptr < needle_end && folded_needle_count < 1024) {
-        sz_rune_t cp;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(needle_ptr, &cp, &rune_length);
-        if (rune_length == 0) break;
-
-        // Apply case folding
-        sz_rune_t folded[4];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
-        for (sz_size_t i = 0; i < folded_count && folded_needle_count < 1024; ++i)
-            folded_needle[folded_needle_count++] = folded[i];
-
-        needle_ptr += rune_length;
+    // Phase 1: Compute needle hash and folded rune count using iterator
+    sz_u64_t needle_hash = 0;
+    sz_size_t needle_folded_count = 0;
+    {
+        sz_utf8_folded_iter_t needle_iterator;
+        sz_utf8_folded_iter_init_(&needle_iterator, needle, needle_length);
+        sz_rune_t needle_rune;
+        while (sz_utf8_folded_iter_next_(&needle_iterator, &needle_rune)) {
+            needle_hash = needle_hash * 257 + needle_rune;
+            needle_folded_count++;
+        }
     }
-
-    if (folded_needle_count == 0) {
+    if (needle_folded_count == 0) {
         *matched_length = 0;
         return SZ_NULL_CHAR;
     }
 
-    // Search through the haystack
-    sz_cptr_t haystack_ptr = haystack;
-    sz_cptr_t haystack_end = haystack + haystack_length;
+    // Precompute highest_power = 257^(needle_folded_count - 1)
+    sz_u64_t highest_power = 1;
+    for (sz_size_t i = 1; i < needle_folded_count; ++i) highest_power *= 257;
 
-    while (haystack_ptr < haystack_end) {
-        sz_cptr_t match_start = haystack_ptr;
-        sz_cptr_t match_ptr = haystack_ptr;
-        sz_size_t needle_idx = 0;
-        sz_bool_t mismatch = sz_false_k;
+    // Phase 2: Initialize haystack window using iterator
+    sz_utf8_folded_iter_t window_iterator;
+    sz_utf8_folded_iter_init_(&window_iterator, haystack, haystack_length);
 
-        // Try to match the folded needle at this position
-        while (needle_idx < folded_needle_count && match_ptr < haystack_end && !mismatch) {
-            sz_rune_t cp;
-            sz_rune_length_t rune_length;
-            sz_rune_parse(match_ptr, &cp, &rune_length);
-            if (rune_length == 0) break;
+    sz_cptr_t window_start = haystack;
+    sz_u64_t window_hash = 0;
+    sz_size_t window_count = 0;
+    sz_rune_t rune;
 
-            // Apply case folding
-            sz_rune_t folded[4];
-            sz_size_t folded_count = sz_unicode_fold_codepoint_(cp, folded);
+    while (window_count < needle_folded_count && sz_utf8_folded_iter_next_(&window_iterator, &rune)) {
+        window_hash = window_hash * 257 + rune;
+        window_count++;
+    }
+    sz_cptr_t window_end = window_iterator.ptr;
 
-            // Compare all folded codepoints against the needle
-            for (sz_size_t i = 0; i < folded_count && needle_idx < folded_needle_count; ++i) {
-                if (folded[i] != folded_needle[needle_idx]) {
-                    mismatch = sz_true_k;
-                    break;
-                }
-                needle_idx++;
-            }
+    if (window_count < needle_folded_count) {
+        *matched_length = 0;
+        return SZ_NULL_CHAR;
+    }
 
-            match_ptr += rune_length;
+    // Phase 3: Slide window through haystack
+    while (window_count == needle_folded_count) {
+        // Check for hash match and verify
+        if (window_hash == needle_hash &&
+            sz_utf8_verify_case_insensitive_match_(needle, needle_length, window_start, window_end)) {
+            *matched_length = (sz_size_t)(window_end - window_start);
+            return window_start;
         }
 
-        // Did we match the entire needle?
-        if (needle_idx == folded_needle_count && !mismatch) {
-            *matched_length = (sz_size_t)(match_ptr - match_start);
-            return match_start;
-        }
+        // Advance window_start by one source rune
+        sz_rune_t old_rune;
+        sz_rune_length_t old_len;
+        sz_rune_parse(window_start, &old_rune, &old_len);
+        if (old_len == sz_utf8_invalid_k) break;
 
-        // Move to next codepoint in haystack
-        sz_rune_t cp;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(haystack_ptr, &cp, &rune_length);
-        if (rune_length == 0) break;
-        haystack_ptr += rune_length;
+        sz_rune_t old_folded[4];
+        sz_size_t old_folded_count = sz_unicode_fold_codepoint_(old_rune, old_folded);
+
+        // Remove old folded runes from hash
+        for (sz_size_t i = 0; i < old_folded_count; ++i) {
+            window_hash = (window_hash - old_folded[i] * highest_power) * 257;
+            window_count--;
+        }
+        window_start += old_len;
+
+        // Add new folded runes to refill window
+        while (window_count < needle_folded_count && sz_utf8_folded_iter_next_(&window_iterator, &rune)) {
+            window_hash += rune;
+            window_count++;
+        }
+        window_end = window_iterator.ptr;
     }
 
     *matched_length = 0;
@@ -803,6 +871,24 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
     }
 
     return (sz_size_t)(dst - dst_start);
+}
+
+SZ_PUBLIC sz_ordering_t sz_utf8_order_case_insensitive_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                              sz_size_t b_length) {
+    sz_utf8_folded_iter_t a_iterator, b_iterator;
+    sz_utf8_folded_iter_init_(&a_iterator, a, a_length);
+    sz_utf8_folded_iter_init_(&b_iterator, b, b_length);
+
+    sz_rune_t a_rune, b_rune;
+    for (;;) {
+        sz_bool_t pulled_from_a = sz_utf8_folded_iter_next_(&a_iterator, &a_rune);
+        sz_bool_t pulled_from_b = sz_utf8_folded_iter_next_(&b_iterator, &b_rune);
+
+        if (!pulled_from_a && !pulled_from_b) return sz_equal_k;
+        if (!pulled_from_a) return sz_less_k;
+        if (!pulled_from_b) return sz_greater_k;
+        if (a_rune != b_rune) return sz_order_scalars_(a_rune, b_rune);
+    }
 }
 
 #pragma endregion // Serial Implementation
@@ -1063,6 +1149,12 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive(sz_cptr_t haystack, sz_size_t
 #else
     return sz_utf8_find_case_insensitive_serial(haystack, haystack_length, needle, needle_length, matched_length);
 #endif
+}
+
+SZ_DYNAMIC sz_ordering_t sz_utf8_order_case_insensitive(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                        sz_size_t b_length) {
+    // Only serial implementation exists for now
+    return sz_utf8_order_case_insensitive_serial(a, a_length, b, b_length);
 }
 
 #endif // !SZ_DYNAMIC_DISPATCH
