@@ -788,6 +788,12 @@ typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, s
 /** @brief Signature of `sz_utf8_case_fold`. */
 typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
+/** @brief Signature of `sz_utf8_find_case_insensitive`. */
+typedef sz_cptr_t (*sz_utf8_find_case_insensitive_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t *);
+
+/** @brief Signature of `sz_utf8_order_case_insensitive`. */
+typedef sz_ordering_t (*sz_utf8_order_case_insensitive_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 

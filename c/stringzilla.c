@@ -60,10 +60,13 @@ typedef struct sz_implementations_t {
 
     sz_utf8_count_t utf8_count;
     sz_utf8_find_nth_t utf8_find_nth;
-    sz_utf8_unpack_chunk_t utf8_unpack_chunk;
     sz_utf8_find_boundary_t utf8_find_newline;
     sz_utf8_find_boundary_t utf8_find_whitespace;
+
     sz_utf8_case_fold_t utf8_case_fold;
+    sz_utf8_unpack_chunk_t utf8_unpack_chunk;
+    sz_utf8_find_case_insensitive_t utf8_find_case_insensitive;
+    sz_utf8_order_case_insensitive_t utf8_order_case_insensitive;
 
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
@@ -108,10 +111,13 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
     impl->utf8_count = sz_utf8_count_serial;
     impl->utf8_find_nth = sz_utf8_find_nth_serial;
-    impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
     impl->utf8_find_newline = sz_utf8_find_newline_serial;
     impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
+
     impl->utf8_case_fold = sz_utf8_case_fold_serial;
+    impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
+    impl->utf8_find_case_insensitive = sz_utf8_find_case_insensitive_serial;
+    impl->utf8_order_case_insensitive = sz_utf8_order_case_insensitive_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -164,10 +170,12 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_haswell;
         impl->utf8_find_nth = sz_utf8_find_nth_haswell;
-        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
         impl->utf8_find_newline = sz_utf8_find_newline_haswell;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_haswell;
+
         impl->utf8_case_fold = sz_utf8_case_fold_haswell;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
+        impl->utf8_find_case_insensitive = sz_utf8_find_case_insensitive_haswell;
     }
 #endif
 
@@ -204,10 +212,12 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_ice;
         impl->utf8_find_nth = sz_utf8_find_nth_ice;
-        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_ice;
         impl->utf8_find_newline = sz_utf8_find_newline_ice;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_ice;
+
         impl->utf8_case_fold = sz_utf8_case_fold_ice;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_ice;
+        impl->utf8_find_case_insensitive = sz_utf8_find_case_insensitive_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -246,10 +256,12 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
         impl->utf8_count = sz_utf8_count_neon;
         impl->utf8_find_nth = sz_utf8_find_nth_neon;
-        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_neon;
         impl->utf8_find_newline = sz_utf8_find_newline_neon;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_neon;
+
         impl->utf8_case_fold = sz_utf8_case_fold_neon;
+        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_neon;
+        impl->utf8_find_case_insensitive = sz_utf8_find_case_insensitive_neon;
     }
 #endif
 
@@ -505,6 +517,18 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
 
 SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     return sz_dispatch_table.utf8_case_fold(source, source_length, destination);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_case_insensitive( //
+    sz_cptr_t haystack, sz_size_t haystack_length,  //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+    return sz_dispatch_table.utf8_find_case_insensitive(haystack, haystack_length, needle, needle_length,
+                                                        matched_length);
+}
+
+SZ_DYNAMIC sz_ordering_t sz_utf8_order_case_insensitive( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    return sz_dispatch_table.utf8_order_case_insensitive(a, a_length, b, b_length);
 }
 
 // Provide overrides for the libc mem* functions
