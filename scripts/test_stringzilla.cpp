@@ -2292,34 +2292,34 @@ void test_utf8() {
     // Test case-insensitive string comparison
     {
         // Equal strings (ASCII)
-        let_assert(auto r = sz_utf8_order_case_insensitive("hello", 5, "HELLO", 5), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("abc", 3, "ABC", 3), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("HeLLo WoRLd", 11, "hello world", 11), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("hello", 5, "HELLO", 5), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("abc", 3, "ABC", 3), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("HeLLo WoRLd", 11, "hello world", 11), r == sz_equal_k);
 
         // Less than
-        let_assert(auto r = sz_utf8_order_case_insensitive("abc", 3, "abd", 3), r == sz_less_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("ab", 2, "abc", 3), r == sz_less_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("ABC", 3, "abd", 3), r == sz_less_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("abc", 3, "abd", 3), r == sz_less_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("ab", 2, "abc", 3), r == sz_less_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("ABC", 3, "abd", 3), r == sz_less_k);
 
         // Greater than
-        let_assert(auto r = sz_utf8_order_case_insensitive("abd", 3, "abc", 3), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("abcd", 4, "abc", 3), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("ABD", 3, "abc", 3), r == sz_greater_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("abd", 3, "abc", 3), r == sz_greater_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("abcd", 4, "abc", 3), r == sz_greater_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("ABD", 3, "abc", 3), r == sz_greater_k);
 
         // German Eszett: "straße" (7 bytes) vs "STRASSE" (7 bytes) should be equal
-        let_assert(auto r = sz_utf8_order_case_insensitive("straße", 7, "STRASSE", 7), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("STRASSE", 7, "straße", 7), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("STRASSE", 7, "straße", 7), r == sz_equal_k);
 
         // Empty strings
-        let_assert(auto r = sz_utf8_order_case_insensitive("", 0, "", 0), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("a", 1, "", 0), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_order_case_insensitive("", 0, "a", 1), r == sz_less_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("", 0, "", 0), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("a", 1, "", 0), r == sz_greater_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("", 0, "a", 1), r == sz_less_k);
 
         // Greek case folding
-        let_assert(auto r = sz_utf8_order_case_insensitive("αβγδ", 8, "ΑΒΓΔ", 8), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("αβγδ", 8, "ΑΒΓΔ", 8), r == sz_equal_k);
 
         // Cyrillic case folding
-        let_assert(auto r = sz_utf8_order_case_insensitive("привет", 12, "ПРИВЕТ", 12), r == sz_equal_k);
+        let_assert(auto r = sz_utf8_case_insensitive_order("привет", 12, "ПРИВЕТ", 12), r == sz_equal_k);
     }
 
     // Test case-insensitive substring search
@@ -2330,49 +2330,49 @@ void test_utf8() {
 
         // Basic ASCII search
         haystack = "Hello World";
-        result = sz_utf8_find_case_insensitive(haystack, 11, "WORLD", 5, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 11, "WORLD", 5, &matched_len);
         assert(result == haystack + 6 && matched_len == 5);
 
-        result = sz_utf8_find_case_insensitive(haystack, 11, "world", 5, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 11, "world", 5, &matched_len);
         assert(result == haystack + 6 && matched_len == 5);
 
         // Search at start
         haystack = "HELLO";
-        result = sz_utf8_find_case_insensitive(haystack, 5, "hello", 5, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 5, "hello", 5, &matched_len);
         assert(result == haystack && matched_len == 5);
 
         // Not found
-        result = sz_utf8_find_case_insensitive("Hello", 5, "xyz", 3, &matched_len);
+        result = sz_utf8_case_insensitive_find("Hello", 5, "xyz", 3, &matched_len);
         assert(result == SZ_NULL_CHAR);
 
         // Empty needle
         haystack = "Hello";
-        result = sz_utf8_find_case_insensitive(haystack, 5, "", 0, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 5, "", 0, &matched_len);
         assert(result == haystack && matched_len == 0);
 
         // Eszett matching: search for "ss" in "straße"
         haystack = "straße";
-        result = sz_utf8_find_case_insensitive(haystack, 7, "SS", 2, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 7, "SS", 2, &matched_len);
         assert(result != SZ_NULL_CHAR);
 
         // Search for "straße" in "STRASSE"
         haystack = "STRASSE";
-        result = sz_utf8_find_case_insensitive(haystack, 7, "straße", 7, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 7, "straße", 7, &matched_len);
         assert(result == haystack);
 
         // Greek case folding search
         haystack = "αβγδ";
-        result = sz_utf8_find_case_insensitive(haystack, 8, "ΑΒΓΔ", 8, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 8, "ΑΒΓΔ", 8, &matched_len);
         assert(result == haystack);
 
         // Cyrillic search
         haystack = "привет мир";
-        result = sz_utf8_find_case_insensitive(haystack, 19, "ПРИВЕТ", 12, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 19, "ПРИВЕТ", 12, &matched_len);
         assert(result == haystack);
 
         // Mixed case in middle
         haystack = "foo BAR baz";
-        result = sz_utf8_find_case_insensitive(haystack, 11, "bar", 3, &matched_len);
+        result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &matched_len);
         assert(result == haystack + 4 && matched_len == 3);
     }
 }

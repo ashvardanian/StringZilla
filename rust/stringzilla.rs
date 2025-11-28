@@ -346,14 +346,14 @@ extern "C" {
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
-    pub(crate) fn sz_utf8_find_case_insensitive(
+    pub(crate) fn sz_utf8_case_insensitive_find(
         haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
         matched_length: *mut usize,
     ) -> *const c_void;
-    pub(crate) fn sz_utf8_order_case_insensitive(
+    pub(crate) fn sz_utf8_case_insensitive_order(
         a: *const c_void,
         a_length: usize,
         b: *const c_void,
@@ -972,7 +972,7 @@ where
     let mut matched_length: usize = 0;
 
     let result = unsafe {
-        sz_utf8_find_case_insensitive(
+        sz_utf8_case_insensitive_find(
             haystack_ref.as_ptr() as *const c_void,
             haystack_ref.len(),
             needle_ref.as_ptr() as *const c_void,
@@ -1023,7 +1023,7 @@ where
     let b_ref = b.as_ref();
 
     let result = unsafe {
-        sz_utf8_order_case_insensitive(
+        sz_utf8_case_insensitive_order(
             a_ref.as_ptr() as *const c_void,
             a_ref.len(),
             b_ref.as_ptr() as *const c_void,
