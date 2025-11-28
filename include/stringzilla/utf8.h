@@ -858,6 +858,188 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_ice(sz_cptr_t text, sz_size_t length, sz_si
     return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
+    sz_cptr_t text, sz_size_t length,           //
+    sz_rune_t *runes, sz_size_t runes_capacity, //
+    sz_size_t *runes_unpacked) {
+
+    // Filter out obsolte calls
+    if (!runes_capacity || !length) return text;
+
+    // Process up to the minimum of: available bytes, (output capacity * 4), or optimal chunk size (64)
+    sz_size_t chunk_size = sz_min_of_three(length, runes_capacity * 4, 64);
+    sz_u512_vec_t text_vec, runes_vec;
+    __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
+    text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, (sz_u8_t const *)text);
+    __mmask64 is_non_ascii = _mm512_movepi8_mask(text_vec.zmm);
+
+    // Check if its our lucky day and we have an entire register worth of ASCII text,
+    // that we will output into runes directly. English is responsible for roughly 60% of the text
+    // on the Internet, so this will often be our primary execution path.
+    if (is_non_ascii == 0) {
+        // For ASCII, 1 byte = 1 rune, so limit to runes_capacity
+        sz_size_t runes_to_unpack = sz_min_of_two(chunk_size, runes_capacity);
+        _mm512_mask_storeu_epi32(runes, sz_u16_clamp_mask_until_(runes_to_unpack),
+                                 _mm512_cvtepu8_epi32(_mm512_castsi512_si128(text_vec.zmm)));
+        if (runes_to_unpack > 16)
+            _mm512_mask_storeu_epi32(runes + 16, sz_u16_clamp_mask_until_(runes_to_unpack - 16),
+                                     _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(text_vec.zmm, 1)));
+        if (runes_to_unpack > 32)
+            _mm512_mask_storeu_epi32(runes + 32, sz_u16_clamp_mask_until_(runes_to_unpack - 32),
+                                     _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(text_vec.zmm, 2)));
+        if (runes_to_unpack > 48)
+            _mm512_mask_storeu_epi32(runes + 48, sz_u16_clamp_mask_until_(runes_to_unpack - 48),
+                                     _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(text_vec.zmm, 3)));
+        *runes_unpacked = runes_to_unpack;
+        return text + runes_to_unpack;
+    }
+
+    // Russian, Spanish, German, and French are the 2nd, 3rd, 4th, and 5th most common languages on the Internet,
+    // and all of them are composed of a mixture of 2-byte and 1-byte UTF-8 characters. When dealing with such text
+    // we plan the algorithm with respect to the number of decoded entries we can fit in a single output register.
+    // We don't need to validate the UTF-8 encoding, just classify the inputs to locate the first 3- or 4-byte
+    // character in the input:
+    // - ASCII: bit 7 = 0, i.e., 0xxxxxxx (0x00-0x7F)
+    // - 2-byte lead: bits 7-5 = 110, i.e., 110xxxxx (0xC0-0xDF)
+    // - Continuation: bits 7-6 = 10, i.e., 10xxxxxx (0x80-0xBF)
+    __mmask64 is_ascii = ~is_non_ascii & load_mask;
+    __mmask64 is_two_byte_start = _mm512_mask_cmpeq_epi8_mask(
+        load_mask, _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8((char)0xE0)), _mm512_set1_epi8((char)0xC0));
+    __mmask64 is_continuation = _mm512_mask_cmpeq_epi8_mask(
+        load_mask, _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8((char)0xC0)), _mm512_set1_epi8((char)0x80));
+
+    // Find longest prefix containing only ASCII and complete 2-byte sequences - let's call it the "Mixed 12" case
+    __mmask64 is_expected_continuation = is_two_byte_start << 1;
+    __mmask64 is_valid_mixed12 = is_ascii | is_two_byte_start | (is_continuation & is_expected_continuation);
+    sz_size_t mixed12_prefix_length = sz_u64_ctz(~is_valid_mixed12 | ~load_mask);
+    mixed12_prefix_length -= mixed12_prefix_length && ((is_two_byte_start >> (mixed12_prefix_length - 1)) & 1);
+
+    if (mixed12_prefix_length >= 2) {
+        __mmask64 prefix_mask = sz_u64_mask_until_(mixed12_prefix_length);
+        __mmask64 is_char_start = (is_ascii | is_two_byte_start) & prefix_mask;
+        sz_size_t num_runes = (sz_size_t)sz_u64_popcount(is_char_start);
+        sz_size_t runes_to_unpack = sz_min_of_three(num_runes, runes_capacity, 16);
+
+        // Compress character start positions into sequential indices, then gather bytes
+        sz_u512_vec_t char_indices;
+        char_indices.zmm = _mm512_set_epi8(                                 //
+            63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
+            47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+            31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+        char_indices.zmm = _mm512_maskz_compress_epi8(is_char_start, char_indices.zmm);
+
+        sz_u512_vec_t first_bytes, second_bytes;
+        first_bytes.zmm = _mm512_permutexvar_epi8(char_indices.zmm, text_vec.zmm);
+        second_bytes.zmm =
+            _mm512_permutexvar_epi8(_mm512_add_epi8(char_indices.zmm, _mm512_set1_epi8(1)), text_vec.zmm);
+
+        // Expand to 32-bit and decode 2-byte sequences: ((first & 0x1F) << 6) | (second & 0x3F)
+        __m512i first_bytes_wide = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(first_bytes.zmm));
+        __m512i second_bytes_wide = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(second_bytes.zmm));
+        __mmask16 is_two_byte_char = (__mmask16)_pext_u64(is_two_byte_start, is_char_start);
+        __m512i decoded_two_byte =
+            _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(first_bytes_wide, _mm512_set1_epi32(0x1F)), 6),
+                            _mm512_and_si512(second_bytes_wide, _mm512_set1_epi32(0x3F)));
+
+        // Blend: ASCII positions keep byte value, 2-byte positions get decoded rune
+        runes_vec.zmm = _mm512_mask_blend_epi32(is_two_byte_char, first_bytes_wide, decoded_two_byte);
+        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_unpack), runes_vec.zmm);
+
+        // Bytes consumed: one per ASCII, two per 2-byte sequence
+        sz_size_t two_byte_count = (sz_size_t)sz_u64_popcount(is_two_byte_char & sz_u16_mask_until_(runes_to_unpack));
+        *runes_unpacked = runes_to_unpack;
+        return text + runes_to_unpack + two_byte_count;
+    }
+
+    // Check for the number of 3-byte characters - in this case we can't easily cast to 16-bit integers
+    // and check for equality, but we can pre-define the masks and values we expect at each byte position.
+    // For 3-byte UTF-8 sequences, we check if bytes match the pattern: 1110xxxx 10xxxxxx 10xxxxxx
+    // We need to check every 3rd byte starting from position 0.
+    sz_u512_vec_t three_byte_mask_vec, three_byte_pattern_vec;
+    three_byte_mask_vec.zmm = _mm512_set1_epi32(0x00C0C0F0);    // Mask: [F0, C0, C0, 00] per 4-byte slot
+    three_byte_pattern_vec.zmm = _mm512_set1_epi32(0x008080E0); // Pattern: [E0, 80, 80, 00] per 4-byte slot
+
+    // Create permutation indices to gather 3-byte sequences into 4-byte slots
+    // Input:  [b0 b1 b2]    [b3 b4 b5]    [b6 b7 b8]    ... (up to 16 triplets from 48 bytes)
+    // Output: [b0 b1 b2 XX] [b3 b4 b5 XX] [b6 b7 b8 XX] ... (16 slots, 4th byte zeroed)
+    sz_u512_vec_t permute_indices;
+    permute_indices.zmm = _mm512_setr_epi32(
+        // Triplets 0-3:  [0,1,2,_] [3,4,5,_] [6,7,8,_] [9,10,11,_]
+        0x40020100, 0x40050403, 0x40080706, 0x400B0A09,
+        // Triplets 4-7:  [12,13,14,_] [15,16,17,_] [18,19,20,_] [21,22,23,_]
+        0x400E0D0C, 0x40111010, 0x40141312, 0x40171615,
+        // Triplets 8-11: [24,25,26,_] [27,28,29,_] [30,31,32,_] [33,34,35,_]
+        0x401A1918, 0x401D1C1B, 0x40201F1E, 0x40232221,
+        // Triplets 12-15: [36,37,38,_] [39,40,41,_] [42,43,44,_] [45,46,47,_]
+        0x40262524, 0x40292827, 0x402C2B2A, 0x402F2E2D);
+
+    // Permute to gather triplets into slots
+    sz_u512_vec_t gathered_triplets;
+    gathered_triplets.zmm = _mm512_permutexvar_epi8(permute_indices.zmm, text_vec.zmm);
+
+    // Check if gathered bytes match 3-byte UTF-8 pattern
+    sz_u512_vec_t masked_triplets;
+    masked_triplets.zmm = _mm512_and_si512(gathered_triplets.zmm, three_byte_mask_vec.zmm);
+    __mmask16 three_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_triplets.zmm, three_byte_pattern_vec.zmm);
+    sz_size_t three_byte_prefix_length = sz_u64_ctz(~three_byte_match_mask);
+
+    if (three_byte_prefix_length) {
+        // Unpack up to 16 three-byte characters (48 bytes of input).
+        sz_size_t runes_to_place = sz_min_of_three(three_byte_prefix_length, 16, runes_capacity);
+        // Decode: ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F)
+        // gathered_triplets has: [b0, b1, b2, XX] in each 32-bit slot (little-endian: 0xXXb2b1b0)
+        // Extract: b0 from bits 7-0, b1 from bits 15-8, b2 from bits 23-16
+        runes_vec.zmm = _mm512_or_si512(
+            _mm512_or_si512(
+                // (b0 & 0x0F) << 12
+                _mm512_slli_epi32(_mm512_and_si512(gathered_triplets.zmm, _mm512_set1_epi32(0x0FU)), 12),
+                // (b1 & 0x3F) << 6
+                _mm512_slli_epi32(
+                    _mm512_and_si512(_mm512_srli_epi32(gathered_triplets.zmm, 8), _mm512_set1_epi32(0x3FU)), 6)),
+            _mm512_and_si512(_mm512_srli_epi32(gathered_triplets.zmm, 16), _mm512_set1_epi32(0x3FU))); // (b2 & 0x3F)
+        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_place), runes_vec.zmm);
+        *runes_unpacked = runes_to_place;
+        return text + runes_to_place * 3;
+    }
+
+    // Check for the number of 4-byte characters
+    // For 4-byte UTF-8 sequences: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    // With a homogeneous 4-byte prefix, we have perfect 4-byte alignment (up to 16 sequences in 64 bytes)
+    sz_u512_vec_t four_byte_mask_vec, four_byte_pattern_vec;
+    four_byte_mask_vec.zmm = _mm512_set1_epi32((int)0xC0C0C0F8);    // Mask: [F8, C0, C0, C0] per 4-byte slot
+    four_byte_pattern_vec.zmm = _mm512_set1_epi32((int)0x808080F0); // Pattern: [F0, 80, 80, 80] per 4-byte slot
+
+    // Mask and check for 4-byte pattern in each 32-bit slot
+    sz_u512_vec_t masked_quads;
+    masked_quads.zmm = _mm512_and_si512(text_vec.zmm, four_byte_mask_vec.zmm);
+    __mmask16 four_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_quads.zmm, four_byte_pattern_vec.zmm);
+    sz_size_t four_byte_prefix_length = sz_u64_ctz(~four_byte_match_mask);
+
+    if (four_byte_prefix_length) {
+        // Unpack up to 16 four-byte characters (64 bytes of input).
+        sz_size_t runes_to_place = sz_min_of_three(four_byte_prefix_length, 16, runes_capacity);
+        // Decode: ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F)
+        runes_vec.zmm = _mm512_or_si512(
+            _mm512_or_si512(
+                // (b0 & 0x07) << 18
+                _mm512_slli_epi32(_mm512_and_si512(text_vec.zmm, _mm512_set1_epi32(0x07U)), 18),
+                // (b1 & 0x3F) << 12
+                _mm512_slli_epi32(_mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 8), _mm512_set1_epi32(0x3FU)), 12)),
+            _mm512_or_si512(
+                // (b2 & 0x3F) << 6
+                _mm512_slli_epi32(_mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 16), _mm512_set1_epi32(0x3FU)), 6),
+                // (b3 & 0x3F)
+                _mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 24), _mm512_set1_epi32(0x3FU))));
+        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_place), runes_vec.zmm);
+        *runes_unpacked = runes_to_place;
+        return text + runes_to_place * 4;
+    }
+
+    // Fallback to serial for mixed/malformed content
+    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
@@ -1167,144 +1349,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
 
     // Process remaining bytes with serial
     return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
-}
-
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_ice(   //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_unpacked) {
-
-    // Process up to the minimum of: available bytes, output capacity * 4, or optimal chunk size (64)
-    sz_size_t chunk_size = sz_min_of_three(length, runes_capacity * 4, 64);
-    sz_u512_vec_t text_vec, runes_vec;
-    __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
-    text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, (sz_u8_t const *)text);
-
-    // Check, how many of the next characters are single byte (ASCII) codepoints
-    // ASCII bytes have bit 7 clear (0x00-0x7F), non-ASCII have bit 7 set (0x80-0xFF)
-    __mmask64 non_ascii_mask = _mm512_movepi8_mask(text_vec.zmm);
-    // Find first non-ASCII byte or end of loaded data
-    sz_size_t ascii_prefix_length = sz_u64_ctz(non_ascii_mask | ~load_mask);
-
-    if (ascii_prefix_length) {
-        // Unpack the last 16 bytes of text into the next 16 runes.
-        // Even if we have more than 16 ASCII characters, we don't want to overcomplicate control flow here.
-        sz_size_t runes_to_place = sz_min_of_three(ascii_prefix_length, 16, runes_capacity);
-        runes_vec.zmm = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(text_vec.zmm));
-        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_place), runes_vec.zmm);
-        *runes_unpacked = runes_to_place;
-        return text + runes_to_place;
-    }
-
-    // Check for the number of 2-byte characters
-    // 2-byte UTF-8: [lead, cont] where lead=110xxxxx (0xC0-0xDF), cont=10xxxxxx (0x80-0xBF)
-    // In 16-bit little-endian: 0xCCLL where LL=lead, CC=cont
-    // Mask: 0xC0E0 (cont & 0xC0, lead & 0xE0), Pattern: 0x80C0 (cont=0x80, lead=0xC0)
-    __mmask32 non_two_byte_mask = _mm512_cmpneq_epi16_mask(
-        _mm512_and_si512(text_vec.zmm, _mm512_set1_epi16((short)0xC0E0)), _mm512_set1_epi16((short)0x80C0));
-    sz_size_t two_byte_prefix_length = sz_u64_ctz(non_two_byte_mask);
-    if (two_byte_prefix_length) {
-        // Unpack the last 32 bytes of text into the next 32 runes.
-        // Even if we have more than 32 two-byte characters, we don't want to overcomplicate control flow here.
-        sz_size_t runes_to_place = sz_min_of_three(two_byte_prefix_length, 32, runes_capacity);
-        runes_vec.zmm = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(text_vec.zmm));
-        // Decode 2-byte UTF-8: ((lead & 0x1F) << 6) | (cont & 0x3F)
-        // After cvtepu16_epi32: value = 0x0000CCLL where LL=lead (bits 7-0), CC=cont (bits 15-8)
-        runes_vec.zmm = _mm512_or_si512(                                                      //
-            _mm512_slli_epi32(_mm512_and_si512(runes_vec.zmm, _mm512_set1_epi32(0x1FU)), 6),  // (lead & 0x1F) << 6
-            _mm512_and_si512(_mm512_srli_epi32(runes_vec.zmm, 8), _mm512_set1_epi32(0x3FU))); // (cont & 0x3F)
-        _mm512_mask_storeu_epi32(runes, sz_u32_mask_until_(runes_to_place), runes_vec.zmm);
-        *runes_unpacked = runes_to_place;
-        return text + runes_to_place * 2;
-    }
-
-    // Check for the number of 3-byte characters - in this case we can't easily cast to 16-bit integers
-    // and check for equality, but we can pre-define the masks and values we expect at each byte position.
-    // For 3-byte UTF-8 sequences, we check if bytes match the pattern: 1110xxxx 10xxxxxx 10xxxxxx
-    // We need to check every 3rd byte starting from position 0.
-    sz_u512_vec_t three_byte_mask_vec, three_byte_pattern_vec;
-    three_byte_mask_vec.zmm = _mm512_set1_epi32(0x00C0C0F0);    // Mask: [F0, C0, C0, 00] per 4-byte slot
-    three_byte_pattern_vec.zmm = _mm512_set1_epi32(0x008080E0); // Pattern: [E0, 80, 80, 00] per 4-byte slot
-
-    // Create permutation indices to gather 3-byte sequences into 4-byte slots
-    // Input:  [b0 b1 b2]    [b3 b4 b5]    [b6 b7 b8]    ... (up to 16 triplets from 48 bytes)
-    // Output: [b0 b1 b2 XX] [b3 b4 b5 XX] [b6 b7 b8 XX] ... (16 slots, 4th byte zeroed)
-    sz_u512_vec_t permute_indices;
-    permute_indices.zmm = _mm512_setr_epi32(
-        // Triplets 0-3:  [0,1,2,_] [3,4,5,_] [6,7,8,_] [9,10,11,_]
-        0x40020100, 0x40050403, 0x40080706, 0x400B0A09,
-        // Triplets 4-7:  [12,13,14,_] [15,16,17,_] [18,19,20,_] [21,22,23,_]
-        0x400E0D0C, 0x40111010, 0x40141312, 0x40171615,
-        // Triplets 8-11: [24,25,26,_] [27,28,29,_] [30,31,32,_] [33,34,35,_]
-        0x401A1918, 0x401D1C1B, 0x40201F1E, 0x40232221,
-        // Triplets 12-15: [36,37,38,_] [39,40,41,_] [42,43,44,_] [45,46,47,_]
-        0x40262524, 0x40292827, 0x402C2B2A, 0x402F2E2D);
-
-    // Permute to gather triplets into slots
-    sz_u512_vec_t gathered_triplets;
-    gathered_triplets.zmm = _mm512_permutexvar_epi8(permute_indices.zmm, text_vec.zmm);
-
-    // Check if gathered bytes match 3-byte UTF-8 pattern
-    sz_u512_vec_t masked_triplets;
-    masked_triplets.zmm = _mm512_and_si512(gathered_triplets.zmm, three_byte_mask_vec.zmm);
-    __mmask16 three_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_triplets.zmm, three_byte_pattern_vec.zmm);
-    sz_size_t three_byte_prefix_length = sz_u64_ctz(~three_byte_match_mask);
-
-    if (three_byte_prefix_length) {
-        // Unpack up to 16 three-byte characters (48 bytes of input).
-        sz_size_t runes_to_place = sz_min_of_three(three_byte_prefix_length, 16, runes_capacity);
-        // Decode: ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F)
-        // gathered_triplets has: [b0, b1, b2, XX] in each 32-bit slot (little-endian: 0xXXb2b1b0)
-        // Extract: b0 from bits 7-0, b1 from bits 15-8, b2 from bits 23-16
-        runes_vec.zmm = _mm512_or_si512(
-            _mm512_or_si512(
-                // (b0 & 0x0F) << 12
-                _mm512_slli_epi32(_mm512_and_si512(gathered_triplets.zmm, _mm512_set1_epi32(0x0FU)), 12),
-                // (b1 & 0x3F) << 6
-                _mm512_slli_epi32(
-                    _mm512_and_si512(_mm512_srli_epi32(gathered_triplets.zmm, 8), _mm512_set1_epi32(0x3FU)), 6)),
-            _mm512_and_si512(_mm512_srli_epi32(gathered_triplets.zmm, 16), _mm512_set1_epi32(0x3FU))); // (b2 & 0x3F)
-        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_place), runes_vec.zmm);
-        *runes_unpacked = runes_to_place;
-        return text + runes_to_place * 3;
-    }
-
-    // Check for the number of 4-byte characters
-    // For 4-byte UTF-8 sequences: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-    // With a homogeneous 4-byte prefix, we have perfect 4-byte alignment (up to 16 sequences in 64 bytes)
-    sz_u512_vec_t four_byte_mask_vec, four_byte_pattern_vec;
-    four_byte_mask_vec.zmm = _mm512_set1_epi32((int)0xC0C0C0F8);    // Mask: [F8, C0, C0, C0] per 4-byte slot
-    four_byte_pattern_vec.zmm = _mm512_set1_epi32((int)0x808080F0); // Pattern: [F0, 80, 80, 80] per 4-byte slot
-
-    // Mask and check for 4-byte pattern in each 32-bit slot
-    sz_u512_vec_t masked_quads;
-    masked_quads.zmm = _mm512_and_si512(text_vec.zmm, four_byte_mask_vec.zmm);
-    __mmask16 four_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_quads.zmm, four_byte_pattern_vec.zmm);
-    sz_size_t four_byte_prefix_length = sz_u64_ctz(~four_byte_match_mask);
-
-    if (four_byte_prefix_length) {
-        // Unpack up to 16 four-byte characters (64 bytes of input).
-        sz_size_t runes_to_place = sz_min_of_three(four_byte_prefix_length, 16, runes_capacity);
-        // Decode: ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F)
-        runes_vec.zmm = _mm512_or_si512(
-            _mm512_or_si512(
-                // (b0 & 0x07) << 18
-                _mm512_slli_epi32(_mm512_and_si512(text_vec.zmm, _mm512_set1_epi32(0x07U)), 18),
-                // (b1 & 0x3F) << 12
-                _mm512_slli_epi32(_mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 8), _mm512_set1_epi32(0x3FU)), 12)),
-            _mm512_or_si512(
-                // (b2 & 0x3F) << 6
-                _mm512_slli_epi32(_mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 16), _mm512_set1_epi32(0x3FU)), 6),
-                // (b3 & 0x3F)
-                _mm512_and_si512(_mm512_srli_epi32(text_vec.zmm, 24), _mm512_set1_epi32(0x3FU))));
-        _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_place), runes_vec.zmm);
-        *runes_unpacked = runes_to_place;
-        return text + runes_to_place * 4;
-    }
-
-    // Seems like broken unicoode?
-    *runes_unpacked = 0;
-    return text;
 }
 
 #if defined(__clang__)
