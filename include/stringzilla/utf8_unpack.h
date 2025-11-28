@@ -307,83 +307,82 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
 
 // clang-format off
 SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
-    // 2-byte character ranges with +32 translations
-    if (rune >= 0x0041 && rune <= 0x005A) { folded[0] = rune + 0x20; return 1; } // ASCII A-Z → a-z
-    if (rune >= 0x00C0 && rune <= 0x00D6) { folded[0] = rune + 0x20; return 1; } // Latin-1 À-Ö → à-ö
-    if (rune >= 0x00D8 && rune <= 0x00DE) { folded[0] = rune + 0x20; return 1; } // Latin-1 Ø-Þ → ø-þ
-    if (rune >= 0x0391 && rune <= 0x03A1) { folded[0] = rune + 0x20; return 1; } // Greek Α-Ρ → α-ρ
-    if (rune >= 0x03A3 && rune <= 0x03AB) { folded[0] = rune + 0x20; return 1; } // Greek Σ-Ϋ → σ-ϋ
-    if (rune >= 0x0410 && rune <= 0x042F) { folded[0] = rune + 0x20; return 1; } // Cyrillic А-Я → а-я
-    if (rune >= 0xFF21 && rune <= 0xFF3A) { folded[0] = rune + 0x20; return 1; } // Fullwidth Ａ-Ｚ → ａ-ｚ
-    if (rune >= 0x10D50 && rune <= 0x10D65) { folded[0] = rune + 0x20; return 1; } // Garay
-    if (rune >= 0x118A0 && rune <= 0x118BF) { folded[0] = rune + 0x20; return 1; } // Warang Citi
-    if (rune >= 0x16E40 && rune <= 0x16E5F) { folded[0] = rune + 0x20; return 1; } // Medefaidrin
-    if (rune >= 0x16EA0 && rune <= 0x16EB8) { folded[0] = rune + 0x1B; return 1; } // Beria Erfe
-    // 2-byte character ranges with +48 translations
-    if (rune >= 0x0531 && rune <= 0x0556) { folded[0] = rune + 0x30; return 1; } // Armenian Ա-Ֆ → ա-ֆ
-    if (rune >= 0x2C00 && rune <= 0x2C2F) { folded[0] = rune + 0x30; return 1; } // Glagolitic Ⰰ-Ⱟ → ⰰ-ⱟ
-    // 2-byte character ranges with -8 translations
+    // 1-byte UTF-8 ranges (U+0000-007F)
+    if (rune >= 0x0041 && rune <= 0x005A) { folded[0] = rune + 0x20; return 1; } // ASCII A-Z → a-z (+32)
+    // 2-byte UTF-8 ranges (U+0080-07FF)
+    if (rune >= 0x00C0 && rune <= 0x00D6) { folded[0] = rune + 0x20; return 1; } // Latin-1 À-Ö → à-ö (+32)
+    if (rune >= 0x00D8 && rune <= 0x00DE) { folded[0] = rune + 0x20; return 1; } // Latin-1 Ø-Þ → ø-þ (+32)
+    if (rune >= 0x0388 && rune <= 0x038A) { folded[0] = rune + 0x25; return 1; } // Greek Έ-Ί (+37)
+    if (rune >= 0x0391 && rune <= 0x03A1) { folded[0] = rune + 0x20; return 1; } // Greek Α-Ρ → α-ρ (+32)
+    if (rune >= 0x03A3 && rune <= 0x03AB) { folded[0] = rune + 0x20; return 1; } // Greek Σ-Ϋ → σ-ϋ (+32)
+    if (rune >= 0x03FD && rune <= 0x03FF) { folded[0] = rune + 0xFFFFFF7E; return 1; } // Greek Ͻ-Ͽ (-130)
+    if (rune >= 0x0400 && rune <= 0x040F) { folded[0] = rune + 0x50; return 1; } // Cyrillic Ѐ-Џ → ѐ-џ (+80)
+    if (rune >= 0x0410 && rune <= 0x042F) { folded[0] = rune + 0x20; return 1; } // Cyrillic А-Я → а-я (+32)
+    if (rune >= 0x0531 && rune <= 0x0556) { folded[0] = rune + 0x30; return 1; } // Armenian Ա-Ֆ → ա-ֆ (+48)
+    // 3-byte UTF-8 ranges (U+0800-FFFF)
+    if (rune >= 0x10A0 && rune <= 0x10C5) { folded[0] = rune + 0x1C60; return 1; } // Georgian Ⴀ-Ⴥ (+7264)
     if (rune >= 0x13F8 && rune <= 0x13FD) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Cherokee Ᏸ-Ᏽ (-8)
-    if (rune >= 0x1F08 && rune <= 0x1F0F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἀ-Ἇ (-8)
-    if (rune >= 0x1F18 && rune <= 0x1F1D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἐ-Ἕ (-8)
-    if (rune >= 0x1F28 && rune <= 0x1F2F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἠ-Ἧ (-8)
-    if (rune >= 0x1F38 && rune <= 0x1F3F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ἰ-Ἷ (-8)
-    if (rune >= 0x1F48 && rune <= 0x1F4D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ὀ-Ὅ (-8)
-    if (rune >= 0x1F68 && rune <= 0x1F6F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Ὠ-Ὧ (-8)
-    // 2-byte character ranges with various other translations
     if (rune >= 0x1C90 && rune <= 0x1CBA) { folded[0] = rune + 0xFFFFF440; return 1; } // Georgian Mtavruli Ა-Ჺ (-3008)
     if (rune >= 0x1CBD && rune <= 0x1CBF) { folded[0] = rune + 0xFFFFF440; return 1; } // Georgian Mtavruli Ჽ-Ჿ (-3008)
-    if (rune >= 0xAB70 && rune <= 0xABBF) { folded[0] = rune + 0xFFFF6830; return 1; } // Cherokee Ꭰ-Ᏼ (offset -38864)
-    if (rune >= 0x10A0 && rune <= 0x10C5) { folded[0] = rune + 0x1C60; return 1; } // Georgian Ⴀ-Ⴥ (+7264)
-    if (rune >= 0x24B6 && rune <= 0x24CF) { folded[0] = rune + 0x1A; return 1; } // Circled Ⓐ-Ⓩ → ⓐ-ⓩ (+26)
+    if (rune >= 0x1F08 && rune <= 0x1F0F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ἀ-Ἇ (-8)
+    if (rune >= 0x1F18 && rune <= 0x1F1D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ἐ-Ἕ (-8)
+    if (rune >= 0x1F28 && rune <= 0x1F2F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ἠ-Ἧ (-8)
+    if (rune >= 0x1F38 && rune <= 0x1F3F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ἰ-Ἷ (-8)
+    if (rune >= 0x1F48 && rune <= 0x1F4D) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ὀ-Ὅ (-8)
+    if (rune >= 0x1F68 && rune <= 0x1F6F) { folded[0] = rune + 0xFFFFFFF8; return 1; } // Greek Extended Ὠ-Ὧ (-8)
+    if (rune >= 0x1FC8 && rune <= 0x1FCB) { folded[0] = rune + 0xFFFFFFAA; return 1; } // Greek Extended Ὲ-Ή (-86)
     if (rune >= 0x2160 && rune <= 0x216F) { folded[0] = rune + 0x10; return 1; } // Roman numerals Ⅰ-Ⅿ → ⅰ-ⅿ (+16)
-    if (rune >= 0x0400 && rune <= 0x040F) { folded[0] = rune + 0x50; return 1; } // Cyrillic Ѐ-Џ → ѐ-џ (+80)
-    if (rune >= 0x03FD && rune <= 0x03FF) { folded[0] = rune + 0xFFFFFF7E; return 1; } // Greek Ͻ-Ͽ (-130)
-    if (rune >= 0x1FC8 && rune <= 0x1FCB) { folded[0] = rune + 0xFFFFFFAA; return 1; } // Greek Ὲ-Ή (-86)
-    if (rune >= 0x0388 && rune <= 0x038A) { folded[0] = rune + 0x25; return 1; } // Greek Έ-Ί (+37)
-    // 3-byte character ranges with various translations
+    if (rune >= 0x24B6 && rune <= 0x24CF) { folded[0] = rune + 0x1A; return 1; } // Circled Ⓐ-Ⓩ → ⓐ-ⓩ (+26)
+    if (rune >= 0x2C00 && rune <= 0x2C2F) { folded[0] = rune + 0x30; return 1; } // Glagolitic Ⰰ-Ⱟ → ⰰ-ⱟ (+48)
+    if (rune >= 0xAB70 && rune <= 0xABBF) { folded[0] = rune + 0xFFFF6830; return 1; } // Cherokee Ꭰ-Ᏼ (-38864)
+    if (rune >= 0xFF21 && rune <= 0xFF3A) { folded[0] = rune + 0x20; return 1; } // Fullwidth Ａ-Ｚ → ａ-ｚ (+32)
+    // 4-byte UTF-8 ranges (U+10000-10FFFF)
     if (rune >= 0x10400 && rune <= 0x10427) { folded[0] = rune + 0x28; return 1; } // Deseret 𐐀-𐐧 → 𐐨-𐑏 (+40)
     if (rune >= 0x104B0 && rune <= 0x104D3) { folded[0] = rune + 0x28; return 1; } // Osage 𐒰-𐓓 → 𐓘-𐓻 (+40)
-    if (rune >= 0x10C80 && rune <= 0x10CB2) { folded[0] = rune + 0x40; return 1; } // Old Hungarian (+64)
     if (rune >= 0x10570 && rune <= 0x1057A) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
     if (rune >= 0x1057C && rune <= 0x1058A) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
     if (rune >= 0x1058C && rune <= 0x10592) { folded[0] = rune + 0x27; return 1; } // Vithkuqi (+39)
+    if (rune >= 0x10C80 && rune <= 0x10CB2) { folded[0] = rune + 0x40; return 1; } // Old Hungarian (+64)
+    if (rune >= 0x10D50 && rune <= 0x10D65) { folded[0] = rune + 0x20; return 1; } // Garay (+32)
+    if (rune >= 0x118A0 && rune <= 0x118BF) { folded[0] = rune + 0x20; return 1; } // Warang Citi (+32)
+    if (rune >= 0x16E40 && rune <= 0x16E5F) { folded[0] = rune + 0x20; return 1; } // Medefaidrin (+32)
+    if (rune >= 0x16EA0 && rune <= 0x16EB8) { folded[0] = rune + 0x1B; return 1; } // Beria Erfe (+27)
     if (rune >= 0x1E900 && rune <= 0x1E921) { folded[0] = rune + 0x22; return 1; } // Adlam 𞤀-𞤡 → 𞤢-𞥃 (+34)
 
     // Even/odd +1 mappings: uppercase at even codepoint, lowercase at odd (or vice versa)
     sz_u32_t is_even = ((rune & 1) == 0), is_odd = !is_even;
-    // Latin Extended-A: Ą Ć Ę Ł Ń Ś Ź Ż, Č Ď Ě Ň Ř Š Ť Ž, Ő Ű, Ş Ğ
+    // 2-byte UTF-8: Latin Extended-A (U+0100-017F)
     if (rune >= 0x0100 && rune <= 0x012E && is_even) { folded[0] = rune + 1; return 1; } // Ā-Į
     if (rune >= 0x0132 && rune <= 0x0136 && is_even) { folded[0] = rune + 1; return 1; } // Ĳ-Ķ
     if (rune >= 0x0139 && rune <= 0x0147 && is_odd)  { folded[0] = rune + 1; return 1; } // Ĺ-Ň
     if (rune >= 0x014A && rune <= 0x0176 && is_even) { folded[0] = rune + 1; return 1; } // Ŋ-Ŷ
     if (rune >= 0x0179 && rune <= 0x017D && is_odd)  { folded[0] = rune + 1; return 1; } // Ź-Ž
-    // Latin Extended-B: Pinyin, Romanian, Serbian/Croatian
+    // 2-byte UTF-8: Latin Extended-B (U+0180-024F)
     if (rune >= 0x01CD && rune <= 0x01DB && is_odd)  { folded[0] = rune + 1; return 1; } // Ǎ-Ǜ
     if (rune >= 0x01DE && rune <= 0x01EE && is_even) { folded[0] = rune + 1; return 1; } // Ǟ-Ǯ
     if (rune >= 0x01F8 && rune <= 0x01FE && is_even) { folded[0] = rune + 1; return 1; } // Ǹ-Ǿ
     if (rune >= 0x0200 && rune <= 0x021E && is_even) { folded[0] = rune + 1; return 1; } // Ȁ-Ȟ
     if (rune >= 0x0222 && rune <= 0x0232 && is_even) { folded[0] = rune + 1; return 1; } // Ȣ-Ȳ
     if (rune >= 0x0246 && rune <= 0x024E && is_even) { folded[0] = rune + 1; return 1; } // Ɇ-Ɏ
-    // Greek archaic
+    // 2-byte UTF-8: Greek archaic (U+0370-03FF)
     if (rune >= 0x0370 && rune <= 0x0372 && is_even) { folded[0] = rune + 1; return 1; } // Ͱ-Ͳ
     if (rune == 0x0376) { folded[0] = 0x0377; return 1; } // Ͷ → ͷ
     if (rune >= 0x03D8 && rune <= 0x03EE && is_even) { folded[0] = rune + 1; return 1; } // Ϙ-Ϯ
-    // Cyrillic extended
+    // 2-byte UTF-8: Cyrillic extended (U+0460-052F)
     if (rune >= 0x0460 && rune <= 0x0480 && is_even) { folded[0] = rune + 1; return 1; } // Ѡ-Ҁ
     if (rune >= 0x048A && rune <= 0x04BE && is_even) { folded[0] = rune + 1; return 1; } // Ҋ-Ҿ
     if (rune >= 0x04C1 && rune <= 0x04CD && is_odd)  { folded[0] = rune + 1; return 1; } // Ӂ-Ӎ
     if (rune >= 0x04D0 && rune <= 0x04FE && is_even) { folded[0] = rune + 1; return 1; } // Ӑ-Ӿ
     if (rune >= 0x0500 && rune <= 0x052E && is_even) { folded[0] = rune + 1; return 1; } // Ԁ-Ԯ
-    // Latin Extended Additional: Vietnamese Ạ Ả Ấ Ầ...
+    // 3-byte UTF-8: Latin Extended Additional (U+1E00-1EFF) - includes Vietnamese
     if (rune >= 0x1E00 && rune <= 0x1E94 && is_even) { folded[0] = rune + 1; return 1; } // Ḁ-Ẕ
-    if (rune >= 0x1EA0 && rune <= 0x1EFE && is_even) { folded[0] = rune + 1; return 1; } // Ạ-Ỿ
-    // Coptic
+    if (rune >= 0x1EA0 && rune <= 0x1EFE && is_even) { folded[0] = rune + 1; return 1; } // Ạ-Ỿ (Vietnamese)
+    // 3-byte UTF-8: Coptic (U+2C80-2CFF)
     if (rune >= 0x2C80 && rune <= 0x2CE2 && is_even) { folded[0] = rune + 1; return 1; } // Ⲁ-Ⳣ
-    // Cyrillic Extended-B
+    // 3-byte UTF-8: Cyrillic Extended-B (U+A640-A69F)
     if (rune >= 0xA640 && rune <= 0xA66C && is_even) { folded[0] = rune + 1; return 1; } // Ꙁ-Ꙭ
     if (rune >= 0xA680 && rune <= 0xA69A && is_even) { folded[0] = rune + 1; return 1; } // Ꚁ-Ꚛ
-    // Latin Extended-D
+    // 3-byte UTF-8: Latin Extended-D (U+A720-A7FF)
     if (rune >= 0xA722 && rune <= 0xA72E && is_even) { folded[0] = rune + 1; return 1; } // Ꜣ-Ꜯ
     if (rune >= 0xA732 && rune <= 0xA76E && is_even) { folded[0] = rune + 1; return 1; } // Ꜳ-Ꝯ
     if (rune >= 0xA77E && rune <= 0xA786 && is_even) { folded[0] = rune + 1; return 1; } // Ꝿ-Ꞇ
@@ -391,7 +390,6 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     if (rune >= 0xA796 && rune <= 0xA7A8 && is_even) { folded[0] = rune + 1; return 1; } // Ꞗ-Ꞩ
     if (rune >= 0xA7B4 && rune <= 0xA7C2 && is_even) { folded[0] = rune + 1; return 1; } // Ꞵ-Ꟃ
     if (rune == 0xA7C7 || rune == 0xA7C9) { folded[0] = rune + 1; return 1; } // Ꟈ, Ꟊ
-    // Latin Extended-D: Only specific even codepoints
     if (rune == 0xA7CC || rune == 0xA7CE || rune == 0xA7D0 || rune == 0xA7D2 ||
         rune == 0xA7D4 || rune == 0xA7D6 || rune == 0xA7D8) {
         folded[0] = rune + 1;
