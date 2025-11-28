@@ -172,10 +172,6 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
         impl->utf8_find_nth = sz_utf8_find_nth_haswell;
         impl->utf8_find_newline = sz_utf8_find_newline_haswell;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_haswell;
-
-        impl->utf8_case_fold = sz_utf8_case_fold_haswell;
-        impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_haswell;
-        impl->utf8_find_case_insensitive = sz_utf8_find_case_insensitive_haswell;
     }
 #endif
 
