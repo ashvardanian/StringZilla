@@ -1985,7 +1985,6 @@ void test_utf8() {
         // Precomposed vs decomposed normalization
         let_assert(auto c = chars("é"), c.size() == 1 && c[0] == 0x00E9); // Precomposed
 
-        // Test all byte-length transitions (stress Ice Lake waterfall approach)
         // Missing transitions: 1→2, 2→1, 2→3, 3→2, 2→4, 4→2, 3→4, 4→3
         let_assert(auto c = chars("aП"), c.size() == 2 && c[0] == 'a' && c[1] == 0x041F);       // 1→2
         let_assert(auto c = chars("Пa"), c.size() == 2 && c[0] == 0x041F && c[1] == 'a');       // 2→1
@@ -2001,28 +2000,28 @@ void test_utf8() {
         let_assert(auto c = chars("世界人"), c.size() == 3 && c[0] == 0x4E16 && c[2] == 0x4EBA); // 3→3→3
 
         // Asymmetric alternating patterns (2:3, 3:2) - stress homogeneity assumption
-        let_assert(auto c = chars("aaПППaaППП"), c.size() == 10);           // 2 ASCII, 3 Cyrillic
-        let_assert(auto c = chars("aaaППaaaПП"), c.size() == 10);           // 3 ASCII, 2 Cyrillic
-        let_assert(auto c = chars("aa世世世aa世世世"), c.size() == 10);     // 2 ASCII, 3 CJK
+        let_assert(auto c = chars("xxПППxxППП"), c.size() == 10);           // 2 ASCII, 3 Cyrillic
+        let_assert(auto c = chars("xxxППxxxПП"), c.size() == 10);           // 3 ASCII, 2 Cyrillic
+        let_assert(auto c = chars("xx世世世xx世世世"), c.size() == 10);     // 2 ASCII, 3 CJK
         let_assert(auto c = chars("ПП世世世ПП世世世"), c.size() == 10);     // 2 Cyrillic, 3 CJK
         let_assert(auto c = chars("世世😀😀😀世世😀😀😀"), c.size() == 10); // 2 CJK, 3 Emoji
-        let_assert(auto c = chars("aaa😀😀aaa😀😀"), c.size() == 10);       // 3 ASCII, 2 Emoji
+        let_assert(auto c = chars("xxx😀😀xxx😀😀"), c.size() == 10);       // 3 ASCII, 2 Emoji
 
         // Pathological mixed patterns
-        let_assert(auto c = chars("aaПППП世世世世😀😀😀😀😀"), c.size() == 15); // 2-4-4-5
-        let_assert(auto c = chars("aaПППaa😀😀😀😀世世世ПП"), c.size() == 16);  // 2-3-2-4-3-2
+        let_assert(auto c = chars("xxПППП世世世世😀😀😀😀😀"), c.size() == 15); // 2-4-4-5
+        let_assert(auto c = chars("xxПППxx😀😀😀😀世世世ПП"), c.size() == 16);  // 2-3-2-4-3-2
 
-        // Extended asymmetric: 30x "aaППП" = 150 chars, 210 bytes (crosses multiple 64-byte chunks)
-        scope_assert(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "aaППП",
+        // Extended asymmetric: 30x "xxППП" = 150 chars, 210 bytes (crosses multiple 64-byte chunks)
+        scope_assert(std::string asym_long, for (int i = 0; i < 30; ++i) asym_long += "xxППП",
                      sz::string_view(asym_long).utf8_count() == 150);
     }
 
     // Test 64-byte chunk boundaries and batch limits
     {
         // Critical 63, 64, 65 byte boundaries
-        let_assert(std::string s63(63, 'a'), sz::string_view(s63).utf8_chars().size() == 63);
-        let_assert(std::string s64(64, 'a'), sz::string_view(s64).utf8_chars().size() == 64);
-        let_assert(std::string s65(65, 'a'), sz::string_view(s65).utf8_chars().size() == 65);
+        let_assert(std::string s63(63, 'x'), sz::string_view(s63).utf8_chars().size() == 63);
+        let_assert(std::string s64(64, 'x'), sz::string_view(s64).utf8_chars().size() == 64);
+        let_assert(std::string s65(65, 'x'), sz::string_view(s65).utf8_chars().size() == 65);
 
         // ASCII batch limit: 16 characters max per Ice Lake iteration
         let_assert(std::string s17(17, 'x'), sz::string_view(s17).utf8_chars().size() == 17);
@@ -2047,7 +2046,7 @@ void test_utf8() {
                      sz::string_view(emoji17).utf8_count() == 17);
 
         // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
-        scope_assert(std::string boundary_asym(60, 'a'), boundary_asym += "ПП世",
+        scope_assert(std::string boundary_asym(60, 'x'), boundary_asym += "ПП世",
                      sz::string_view(boundary_asym).utf8_count() == 63);
 
         // Test sequences exceeding batch limits
@@ -2069,7 +2068,7 @@ void test_utf8() {
 
         // Test transitions at chunk boundaries
         // 63 bytes ASCII + 2-byte char (transition at 64-byte boundary)
-        scope_assert(std::string boundary_test(63, 'a'), boundary_test += "П",
+        scope_assert(std::string boundary_test(63, 'x'), boundary_test += "П",
                      sz::string_view(boundary_test).utf8_chars().size() == 64);
 
         // Asymmetric spanning boundary: 60 ASCII + 24 Cyrillic = 84 chars, 108 bytes
@@ -2082,7 +2081,7 @@ void test_utf8() {
             sz::string_view(span_asym).utf8_count() == 84);
 
         // Transition exactly at 64-byte boundary
-        scope_assert(std::string exact_boundary(64, 'a'), exact_boundary += "П世😀",
+        scope_assert(std::string exact_boundary(64, 'x'), exact_boundary += "П世😀",
                      sz::string_view(exact_boundary).utf8_count() == 67);
     }
 

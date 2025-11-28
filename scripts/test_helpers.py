@@ -109,14 +109,10 @@ def _download_case_folding_file(version: str) -> str:
 
     if not os.path.exists(cache_path):
         url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
-        print(f"Downloading Unicode {version} CaseFolding.txt from {url}...")
         try:
             urllib.request.urlretrieve(url, cache_path)
-            print(f"Cached to {cache_path}")
         except Exception as e:
             raise RuntimeError(f"Could not download CaseFolding.txt from {url}: {e}")
-    else:
-        print(f"Using cached Unicode {version} CaseFolding.txt: {cache_path}")
 
     return cache_path
 

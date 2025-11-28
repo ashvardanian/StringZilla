@@ -1577,6 +1577,87 @@ def test_utf8_case_fold_random_strings(seed_value: int):
         assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
 
 
+def test_utf8_case_insensitive_find():
+    """Test case-insensitive UTF-8 substring search."""
+    # Basic ASCII
+    assert sz.utf8_case_insensitive_find("Hello World", "WORLD") == 6
+    assert sz.utf8_case_insensitive_find("Hello World", "hello") == 0
+    assert sz.utf8_case_insensitive_find("Hello World", "xyz") == -1
+
+    # Case variations
+    assert sz.utf8_case_insensitive_find("HELLO", "hello") == 0
+    assert sz.utf8_case_insensitive_find("hello", "HELLO") == 0
+    assert sz.utf8_case_insensitive_find("HeLLo WoRLd", "world") == 6
+
+    # German sharp S: ß folds to "ss"
+    assert sz.utf8_case_insensitive_find("Straße", "STRASSE") == 0
+    assert sz.utf8_case_insensitive_find("STRASSE", "straße") == 0
+    assert sz.utf8_case_insensitive_find("die Straße", "STRASSE") == 4
+
+    # Greek letters
+    assert sz.utf8_case_insensitive_find("ΑΒΓΔ", "αβγδ") == 0
+    assert sz.utf8_case_insensitive_find("αβγδ", "ΑΒΓΔ") == 0
+
+    # Cyrillic
+    assert sz.utf8_case_insensitive_find("ПРИВЕТ", "привет") == 0
+    assert sz.utf8_case_insensitive_find("привет", "ПРИВЕТ") == 0
+
+    # Empty cases
+    assert sz.utf8_case_insensitive_find("hello", "") == 0
+    assert sz.utf8_case_insensitive_find("", "x") == -1
+    assert sz.utf8_case_insensitive_find("", "") == 0
+
+    # Partial matches
+    assert sz.utf8_case_insensitive_find("abcdef", "CD") == 2
+    assert sz.utf8_case_insensitive_find("ABCDEF", "cd") == 2
+
+    # Method form on Str
+    s = sz.Str("Hello World")
+    assert s.utf8_case_insensitive_find("WORLD") == 6
+
+
+def test_utf8_case_insensitive_order():
+    """Test case-insensitive UTF-8 comparison."""
+    # Equal strings
+    assert sz.utf8_case_insensitive_order("hello", "HELLO") == 0
+    assert sz.utf8_case_insensitive_order("HELLO", "hello") == 0
+    assert sz.utf8_case_insensitive_order("HeLLo", "hElLO") == 0
+
+    # German sharp S equivalence
+    assert sz.utf8_case_insensitive_order("Straße", "STRASSE") == 0
+    assert sz.utf8_case_insensitive_order("strasse", "STRAẞE") == 0
+
+    # Less than
+    assert sz.utf8_case_insensitive_order("apple", "BANANA") < 0
+    assert sz.utf8_case_insensitive_order("APPLE", "banana") < 0
+    assert sz.utf8_case_insensitive_order("a", "B") < 0
+
+    # Greater than
+    assert sz.utf8_case_insensitive_order("ZEBRA", "apple") > 0
+    assert sz.utf8_case_insensitive_order("zebra", "APPLE") > 0
+    assert sz.utf8_case_insensitive_order("z", "A") > 0
+
+    # Empty strings
+    assert sz.utf8_case_insensitive_order("", "") == 0
+    assert sz.utf8_case_insensitive_order("", "a") < 0
+    assert sz.utf8_case_insensitive_order("a", "") > 0
+
+    # Prefix ordering
+    assert sz.utf8_case_insensitive_order("hello", "HELLO WORLD") < 0
+    assert sz.utf8_case_insensitive_order("HELLO WORLD", "hello") > 0
+
+    # Greek letters
+    assert sz.utf8_case_insensitive_order("ΑΒΓΔ", "αβγδ") == 0
+    assert sz.utf8_case_insensitive_order("αβγ", "ΑΒΓ") == 0
+
+    # Cyrillic
+    assert sz.utf8_case_insensitive_order("ПРИВЕТ", "привет") == 0
+
+    # Method form on Str
+    s = sz.Str("hello")
+    assert s.utf8_case_insensitive_order("HELLO") == 0
+
+
 def test_unit_utf8_count():
     """Test UTF-8 character counting (codepoints, not bytes)."""
     # ASCII strings: len == utf8_count
