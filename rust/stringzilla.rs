@@ -912,11 +912,11 @@ where
 /// use stringzilla::stringzilla as sz;
 /// let source = "HELLO WORLD";
 /// let mut dest = [0u8; 32];
-/// let len = sz::case_fold(source, &mut dest);
+/// let len = sz::utf8_case_fold(source, &mut dest);
 /// assert_eq!(&dest[..len], b"hello world");
 /// ```
 ///
-pub fn case_fold<T, D>(source: T, destination: &mut D) -> usize
+pub fn utf8_case_fold<T, D>(source: T, destination: &mut D) -> usize
 where
     T: AsRef<[u8]>,
     D: AsMut<[u8]> + ?Sized,
@@ -956,13 +956,13 @@ where
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let haystack = "Hello WORLD";
-/// if let Some((offset, len)) = sz::find_case_insensitive(haystack, "world") {
+/// if let Some((offset, len)) = sz::utf8_case_insensitive_find(haystack, "world") {
 ///     assert_eq!(offset, 6);
 ///     assert_eq!(len, 5);
 /// }
 /// ```
 ///
-pub fn find_case_insensitive<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
+pub fn utf8_case_insensitive_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
 where
     H: AsRef<[u8]>,
     N: AsRef<[u8]>,
@@ -1010,11 +1010,11 @@ where
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// use std::cmp::Ordering;
-/// assert_eq!(sz::order_case_insensitive("Hello", "HELLO"), Ordering::Equal);
-/// assert_eq!(sz::order_case_insensitive("abc", "ABD"), Ordering::Less);
+/// assert_eq!(sz::utf8_case_insensitive_order("Hello", "HELLO"), Ordering::Equal);
+/// assert_eq!(sz::utf8_case_insensitive_order("abc", "ABD"), Ordering::Less);
 /// ```
 ///
-pub fn order_case_insensitive<A, B>(a: A, b: B) -> Ordering
+pub fn utf8_case_insensitive_order<A, B>(a: A, b: B) -> Ordering
 where
     A: AsRef<[u8]>,
     B: AsRef<[u8]>,

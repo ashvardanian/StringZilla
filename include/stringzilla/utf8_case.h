@@ -1092,14 +1092,17 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_si
 
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
-    // - All ASCII single-byte codepoints
-    // - Mixture of 2-byte codepoints in one language (continuous range) and 1-byte ASCII codepoints
-    // - Groups of 3- and 4-byte codepoints without folding rules defined
+    // 1. All ASCII single-byte codepoints
+    // 2. Mixture of 2-byte codepoints in one language (continuous range) and 1-byte ASCII codepoints
+    //    2.1. Only Latin-1 supplements, where excluding three characters (×,÷,ß) folding is a trivial
+    //         addition of +32 to the second byte, which doesn't even require packing/unpacking to UTF-16.
+    //         The three exceptions are handled via blends.
+    //    2.2. Other scripts (Cyrillic, Greek, etc.) where we unpack into UTF-16 codepoints, fold, and repack.
+    // 3. Groups of 3- and 4-byte codepoints without folding rules defined
     // Within those assumptions, we this kernel vectorizes case folding for simple cases, when
     // a sequence of bytes in a certain range can be folded by a single constant addition/subtraction.
     // For more complex cases it periodically switches to serial code.
     sz_u512_vec_t source_vec;
-    sz_unused_(source_vec);
     sz_ptr_t target_start = target;
 
     // We will be fetching 64 bytes per cycle, but stepping forward by a smaller amount.
@@ -1116,27 +1119,172 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
     //
     // Those techniques don't apply to Cyrillic, Greek, or other scripts. Those are unpacked into 16-bit or 32-bit
     // runes if case-folding is necessary. Otherwise, for some 3- and 4-byte sequences, a simple mem-copy is done.
+
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const subtract26_vec = _mm512_set1_epi8(26);
+    __m512i const x20_vec = _mm512_set1_epi8(0x20);
+
     while (source_length) {
         sz_size_t chunk_size = sz_min_of_two(source_length, 64);
         __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
-        source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, (sz_u8_t const *)source);
+        source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source);
         __mmask64 is_non_ascii = _mm512_movepi8_mask(source_vec.zmm);
 
         // Check that all loaded characters are ASCII
         if (is_non_ascii == 0) {
-            // Identify uppercase A-Z: (byte - 'A') < 26 unsigned
-            __m512i offset = _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8('A'));
-            __mmask64 is_upper = _mm512_cmp_epu8_mask(offset, _mm512_set1_epi8(26), _MM_CMPINT_LT);
-            __m512i folded = _mm512_mask_add_epi8(source_vec.zmm, is_upper, source_vec.zmm, _mm512_set1_epi8(0x20));
-            _mm512_mask_storeu_epi8(target, load_mask, folded);
+            __mmask64 is_upper =
+                _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
+            _mm512_mask_storeu_epi8(target, load_mask,
+                                    _mm512_mask_add_epi8(source_vec.zmm, is_upper, source_vec.zmm, x20_vec));
             target += chunk_size, source += chunk_size, source_length -= chunk_size;
             continue;
         }
 
-        // TODO: Check that all languages belong to typical European scripts with a mixture of Latin-1 supplements
-        // of 2-byte and 1-byte characters by performing comparisons against 16-bit unsigned
-        // integers at odd and even 8-bit offsets in the register: [0, 1], [1, 2], [2, 3], ...
-        // For now, fall back to serial for non-ASCII characters.
+        // 2.1. Latin-1 Supplement (C3 80 - C3 BF) mixed with ASCII
+        __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
+        __mmask64 is_latin1_second = is_latin1_lead << 1;
+        __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | is_latin1_second;
+        sz_size_t latin1_length = sz_u64_ctz(~is_valid_latin1_mix | ~load_mask);
+        latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1); // Don't split 2-byte seq
+
+        if (latin1_length >= 2) {
+            __mmask64 prefix_mask = sz_u64_mask_until_(latin1_length);
+            __mmask64 latin1_second_bytes = is_latin1_second & prefix_mask;
+
+            // ASCII A-Z (0x41-0x5A) and Latin-1 À-Þ (second byte 0x80-0x9E excl. ×=0x97) both get +0x20
+            __mmask64 is_upper_ascii = _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8('A')),
+                                                            _mm512_set1_epi8(26), _MM_CMPINT_LT);
+            __mmask64 is_latin1_upper = _mm512_mask_cmp_epu8_mask(
+                latin1_second_bytes, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                _mm512_set1_epi8(0x1F), _MM_CMPINT_LT);
+            is_latin1_upper ^= _mm512_mask_cmpeq_epi8_mask(is_latin1_upper, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0x97)); // Exclude ×
+            __m512i folded = _mm512_mask_add_epi8(source_vec.zmm, (is_upper_ascii | is_latin1_upper) & prefix_mask,
+                                                  source_vec.zmm, _mm512_set1_epi8(0x20));
+
+            // ß (C3 9F) → ss: replace both bytes with 's'
+            __mmask64 is_eszett =
+                _mm512_mask_cmpeq_epi8_mask(latin1_second_bytes, source_vec.zmm, _mm512_set1_epi8((char)0x9F));
+            folded = _mm512_mask_set1_epi8(folded, is_eszett | (is_eszett >> 1), 's');
+
+            _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+            target += latin1_length, source += latin1_length, source_length -= latin1_length;
+            continue;
+        }
+
+        // 2.2. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian) - unpack, fold, repack
+        // Detect any 2-byte lead (110xxxxx = 0xC0-0xDF) except C3 (Latin-1, already handled above)
+        __mmask64 is_two_byte_lead = _mm512_cmpeq_epi8_mask(
+            _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8((char)0xE0)), _mm512_set1_epi8((char)0xC0));
+        is_two_byte_lead &= ~is_latin1_lead; // Exclude C3
+        __mmask64 is_two_byte_second = is_two_byte_lead << 1;
+        __mmask64 is_valid_two_byte_mix = ~is_non_ascii | is_two_byte_lead | is_two_byte_second;
+        sz_size_t two_byte_length = sz_u64_ctz(~is_valid_two_byte_mix | ~load_mask);
+        two_byte_length -= two_byte_length && ((is_two_byte_lead >> (two_byte_length - 1)) & 1);
+
+        if (two_byte_length >= 2) {
+            __mmask64 prefix_mask = sz_u64_mask_until_(two_byte_length);
+            __mmask64 is_char_start = (~is_non_ascii | is_two_byte_lead) & prefix_mask;
+            sz_size_t num_chars = (sz_size_t)sz_u64_popcount(is_char_start);
+            if (num_chars > 16) num_chars = 16; // Process at most 16 chars per iteration
+
+            // Compress character start positions, gather first/second bytes
+            sz_u512_vec_t char_indices;
+            char_indices.zmm = _mm512_set_epi8(                                 //
+                63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
+                47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+                31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+            char_indices.zmm = _mm512_maskz_compress_epi8(is_char_start, char_indices.zmm);
+
+            sz_u512_vec_t first_bytes, second_bytes;
+            first_bytes.zmm = _mm512_permutexvar_epi8(char_indices.zmm, source_vec.zmm);
+            second_bytes.zmm =
+                _mm512_permutexvar_epi8(_mm512_add_epi8(char_indices.zmm, _mm512_set1_epi8(1)), source_vec.zmm);
+
+            // Expand to 32-bit for arithmetic
+            __m512i first_wide = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(first_bytes.zmm));
+            __m512i second_wide = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(second_bytes.zmm));
+            __mmask16 is_two_byte_char = (__mmask16)_pext_u64(is_two_byte_lead & prefix_mask, is_char_start);
+
+            // Decode: ASCII as-is, 2-byte as ((first & 0x1F) << 6) | (second & 0x3F)
+            __m512i decoded =
+                _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(first_wide, _mm512_set1_epi32(0x1F)), 6),
+                                _mm512_and_si512(second_wide, _mm512_set1_epi32(0x3F)));
+            __m512i codepoints = _mm512_mask_blend_epi32(is_two_byte_char, first_wide, decoded);
+
+            // Apply folding rules - all use range check: (cp - base) < size
+            __m512i folded = codepoints;
+
+            // ASCII A-Z: 0x0041-0x005A → +0x20
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0041)),
+                                                            _mm512_set1_epi32(26), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x20));
+            // Cyrillic А-Я: 0x0410-0x042F → +0x20
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0410)),
+                                                            _mm512_set1_epi32(0x20), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x20));
+            // Cyrillic Ѐ-Џ: 0x0400-0x040F → +0x50
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0400)),
+                                                            _mm512_set1_epi32(0x10), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x50));
+            // Greek Α-Ρ: 0x0391-0x03A1 → +0x20
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0391)),
+                                                            _mm512_set1_epi32(0x11), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x20));
+            // Greek Σ-Ϋ: 0x03A3-0x03AB → +0x20
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x03A3)),
+                                                            _mm512_set1_epi32(0x09), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x20));
+            // Armenian Ա-Ֆ: 0x0531-0x0556 → +0x30
+            folded =
+                _mm512_mask_add_epi32(folded,
+                                      _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0531)),
+                                                            _mm512_set1_epi32(0x26), _MM_CMPINT_LT),
+                                      folded, _mm512_set1_epi32(0x30));
+            // Latin Extended-A even: 0x0100-0x012E (even codepoints → +1)
+            __mmask16 is_latin_ext_a = _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0100)),
+                                                             _mm512_set1_epi32(0x2F), _MM_CMPINT_LT);
+            __mmask16 is_even =
+                _mm512_cmpeq_epi32_mask(_mm512_and_si512(codepoints, _mm512_set1_epi32(1)), _mm512_setzero_si512());
+            folded = _mm512_mask_add_epi32(folded, is_latin_ext_a & is_even, folded, _mm512_set1_epi32(1));
+
+            // Re-encode to UTF-8: lead = 0xC0 | (cp >> 6), second = 0x80 | (cp & 0x3F)
+            __m512i new_lead = _mm512_or_si512(_mm512_set1_epi32(0xC0), _mm512_srli_epi32(folded, 6));
+            __m512i new_second =
+                _mm512_or_si512(_mm512_set1_epi32(0x80), _mm512_and_si512(folded, _mm512_set1_epi32(0x3F)));
+            // ASCII stays single-byte
+            __mmask16 is_ascii_out = _mm512_cmp_epu32_mask(folded, _mm512_set1_epi32(0x80), _MM_CMPINT_LT);
+            new_lead = _mm512_mask_blend_epi32(is_ascii_out, new_lead, folded);
+
+            // Scatter back using expand (inverse of compress) - no scalar loop needed!
+            // Pack 32-bit results to bytes
+            __m512i lead_zmm = _mm512_zextsi128_si512(_mm512_cvtepi32_epi8(new_lead));
+            __m512i second_zmm = _mm512_zextsi128_si512(_mm512_cvtepi32_epi8(new_second));
+
+            // Expand lead bytes to char start positions
+            __m512i result = _mm512_mask_expand_epi8(source_vec.zmm, is_char_start, lead_zmm);
+
+            // For second bytes: compress only 2-byte chars' seconds, then expand to continuation positions
+            __m512i second_compressed = _mm512_maskz_compress_epi8((__mmask64)is_two_byte_char, second_zmm);
+            result = _mm512_mask_expand_epi8(result, is_two_byte_second & prefix_mask, second_compressed);
+
+            _mm512_mask_storeu_epi8(target, prefix_mask, result);
+            target += two_byte_length, source += two_byte_length, source_length -= two_byte_length;
+            continue;
+        }
+
+        // 3. For 3/4-byte sequences or mixed content, fall back to serial
         break;
     }
 
