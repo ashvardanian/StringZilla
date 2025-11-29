@@ -40,6 +40,7 @@ import pytest
 # Import shared Unicode data loading functions
 from test_helpers import (
     UNICODE_VERSION,
+    UnicodeDataDownloadError,
     get_unicode_xml_data,
     parse_case_folding_file,
     get_case_folding_rules,
@@ -1513,7 +1514,10 @@ def test_utf8_case_fold_all_codepoints():
     The file is cached in the system temp directory for subsequent runs.
     """
     # Load Unicode 17.0 case folding rules (downloads and caches automatically)
-    unicode_folds = _get_case_folding_rules("17.0.0")
+    try:
+        unicode_folds = _get_case_folding_rules("17.0.0")
+    except UnicodeDataDownloadError as e:
+        pytest.skip(f"Skipping due to network issue: {e}")
 
     mismatches = []
     missing_folds = []
