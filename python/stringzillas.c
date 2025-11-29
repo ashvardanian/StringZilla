@@ -966,6 +966,13 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
         return -1;
     }
 
+    // Check that array is C-contiguous for safe memory access
+    if (!PyArray_IS_C_CONTIGUOUS(subs_array)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "substitution_matrix must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
+        return -1;
+    }
+
     // Parse capabilities if provided
     if (capabilities_tuple) {
         if (parse_and_intersect_capabilities(capabilities_tuple, &capabilities) != 0) { return -1; }
@@ -1254,6 +1261,13 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
 
     if (PyArray_TYPE(subs_array) != NPY_INT8) {
         PyErr_SetString(PyExc_TypeError, "substitution_matrix must have int8 dtype");
+        return -1;
+    }
+
+    // Check that array is C-contiguous for safe memory access
+    if (!PyArray_IS_C_CONTIGUOUS(subs_array)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "substitution_matrix must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
         return -1;
     }
 

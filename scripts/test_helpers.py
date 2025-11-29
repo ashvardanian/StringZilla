@@ -14,6 +14,13 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Dict, List
 
+
+class UnicodeDataDownloadError(Exception):
+    """Raised when Unicode data files cannot be downloaded."""
+
+    pass
+
+
 # Unicode version used for all Unicode data files
 UNICODE_VERSION = "17.0.0"
 
@@ -103,16 +110,19 @@ def _download_case_folding_file(version: str) -> str:
         Path to cached file
 
     Raises:
-        RuntimeError: If download fails
+        UnicodeDataDownloadError: If download fails
     """
     cache_path = os.path.join(tempfile.gettempdir(), f"CaseFolding-{version}.txt")
 
     if not os.path.exists(cache_path):
         url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
         try:
-            urllib.request.urlretrieve(url, cache_path)
+            # Use urlopen with 30-second timeout instead of urlretrieve
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(cache_path, "wb") as f:
+                    f.write(response.read())
         except Exception as e:
-            raise RuntimeError(f"Could not download CaseFolding.txt from {url}: {e}")
+            raise UnicodeDataDownloadError(f"Could not download CaseFolding.txt from {url}: {e}")
 
     return cache_path
 
