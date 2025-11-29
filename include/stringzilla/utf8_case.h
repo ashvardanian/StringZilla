@@ -1,6 +1,6 @@
 /**
  *  @brief  Hardware-accelerated UTF-8 text processing utilities, that require unpacking into UTF-32 runes.
- *  @file   utf8_unpack.h
+ *  @file   utf8_case.h
  *  @author Ash Vardanian
  *
  *  Work in progress:
@@ -11,11 +11,11 @@
  *
  *  It's important to remember that UTF-8 is just one of many possible Unicode encodings.
  *  Unicode is a versioned standard and we implement its locale-independent specification v17.
- *  All algorithms are fully complaint with the specification and handle all edge cases.
+ *  All algorithms are fully compliant with the specification and handle all edge cases.
  *
  *  On fast vectorized paths, unlike other parts of StringZilla, there may be significant algorithmic
  *  differences between different ISA versions. Most of them are designed to be practical in common
- *  usecases, targetting the most common languages on the Internet.
+ *  use cases, targeting the most common languages on the Internet.
  *
  *   Rank  Language    Script      UTF-8 Bytes  Has Case?  Case Folding Notes
  *  ------------------------------------------------------------------------------------------
@@ -41,11 +41,9 @@
  *   20    Czech       Latin       1-2          Yes        ASCII + ě, š, č, ř, ž
  *
  *  This doesn't, however, cover many other relevant subranges of Unicode.
- *
- *  Huge part of case-insensitive operations can be performed
  */
-#ifndef STRINGZILLA_UTF8_UNPACK_H_
-#define STRINGZILLA_UTF8_UNPACK_H_
+#ifndef STRINGZILLA_UTF8_CASE_H_
+#define STRINGZILLA_UTF8_CASE_H_
 
 #include "types.h"
 
@@ -813,11 +811,11 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         case 0xFB05: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬅ → st
         case 0xFB06: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬆ → st
         // Armenian ligatures
-        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մdelays
-        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մdelays
-        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մdelays
-        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → delays
-        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մdelays
+        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մdelays (men + nun)
+        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մdelays (men + ech)
+        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մdelays (men + ini)
+        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → delays (vew + nun)
+        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մdelays (men + xeh)
         }
 
         folded[0] = rune; return 1;  // 3-byte: no folding needed
@@ -1150,7 +1148,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 //   - E1: Georgian, Greek Extended, Latin Extended Additional
                 //   - E2: Glagolitic (B0-B1), Coptic (B2-B3), Letterlike (84 = Kelvin/Angstrom)
                 //   - EF: Fullwidth A-Z
-                // E2 80-83, 85-9F, A0-AF are safe (punctuation, symbols, currency, math)
+                // E2 80-83 are safe (General Punctuation quotes); other E2 ranges have folding
                 // EA is mostly safe (Hangul B0-BF) but some second bytes have folding:
                 //   - 0x99-0x9F: Cyrillic Ext-B, Latin Ext-D (A640-A7FF)
                 //   - 0xAD-0xAE: Cherokee Supplement (AB70-ABBF)
@@ -1407,7 +1405,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 // Cyrillic Extended: 0x0460-0x052F (has case folding, not covered)
                 _mm512_cmp_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0460)),
                                       _mm512_set1_epi32(0x00D0), _MM_CMPINT_LT) | // 0x0460-0x052F
-                // Armenian ligature that expands: U+0587 (և → եdelays)
+                // Armenian ligature that expands: U+0587 (և → եdelays, ech + yiwn)
                 _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x0587));
 
             // Only consider characters we're actually processing
@@ -1618,10 +1616,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             // We include ALL E1 82/83 content in the fast path, but only transform uppercase.
             if (is_e1_lead && source_length >= 3) {
                 // Check if E1 leads have Georgian second bytes (82 or 83)
-                __m512i indices_vec =
-                    _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43,
-                                    42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22,
-                                    21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
                 __m512i second_bytes =
                     _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(1)), source_vec.zmm);
 
@@ -1721,13 +1715,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 
                         _mm512_mask_storeu_epi8(target, prefix_mask, folded);
                         target += georgian_length, source += georgian_length, source_length -= georgian_length;
-                        // DEBUG: printf("Georgian path: processed %zu bytes\n", georgian_length);
                         continue;
                     }
                 }
             }
-            // DEBUG: Add counter for when Georgian path is skipped
-            // static int skip_count = 0; if (is_e1_lead && ++skip_count < 10) printf("Skipped Georgian path at len=%zu\n", source_length);
 
             // Slow path: Has 2-byte, 4-byte, or E1/E2/EF leads that need special handling
             // EA with problematic second bytes (is_ea_complex) also needs special handling
@@ -2105,4 +2096,4 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_UNPACK_H_
+#endif // STRINGZILLA_UTF8_CASE_H_
