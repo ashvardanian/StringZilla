@@ -443,61 +443,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_bool_t sz_utf8_valid_serial(sz_cptr_t text, sz_size_t length) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_u8_t const *end_u8 = text_u8 + length;
-
-    while (text_u8 < end_u8) {
-        sz_u8_t byte1 = *text_u8;
-
-        // 1-byte sequence (0x00-0x7F)
-        if (byte1 <= 0x7F) { text_u8 += 1; }
-
-        // 2-byte sequence (0xC2-0xDF)
-        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
-            if (text_u8 + 1 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
-            text_u8 += 2;
-        }
-
-        // 3-byte sequence (0xE0-0xEF)
-        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
-            if (text_u8 + 2 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong encodings and surrogates
-            if (byte1 == 0xE0 && byte2 < 0xA0) return sz_false_k;  // Overlong
-            if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
-
-            text_u8 += 3;
-        }
-
-        // 4-byte sequence (0xF0-0xF4)
-        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
-            if (text_u8 + 3 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            sz_u8_t byte4 = text_u8[3];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80 || (byte4 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong and out-of-range
-            if (byte1 == 0xF0 && byte2 < 0x90) return sz_false_k;  // Overlong
-            if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
-
-            text_u8 += 4;
-        }
-
-        // Invalid lead byte
-        else
-            return sz_false_k;
-    }
-
-    return sz_true_k;
-}
-
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
@@ -507,13 +452,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t src_end = text + length;
     sz_size_t runes_written = 0;
 
-    // Process up to runes_capacity codepoints or end of input
+    // Process up to runes_capacity codepoints or end of input.
     while (src < src_end && runes_written < runes_capacity) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse(src, &rune, &rune_length);
-        if (rune_length == sz_utf8_invalid_k) break;
-        if (src + rune_length > src_end) break; // Incomplete sequence
+        if (src + rune_length > src_end) break; // Incomplete sequence at buffer boundary
         runes[runes_written++] = rune;
         src += rune_length;
     }

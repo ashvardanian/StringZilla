@@ -3206,6 +3206,7 @@ static char const doc_utf8_case_fold[] = //
     "\n"
     "Args:\n"
     "    text (Str or str or bytes): The input UTF-8 string.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    bytes: The case-folded UTF-8 string.\n"
@@ -3220,16 +3221,28 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
                                          PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
+    int validate = 0;                       // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd positional argument(s)", nargs_expected);
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_fold() takes no keyword arguments");
-        return NULL;
+    // Parse optional 'validate' keyword argument
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_fold() got unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
     }
 
     PyObject *str_obj = is_member ? self : args[0];
@@ -3237,6 +3250,12 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
     sz_string_view_t str;
     if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
         wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+
+    // Validate UTF-8 input only if requested
+    if (validate && !sz_utf8_valid(str.start, str.length)) {
+        PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
 
@@ -3273,6 +3292,7 @@ static char const doc_utf8_case_insensitive_find[] = //
     "Args:\n"
     "    haystack (Str or str or bytes): The string to search in.\n"
     "    needle (Str or str or bytes): The substring to find.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    int: Index of the first match, or -1 if not found.\n"
@@ -3284,20 +3304,32 @@ static char const doc_utf8_case_insensitive_find[] = //
     "    0";
 
 static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *const *args,
-                                                      Py_ssize_t positional_args_count,
-                                                      PyObject *args_names_tuple) {
+                                                     Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // needle if method, haystack+needle if function
+    int validate = 0;                              // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() takes exactly %zd argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() takes exactly %zd positional argument(s)",
+                     nargs_expected);
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_find() takes no keyword arguments");
-        return NULL;
+    // Parse optional 'validate' keyword argument
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() got unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
     }
 
     PyObject *haystack_obj = is_member ? self : args[0];
@@ -3318,9 +3350,21 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
     // Empty haystack can't contain non-empty needle
     if (haystack.length == 0) { return PyLong_FromSsize_t(-1); }
 
+    // Validate UTF-8 input only if requested
+    if (validate) {
+        if (!sz_utf8_valid(haystack.start, haystack.length)) {
+            PyErr_SetString(PyExc_ValueError, "Haystack is not valid UTF-8");
+            return NULL;
+        }
+        if (!sz_utf8_valid(needle.start, needle.length)) {
+            PyErr_SetString(PyExc_ValueError, "Needle is not valid UTF-8");
+            return NULL;
+        }
+    }
+
     sz_size_t matched_length = 0;
-    sz_cptr_t result = sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length,
-                                                      &matched_length);
+    sz_cptr_t result =
+        sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
@@ -3337,6 +3381,7 @@ static char const doc_utf8_case_insensitive_order[] = //
     "Args:\n"
     "    a (Str or str or bytes): First string to compare.\n"
     "    b (Str or str or bytes): Second string to compare.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    int: Negative if a < b, zero if equal, positive if a > b.\n"
@@ -3348,20 +3393,33 @@ static char const doc_utf8_case_insensitive_order[] = //
     "    -1";
 
 static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *const *args,
-                                                       Py_ssize_t positional_args_count,
-                                                       PyObject *args_names_tuple) {
+                                                      Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
+    int validate = 0;                              // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd positional argument(s)",
+                     nargs_expected);
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_order() takes no keyword arguments");
-        return NULL;
+    // Parse optional 'validate' keyword argument
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() got unexpected keyword argument '%U'",
+                             key);
+                return NULL;
+            }
+        }
     }
 
     PyObject *a_obj = is_member ? self : args[0];
@@ -3375,6 +3433,18 @@ static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *
     if (!sz_py_export_string_like(b_obj, &b.start, &b.length)) {
         wrap_current_exception("Second argument must be string-like");
         return NULL;
+    }
+
+    // Validate UTF-8 input only if requested
+    if (validate) {
+        if (!sz_utf8_valid(a.start, a.length)) {
+            PyErr_SetString(PyExc_ValueError, "First argument is not valid UTF-8");
+            return NULL;
+        }
+        if (!sz_utf8_valid(b.start, b.length)) {
+            PyErr_SetString(PyExc_ValueError, "Second argument is not valid UTF-8");
+            return NULL;
+        }
     }
 
     sz_ordering_t order = sz_utf8_case_insensitive_order(a.start, a.length, b.start, b.length);
@@ -4735,8 +4805,10 @@ static PyMethodDef Str_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -5857,19 +5929,19 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     sz_ptr_t buffer_ptr = buffer;
     *did_fit = 1;
 
-    // First pass: calculate required buffer size and validate UTF-8
+    // Validate UTF-8 first
+    if (!sz_utf8_valid(cstr, cstr_length)) {
+        *did_fit = -1; // Signal UTF-8 error
+        return buffer_ptr;
+    }
+
+    // First pass: calculate required buffer size (input already validated)
     sz_size_t required_bytes = 2; // Opening and closing quotes
     sz_cptr_t scan_ptr = cstr;
     while (scan_ptr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse(scan_ptr, &rune, &rune_length);
-
-        // Check for invalid UTF-8
-        if (rune_length == sz_utf8_invalid_k) {
-            *did_fit = -1; // Signal UTF-8 error
-            return buffer_ptr;
-        }
 
         if (rune_length == 1 && *scan_ptr == '\'') { required_bytes += 2; } // Escaped quote: \'
         else { required_bytes += rune_length; }                             // Normal rune
@@ -5987,7 +6059,7 @@ static PyObject *Strs_repr(Strs *self) {
 
         // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = sz_runes_valid(cstr_start, cstr_length)
+        repr_buffer_ptr = sz_utf8_valid(cstr_start, cstr_length)
                               ? export_escaped_unquoted_to_utf8_buffer(
                                     cstr_start, cstr_length, repr_buffer_ptr,
                                     repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
@@ -6032,7 +6104,7 @@ static PyObject *Strs_str(Strs *self) {
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
-        if (sz_runes_valid(cstr_start, cstr_length)) {
+        if (sz_utf8_valid(cstr_start, cstr_length)) {
             // Valid UTF-8: format as '...' with escaped quotes
             total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
@@ -6078,7 +6150,7 @@ static PyObject *Strs_str(Strs *self) {
         int did_fit;
         // Check if the string contains valid UTF-8 and export appropriately
         result_ptr =
-            sz_runes_valid(cstr_start, cstr_length)
+            sz_utf8_valid(cstr_start, cstr_length)
                 ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
                                                          total_bytes - (result_ptr - result_buffer), &did_fit)
                 : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,
@@ -7066,8 +7138,10 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},

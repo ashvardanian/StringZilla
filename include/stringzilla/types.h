@@ -989,54 +989,98 @@ typedef union sz_u512_vec_t {
 #pragma region UTF8
 
 /**
- *  @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer.
- *  @param[in] utf8 Pointer to the beginning of a UTF8-encoded string.
+ *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer.
+ *  @param[in] utf8 Pointer to the beginning of a valid UTF-8 encoded string.
  *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
  *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
  *  @note This function does not perform any bounds checking on the input string.
  */
 SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
-    sz_u8_t const *current = (sz_u8_t const *)utf8;
-    sz_u8_t leading_byte = *current++;
-    sz_rune_t rune;
-    sz_rune_length_t rune_length;
+    sz_u8_t const *c = (sz_u8_t const *)utf8;
+    sz_u8_t lead = *c++;
 
-    // TODO: This can be made entirely branchless using 32-bit SWAR.
+    // Branchless UTF-8 length detection using arithmetic.
+    // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
+    // CLZ-based approach was also considered but has complications with ASCII handling.
+    sz_rune_length_t len = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
+
+    // Extract rune bits - switch compiles to efficient jump table.
+    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation needed.
+    sz_rune_t rune;
+    switch (len) {
     // Single-byte rune (0xxxxxxx)
-    if (leading_byte < 0x80U) {
-        rune = leading_byte;
-        rune_length = sz_utf8_rune_1byte_k;
-    }
+    case 1: rune = lead; break;
     // Two-byte rune (110xxxxx 10xxxxxx)
-    else if ((leading_byte & 0xE0U) == 0xC0U) {
-        rune = (leading_byte & 0x1FU) << 6; // bottom 5 bits from the first byte
-        rune |= (*current++ & 0x3FU);       // bottom 6 bits from the second byte
-        rune_length = sz_utf8_rune_2bytes_k;
-    }
+    case 2: rune = (lead & 0x1FU) << 6 | (c[0] & 0x3FU); break;
     // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-    else if ((leading_byte & 0xF0U) == 0xE0U) {
-        rune = (leading_byte & 0x0FU) << 12; // bottom 4 bits from the first byte
-        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the second byte
-        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the third byte
-        rune_length = sz_utf8_rune_3bytes_k;
-    }
+    case 3: rune = (lead & 0x0FU) << 12 | (c[0] & 0x3FU) << 6 | (c[1] & 0x3FU); break;
     // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-    else if ((leading_byte & 0xF8U) == 0xF0U) {
-        rune = (leading_byte & 0x07U) << 18; // bottom 3 bits from the first byte
-        rune |= (*current++ & 0x3FU) << 12;  // bottom 6 bits from the second byte
-        rune |= (*current++ & 0x3FU) << 6;   // bottom 6 bits from the third byte
-        rune |= (*current++ & 0x3FU);        // bottom 6 bits from the fourth byte
-        // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
-        if (rune > 0x10FFFFU) { rune = 0U, rune_length = sz_utf8_invalid_k; }
-        else { rune_length = sz_utf8_rune_4bytes_k; }
+    default: rune = (lead & 0x07U) << 18 | (c[0] & 0x3FU) << 12 | (c[1] & 0x3FU) << 6 | (c[2] & 0x3FU); break;
     }
-    // Invalid UTF8 rune.
-    else {
-        rune = 0U;
-        rune_length = sz_utf8_invalid_k;
-    }
+
     *runes = rune;
-    *runes_lengths = rune_length;
+    *runes_lengths = len;
+}
+
+/**
+ *  @brief  Validates if a UTF-8 string contains only valid UTF-8 sequences.
+ *  @param  text Pointer to the UTF-8 string to validate.
+ *  @param  length Length of the string in bytes.
+ *  @return sz_true_k if the string contains only valid UTF-8, sz_false_k otherwise.
+ */
+SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+
+    while (text_u8 < end_u8) {
+        sz_u8_t byte1 = *text_u8;
+
+        // 1-byte sequence (0x00-0x7F)
+        if (byte1 <= 0x7F) { text_u8 += 1; }
+
+        // 2-byte sequence (0xC2-0xDF)
+        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
+            if (text_u8 + 1 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
+            text_u8 += 2;
+        }
+
+        // 3-byte sequence (0xE0-0xEF)
+        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
+            if (text_u8 + 2 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            sz_u8_t byte3 = text_u8[2];
+            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return sz_false_k;
+
+            // Check for overlong encodings and surrogates
+            if (byte1 == 0xE0 && byte2 < 0xA0) return sz_false_k;  // Overlong
+            if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
+
+            text_u8 += 3;
+        }
+
+        // 4-byte sequence (0xF0-0xF4)
+        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
+            if (text_u8 + 3 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            sz_u8_t byte3 = text_u8[2];
+            sz_u8_t byte4 = text_u8[3];
+            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80 || (byte4 & 0xC0) != 0x80) return sz_false_k;
+
+            // Check for overlong and out-of-range
+            if (byte1 == 0xF0 && byte2 < 0x90) return sz_false_k;  // Overlong
+            if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
+
+            text_u8 += 4;
+        }
+
+        // Invalid lead byte
+        else { return sz_false_k; }
+    }
+
+    return sz_true_k;
 }
 
 /**
@@ -1071,23 +1115,6 @@ SZ_PUBLIC sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
         return sz_utf8_rune_4bytes_k;
     }
     return sz_utf8_invalid_k;
-}
-
-/**
- *  @brief Validates if a UTF8 string contains only valid UTF8 sequences.
- *  @param[in] utf8 The UTF8 string to validate.
- *  @param[in] utf8_length The length of the UTF8 string in bytes.
- *  @return sz_true_k if the string contains only valid UTF8, sz_false_k otherwise.
- */
-SZ_PUBLIC sz_bool_t sz_runes_valid(sz_cptr_t utf8, sz_size_t utf8_length) {
-    sz_cptr_t const end = utf8 + utf8_length;
-    sz_rune_length_t rune_length;
-    sz_rune_t rune;
-    for (; utf8 != end; utf8 += rune_length) {
-        sz_rune_parse(utf8, &rune, &rune_length);
-        if (rune_length == sz_utf8_invalid_k) return sz_false_k;
-    }
-    return sz_true_k;
 }
 
 /**
