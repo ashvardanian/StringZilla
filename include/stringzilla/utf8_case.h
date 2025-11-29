@@ -1146,13 +1146,24 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             __mmask64 is_valid_pure_3byte = is_three_byte_lead | is_cont;
             // Quick check: if all bits match, we have pure 3-byte content
             if ((is_valid_pure_3byte & load_mask) == (is_non_ascii & load_mask) && !is_four_byte_lead) {
-                // Check for problematic leads: E1, E2, EF have case folding
+                // Check for problematic leads that have case folding:
+                //   - E1: Georgian, Greek Extended, Latin Extended Additional
+                //   - E2: Glagolitic (B0-B1), Coptic (B2-B3), Letterlike (84 = Kelvin/Angstrom)
+                //   - EF: Fullwidth A-Z
+                // E2 80-83, 85-9F, A0-AF are safe (punctuation, symbols, currency, math)
                 // EA is mostly safe (Hangul B0-BF) but some second bytes have folding:
                 //   - 0x99-0x9F: Cyrillic Ext-B, Latin Ext-D (A640-A7FF)
                 //   - 0xAD-0xAE: Cherokee Supplement (AB70-ABBF)
                 __mmask64 is_e1 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
-                __mmask64 is_e2 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
                 __mmask64 is_ef = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+                // For E2, only allow 80-83 (General Punctuation quotes) through - many other E2 ranges have folding
+                // (84 Letterlike, 93 Enclosed Alphanumerics, B0-B3 Glagolitic/Coptic, etc.)
+                __mmask64 is_e2 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+                __mmask64 e2_seconds = is_e2 << 1;
+                // E2 folding needed if second byte is NOT in 80-83 range
+                __mmask64 is_e2_folding =
+                    e2_seconds & ~_mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                                       _mm512_set1_epi8(0x04), _MM_CMPINT_LT); // NOT 80-83
                 // For EA, check if second byte is in problematic ranges
                 __mmask64 is_ea = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
                 __mmask64 ea_seconds = is_ea << 1;
@@ -1162,7 +1173,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                                                        _mm512_set1_epi8(0x07), _MM_CMPINT_LT) | // 0x99-0x9F
                                   _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
                                                        _mm512_set1_epi8(0x02), _MM_CMPINT_LT)); // 0xAD-0xAE
-                if (!(is_e1 | is_e2 | is_ea_folding | is_ef)) {
+                if (!(is_e1 | is_e2_folding | is_ea_folding | is_ef)) {
                     // Pure safe 3-byte content (E0, E3-E9, EB-EE) - no case folding needed
                     // Just need to avoid splitting a 3-byte sequence at the end
                     sz_size_t copy_len = chunk_size;
@@ -1286,7 +1297,33 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             }
         }
 
-        // 2.3. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian)
+        // 2.3. Fast path for 2-byte scripts without case folding (Hebrew, Arabic, Syriac, etc.)
+        //
+        // Lead bytes D7-DF cover Hebrew (D7), Arabic (D8-DB), Syriac (DC-DD), Thaana/NKo (DE-DF).
+        // None of these scripts have case distinctions, so we can just copy them unchanged.
+        // NOTE: D5/D6 cover Armenian which HAS case folding (including U+0587 which expands).
+        __mmask64 is_caseless_2byte = _mm512_cmp_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD7), _MM_CMPINT_GE) &
+                                      _mm512_cmp_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xDF), _MM_CMPINT_LE);
+        if (is_caseless_2byte) {
+            __mmask64 is_caseless_second = is_caseless_2byte << 1;
+            __mmask64 is_valid_caseless = ~is_non_ascii | is_caseless_2byte | is_caseless_second;
+            sz_size_t caseless_length = sz_u64_ctz(~is_valid_caseless | ~load_mask);
+            caseless_length -= caseless_length && ((is_caseless_2byte >> (caseless_length - 1)) & 1);
+
+            if (caseless_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(caseless_length);
+                // Fold only ASCII A-Z, copy 2-byte unchanged
+                __mmask64 is_upper_ascii =
+                    _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
+                __m512i folded =
+                    _mm512_mask_add_epi8(source_vec.zmm, is_upper_ascii & prefix_mask, source_vec.zmm, x20_vec);
+                _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                target += caseless_length, source += caseless_length, source_length -= caseless_length;
+                continue;
+            }
+        }
+
+        // 2.4. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian)
         //
         // Unlike Latin-1 where folding is a simple +0x20 to the second byte in-place, these scripts
         // require unpacking to 32-bit codepoints because:
@@ -1571,6 +1608,127 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 }
             }
 
+            // 3.1. Georgian fast path: handles E1 82/83 content
+            //
+            // Georgian script uses E1 82 and E1 83 lead sequences:
+            //   - E1 82 A0-BF: Uppercase (Ⴀ-Ⴟ) - folds to E2 B4 80-9F
+            //   - E1 83 80-85: Uppercase (Ⴠ-Ⴥ) - folds to E2 B4 A0-A5
+            //   - E1 83 86-BF: Lowercase/other (ა-ჿ) - no folding needed
+            //
+            // We include ALL E1 82/83 content in the fast path, but only transform uppercase.
+            if (is_e1_lead && source_length >= 3) {
+                // Check if E1 leads have Georgian second bytes (82 or 83)
+                __m512i indices_vec =
+                    _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43,
+                                    42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22,
+                                    21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+                __m512i second_bytes =
+                    _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(1)), source_vec.zmm);
+
+                // Check for Georgian second bytes: 82 or 83
+                // Only check positions where second byte is within chunk (positions 0-62 for 64-byte chunk)
+                // Position 63's second byte would wrap around in the permutation
+                __mmask64 safe_e1_mask = is_e1_lead & (load_mask >> 1);
+                __mmask64 is_82_at_e1 =
+                    _mm512_mask_cmpeq_epi8_mask(safe_e1_mask, second_bytes, _mm512_set1_epi8((char)0x82));
+                __mmask64 is_83_at_e1 =
+                    _mm512_mask_cmpeq_epi8_mask(safe_e1_mask, second_bytes, _mm512_set1_epi8((char)0x83));
+                __mmask64 is_georgian_e1 = is_82_at_e1 | is_83_at_e1;
+
+                // If all checkable E1 leads are Georgian (82/83) and no other complex content
+                // E1 leads at the edge (position 63) are handled by not including them in this check
+                __mmask64 non_georgian_e1 = safe_e1_mask & ~is_georgian_e1;
+                if (!non_georgian_e1 && is_georgian_e1) {
+                    // All Georgian 3-byte sequences are valid (E1 82 80-BF, E1 83 80-BF)
+                    // We only transform the uppercase subset, rest passes through
+
+                    // Find uppercase positions that need transformation:
+                    // - E1 82 A0-BF: third byte in A0-BF range (U+10A0-10BF)
+                    // - E1 83 80-85: third byte in 80-85 range (U+10C0-10C5)
+                    // - E1 83 87: third byte = 87 (U+10C7)
+                    // - E1 83 8D: third byte = 8D (U+10CD)
+                    __mmask64 third_pos_82 = is_82_at_e1 << 2;
+                    __mmask64 third_pos_83 = is_83_at_e1 << 2;
+
+                    __mmask64 is_82_uppercase = _mm512_mask_cmp_epu8_mask(
+                        third_pos_82 & load_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                        _mm512_set1_epi8(0x20), _MM_CMPINT_LT);
+                    // For E1 83: check 80-85, 87, or 8D
+                    __mmask64 is_83_range = _mm512_mask_cmp_epu8_mask(
+                        third_pos_83 & load_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                        _mm512_set1_epi8(0x06), _MM_CMPINT_LT);
+                    __mmask64 is_83_c7 = _mm512_mask_cmpeq_epi8_mask(
+                        third_pos_83 & load_mask, source_vec.zmm, _mm512_set1_epi8((char)0x87));
+                    __mmask64 is_83_cd = _mm512_mask_cmpeq_epi8_mask(
+                        third_pos_83 & load_mask, source_vec.zmm, _mm512_set1_epi8((char)0x8D));
+                    __mmask64 is_83_uppercase = is_83_range | is_83_c7 | is_83_cd;
+
+                    // Include ASCII, ALL Georgian E1 (not just uppercase), E2 (punctuation), continuations, safe EA
+                    // E2 is mostly safe (punctuation, symbols) - only a few codepoints fold (Kelvin, Angstrom)
+                    // but we can safely pass those through unchanged (they're rare in Georgian text)
+                    // Also include C2 leads (Latin-1 Supplement: U+0080-00BF) - no case folding needed
+                    __mmask64 is_safe_ea = is_ea_lead & ~(is_ea_complex >> 1);
+                    __mmask64 is_c2_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC2));
+                    __mmask64 is_valid_georgian_mix =
+                        ~is_non_ascii | is_georgian_e1 | is_e2_lead | is_cont | is_safe_ea | is_c2_lead;
+                    // Exclude other 2-byte leads (C3-DF may need folding), 4-byte, EF
+                    __mmask64 is_foldable_2byte = is_two_byte_lead & ~is_c2_lead;
+                    is_valid_georgian_mix &= ~(is_foldable_2byte | is_four_byte_lead | is_ef_lead);
+                    sz_size_t georgian_length = sz_u64_ctz(~is_valid_georgian_mix | ~load_mask);
+
+                    // Don't split multi-byte sequences (2-byte C2, 3-byte E1/E2/EA)
+                    if (georgian_length >= 1 && georgian_length < 64) {
+                        __mmask64 prefix = sz_u64_mask_until_(georgian_length);
+                        // Check for incomplete 3-byte sequences (leads in last 2 positions)
+                        __mmask64 leads3_in_prefix = is_three_byte_lead & prefix;
+                        __mmask64 safe3_mask = georgian_length >= 3 ? sz_u64_mask_until_(georgian_length - 2) : 0;
+                        __mmask64 unsafe3 = leads3_in_prefix & ~safe3_mask;
+                        // Check for incomplete 2-byte sequences (leads in last position)
+                        __mmask64 leads2_in_prefix = is_c2_lead & prefix;
+                        __mmask64 safe2_mask = georgian_length >= 2 ? sz_u64_mask_until_(georgian_length - 1) : 0;
+                        __mmask64 unsafe2 = leads2_in_prefix & ~safe2_mask;
+                        __mmask64 unsafe = unsafe3 | unsafe2;
+                        if (unsafe) georgian_length = sz_u64_ctz(unsafe);
+                    }
+
+                    if (georgian_length >= 2) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(georgian_length);
+
+                        // Find uppercase leads that need transformation within prefix
+                        __mmask64 uppercase_leads = ((is_82_uppercase | is_83_uppercase) >> 2) & is_georgian_e1;
+                        uppercase_leads &= prefix_mask;
+
+                        // Transform only uppercase Georgian: E1 82/83 XX → E2 B4 YY
+                        __m512i folded = source_vec.zmm;
+
+                        // Set lead bytes to E2 where uppercase Georgian
+                        folded = _mm512_mask_blend_epi8(uppercase_leads, folded, _mm512_set1_epi8((char)0xE2));
+
+                        // Set second bytes to B4 where uppercase Georgian
+                        __mmask64 uppercase_second_pos = uppercase_leads << 1;
+                        folded = _mm512_mask_blend_epi8(uppercase_second_pos, folded, _mm512_set1_epi8((char)0xB4));
+
+                        // Adjust third bytes for uppercase only: -0x20 for 82, +0x20 for 83
+                        __mmask64 prefix_82_upper = is_82_uppercase & prefix_mask;
+                        __mmask64 prefix_83_upper = is_83_uppercase & prefix_mask;
+                        folded = _mm512_mask_sub_epi8(folded, prefix_82_upper, folded, _mm512_set1_epi8(0x20));
+                        folded = _mm512_mask_add_epi8(folded, prefix_83_upper, folded, _mm512_set1_epi8(0x20));
+
+                        // Also fold ASCII A-Z
+                        __mmask64 is_upper_ascii = _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, a_upper_vec),
+                                                                        subtract26_vec, _MM_CMPINT_LT);
+                        folded = _mm512_mask_add_epi8(folded, is_upper_ascii & prefix_mask, folded, x20_vec);
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                        target += georgian_length, source += georgian_length, source_length -= georgian_length;
+                        // DEBUG: printf("Georgian path: processed %zu bytes\n", georgian_length);
+                        continue;
+                    }
+                }
+            }
+            // DEBUG: Add counter for when Georgian path is skipped
+            // static int skip_count = 0; if (is_e1_lead && ++skip_count < 10) printf("Skipped Georgian path at len=%zu\n", source_length);
+
             // Slow path: Has 2-byte, 4-byte, or E1/E2/EF leads that need special handling
             // EA with problematic second bytes (is_ea_complex) also needs special handling
             // But plain EA (Hangul) is safe
@@ -1690,6 +1848,67 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                         _mm512_mask_storeu_epi8(target, prefix_mask_3, folded);
                         target += three_byte_length, source += three_byte_length, source_length -= three_byte_length;
                         continue;
+                    }
+
+                    // Handle Georgian uppercase (E1 82/83) → lowercase (E2 B4)
+                    // Georgian Mkhedruli: U+10A0-10C5 (E1 82 A0 - E1 83 85) → U+2D00-2D25 (E2 B4 80 - E2 B4 A5)
+                    // This transformation changes the UTF-8 lead byte from E1 to E2, requiring special handling.
+                    __mmask64 is_82_second =
+                        _mm512_mask_cmpeq_epi8_mask(is_e1_in_prefix, second_bytes, _mm512_set1_epi8((char)0x82));
+                    __mmask64 is_83_second =
+                        _mm512_mask_cmpeq_epi8_mask(is_e1_in_prefix, second_bytes, _mm512_set1_epi8((char)0x83));
+                    __mmask64 is_georgian_second = is_82_second | is_83_second;
+
+                    if (is_georgian_second) {
+                        // Validate third byte range for Georgian uppercase:
+                        // - E1 82 A0-BF: U+10A0-10BF (32 chars)
+                        // - E1 83 80-85: U+10C0-10C5 (6 chars)
+                        __mmask64 third_pos_82 = is_82_second << 2;
+                        __mmask64 third_pos_83 = is_83_second << 2;
+
+                        // For E1 82: third byte must be A0-BF
+                        __mmask64 is_82_valid = _mm512_mask_cmp_epu8_mask(
+                            third_pos_82, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                            _mm512_set1_epi8(0x20), _MM_CMPINT_LT);
+
+                        // For E1 83: third byte must be 80-85
+                        __mmask64 is_83_valid = _mm512_mask_cmp_epu8_mask(
+                            third_pos_83, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                            _mm512_set1_epi8(0x06), _MM_CMPINT_LT);
+
+                        __mmask64 georgian_leads = ((is_82_valid | is_83_valid) >> 2) & is_e1_in_prefix;
+
+                        if (georgian_leads) {
+                            // Transform: E1 82/83 XX → E2 B4 YY
+                            // For 82: YY = XX - 0x20 (A0-BF → 80-9F)
+                            // For 83: YY = XX + 0x20 (80-85 → A0-A5)
+
+                            // Start with source, then apply transformations
+                            __m512i folded = source_vec.zmm;
+
+                            // Set lead bytes to E2 where Georgian
+                            folded = _mm512_mask_blend_epi8(georgian_leads, folded, _mm512_set1_epi8((char)0xE2));
+
+                            // Set second bytes to B4 where Georgian
+                            __mmask64 georgian_second_pos = georgian_leads << 1;
+                            folded =
+                                _mm512_mask_blend_epi8(georgian_second_pos, folded, _mm512_set1_epi8((char)0xB4));
+
+                            // Adjust third bytes based on original second byte
+                            // -0x20 for sequences that had 82, +0x20 for sequences that had 83
+                            folded = _mm512_mask_sub_epi8(folded, is_82_valid, folded, _mm512_set1_epi8(0x20));
+                            folded = _mm512_mask_add_epi8(folded, is_83_valid, folded, _mm512_set1_epi8(0x20));
+
+                            // Also fold any ASCII A-Z that might be mixed in
+                            __mmask64 is_upper_ascii = _mm512_cmp_epu8_mask(
+                                _mm512_sub_epi8(source_vec.zmm, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
+                            folded = _mm512_mask_add_epi8(folded, is_upper_ascii & prefix_mask_3, folded, x20_vec);
+
+                            _mm512_mask_storeu_epi8(target, prefix_mask_3, folded);
+                            target += three_byte_length, source += three_byte_length,
+                                source_length -= three_byte_length;
+                            continue;
+                        }
                     }
                 }
 
