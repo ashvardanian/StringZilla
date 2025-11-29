@@ -1619,6 +1619,45 @@ def test_utf8_case_insensitive_find():
     s = sz.Str("Hello World")
     assert s.utf8_case_insensitive_find("WORLD") == 6
 
+    # str returns codepoint offsets: 'Hëllo' has 5 codepoints but 6 bytes (ë = 2 bytes)
+    assert sz.utf8_case_insensitive_find("Hëllo Wörld", "WÖRLD") == 6  # 6 codepoints
+    assert sz.utf8_case_insensitive_find("Café", "FÉ") == 2  # 2 codepoints (C, a)
+
+    # bytes returns byte offsets
+    assert sz.utf8_case_insensitive_find(b"Hello World", b"WORLD") == 6  # Same for ASCII
+    # 'Hëllo' = H(1) + ë(2) + l(1) + l(1) + o(1) + space(1) = 7 bytes before 'Wörld'
+    assert sz.utf8_case_insensitive_find("Hëllo Wörld".encode(), "WÖRLD".encode()) == 7
+    # 'Café' = C(1) + a(1) + f(1) + é(2) = 'fé' starts at byte 2
+    assert sz.utf8_case_insensitive_find("Café".encode(), "FÉ".encode()) == 2
+
+    # start/end with str (codepoint offsets)
+    text = "Hëllo Hëllo"  # 11 codepoints
+    assert sz.utf8_case_insensitive_find(text, "HËLLO", 0) == 0  # First match
+    assert sz.utf8_case_insensitive_find(text, "HËLLO", 1) == 6  # Skip first, find second
+    assert sz.utf8_case_insensitive_find(text, "HËLLO", 0, 5) == 0  # Within first word
+    assert sz.utf8_case_insensitive_find(text, "HËLLO", 0, 4) == -1  # Too short
+
+    # start/end with bytes (byte offsets)
+    text_bytes = "Hëllo Hëllo".encode()  # 13 bytes
+    assert sz.utf8_case_insensitive_find(text_bytes, "HËLLO".encode(), 0) == 0
+    assert sz.utf8_case_insensitive_find(text_bytes, "HËLLO".encode(), 1) == 7  # Skip first byte, find at byte 7
+    assert sz.utf8_case_insensitive_find(text_bytes, "HËLLO".encode(), 0, 7) == 0  # First match within range
+    assert sz.utf8_case_insensitive_find(text_bytes, "HËLLO".encode(), 0, 5) == -1  # Too short
+
+    # German sharp S with bytes
+    assert sz.utf8_case_insensitive_find(b"Strasse", b"STRASSE") == 0
+    assert sz.utf8_case_insensitive_find("Straße".encode(), b"STRASSE") == 0
+    assert sz.utf8_case_insensitive_find("XXStraße".encode(), b"STRASSE") == 2  # XX = 2 bytes
+
+    # Verify returned index works for slicing
+    text = "Café au lait"
+    idx = sz.utf8_case_insensitive_find(text, "AU")
+    assert text[idx : idx + 2].lower() == "au"
+
+    text_bytes = "Café au lait".encode()
+    idx = sz.utf8_case_insensitive_find(text_bytes, b"AU")
+    assert text_bytes[idx : idx + 2].lower() == b"au"
+
 
 def test_utf8_case_insensitive_order():
     """Test case-insensitive UTF-8 comparison."""
@@ -1660,6 +1699,22 @@ def test_utf8_case_insensitive_order():
     # Method form on Str
     s = sz.Str("hello")
     assert s.utf8_case_insensitive_order("HELLO") == 0
+
+    # bytes input
+    assert sz.utf8_case_insensitive_order(b"hello", b"HELLO") == 0
+    assert sz.utf8_case_insensitive_order(b"HELLO", b"hello") == 0
+    assert sz.utf8_case_insensitive_order(b"apple", b"BANANA") < 0
+    assert sz.utf8_case_insensitive_order(b"ZEBRA", b"apple") > 0
+
+    # German sharp S with bytes
+    assert sz.utf8_case_insensitive_order("Straße".encode(), b"STRASSE") == 0
+    assert sz.utf8_case_insensitive_order(b"strasse", "Straße".encode()) == 0
+
+    # Greek with bytes
+    assert sz.utf8_case_insensitive_order("ΑΒΓΔ".encode(), "αβγδ".encode()) == 0
+
+    # Cyrillic with bytes
+    assert sz.utf8_case_insensitive_order("ПРИВЕТ".encode(), "привет".encode()) == 0
 
 
 def test_unit_utf8_count():

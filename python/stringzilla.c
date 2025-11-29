@@ -3289,54 +3289,99 @@ static char const doc_utf8_case_insensitive_find[] = //
     "Performs a case-insensitive search using Unicode case folding rules,\n"
     "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"
     "\n"
+    "IMPORTANT - Type-dependent behavior:\n"
+    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"
+    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"
+    "\n"
     "Args:\n"
     "    haystack (Str or str or bytes): The string to search in.\n"
     "    needle (Str or str or bytes): The substring to find.\n"
+    "    start (int, optional): Starting index (default: 0).\n"
+    "    end (int, optional): Ending index (default: length).\n"
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    int: Index of the first match, or -1 if not found.\n"
     "\n"
     "Example:\n"
-    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')\n"
+    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')  # str: codepoint offset\n"
     "    6\n"
-    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')\n"
+    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"
+    "    0\n"
+    "    >>> sz.utf8_case_insensitive_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"
     "    0";
 
 static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *const *args,
                                                      Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs_expected = is_member ? 1 : 2; // needle if method, haystack+needle if function
-    int validate = 0;                              // Default: no validation
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
-    if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() takes exactly %zd positional argument(s)",
-                     nargs_expected);
+    // Argument objects
+    PyObject *haystack_obj = NULL;
+    PyObject *needle_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+    int validate = 0;
+
+    // Argument count validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // needle required
+    Py_ssize_t const expected_max = expected_min + 3;  // + start + end + validate
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    // Parse optional 'validate' keyword argument
-    if (args_names_tuple) {
-        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
-        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
-            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
-            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
-                PyObject *val = args[positional_args_count + i];
-                validate = PyObject_IsTrue(val);
-                if (validate < 0) return NULL;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() got unexpected keyword argument '%U'", key);
+    // Extract positional arguments
+    if (is_member) {
+        haystack_obj = self;
+        if (positional_args_count >= 1) needle_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) haystack_obj = args[0];
+        if (positional_args_count >= 2) needle_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+    }
+
+    // Parse keyword arguments
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+        PyObject *val = args[positional_args_count + i];
+
+        if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+            if (start_obj) {
+                PyErr_SetString(PyExc_TypeError, "start specified twice");
                 return NULL;
             }
+            start_obj = val;
+        }
+        else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+            if (end_obj) {
+                PyErr_SetString(PyExc_TypeError, "end specified twice");
+                return NULL;
+            }
+            end_obj = val;
+        }
+        else if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+            validate = PyObject_IsTrue(val);
+            if (validate < 0) return NULL;
+        }
+        else {
+            PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() got unexpected keyword argument '%U'", key);
+            return NULL;
         }
     }
 
-    PyObject *haystack_obj = is_member ? self : args[0];
-    PyObject *needle_obj = is_member ? args[0] : args[1];
+    // Determine if input is Unicode (str) or bytes - affects offset semantics
+    int const is_unicode = PyUnicode_Check(haystack_obj);
 
-    sz_string_view_t haystack, needle;
-    if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length)) {
+    // Extract string views (UTF-8 bytes)
+    sz_string_view_t haystack_full, needle;
+    if (!sz_py_export_string_like(haystack_obj, &haystack_full.start, &haystack_full.length)) {
         wrap_current_exception("First argument (haystack) must be string-like");
         return NULL;
     }
@@ -3345,9 +3390,70 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
         return NULL;
     }
 
-    // Empty needle matches at position 0
-    if (needle.length == 0) { return PyLong_FromSsize_t(0); }
-    // Empty haystack can't contain non-empty needle
+    // Parse start/end (these are codepoint offsets for str, byte offsets for bytes)
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+    if (start_obj) {
+        start = PyLong_AsSsize_t(start_obj);
+        if (start == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "start must be an integer");
+            return NULL;
+        }
+    }
+    if (end_obj) {
+        end = PyLong_AsSsize_t(end_obj);
+        if (end == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "end must be an integer");
+            return NULL;
+        }
+    }
+
+    // Convert offsets and prepare search range
+    sz_size_t byte_offset_start = 0;
+    sz_size_t byte_length = haystack_full.length;
+    sz_size_t codepoint_offset_start = 0; // Only used for str return value
+
+    if (is_unicode) {
+        // For str: start/end are codepoint offsets, convert to byte offsets
+        sz_size_t total_codepoints = sz_utf8_count(haystack_full.start, haystack_full.length);
+
+        // Clamp codepoint offsets
+        sz_size_t cp_start = (start < 0) ? 0 : (sz_size_t)start;
+        sz_size_t cp_end = (end < 0 || (sz_size_t)end > total_codepoints) ? total_codepoints : (sz_size_t)end;
+        if (cp_start > cp_end) cp_start = cp_end;
+
+        codepoint_offset_start = cp_start;
+
+        // Convert codepoint start to byte offset
+        if (cp_start > 0) {
+            sz_cptr_t start_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_start);
+            byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
+        }
+
+        // Convert codepoint end to byte offset
+        sz_size_t byte_offset_end = haystack_full.length;
+        if (cp_end < total_codepoints) {
+            sz_cptr_t end_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_end);
+            byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
+        }
+
+        byte_length = (byte_offset_end > byte_offset_start) ? (byte_offset_end - byte_offset_start) : 0;
+    }
+    else {
+        // For bytes: start/end are byte offsets, use directly
+        sz_ssize_clamp_interval(haystack_full.length, start, end, &byte_offset_start, &byte_length);
+    }
+
+    // Prepare the search haystack
+    sz_string_view_t haystack;
+    haystack.start = haystack_full.start + byte_offset_start;
+    haystack.length = byte_length;
+
+    // Empty needle matches at start position
+    if (needle.length == 0) {
+        if (is_unicode) { return PyLong_FromSsize_t((Py_ssize_t)codepoint_offset_start); }
+        else { return PyLong_FromSsize_t((Py_ssize_t)byte_offset_start); }
+    }
+    // Empty haystack (after slicing) can't contain non-empty needle
     if (haystack.length == 0) { return PyLong_FromSsize_t(-1); }
 
     // Validate UTF-8 input only if requested
@@ -3368,8 +3474,18 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
-    Py_ssize_t index = (Py_ssize_t)(result - haystack.start);
-    return PyLong_FromSsize_t(index);
+    // Compute and return the appropriate offset type
+    sz_size_t result_byte_offset = (sz_size_t)(result - haystack_full.start);
+
+    if (is_unicode) {
+        // For str: return codepoint offset
+        sz_size_t result_codepoint_offset = sz_utf8_count(haystack_full.start, result_byte_offset);
+        return PyLong_FromSsize_t((Py_ssize_t)result_codepoint_offset);
+    }
+    else {
+        // For bytes: return byte offset
+        return PyLong_FromSsize_t((Py_ssize_t)result_byte_offset);
+    }
 }
 
 static char const doc_utf8_case_insensitive_order[] = //
