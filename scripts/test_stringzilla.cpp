@@ -530,6 +530,202 @@ void test_utf8_equivalence(                                 //
     }
 }
 
+/**
+ *  @brief  Tests equivalence of case folding implementations (serial vs SIMD).
+ *
+ *  Generates random UTF-8 strings containing:
+ *  - ASCII text (uppercase and lowercase)
+ *  - Multi-byte UTF-8 characters from various scripts (Cyrillic, Greek, Latin Extended)
+ *  - Special cases like German ß
+ *
+ *  For each generated string, compares byte-by-byte output of both implementations.
+ */
+void test_utf8_case_fold_equivalence(                             //
+    sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd, //
+    std::size_t min_text_length = 4000, std::size_t min_iterations = 10000) {
+
+    // Output buffers (3x input for worst-case expansion)
+    std::vector<char> output_base(min_text_length * 3 + 256);
+    std::vector<char> output_simd(min_text_length * 3 + 256);
+
+    auto check = [&](std::string const &text) {
+        // Ensure buffers are large enough
+        if (output_base.size() < text.size() * 3 + 64) {
+            output_base.resize(text.size() * 3 + 64);
+            output_simd.resize(text.size() * 3 + 64);
+        }
+
+        sz_size_t len_base = fold_base(text.data(), text.size(), output_base.data());
+        sz_size_t len_simd = fold_simd(text.data(), text.size(), output_simd.data());
+
+        if (len_base != len_simd) {
+            std::fprintf(stderr, "Case fold length mismatch: base=%zu, simd=%zu, input_len=%zu\n", //
+                         len_base, len_simd, text.size());
+            // Print first divergence
+            for (std::size_t i = 0; i < std::min(len_base, len_simd); ++i) {
+                if (output_base[i] != output_simd[i]) {
+                    std::fprintf(stderr, "First byte diff at output[%zu]: base=0x%02X, simd=0x%02X\n", //
+                                 i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
+                    break;
+                }
+            }
+            assert(len_base == len_simd && "Case fold length mismatch");
+        }
+
+        for (sz_size_t i = 0; i < len_base; ++i) {
+            if (output_base[i] != output_simd[i]) {
+                std::fprintf(stderr, "Case fold content mismatch at byte %zu: base=0x%02X, simd=0x%02X\n", //
+                             i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
+                // Show context around the mismatch
+                std::size_t start = i > 10 ? i - 10 : 0;
+                std::size_t end = std::min(i + 10, (std::size_t)len_base);
+                std::fprintf(stderr, "Base output[%zu..%zu]: ", start, end);
+                for (std::size_t j = start; j < end; ++j) std::fprintf(stderr, "%02X ", (unsigned char)output_base[j]);
+                std::fprintf(stderr, "\nSIMD output[%zu..%zu]: ", start, end);
+                for (std::size_t j = start; j < end; ++j) std::fprintf(stderr, "%02X ", (unsigned char)output_simd[j]);
+                std::fprintf(stderr, "\n");
+                assert(output_base[i] == output_simd[i] && "Case fold content mismatch");
+            }
+        }
+    };
+
+    // Test content - mix of scripts with case folding rules
+    static char const *utf8_content[] = {
+        // ASCII
+        "",
+        "a",
+        "A",
+        "hello",
+        "HELLO",
+        "Hello World",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "abcdefghijklmnopqrstuvwxyz",
+        "0123456789",
+        // German ß (special case: stays as ß, but capital ẞ folds to ss)
+        "\xC3\x9F", // ß (U+00DF)
+        "stra\xC3\x9F"
+        "e", // straße
+        // Latin-1 uppercase (À-Þ range, 2-byte UTF-8 starting with C3)
+        "\xC3\x80", // À (U+00C0)
+        "\xC3\x89", // É (U+00C9)
+        "\xC3\x96", // Ö (U+00D6)
+        "\xC3\x9C", // Ü (U+00DC)
+        "\xC3\x9E", // Þ (U+00DE)
+        // Cyrillic (2-byte UTF-8 starting with D0-D1)
+        "\xD0\x90",                                         // А (U+0410)
+        "\xD0\x9F",                                         // П (U+041F)
+        "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2", // ПРИВЕТ
+        "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", // привет
+        // Greek (2-byte UTF-8 starting with CE-CF)
+        "\xCE\x91",                                         // Α (U+0391)
+        "\xCE\xA9",                                         // Ω (U+03A9)
+        "\xCE\x95\xCE\xBB\xCE\xBB\xCE\xAC\xCE\xB4\xCE\xB1", // Ελλάδα
+        // Armenian (2-byte UTF-8 starting with D4-D5)
+        "\xD4\xB1", // Ա (U+0531)
+        "\xD5\x80", // Հ (U+0540)
+        // Mixed content
+        "Hello \xD0\x9C\xD0\xB8\xD1\x80!",      // Hello Мир!
+        "Caf\xC3\xA9 \xCE\xB1\xCE\xB2\xCE\xB3", // Café αβγ
+        // Emojis (no case folding, should pass through)
+        "\xF0\x9F\x98\x80",             // 😀
+        "Hello \xF0\x9F\x8C\x8D World", // Hello 🌍 World
+    };
+
+    auto &rng = global_random_generator();
+    std::size_t const content_count = sizeof(utf8_content) / sizeof(utf8_content[0]);
+    std::uniform_int_distribution<std::size_t> content_dist(0, content_count - 1);
+
+    // First, test all the fixed strings
+    for (std::size_t i = 0; i < content_count; ++i) { check(utf8_content[i]); }
+
+    // Generate and test many random strings
+    for (std::size_t iteration = 0; iteration < min_iterations; ++iteration) {
+        std::string text;
+
+        // Build up a random string of at least `min_text_length` bytes
+        while (text.size() < min_text_length) {
+            std::size_t idx = content_dist(rng);
+            text.append(utf8_content[idx]);
+        }
+        check(text);
+    }
+}
+
+/**
+ *  @brief  Tests UTF-8 case folding for ALL valid Unicode codepoints.
+ *
+ *  Generates a string containing every valid Unicode codepoint (0x0000-0x10FFFF,
+ *  excluding surrogates 0xD800-0xDFFF), folds it with both serial and SIMD
+ *  implementations, and reports any codepoints that produce different results.
+ */
+void test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
+    std::printf("Testing case folding for all Unicode codepoints...\n");
+
+    // Generate text with all valid Unicode codepoints
+    std::vector<char> all_codepoints;
+    std::vector<sz_rune_t> codepoints_list;
+
+    for (sz_rune_t cp = 0; cp <= 0x10FFFF; ++cp) {
+        // Skip surrogates (invalid in UTF-8)
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+
+        sz_u8_t buf[4];
+        sz_rune_length_t len = sz_rune_export(cp, buf);
+        all_codepoints.insert(all_codepoints.end(), buf, buf + len);
+        codepoints_list.push_back(cp);
+    }
+
+    std::printf("Generated %zu codepoints (%zu bytes)\n", codepoints_list.size(), all_codepoints.size());
+
+    // Allocate output buffers (4x for worst-case expansion like ΐ → ι + 2 combining marks)
+    std::vector<char> output_base(all_codepoints.size() * 4);
+    std::vector<char> output_simd(all_codepoints.size() * 4);
+
+    // Fold with both implementations
+    sz_size_t len_base = fold_base(all_codepoints.data(), all_codepoints.size(), output_base.data());
+    sz_size_t len_simd = fold_simd(all_codepoints.data(), all_codepoints.size(), output_simd.data());
+
+    // Compare results
+    bool all_match = (len_base == len_simd) && (std::memcmp(output_base.data(), output_simd.data(), len_base) == 0);
+
+    if (all_match) {
+        std::printf("All %zu codepoints fold identically!\n", codepoints_list.size());
+        return;
+    }
+
+    // Find and report specific failing codepoints
+    std::printf("Mismatch detected! Scanning for failing codepoints...\n");
+    std::size_t fail_count = 0;
+    std::size_t src_offset = 0;
+
+    for (sz_rune_t cp : codepoints_list) {
+        // Get the UTF-8 length of this codepoint
+        sz_u8_t tmp[4];
+        sz_rune_length_t cp_len = sz_rune_export(cp, tmp);
+
+        // Fold this single codepoint with both implementations
+        char expected[16], actual[16];
+        sz_size_t exp_len = fold_base(all_codepoints.data() + src_offset, cp_len, expected);
+        sz_size_t act_len = fold_simd(all_codepoints.data() + src_offset, cp_len, actual);
+
+        if (exp_len != act_len || std::memcmp(expected, actual, exp_len) != 0) {
+            fail_count++;
+            if (fail_count <= 50) { // Limit output
+                std::fprintf(stderr, "FAIL U+%04X: expected %zu bytes [", cp, exp_len);
+                for (sz_size_t i = 0; i < exp_len; ++i) std::fprintf(stderr, "%02X ", (unsigned char)expected[i]);
+                std::fprintf(stderr, "], got %zu bytes [", act_len);
+                for (sz_size_t i = 0; i < act_len; ++i) std::fprintf(stderr, "%02X ", (unsigned char)actual[i]);
+                std::fprintf(stderr, "]\n");
+            }
+        }
+
+        src_offset += cp_len;
+    }
+
+    std::fprintf(stderr, "Total failures: %zu out of %zu codepoints\n", fail_count, codepoints_list.size());
+    assert(fail_count == 0 && "Case folding mismatch for some codepoints");
+}
+
 void test_equivalence() {
 
     // Ensure the seed affects hash results
@@ -613,6 +809,8 @@ void test_equivalence() {
         sz_utf8_find_newline_ice,                //
         sz_utf8_find_whitespace_serial,          //
         sz_utf8_find_whitespace_ice);
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
+    test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
