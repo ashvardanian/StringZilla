@@ -601,10 +601,9 @@ void test_utf8_case_fold_equivalence(                             //
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
         "abcdefghijklmnopqrstuvwxyz",
         "0123456789",
-        // German ß (special case: stays as ß, but capital ẞ folds to ss)
-        "\xC3\x9F", // ß (U+00DF)
-        "stra\xC3\x9F"
-        "e", // straße
+        // German Eszett (both ß and ẞ fold to "ss")
+        "\xC3\x9F", // ß (U+00DF) → ss
+        "straße",
         // Latin-1 uppercase (À-Þ range, 2-byte UTF-8 starting with C3)
         "\xC3\x80", // À (U+00C0)
         "\xC3\x89", // É (U+00C9)
