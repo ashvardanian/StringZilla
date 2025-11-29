@@ -1170,7 +1170,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                         // Check if last 1-2 bytes are an incomplete sequence
                         __mmask64 leads_in_chunk = is_three_byte_lead & load_mask;
                         if (leads_in_chunk) {
-                            int last_lead_pos = 63 - __builtin_clzll(leads_in_chunk);
+                            int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk);
                             if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
                         }
                     }
