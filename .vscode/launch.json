@@ -203,14 +203,20 @@
       "program": "${file}",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["./leipzig1M.txt"]
+      "args": [
+        "./leipzig1M.txt"
+      ]
     },
     {
       "name": "Current PyTest File",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": ["${file}", "-s", "-x"],
+      "args": [
+        "${file}",
+        "-s",
+        "-x"
+      ],
       "console": "integratedTerminal",
       "justMyCode": false
     }
