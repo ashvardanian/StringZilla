@@ -3264,6 +3264,123 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
     return result_bytes;
 }
 
+static char const doc_utf8_case_insensitive_find[] = //
+    "Find substring using Unicode case-insensitive matching.\n"
+    "\n"
+    "Performs a case-insensitive search using Unicode case folding rules,\n"
+    "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"
+    "\n"
+    "Args:\n"
+    "    haystack (Str or str or bytes): The string to search in.\n"
+    "    needle (Str or str or bytes): The substring to find.\n"
+    "\n"
+    "Returns:\n"
+    "    int: Index of the first match, or -1 if not found.\n"
+    "\n"
+    "Example:\n"
+    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')\n"
+    "    6\n"
+    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')\n"
+    "    0";
+
+static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *const *args,
+                                                      Py_ssize_t positional_args_count,
+                                                      PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs_expected = is_member ? 1 : 2; // needle if method, haystack+needle if function
+
+    if (positional_args_count != nargs_expected) {
+        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() takes exactly %zd argument(s)", nargs_expected);
+        return NULL;
+    }
+
+    // Reject keyword arguments
+    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
+        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_find() takes no keyword arguments");
+        return NULL;
+    }
+
+    PyObject *haystack_obj = is_member ? self : args[0];
+    PyObject *needle_obj = is_member ? args[0] : args[1];
+
+    sz_string_view_t haystack, needle;
+    if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length)) {
+        wrap_current_exception("First argument (haystack) must be string-like");
+        return NULL;
+    }
+    if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
+        wrap_current_exception("Second argument (needle) must be string-like");
+        return NULL;
+    }
+
+    // Empty needle matches at position 0
+    if (needle.length == 0) { return PyLong_FromSsize_t(0); }
+    // Empty haystack can't contain non-empty needle
+    if (haystack.length == 0) { return PyLong_FromSsize_t(-1); }
+
+    sz_size_t matched_length = 0;
+    sz_cptr_t result = sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length,
+                                                      &matched_length);
+
+    if (result == NULL) { return PyLong_FromSsize_t(-1); }
+
+    Py_ssize_t index = (Py_ssize_t)(result - haystack.start);
+    return PyLong_FromSsize_t(index);
+}
+
+static char const doc_utf8_case_insensitive_order[] = //
+    "Compare two UTF-8 strings case-insensitively.\n"
+    "\n"
+    "Performs lexicographical comparison using Unicode case folding,\n"
+    "correctly handling one-to-many expansions (e.g., 'Straße' equals 'STRASSE').\n"
+    "\n"
+    "Args:\n"
+    "    a (Str or str or bytes): First string to compare.\n"
+    "    b (Str or str or bytes): Second string to compare.\n"
+    "\n"
+    "Returns:\n"
+    "    int: Negative if a < b, zero if equal, positive if a > b.\n"
+    "\n"
+    "Example:\n"
+    "    >>> sz.utf8_case_insensitive_order('hello', 'HELLO')\n"
+    "    0\n"
+    "    >>> sz.utf8_case_insensitive_order('apple', 'BANANA')\n"
+    "    -1";
+
+static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *const *args,
+                                                       Py_ssize_t positional_args_count,
+                                                       PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
+
+    if (positional_args_count != nargs_expected) {
+        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd argument(s)", nargs_expected);
+        return NULL;
+    }
+
+    // Reject keyword arguments
+    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
+        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_order() takes no keyword arguments");
+        return NULL;
+    }
+
+    PyObject *a_obj = is_member ? self : args[0];
+    PyObject *b_obj = is_member ? args[0] : args[1];
+
+    sz_string_view_t a, b;
+    if (!sz_py_export_string_like(a_obj, &a.start, &a.length)) {
+        wrap_current_exception("First argument must be string-like");
+        return NULL;
+    }
+    if (!sz_py_export_string_like(b_obj, &b.start, &b.length)) {
+        wrap_current_exception("Second argument must be string-like");
+        return NULL;
+    }
+
+    sz_ordering_t order = sz_utf8_case_insensitive_order(a.start, a.length, b.start, b.length);
+    return PyLong_FromLong((long)order);
+}
+
 static char const doc_find_first_of[] = //
     "Find the index of the first occurrence of any character from another string.\n"
     "\n"
@@ -4618,6 +4735,8 @@ static PyMethodDef Str_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -6947,6 +7066,8 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},

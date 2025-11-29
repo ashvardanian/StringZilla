@@ -279,6 +279,7 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
     }
 }
 
+use core::cmp::Ordering;
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
 
@@ -345,6 +346,19 @@ extern "C" {
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
+    pub(crate) fn sz_utf8_case_insensitive_find(
+        haystack: *const c_void,
+        haystack_length: usize,
+        needle: *const c_void,
+        needle_length: usize,
+        matched_length: *mut usize,
+    ) -> *const c_void;
+    pub(crate) fn sz_utf8_case_insensitive_order(
+        a: *const c_void,
+        a_length: usize,
+        b: *const c_void,
+        b_length: usize,
+    ) -> i32;
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
@@ -898,11 +912,11 @@ where
 /// use stringzilla::stringzilla as sz;
 /// let source = "HELLO WORLD";
 /// let mut dest = [0u8; 32];
-/// let len = sz::case_fold(source, &mut dest);
+/// let len = sz::utf8_case_fold(source, &mut dest);
 /// assert_eq!(&dest[..len], b"hello world");
 /// ```
 ///
-pub fn case_fold<T, D>(source: T, destination: &mut D) -> usize
+pub fn utf8_case_fold<T, D>(source: T, destination: &mut D) -> usize
 where
     T: AsRef<[u8]>,
     D: AsMut<[u8]> + ?Sized,
@@ -917,6 +931,162 @@ where
             dest_slice.as_mut_ptr() as *mut c_void,
         )
     }
+}
+
+/// Performs case-insensitive search for `needle` in UTF-8 `haystack`.
+///
+/// Unlike ASCII case-insensitive search, this handles Unicode case folding
+/// (e.g., German ß matches "ss", Turkish İ matches "i").
+///
+/// # Arguments
+///
+/// * `haystack`: The UTF-8 text to search in.
+/// * `needle`: The UTF-8 pattern to search for.
+///
+/// # Returns
+///
+/// If found, returns `Some((offset, matched_length))` where:
+/// - `offset` is the byte position in haystack where the match starts
+/// - `matched_length` is the number of bytes matched in haystack (may differ from needle length)
+///
+/// Returns `None` if no match is found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let haystack = "Hello WORLD";
+/// if let Some((offset, len)) = sz::utf8_case_insensitive_find(haystack, "world") {
+///     assert_eq!(offset, 6);
+///     assert_eq!(len, 5);
+/// }
+/// ```
+///
+pub fn utf8_case_insensitive_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
+where
+    H: AsRef<[u8]>,
+    N: AsRef<[u8]>,
+{
+    let haystack_ref = haystack.as_ref();
+    let needle_ref = needle.as_ref();
+    let mut matched_length: usize = 0;
+
+    let result = unsafe {
+        sz_utf8_case_insensitive_find(
+            haystack_ref.as_ptr() as *const c_void,
+            haystack_ref.len(),
+            needle_ref.as_ptr() as *const c_void,
+            needle_ref.len(),
+            &mut matched_length,
+        )
+    };
+
+    if result.is_null() {
+        None
+    } else {
+        let offset = unsafe { result.offset_from(haystack_ref.as_ptr() as *const c_void) };
+        Some((offset as usize, matched_length))
+    }
+}
+
+/// Compares two UTF-8 strings in case-insensitive manner.
+///
+/// Uses Unicode case folding for comparison, handling characters like
+/// German ß, Turkish İ/ı, and other case variants.
+///
+/// # Arguments
+///
+/// * `a`: First UTF-8 string.
+/// * `b`: Second UTF-8 string.
+///
+/// # Returns
+///
+/// * `Ordering::Less` if `a < b`
+/// * `Ordering::Equal` if `a == b` (case-insensitively)
+/// * `Ordering::Greater` if `a > b`
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// use std::cmp::Ordering;
+/// assert_eq!(sz::utf8_case_insensitive_order("Hello", "HELLO"), Ordering::Equal);
+/// assert_eq!(sz::utf8_case_insensitive_order("abc", "ABD"), Ordering::Less);
+/// ```
+///
+pub fn utf8_case_insensitive_order<A, B>(a: A, b: B) -> Ordering
+where
+    A: AsRef<[u8]>,
+    B: AsRef<[u8]>,
+{
+    let a_ref = a.as_ref();
+    let b_ref = b.as_ref();
+
+    let result = unsafe {
+        sz_utf8_case_insensitive_order(
+            a_ref.as_ptr() as *const c_void,
+            a_ref.len(),
+            b_ref.as_ptr() as *const c_void,
+            b_ref.len(),
+        )
+    };
+
+    match result {
+        x if x < 0 => Ordering::Less,
+        0 => Ordering::Equal,
+        _ => Ordering::Greater,
+    }
+}
+
+/// Unpacks a UTF-8 byte sequence into UTF-32 codepoints.
+///
+/// This function decodes UTF-8 encoded text into individual Unicode codepoints,
+/// storing them in a u32 array. It processes as many complete characters as
+/// possible given the input and output buffer sizes.
+///
+/// # Arguments
+///
+/// * `text`: The UTF-8 encoded byte slice to decode.
+/// * `runes`: Output buffer to store decoded codepoints.
+///
+/// # Returns
+///
+/// A tuple `(bytes_consumed, runes_unpacked)` where:
+/// - `bytes_consumed` is the number of bytes processed from `text`
+/// - `runes_unpacked` is the number of codepoints written to `runes`
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let text = "Hello 世界";
+/// let mut runes = [0u32; 16];
+/// let (bytes, count) = sz::utf8_unpack_chunk(text.as_bytes(), &mut runes);
+/// assert_eq!(count, 8); // 6 ASCII + 2 CJK characters
+/// assert_eq!(runes[0], 'H' as u32);
+/// assert_eq!(runes[6], '世' as u32);
+/// ```
+///
+pub fn utf8_unpack_chunk(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
+    let mut runes_unpacked: usize = 0;
+
+    let result = unsafe {
+        sz_utf8_unpack_chunk(
+            text.as_ptr() as *const c_void,
+            text.len(),
+            runes.as_mut_ptr(),
+            runes.len(),
+            &mut runes_unpacked,
+        )
+    };
+
+    let bytes_consumed = if result.is_null() {
+        0
+    } else {
+        unsafe { result.offset_from(text.as_ptr() as *const c_void) as usize }
+    };
+
+    (bytes_consumed, runes_unpacked)
 }
 
 /// Computes a 64-bit AES-based hash value for a given byte slice `text`.

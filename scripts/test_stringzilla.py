@@ -37,6 +37,16 @@ from typing import Optional, Sequence, Dict
 
 import pytest
 
+# Import shared Unicode data loading functions
+from test_helpers import (
+    UNICODE_VERSION,
+    get_unicode_xml_data,
+    parse_case_folding_file,
+    get_case_folding_rules,
+    get_case_folding_rules_as_codepoints,
+    get_normalization_props,
+)
+
 import stringzilla as sz
 from stringzilla import Str, Strs
 
@@ -1490,59 +1500,9 @@ def test_utf8_case_fold_expansions(input_str, expected):
     assert sz.utf8_case_fold(input_str) == expected
 
 
-def _parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
-    """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
-
-    Uses status C (common) and F (full) mappings for full case folding.
-    """
-    folds = {}
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split(";")
-            if len(parts) < 3:
-                continue
-            status = parts[1].strip()
-            # C = common, F = full (for expansions like ß → ss)
-            # Skip S (simple) and T (Turkic) for full case folding
-            if status not in ("C", "F"):
-                continue
-            try:
-                codepoint = int(parts[0].strip(), 16)
-                # Mapping can be multiple codepoints separated by spaces (e.g., "0073 0073" for ß → ss)
-                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
-                # Convert target codepoints to UTF-8 bytes
-                folded_str = "".join(chr(cp) for cp in target_cps)
-                folds[codepoint] = folded_str.encode("utf-8")
-            except (ValueError, IndexError):
-                continue
-    return folds
-
-
-def _get_case_folding_rules(version: str = "17.0.0") -> Dict[int, bytes]:
-    """Download and parse Unicode CaseFolding.txt, caching in temp directory.
-
-    Args:
-        version: Unicode version string (e.g., "17.0.0")
-
-    Returns:
-        Dict mapping codepoints to their folded UTF-8 bytes
-    """
-    import urllib.request
-
-    cache_path = os.path.join(tempfile.gettempdir(), f"CaseFolding-{version}.txt")
-
-    # Use cached file if it exists
-    if not os.path.exists(cache_path):
-        url = f"https://www.unicode.org/Public/{version}/ucd/CaseFolding.txt"
-        try:
-            urllib.request.urlretrieve(url, cache_path)
-        except Exception as e:
-            pytest.skip(f"Could not download CaseFolding.txt from {url}: {e}")
-
-    return _parse_case_folding_file(cache_path)
+# Backward compatibility aliases
+_parse_case_folding_file = parse_case_folding_file
+_get_case_folding_rules = get_case_folding_rules
 
 
 def test_utf8_case_fold_all_codepoints():
@@ -1615,6 +1575,87 @@ def test_utf8_case_fold_random_strings(seed_value: int):
         python_folded = test_str.casefold().encode("utf-8")
         sz_folded = sz.utf8_case_fold(test_str)
         assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
+
+
+def test_utf8_case_insensitive_find():
+    """Test case-insensitive UTF-8 substring search."""
+    # Basic ASCII
+    assert sz.utf8_case_insensitive_find("Hello World", "WORLD") == 6
+    assert sz.utf8_case_insensitive_find("Hello World", "hello") == 0
+    assert sz.utf8_case_insensitive_find("Hello World", "xyz") == -1
+
+    # Case variations
+    assert sz.utf8_case_insensitive_find("HELLO", "hello") == 0
+    assert sz.utf8_case_insensitive_find("hello", "HELLO") == 0
+    assert sz.utf8_case_insensitive_find("HeLLo WoRLd", "world") == 6
+
+    # German sharp S: ß folds to "ss"
+    assert sz.utf8_case_insensitive_find("Straße", "STRASSE") == 0
+    assert sz.utf8_case_insensitive_find("STRASSE", "straße") == 0
+    assert sz.utf8_case_insensitive_find("die Straße", "STRASSE") == 4
+
+    # Greek letters
+    assert sz.utf8_case_insensitive_find("ΑΒΓΔ", "αβγδ") == 0
+    assert sz.utf8_case_insensitive_find("αβγδ", "ΑΒΓΔ") == 0
+
+    # Cyrillic
+    assert sz.utf8_case_insensitive_find("ПРИВЕТ", "привет") == 0
+    assert sz.utf8_case_insensitive_find("привет", "ПРИВЕТ") == 0
+
+    # Empty cases
+    assert sz.utf8_case_insensitive_find("hello", "") == 0
+    assert sz.utf8_case_insensitive_find("", "x") == -1
+    assert sz.utf8_case_insensitive_find("", "") == 0
+
+    # Partial matches
+    assert sz.utf8_case_insensitive_find("abcdef", "CD") == 2
+    assert sz.utf8_case_insensitive_find("ABCDEF", "cd") == 2
+
+    # Method form on Str
+    s = sz.Str("Hello World")
+    assert s.utf8_case_insensitive_find("WORLD") == 6
+
+
+def test_utf8_case_insensitive_order():
+    """Test case-insensitive UTF-8 comparison."""
+    # Equal strings
+    assert sz.utf8_case_insensitive_order("hello", "HELLO") == 0
+    assert sz.utf8_case_insensitive_order("HELLO", "hello") == 0
+    assert sz.utf8_case_insensitive_order("HeLLo", "hElLO") == 0
+
+    # German sharp S equivalence
+    assert sz.utf8_case_insensitive_order("Straße", "STRASSE") == 0
+    assert sz.utf8_case_insensitive_order("strasse", "STRAẞE") == 0
+
+    # Less than
+    assert sz.utf8_case_insensitive_order("apple", "BANANA") < 0
+    assert sz.utf8_case_insensitive_order("APPLE", "banana") < 0
+    assert sz.utf8_case_insensitive_order("a", "B") < 0
+
+    # Greater than
+    assert sz.utf8_case_insensitive_order("ZEBRA", "apple") > 0
+    assert sz.utf8_case_insensitive_order("zebra", "APPLE") > 0
+    assert sz.utf8_case_insensitive_order("z", "A") > 0
+
+    # Empty strings
+    assert sz.utf8_case_insensitive_order("", "") == 0
+    assert sz.utf8_case_insensitive_order("", "a") < 0
+    assert sz.utf8_case_insensitive_order("a", "") > 0
+
+    # Prefix ordering
+    assert sz.utf8_case_insensitive_order("hello", "HELLO WORLD") < 0
+    assert sz.utf8_case_insensitive_order("HELLO WORLD", "hello") > 0
+
+    # Greek letters
+    assert sz.utf8_case_insensitive_order("ΑΒΓΔ", "αβγδ") == 0
+    assert sz.utf8_case_insensitive_order("αβγ", "ΑΒΓ") == 0
+
+    # Cyrillic
+    assert sz.utf8_case_insensitive_order("ПРИВЕТ", "привет") == 0
+
+    # Method form on Str
+    s = sz.Str("hello")
+    assert s.utf8_case_insensitive_order("HELLO") == 0
 
 
 def test_unit_utf8_count():
