@@ -1232,8 +1232,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                                   _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
                                                        _mm512_set1_epi8(0x02), _MM_CMPINT_LT)); // 0xAD-0xAE
                 if (!(is_e1 | is_e2_folding | is_ea_folding | is_ef)) {
-                    // Pure safe 3-byte content (E0, E3-E9, EB-EE) - no case folding needed
-                    // Just need to avoid splitting a 3-byte sequence at the end
+                    // Safe 3-byte content (E0, E3-E9, EB-EE) - no 3-byte case folding needed
+                    // But ASCII mixed in still needs folding! Use sz_ice_fold_ascii_in_prefix_.
+                    // Just need to avoid splitting a 3-byte sequence at the end.
                     sz_size_t copy_len = chunk_size;
                     if (copy_len < 64) {
                         // Check if last 1-2 bytes are an incomplete sequence
@@ -1245,7 +1246,8 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     }
                     if (copy_len > 0) {
                         __mmask64 copy_mask = sz_u64_mask_until_(copy_len);
-                        _mm512_mask_storeu_epi8(target, copy_mask, source_vec.zmm);
+                        _mm512_mask_storeu_epi8(target, copy_mask,
+                                                sz_ice_fold_ascii_in_prefix_(source_vec.zmm, copy_mask));
                         target += copy_len, source += copy_len, source_length -= copy_len;
                         continue;
                     }
