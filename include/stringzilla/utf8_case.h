@@ -172,6 +172,34 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
     sz_cptr_t haystack, sz_size_t haystack_length,  //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
+/**
+ *  @brief  Case-insensitive lexicographic comparison of two UTF-8 strings.
+ *
+ *  Compares strings using Unicode case folding rules, producing consistent ordering regardless of
+ *  letter case. Implements the same full Unicode Case Folding as `sz_utf8_case_fold`, including
+ *  all one-to-many expansions (e.g., ß → ss) and bicameral script mappings.
+ *
+ *  Unlike simple byte comparison, this function correctly handles multi-byte UTF-8 sequences
+ *  and expansion characters. Comparison is performed codepoint-by-codepoint after folding,
+ *  not byte-by-byte, ensuring linguistically correct results.
+ *
+ *  @param[in] a First UTF-8 string to compare.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Second UTF-8 string to compare.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @return @c sz_less_k if a < b, @c sz_equal_k if a == b, @c sz_greater_k if a > b.
+ *
+ *  @warning Both inputs must contain valid UTF-8. Behavior is undefined for invalid input.
+ *
+ *  @example Basic usage:
+ *  @code
+ *      sz_ordering_t result = sz_utf8_case_insensitive_order("Hello", 5, "HELLO", 5);
+ *      // result == sz_equal_k
+ *
+ *      result = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7);
+ *      // result == sz_equal_k (ß folds to ss)
+ *  @endcode
+ */
 SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                         sz_size_t b_length);
 
@@ -190,30 +218,34 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
 
 /** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                              sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
 /** @copydoc sz_utf8_case_insensitive_find */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+
 /** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_ice(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                           sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_ice( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
 /** @copydoc sz_utf8_case_insensitive_find */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
     sz_cptr_t haystack, sz_size_t haystack_length,      //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length);
+
 /** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                            sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 #pragma endregion
 
@@ -886,6 +918,12 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
 }
 
 /**
+ *  @brief  Branchless ASCII case fold - converts A-Z to a-z.
+ *  Uses unsigned subtraction trick: (c - 'A') <= 25 is true only for uppercase letters.
+ */
+SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
+
+/**
  *  @brief  Iterator state for streaming through folded UTF-8 runes.
  *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently.
  */
@@ -905,16 +943,24 @@ SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *it, sz_cptr_t 
     it->pending_idx = 0;
 }
 
-/** @brief Get next folded rune. Returns `sz_false_k` when exhausted or on invalid UTF-8. */
+/** @brief Get next folded rune. Returns `sz_false_k` when exhausted. Assumes valid UTF-8 input. */
 SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
     if (it->pending_idx >= it->pending_count) {
         if (it->ptr >= it->end) return sz_false_k;
 
+        // ASCII fast-path: fold inline without buffering
+        sz_u8_t lead = *(sz_u8_t const *)it->ptr;
+        if (lead < 0x80) {
+            *out_rune = sz_ascii_fold_(lead);
+            it->ptr++;
+            return sz_true_k;
+        }
+
+        // Multi-byte UTF-8: decode, fold, and buffer
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse(it->ptr, &rune, &rune_length);
-        if (rune_length == sz_utf8_invalid_k) return sz_false_k;
 
         it->ptr += rune_length;
         it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
@@ -948,6 +994,75 @@ SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
     }
 }
 
+/**
+ *  @brief  Checks if a UTF-8 string contains only caseless codepoints.
+ *
+ *  Caseless codepoints are those that:
+ *  1. Fold to themselves (no case transformation)
+ *  2. Are not targets of any case folding from other codepoints
+ *
+ *  This includes: CJK ideographs, Hangul, digits, punctuation, most symbols,
+ *  Hebrew, Arabic, Thai, and many other scripts without case distinctions.
+ *
+ *  If a string is fully caseless, `sz_find` can be used instead of case-insensitive search.
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_is_fully_caseless_(sz_cptr_t str, sz_size_t len) {
+    sz_u8_t const *ptr = (sz_u8_t const *)str;
+    sz_u8_t const *end = ptr + len;
+
+    while (ptr < end) {
+        sz_u8_t lead = *ptr;
+
+        // ASCII: only digits, punctuation, and control chars are caseless
+        // A-Z (0x41-0x5A) and a-z (0x61-0x7A) participate in case folding
+        if (lead < 0x80) {
+            if ((lead >= 'A' && lead <= 'Z') || (lead >= 'a' && lead <= 'z')) return sz_false_k;
+            ptr++;
+            continue;
+        }
+
+        // Multi-byte: decode and check
+        sz_rune_t rune;
+        sz_rune_length_t rune_len;
+        sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_len);
+        ptr += rune_len;
+
+        // Check if this rune participates in case folding
+        sz_rune_t folded[4];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
+
+        // If it expands or changes, it's not caseless
+        if (folded_count != 1 || folded[0] != rune) return sz_false_k;
+
+        // Check if this rune is a lowercase target of some uppercase letter
+        // Latin Extended, Greek, Cyrillic lowercase letters are NOT caseless
+        // because uppercase versions fold to them
+        if (rune >= 0x00E0 && rune <= 0x00FF) return sz_false_k;   // Latin-1 lowercase
+        if (rune >= 0x0100 && rune <= 0x024F) return sz_false_k;   // Latin Extended A/B
+        if (rune >= 0x0250 && rune <= 0x02AF) return sz_false_k;   // IPA Extensions (some)
+        if (rune >= 0x0370 && rune <= 0x03FF) return sz_false_k;   // Greek and Coptic
+        if (rune >= 0x0400 && rune <= 0x04FF) return sz_false_k;   // Cyrillic
+        if (rune >= 0x0500 && rune <= 0x052F) return sz_false_k;   // Cyrillic Supplement
+        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_false_k;   // Latin Extended Additional
+        if (rune >= 0x1F00 && rune <= 0x1FFF) return sz_false_k;   // Greek Extended
+        if (rune >= 0x2C00 && rune <= 0x2C5F) return sz_false_k;   // Glagolitic
+        if (rune >= 0x2C60 && rune <= 0x2C7F) return sz_false_k;   // Latin Extended-C
+        if (rune >= 0x2C80 && rune <= 0x2CFF) return sz_false_k;   // Coptic
+        if (rune >= 0xA640 && rune <= 0xA69F) return sz_false_k;   // Cyrillic Extended-B
+        if (rune >= 0xA720 && rune <= 0xA7FF) return sz_false_k;   // Latin Extended-D
+        if (rune >= 0xAB30 && rune <= 0xAB6F) return sz_false_k;   // Latin Extended-E
+        if (rune >= 0xFB00 && rune <= 0xFB06) return sz_false_k;   // Alphabetic Presentation Forms (ligatures)
+        if (rune >= 0xFF21 && rune <= 0xFF5A) return sz_false_k;   // Fullwidth Latin
+        if (rune >= 0x10400 && rune <= 0x1044F) return sz_false_k; // Deseret
+        if (rune >= 0x10C80 && rune <= 0x10CFF) return sz_false_k; // Old Hungarian
+        if (rune >= 0x118A0 && rune <= 0x118FF) return sz_false_k; // Warang Citi
+        if (rune >= 0x16E40 && rune <= 0x16E9F) return sz_false_k; // Medefaidrin
+        if (rune >= 0x1E900 && rune <= 0x1E95F) return sz_false_k; // Adlam
+    }
+
+    return sz_true_k;
+}
+
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
@@ -955,6 +1070,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     if (needle_length == 0) {
         *matched_length = 0;
         return haystack;
+    }
+
+    // Fast-path: if needle is fully caseless (CJK, Hangul, digits, symbols, etc.),
+    // use direct sz_find since case folding won't affect the match
+    if (sz_utf8_is_fully_caseless_(needle, needle_length)) {
+        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
+        if (result) {
+            *matched_length = needle_length;
+            return result;
+        }
+        *matched_length = 0;
+        return SZ_NULL_CHAR;
     }
 
     // Phase 1: Compute needle hash and folded rune count using iterator
@@ -1007,11 +1134,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             return window_start;
         }
 
-        // Advance window_start by one source rune
+        // Advance window_start by one source rune (assumes valid UTF-8)
         sz_rune_t old_rune;
         sz_rune_length_t old_len;
         sz_rune_parse(window_start, &old_rune, &old_len);
-        if (old_len == sz_utf8_invalid_k) break;
 
         sz_rune_t old_folded[4];
         sz_size_t old_folded_count = sz_unicode_fold_codepoint_(old_rune, old_folded);
@@ -1042,11 +1168,17 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
     sz_u8_t *dst = (sz_u8_t *)destination;
     sz_u8_t *dst_start = dst;
 
+    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation is needed.
     while (src < src_end) {
+        // ASCII fast-path: process consecutive ASCII bytes without UTF-8 decode/encode overhead.
+        // This handles ~95% of typical text content with minimal branching.
+        while (src < src_end && *src < 0x80) *dst++ = sz_ascii_fold_(*src++);
+        if (src >= src_end) break;
+
+        // Multi-byte UTF-8 sequence: use full decode/fold/encode path
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse((sz_cptr_t)src, &rune, &rune_length);
-        sz_assert_(rune_length != sz_utf8_invalid_k && "Input text is not valid UTF-8");
         src += rune_length;
 
         sz_rune_t folded[4];
