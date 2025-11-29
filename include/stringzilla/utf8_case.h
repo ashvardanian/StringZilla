@@ -939,7 +939,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
     sz_utf8_folded_iter_init_(&needle_iterator, needle, needle_length);
     sz_utf8_folded_iter_init_(&haystack_iterator, window_start, (sz_size_t)(window_end - window_start));
 
-    sz_rune_t needle_rune, haystack_rune;
+    sz_rune_t needle_rune = 0, haystack_rune = 0;
     for (;;) {
         sz_bool_t loaded_from_needle = sz_utf8_folded_iter_next_(&needle_iterator, &needle_rune);
         sz_bool_t loaded_from_haystack = sz_utf8_folded_iter_next_(&haystack_iterator, &haystack_rune);
