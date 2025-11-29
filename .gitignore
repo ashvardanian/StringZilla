@@ -13,6 +13,7 @@ build_artifacts*
 # But with a very minimalistic binding and just a couple of dependencies
 # it brings 7000 lines of text polluting the entire repo.
 package-lock.json
+uv.lock
 
 # Temporary files
 .DS_Store
