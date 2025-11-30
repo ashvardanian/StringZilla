@@ -1011,6 +1011,377 @@ void test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_t fold_base, sz_utf8_
     std::printf("All mixed scenario tests passed!\n");
 }
 
+/**
+ *  @brief  Type alias for case-insensitive find functions.
+ */
+using sz_utf8_ci_find_t = sz_cptr_t (*)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t *);
+
+/**
+ *  @brief  Tests case-insensitive UTF-8 substring search equivalence between base and SIMD implementations.
+ *
+ *  Covers ASCII, Latin1 (accented characters), Cyrillic, Eszett (ß↔SS), mixed scripts, and edge cases.
+ */
+void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd) {
+    std::printf("Testing case-insensitive find equivalence...\n");
+
+    struct test_case {
+        char const *haystack;
+        char const *needle;
+        char const *description;
+    };
+
+    // Static test cases covering all paths
+    test_case cases[] = {
+        // ASCII path tests
+        {"Hello World", "WORLD", "ASCII uppercase needle"},
+        {"Hello World", "world", "ASCII lowercase needle"},
+        {"the quick brown fox", "QUICK", "ASCII mid-string"},
+        {"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "mnop", "ASCII lowercase in uppercase"},
+        {"abcdefghijklmnopqrstuvwxyz", "MNOP", "ASCII uppercase in lowercase"},
+        {"Hello Hello Hello", "HELLO", "ASCII multiple matches"},
+
+        // Latin1 path tests (C3 lead byte characters: À-ÿ)
+        {"Das ist ein sch\xC3\xB6ner Tag",
+         "SCH\xC3\x96"
+         "NER",
+         "German umlaut o"},                                       // schöner
+        {"Caf\xC3\xA9 au lait", "CAF\xC3\x89", "French accent e"}, // café
+        {"\xC3\x9C"
+         "ber allen Gipfeln",
+         "\xC3\xBC"
+         "BER",
+         "German U umlaut"}, // Über
+        {"na\xC3\xAFve approach",
+         "NA\xC3\x8F"
+         "VE",
+         "French diaeresis i"}, // naïve
+        {"El ni\xC3\xB1o juega",
+         "NI\xC3\x91"
+         "O",
+         "Spanish n tilde"}, // niño
+        {"M\xC3\xA4"
+         "dchen und B\xC3\xBC"
+         "cher",
+         "M\xC3\x84"
+         "DCHEN",
+         "German a umlaut"},                                    // Mädchen
+        {"\xC3\x80 la carte", "\xC3\xA0 LA", "French A grave"}, // À la
+
+        // Cyrillic path tests (D0/D1 lead bytes)
+        {"\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xD0\xBC\xD0\xB8\xD1\x80",
+         "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "Cyrillic lowercase needle"}, // Привет мир
+        {"\xD0\x9C\xD0\x9E\xD0\xA1\xD0\x9A\xD0\x92\xD0\x90 \xD1\x81\xD1\x82\xD0\xBE\xD0\xBB\xD0\xB8\xD1\x86"
+         "\xD0\xB0",
+         "\xD0\xBC\xD0\xbe\xD1\x81\xD0\xba\xD0\xB2\xD0\xB0", "Cyrillic uppercase haystack"}, // МОСКВА
+        {"\xD0\x94\xD0\xBE\xD0\xB1\xD1\x80\xD1\x8B\xD0\xB9 \xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8C",
+         "\xD0\x94\xD0\x9E\xD0\x91\xD0\xA0\xD0\xAB\xD0\x99", "Cyrillic mixed case"}, // Добрый
+
+        // Mixed script tests
+        {"Hello \xD0\x9C\xD0\xB8\xD1\x80 World", "\xD0\x9C\xD0\x98\xD0\xA0", "Cyrillic in mixed string"}, // Мир
+        {"\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0 is beautiful",
+         "\xD0\x9C\xD0\x9E\xD0\xA1\xD0\x9A\xD0\x92\xD0\x90", "Cyrillic + ASCII"}, // Москва
+
+        // Eszett tests (ß ↔ SS)
+        {"stra\xC3\x9F"
+         "e",
+         "STRASSE", "Eszett to SS"}, // straße
+        {"STRASSE",
+         "stra\xC3\x9F"
+         "e",
+         "SS to eszett"},                          // reverse
+        {"gro\xC3\x9F", "GROSS", "Eszett at end"}, // groß
+        {"Fu\xC3\x9F"
+         "ball spielen",
+         "FUSSBALL", "Eszett mid-word"}, // Fußball
+
+        // Not found cases
+        {"Hello World", "xyz", "Not found ASCII"},
+        {"\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "xyz", "Not found in Cyrillic"},
+        {"Hello World", "\xD0\x9F\xD1\x80\xD0\xB8", "Cyrillic needle not in ASCII"},
+
+        // Edge cases
+        {"", "", "Both empty"},
+        {"Hello", "", "Empty needle"},
+        {"", "Hello", "Empty haystack"},
+        {"A", "a", "Single char match"},
+        {"a", "A", "Single char reverse"},
+    };
+
+    std::size_t num_cases = sizeof(cases) / sizeof(cases[0]);
+    std::size_t passed = 0;
+
+    for (std::size_t i = 0; i < num_cases; ++i) {
+        test_case const &tc = cases[i];
+        sz_size_t base_len = 0, simd_len = 0;
+        sz_size_t h_len = std::strlen(tc.haystack);
+        sz_size_t n_len = std::strlen(tc.needle);
+
+        sz_cptr_t base_result = find_base(tc.haystack, h_len, tc.needle, n_len, &base_len);
+        sz_cptr_t simd_result = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_len);
+
+        // Check position match (both NULL or same offset)
+        bool pos_match = (base_result == simd_result) ||
+                         (base_result && simd_result && (base_result - tc.haystack) == (simd_result - tc.haystack));
+
+        if (!pos_match || base_len != simd_len) {
+            std::fprintf(stderr, "FAIL: %s\n", tc.description);
+            std::fprintf(stderr, "  Haystack: ");
+            for (std::size_t j = 0; j < h_len && j < 50; ++j)
+                std::fprintf(stderr, "%02X ", (unsigned char)tc.haystack[j]);
+            std::fprintf(stderr, "\n  Needle: ");
+            for (std::size_t j = 0; j < n_len && j < 50; ++j)
+                std::fprintf(stderr, "%02X ", (unsigned char)tc.needle[j]);
+            std::fprintf(stderr, "\n");
+            std::fprintf(stderr, "  Base: pos=%ld, len=%zu\n", base_result ? (long)(base_result - tc.haystack) : -1L,
+                         base_len);
+            std::fprintf(stderr, "  SIMD: pos=%ld, len=%zu\n", simd_result ? (long)(simd_result - tc.haystack) : -1L,
+                         simd_len);
+            assert(pos_match && "Position mismatch");
+            assert(base_len == simd_len && "Length mismatch");
+        }
+        ++passed;
+    }
+
+    std::printf("  Passed %zu/%zu basic equivalence tests\n", passed, num_cases);
+}
+
+/**
+ *  @brief  Tests case-insensitive find at 64-byte chunk boundaries.
+ *
+ *  SIMD bugs typically hide at chunk boundaries. This tests needle placement
+ *  at positions 60-68 to catch off-by-one errors in the vectorized code.
+ */
+void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd) {
+    std::printf("Testing case-insensitive find at chunk boundaries...\n");
+
+    // Test ASCII needle at various positions
+    for (std::size_t pos = 56; pos <= 72; ++pos) {
+        std::string haystack(pos, 'x');
+        haystack += "HELLO";
+        haystack += std::string(100, 'y');
+
+        sz_size_t base_len = 0, simd_len = 0;
+        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), "hello", 5, &base_len);
+        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), "hello", 5, &simd_len);
+
+        std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
+        std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
+
+        if (base_pos != simd_pos || base_len != simd_len) {
+            std::fprintf(stderr, "FAIL: ASCII at position %zu\n", pos);
+            std::fprintf(stderr, "  Base: pos=%zu, len=%zu\n", base_pos, base_len);
+            std::fprintf(stderr, "  SIMD: pos=%zu, len=%zu\n", simd_pos, simd_len);
+        }
+        assert(base_pos == simd_pos && "ASCII boundary position mismatch");
+        assert(base_len == simd_len && "ASCII boundary length mismatch");
+    }
+
+    // Test Latin1 needle (über = C3 BC + b + e + r = 5 bytes) at various positions
+    char const *latin1_needle = "\xC3\xBC"
+                                "ber"; // über
+    char const *latin1_upper = "\xC3\x9C"
+                               "BER"; // ÜBER
+    for (std::size_t pos = 56; pos <= 72; ++pos) {
+        std::string haystack(pos, 'x');
+        haystack += latin1_upper;
+        haystack += std::string(100, 'y');
+
+        sz_size_t base_len = 0, simd_len = 0;
+        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), latin1_needle, 5, &base_len);
+        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), latin1_needle, 5, &simd_len);
+
+        std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
+        std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
+
+        if (base_pos != simd_pos || base_len != simd_len) {
+            std::fprintf(stderr, "FAIL: Latin1 at position %zu\n", pos);
+            std::fprintf(stderr, "  Base: pos=%zu, len=%zu\n", base_pos, base_len);
+            std::fprintf(stderr, "  SIMD: pos=%zu, len=%zu\n", simd_pos, simd_len);
+        }
+        assert(base_pos == simd_pos && "Latin1 boundary position mismatch");
+        assert(base_len == simd_len && "Latin1 boundary length mismatch");
+    }
+
+    // Test Cyrillic needle (привет = 12 bytes) at various positions
+    char const *cyrillic_lower = "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82"; // привет
+    char const *cyrillic_upper = "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2"; // ПРИВЕТ
+    for (std::size_t pos = 56; pos <= 72; ++pos) {
+        std::string haystack(pos, 'x');
+        haystack += cyrillic_upper;
+        haystack += std::string(100, 'y');
+
+        sz_size_t base_len = 0, simd_len = 0;
+        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), cyrillic_lower, 12, &base_len);
+        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), cyrillic_lower, 12, &simd_len);
+
+        std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
+        std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
+
+        if (base_pos != simd_pos || base_len != simd_len) {
+            std::fprintf(stderr, "FAIL: Cyrillic at position %zu\n", pos);
+            std::fprintf(stderr, "  Base: pos=%zu, len=%zu\n", base_pos, base_len);
+            std::fprintf(stderr, "  SIMD: pos=%zu, len=%zu\n", simd_pos, simd_len);
+        }
+        assert(base_pos == simd_pos && "Cyrillic boundary position mismatch");
+        assert(base_len == simd_len && "Cyrillic boundary length mismatch");
+    }
+
+    std::printf("  All boundary tests passed (positions 56-72 x 3 scripts)\n");
+}
+
+/**
+ *  @brief  Fuzz tests case-insensitive find with randomly generated UTF-8 strings.
+ *
+ *  Generates random valid UTF-8 strings from different script pools,
+ *  extracts substrings, randomizes case, and verifies Serial == ICE.
+ */
+void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd, std::size_t iterations) {
+    std::printf("Testing case-insensitive find with fuzzing (%zu iterations)...\n", iterations);
+
+    auto &rng = global_random_generator();
+
+    // Character pools for each script (lowercase forms)
+    char const *ascii_chars[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+                                 "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"};
+    char const *ascii_upper[] = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                                 "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
+    char const *latin1_chars[] = {"\xC3\xA0", "\xC3\xA1", "\xC3\xA2", "\xC3\xA4", "\xC3\xA5",    // àáâäå
+                                  "\xC3\xA6", "\xC3\xA7", "\xC3\xA8", "\xC3\xA9", "\xC3\xAA",    // æçèéê
+                                  "\xC3\xAB", "\xC3\xAC", "\xC3\xAD", "\xC3\xAE", "\xC3\xAF",    // ëìíîï
+                                  "\xC3\xB1", "\xC3\xB2", "\xC3\xB3", "\xC3\xB4", "\xC3\xB6",    // ñòóôö
+                                  "\xC3\xB8", "\xC3\xB9", "\xC3\xBA", "\xC3\xBB", "\xC3\xBC"};   // øùúûü
+    char const *latin1_upper[] = {"\xC3\x80", "\xC3\x81", "\xC3\x82", "\xC3\x84", "\xC3\x85",    // ÀÁÂÄÅ
+                                  "\xC3\x86", "\xC3\x87", "\xC3\x88", "\xC3\x89", "\xC3\x8A",    // ÆÇÈÉÊ
+                                  "\xC3\x8B", "\xC3\x8C", "\xC3\x8D", "\xC3\x8E", "\xC3\x8F",    // ËÌÍÎÏ
+                                  "\xC3\x91", "\xC3\x92", "\xC3\x93", "\xC3\x94", "\xC3\x96",    // ÑÒÓÔÖ
+                                  "\xC3\x98", "\xC3\x99", "\xC3\x9A", "\xC3\x9B", "\xC3\x9C"};   // ØÙÚÛÜ
+    char const *cyrillic_chars[] = {"\xD0\xB0", "\xD0\xB1", "\xD0\xB2", "\xD0\xB3", "\xD0\xB4",  // абвгд
+                                    "\xD0\xB5", "\xD0\xB6", "\xD0\xB7", "\xD0\xB8", "\xD0\xB9",  // ежзий
+                                    "\xD0\xBA", "\xD0\xBB", "\xD0\xBC", "\xD0\xBD", "\xD0\xBE",  // клмно
+                                    "\xD0\xBF", "\xD1\x80", "\xD1\x81", "\xD1\x82", "\xD1\x83"}; // прсту
+    char const *cyrillic_upper[] = {"\xD0\x90", "\xD0\x91", "\xD0\x92", "\xD0\x93", "\xD0\x94",  // АБВГД
+                                    "\xD0\x95", "\xD0\x96", "\xD0\x97", "\xD0\x98", "\xD0\x99",  // ЕЖЗИЙ
+                                    "\xD0\x9A", "\xD0\x9B", "\xD0\x9C", "\xD0\x9D", "\xD0\x9E",  // КЛМНО
+                                    "\xD0\x9F", "\xD0\xA0", "\xD0\xA1", "\xD0\xA2", "\xD0\xA3"}; // ПРСТУ
+
+    std::uniform_int_distribution<int> script_dist(0, 2); // 0=ASCII, 1=Latin1, 2=Cyrillic
+    std::uniform_int_distribution<int> case_dist(0, 1);   // 0=lower, 1=upper
+    std::uniform_int_distribution<std::size_t> len_dist(50, 300);
+    std::uniform_int_distribution<std::size_t> needle_len_dist(3, 20);
+
+    std::size_t failures = 0;
+
+    for (std::size_t iter = 0; iter < iterations; ++iter) {
+        int script = script_dist(rng);
+        std::size_t haystack_len = len_dist(rng);
+
+        // Build haystack with characters from one script
+        std::string haystack;
+        for (std::size_t i = 0; i < haystack_len; ++i) {
+            int use_upper = case_dist(rng);
+            if (script == 0) {
+                std::uniform_int_distribution<std::size_t> char_dist(0, 25);
+                haystack += use_upper ? ascii_upper[char_dist(rng)] : ascii_chars[char_dist(rng)];
+            }
+            else if (script == 1) {
+                std::uniform_int_distribution<std::size_t> char_dist(0, 24);
+                haystack += use_upper ? latin1_upper[char_dist(rng)] : latin1_chars[char_dist(rng)];
+            }
+            else {
+                std::uniform_int_distribution<std::size_t> char_dist(0, 19);
+                haystack += use_upper ? cyrillic_upper[char_dist(rng)] : cyrillic_chars[char_dist(rng)];
+            }
+        }
+
+        // Extract a random substring as needle (in opposite case)
+        std::size_t needle_len = std::min(needle_len_dist(rng), haystack.size() / 2);
+        if (needle_len < 3) needle_len = 3;
+
+        std::uniform_int_distribution<std::size_t> start_dist(0, haystack.size() - needle_len);
+        std::size_t needle_start = start_dist(rng);
+
+        // Find character boundaries for UTF-8
+        while (needle_start > 0 && (haystack[needle_start] & 0xC0) == 0x80) --needle_start;
+        std::size_t needle_end = needle_start + needle_len;
+        while (needle_end < haystack.size() && (haystack[needle_end] & 0xC0) == 0x80) ++needle_end;
+        needle_len = needle_end - needle_start;
+
+        std::string needle = haystack.substr(needle_start, needle_len);
+
+        // Randomize case of needle
+        std::string case_changed_needle;
+        for (std::size_t i = 0; i < needle.size();) {
+            unsigned char c = (unsigned char)needle[i];
+            if ((c & 0x80) == 0) {
+                // ASCII
+                if (case_dist(rng) && c >= 'a' && c <= 'z') case_changed_needle += (char)(c - 32);
+                else if (case_dist(rng) && c >= 'A' && c <= 'Z')
+                    case_changed_needle += (char)(c + 32);
+                else
+                    case_changed_needle += needle[i];
+                ++i;
+            }
+            else if ((c & 0xE0) == 0xC0 && i + 1 < needle.size()) {
+                // 2-byte UTF-8
+                unsigned char c2 = (unsigned char)needle[i + 1];
+                if (c == 0xC3 && c2 >= 0xA0 && c2 <= 0xBE && case_dist(rng)) {
+                    // Latin1 lowercase -> uppercase
+                    case_changed_needle += (char)c;
+                    case_changed_needle += (char)(c2 - 0x20);
+                }
+                else if (c == 0xC3 && c2 >= 0x80 && c2 <= 0x9E && case_dist(rng)) {
+                    // Latin1 uppercase -> lowercase
+                    case_changed_needle += (char)c;
+                    case_changed_needle += (char)(c2 + 0x20);
+                }
+                else if (c == 0xD0 && c2 >= 0xB0 && c2 <= 0xBF && case_dist(rng)) {
+                    // Cyrillic lowercase -> uppercase
+                    case_changed_needle += (char)c;
+                    case_changed_needle += (char)(c2 - 0x20);
+                }
+                else if (c == 0xD0 && c2 >= 0x90 && c2 <= 0x9F && case_dist(rng)) {
+                    // Cyrillic uppercase -> lowercase
+                    case_changed_needle += (char)c;
+                    case_changed_needle += (char)(c2 + 0x20);
+                }
+                else {
+                    case_changed_needle += needle[i];
+                    case_changed_needle += needle[i + 1];
+                }
+                i += 2;
+            }
+            else {
+                // Copy as-is for other multi-byte sequences
+                std::size_t seq_len = ((c & 0xF0) == 0xE0) ? 3 : ((c & 0xF8) == 0xF0) ? 4 : 1;
+                for (std::size_t j = 0; j < seq_len && i + j < needle.size(); ++j) case_changed_needle += needle[i + j];
+                i += seq_len;
+            }
+        }
+
+        sz_size_t base_len = 0, simd_len = 0;
+        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), case_changed_needle.data(),
+                                          case_changed_needle.size(), &base_len);
+        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), case_changed_needle.data(),
+                                          case_changed_needle.size(), &simd_len);
+
+        // Compare positions - both should find the needle (extracted from haystack with case change).
+        // Not-found is acceptable if case transformation was imperfect, but positions must match.
+        std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
+        std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
+
+        if (base_pos != simd_pos) {
+            std::fprintf(stderr, "FUZZ FAIL iter=%zu script=%d\n", iter, script);
+            std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), case_changed_needle.size());
+            std::fprintf(stderr, "  Base pos=%zu, SIMD pos=%zu\n", base_pos, simd_pos);
+            ++failures;
+            if (failures >= 5) { assert(false && "Too many fuzz failures"); }
+        }
+    }
+
+    std::printf("  Fuzz test passed (%zu iterations, %zu failures)\n", iterations, failures);
+    assert(failures == 0 && "Fuzz test had failures");
+}
+
 void test_equivalence() {
 
     // Ensure the seed affects hash results
@@ -1098,6 +1469,10 @@ void test_equivalence() {
     test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
+    // Case-insensitive find tests
+    test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
+    test_utf8_ci_find_boundaries(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
+    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, 3000);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
@@ -2858,6 +3233,81 @@ void test_utf8() {
         haystack = "foo BAR baz";
         result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &matched_len);
         assert(result == haystack + 4 && matched_len == 3);
+    }
+
+    // Test Unicode word boundary detection (TR29 Word_Break)
+    {
+        // ASCII letters are word chars
+        assert(sz_rune_is_word_char('A') == sz_true_k);
+        assert(sz_rune_is_word_char('Z') == sz_true_k);
+        assert(sz_rune_is_word_char('a') == sz_true_k);
+        assert(sz_rune_is_word_char('z') == sz_true_k);
+
+        // ASCII digits are word chars
+        assert(sz_rune_is_word_char('0') == sz_true_k);
+        assert(sz_rune_is_word_char('9') == sz_true_k);
+
+        // ASCII underscore and mid-word punctuation
+        assert(sz_rune_is_word_char('_') == sz_true_k);
+        assert(sz_rune_is_word_char('\'') == sz_true_k); // apostrophe (mid-word)
+
+        // ASCII whitespace and punctuation are NOT word chars
+        assert(sz_rune_is_word_char(' ') == sz_false_k);
+        assert(sz_rune_is_word_char('\n') == sz_false_k);
+        assert(sz_rune_is_word_char('\t') == sz_false_k);
+        assert(sz_rune_is_word_char('!') == sz_false_k);
+        assert(sz_rune_is_word_char('@') == sz_false_k);
+        assert(sz_rune_is_word_char('-') == sz_false_k);
+        assert(sz_rune_is_word_char('/') == sz_false_k);
+
+        // Latin Extended characters are word chars
+        assert(sz_rune_is_word_char(0x00C0) == sz_true_k); // À
+        assert(sz_rune_is_word_char(0x00E9) == sz_true_k); // é
+        assert(sz_rune_is_word_char(0x00DF) == sz_true_k); // ß
+        assert(sz_rune_is_word_char(0x0100) == sz_true_k); // Latin Extended-A start
+        assert(sz_rune_is_word_char(0x017F) == sz_true_k); // Latin Extended-A end
+
+        // Greek letters are word chars
+        assert(sz_rune_is_word_char(0x0391) == sz_true_k); // Α (Alpha)
+        assert(sz_rune_is_word_char(0x03B1) == sz_true_k); // α (alpha)
+        assert(sz_rune_is_word_char(0x03C9) == sz_true_k); // ω (omega)
+
+        // Cyrillic letters are word chars
+        assert(sz_rune_is_word_char(0x0410) == sz_true_k); // А
+        assert(sz_rune_is_word_char(0x0430) == sz_true_k); // а
+        assert(sz_rune_is_word_char(0x044F) == sz_true_k); // я
+
+        // Hebrew letters are word chars
+        assert(sz_rune_is_word_char(0x05D0) == sz_true_k); // א (Alef)
+        assert(sz_rune_is_word_char(0x05EA) == sz_true_k); // ת (Tav)
+
+        // Arabic letters are word chars
+        assert(sz_rune_is_word_char(0x0627) == sz_true_k); // ا (Alef)
+        assert(sz_rune_is_word_char(0x0628) == sz_true_k); // ب (Ba)
+
+        // CJK ideographs are boundaries (NOT word chars for TR29)
+        assert(sz_rune_is_word_char(0x4E00) == sz_false_k); // 一
+        assert(sz_rune_is_word_char(0x4E2D) == sz_false_k); // 中
+        assert(sz_rune_is_word_char(0x6587) == sz_false_k); // 文
+        assert(sz_rune_is_word_char(0x9FFF) == sz_false_k); // CJK last
+
+        // Hangul syllables ARE word chars
+        assert(sz_rune_is_word_char(0xAC00) == sz_true_k); // 가 (first)
+        assert(sz_rune_is_word_char(0xD7A3) == sz_true_k); // last
+
+        // Spaces and punctuation are boundaries
+        assert(sz_rune_is_word_char(0x2000) == sz_false_k); // En quad
+        assert(sz_rune_is_word_char(0x2014) == sz_false_k); // Em dash
+        assert(sz_rune_is_word_char(0x3000) == sz_false_k); // Ideographic space
+
+        // Emoji are boundaries
+        assert(sz_rune_is_word_char(0x1F600) == sz_false_k); // 😀
+        assert(sz_rune_is_word_char(0x1F4A9) == sz_false_k); // 💩
+
+        // Edge cases
+        assert(sz_rune_is_word_char(0x0000) == sz_false_k); // NUL
+        assert(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
+        assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
     }
 }
 
