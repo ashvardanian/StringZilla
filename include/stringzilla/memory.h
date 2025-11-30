@@ -1015,93 +1015,54 @@ SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     __mmask64 head_mask = sz_u64_mask_until_(head_length);
     __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
 
-    // We need to pull the lookup table into 4x ZMM registers.
-    // We can use `vpermi2b` instruction to perform the look in two ZMM registers with `_mm512_permutex2var_epi8`
-    // intrinsics, but it has a 6-cycle latency on Sapphire Rapids and requires AVX512-VBMI. Assuming we need to
-    // operate on 4 registers, it might be cleaner to use 2x separate `_mm512_permutexvar_epi8` calls.
-    // Combining the results with 2x `_mm512_test_epi8_mask` and 3x blends afterwards.
+    // We use VPERMI2B (`_mm512_permutex2var_epi8`) to perform 256-entry lookups efficiently.
+    // VPERMI2B uses bit 6 of each index to select between two 64-byte tables, allowing us to
+    // cover 128 entries per instruction (2 instructions for all 256 entries).
     //
-    //  - 4x `_mm512_permutexvar_epi8` maps to "VPERMB (ZMM, ZMM, ZMM)":
-    //      - On Ice Lake: 3 cycles latency, ports: 1*p5
-    //      - On Genoa: 6 cycles latency, ports: 1*FP12
-    //  - 3x `_mm512_mask_blend_epi8` maps to "VPBLENDMB_Z (ZMM, K, ZMM, ZMM)":
-    //      - On Ice Lake: 3 cycles latency, ports: 1*p05
-    //      - On Genoa: 1 cycle latency, ports: 1*FP0123
-    //  - 2x `_mm512_test_epi8_mask` maps to "VPTESTMB (K, ZMM, ZMM)":
-    //      - On Ice Lake: 3 cycles latency, ports: 1*p5
-    //      - On Genoa: 4 cycles latency, ports: 1*FP01
-    //
+    // For the high-bit (bit 7) selection, we use VPMOVB2M (`_mm512_movepi8_mask`) which extracts
+    // the sign bit of each byte directly to a mask register. This goes to port 0 on Intel,
+    // avoiding the port 5 bottleneck that VPTESTMB would cause.
     sz_u512_vec_t lut_0_to_63_vec, lut_64_to_127_vec, lut_128_to_191_vec, lut_192_to_255_vec;
     lut_0_to_63_vec.zmm = _mm512_loadu_si512((lut));
     lut_64_to_127_vec.zmm = _mm512_loadu_si512((lut + 64));
     lut_128_to_191_vec.zmm = _mm512_loadu_si512((lut + 128));
     lut_192_to_255_vec.zmm = _mm512_loadu_si512((lut + 192));
 
-    sz_u512_vec_t first_bit_vec, second_bit_vec;
-    first_bit_vec.zmm = _mm512_set1_epi8((char)0x80);
-    second_bit_vec.zmm = _mm512_set1_epi8((char)0x40);
-
-    __mmask64 first_bit_mask, second_bit_mask;
-    sz_u512_vec_t source_vec;
-    // If the top bit is set in each word of `source_vec`, than we use `lookup_128_to_191_vec` or
-    // `lookup_192_to_255_vec`. If the second bit is set, we use `lookup_64_to_127_vec` or `lookup_192_to_255_vec`.
-    sz_u512_vec_t lookup_0_to_63_vec, lookup_64_to_127_vec, lookup_128_to_191_vec, lookup_192_to_255_vec;
-    sz_u512_vec_t blended_0_to_127_vec, blended_128_to_255_vec, blended_0_to_255_vec;
+    __mmask64 high_bit_mask;
+    sz_u512_vec_t source_vec, low_half_vec, high_half_vec, result_vec;
 
     // Handling the head.
     if (head_length) {
         source_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, source);
-        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
-        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
-        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
-        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
-        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
-        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
-        blended_0_to_127_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
-        blended_128_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
-        blended_0_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
-        _mm512_mask_storeu_epi8(target, head_mask, blended_0_to_255_vec.zmm);
+        // VPERMI2B: bit 6 selects between the two tables, bits 0-5 index within each
+        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
+        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
+        // VPMOVB2M: extract bit 7 (sign bit) of each byte directly to mask - uses port 0, not port 5
+        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
+        _mm512_mask_storeu_epi8(target, head_mask, result_vec.zmm);
         source += head_length, target += head_length, length -= head_length;
     }
 
     // Handling the body in 64-byte chunks aligned to cache-line boundaries with respect to `target`.
     while (length >= 64) {
         source_vec.zmm = _mm512_loadu_si512(source);
-        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
-        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
-        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
-        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
-        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
-        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
-        blended_0_to_127_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
-        blended_128_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
-        blended_0_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
-        _mm512_store_si512(target, blended_0_to_255_vec.zmm); //! Aligned store, our main weapon!
+        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
+        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
+        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
+        _mm512_store_si512(target, result_vec.zmm); //! Aligned store, our main weapon!
         source += 64, target += 64, length -= 64;
     }
 
     // Handling the tail.
     if (tail_length) {
         source_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, source);
-        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
-        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
-        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
-        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
-        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
-        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
-        blended_0_to_127_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
-        blended_128_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
-        blended_0_to_255_vec.zmm =
-            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
-        _mm512_mask_storeu_epi8(target, tail_mask, blended_0_to_255_vec.zmm);
+        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
+        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
+        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
+        _mm512_mask_storeu_epi8(target, tail_mask, result_vec.zmm);
         source += tail_length, target += tail_length, length -= tail_length;
     }
 }
