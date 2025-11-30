@@ -1126,6 +1126,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     }
 
     // Phase 3: Slide window through haystack
+    // Due to case folding expansions (e.g., ß→ss), rolling hash is complex.
+    // We use a simpler approach: advance window_start by one source rune at a time,
+    // recomputing the hash for the new window.
     while (window_count == needle_folded_count) {
         // Check for hash match and verify
         if (window_hash == needle_hash &&
@@ -1138,23 +1141,19 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         sz_rune_t old_rune;
         sz_rune_length_t old_len;
         sz_rune_parse(window_start, &old_rune, &old_len);
-
-        sz_rune_t old_folded[4];
-        sz_size_t old_folded_count = sz_unicode_fold_codepoint_(old_rune, old_folded);
-
-        // Remove old folded runes from hash
-        for (sz_size_t i = 0; i < old_folded_count; ++i) {
-            window_hash = (window_hash - old_folded[i] * highest_power) * 257;
-            window_count--;
-        }
         window_start += old_len;
 
-        // Add new folded runes to refill window
-        while (window_count < needle_folded_count && sz_utf8_folded_iter_next_(&window_iterator, &rune)) {
-            window_hash += rune;
+        // Recompute hash and window from the new start position
+        sz_utf8_folded_iter_t new_iter;
+        sz_utf8_folded_iter_init_(&new_iter, window_start, haystack_length - (window_start - haystack));
+        window_hash = 0;
+        window_count = 0;
+        while (window_count < needle_folded_count && sz_utf8_folded_iter_next_(&new_iter, &rune)) {
+            window_hash = window_hash * 257 + rune;
             window_count++;
         }
-        window_end = window_iterator.ptr;
+        window_end = new_iter.ptr;
+        window_iterator = new_iter;
     }
 
     *matched_length = 0;
@@ -2683,192 +2682,308 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_can_use_vietnamese_path_
 }
 
 /**
- *  @brief  Latin1 case-insensitive search kernel using AVX-512 dual-variant Raita heuristic.
+ *  @brief  Fold a single byte using Latin-1 case folding rules.
  *
- *  This kernel handles Western European text with accents (À-ÿ range).
- *  Instead of folding haystack bytes, we precompute BOTH case variants for each probe position
- *  and compare against both. This eliminates context loads (prev bytes) from the hot loop.
+ *  @param str Pointer to the string containing the byte.
+ *  @param offset Offset of the byte to fold.
+ *  @return The folded byte value.
+ */
+SZ_INTERNAL char sz_latin1_fold_byte_(sz_cptr_t str, sz_size_t offset) {
+    sz_u8_t byte = (sz_u8_t)str[offset];
+    sz_u8_t prev = offset > 0 ? (sz_u8_t)str[offset - 1] : 0;
+
+    // ASCII uppercase A-Z → a-z
+    if (byte >= 'A' && byte <= 'Z') return (char)(byte + 0x20);
+
+    // Eszett: ß (C3 9F) folds to "ss" - both bytes become 's' (0x73)
+    if (byte == 0xC3) {
+        sz_u8_t next = (sz_u8_t)str[offset + 1];
+        if (next == 0x9F) return 's';
+    }
+    if (prev == 0xC3 && byte == 0x9F) return 's';
+
+    // Latin-1 second byte after C3: uppercase [80-9E] → lowercase [A0-BE] via +0x20
+    // Excludes 0x97 (×) which has no case variant
+    if (prev == 0xC3 && byte >= 0x80 && byte <= 0x9E && byte != 0x97) return (char)(byte + 0x20);
+
+    return (char)byte;
+}
+
+/**
+ *  @brief  Fold a ZMM register using Latin-1 case folding rules.
  *
- *  Bidirectional Eszett (ß↔ss) is handled by:
- *  - Needle ß bytes: variants include 's' for ss matching
- *  - Needle 's' in "ss": variants include C3/9F for ß matching
+ *  Folds ASCII uppercase (A-Z) and Latin-1 uppercase (C3 80-9E) to lowercase.
+ *  Also handles eszett: ß (C3 9F) → ss (73 73).
+ *
+ *  @param source The source ZMM register.
+ *  @param mask Valid byte mask.
+ *  @return The folded ZMM register.
+ */
+SZ_INTERNAL __m512i sz_latin1_fold_zmm_(__m512i source, __mmask64 mask) {
+    __m512i const c3_vec = _mm512_set1_epi8((char)0xC3);
+    __m512i const x9f_vec = _mm512_set1_epi8((char)0x9F);
+    __m512i const s_vec = _mm512_set1_epi8('s');
+    __m512i const x20_vec = _mm512_set1_epi8(0x20);
+    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
+    __m512i const x1f_vec = _mm512_set1_epi8(0x1F);
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const range_26_vec = _mm512_set1_epi8(26);
+
+    // Step 1: Detect C3 lead bytes → second byte positions
+    __mmask64 is_c3 = _mm512_mask_cmpeq_epi8_mask(mask, source, c3_vec);
+    __mmask64 is_second = is_c3 << 1;
+
+    // Step 2: Detect eszett (C3 9F) and fold both bytes to 's'
+    __mmask64 is_9f = _mm512_mask_cmpeq_epi8_mask(is_second, source, x9f_vec);
+    __mmask64 eszett_positions = is_9f | (is_9f >> 1); // both C3 and 9F positions
+    __m512i result = _mm512_mask_mov_epi8(source, eszett_positions, s_vec);
+
+    // Step 3: Fold Latin-1 uppercase (C3 80-9E) → add 0x20 to second byte
+    // Range check: (byte - 0x80) < 0x1F means byte in [0x80, 0x9E]
+    // Exclude eszett positions (already handled)
+    __mmask64 latin1_upper = _mm512_mask_cmplt_epu8_mask(is_second & ~is_9f, _mm512_sub_epi8(result, x80_vec), x1f_vec);
+
+    // Step 4: Fold ASCII uppercase (A-Z) → add 0x20
+    __mmask64 ascii_upper =
+        _mm512_mask_cmplt_epu8_mask(mask & ~eszett_positions, _mm512_sub_epi8(result, a_upper_vec), range_26_vec);
+
+    // Step 5: Apply folding (+0x20) to uppercase positions
+    return _mm512_mask_add_epi8(result, latin1_upper | ascii_upper, result, x20_vec);
+}
+
+/**
+ *  @brief  Latin-1 case-insensitive substring search using AVX-512 with on-the-fly haystack folding.
+ *
+ *  Uses the Raita heuristic with haystack folding - same clean structure as ASCII kernel.
+ *  The safe slice detector already excludes ss/ß positions, so no skip flags needed.
  *
  *  @param haystack Pointer to the haystack string.
  *  @param haystack_length Length of the haystack in bytes.
  *  @param needle Pointer to the needle string.
  *  @param needle_length Length of the needle in bytes.
- *  @param safe_start Pointer to start of safe Latin1 slice within needle.
+ *  @param safe_start Pointer to start of safe Latin-1 slice within needle.
  *  @param safe_length Length of the safe slice in bytes.
  *  @param matched_length Output: length of the match in haystack bytes.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_ci_find_latin1_ice_( //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
-    sz_cptr_t safe_start, sz_size_t safe_length, sz_size_t *matched_length) {
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_latin1_ice_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                                sz_cptr_t needle, sz_size_t needle_length,
+                                                                sz_cptr_t safe_start, sz_size_t safe_length,
+                                                                sz_size_t *matched_length) {
 
-    // Cap safe slice to 64 bytes for single-ZMM verification
+    // Clamp safe slice to single ZMM register
     if (safe_length > 64) safe_length = 64;
 
-    sz_size_t safe_offset = (sz_size_t)(safe_start - needle);
-    sz_size_t head_length = safe_offset;
-    sz_size_t tail_length = needle_length - safe_offset - safe_length;
+    sz_size_t const safe_offset = (sz_size_t)(safe_start - needle);
+    sz_size_t const head_length = safe_offset;
+    sz_size_t const tail_length = needle_length - safe_offset - safe_length;
 
-    // Pick 3 probe positions within the safe slice
+    // Pick 3 probe positions within the safe slice using Raita heuristic
     sz_size_t offset_first, offset_mid, offset_last;
     sz_locate_needle_anomalies_(safe_start, safe_length, &offset_first, &offset_mid, &offset_last);
 
-    // Compute both case variants for each probe byte position.
-    // For Latin1: C3 lead bytes, second bytes (80-9E), Eszett (9F), ASCII letters.
-    sz_u8_t b_first = (sz_u8_t)safe_start[offset_first];
-    sz_u8_t b_mid = (sz_u8_t)safe_start[offset_mid];
-    sz_u8_t b_last = (sz_u8_t)safe_start[offset_last];
-    sz_u8_t prev_first = offset_first > 0 ? (sz_u8_t)safe_start[offset_first - 1] : 0;
-    sz_u8_t prev_mid = offset_mid > 0 ? (sz_u8_t)safe_start[offset_mid - 1] : 0;
-    sz_u8_t prev_last = offset_last > 0 ? (sz_u8_t)safe_start[offset_last - 1] : 0;
-    sz_u8_t next_first = offset_first + 1 < safe_length ? (sz_u8_t)safe_start[offset_first + 1] : 0;
-    sz_u8_t next_mid = offset_mid + 1 < safe_length ? (sz_u8_t)safe_start[offset_mid + 1] : 0;
-    sz_u8_t next_last = offset_last + 1 < safe_length ? (sz_u8_t)safe_start[offset_last + 1] : 0;
+    // Pre-fold needle probes using Latin-1 folding
+    __m512i const needle_first_vec = _mm512_set1_epi8(sz_latin1_fold_byte_(safe_start, offset_first));
+    __m512i const needle_mid_vec = _mm512_set1_epi8(sz_latin1_fold_byte_(safe_start, offset_mid));
+    __m512i const needle_last_vec = _mm512_set1_epi8(sz_latin1_fold_byte_(safe_start, offset_last));
 
-// Compute case variant for Latin1 byte, including bidirectional Eszett.
-// Latin1 ranges in UTF-8: uppercase [C3 80..9E] excl 97, lowercase [C3 A0..BE] excl B7, Eszett [C3 9F].
-#define sz_latin1_variant_(b, prev, next)                                                              \
-    ((prev) == 0xC3                    ? (((b) >= 0x80 && (b) <= 0x9E && (b) != 0x97)   ? ((b) ^ 0x20) \
-                                          : ((b) >= 0xA0 && (b) <= 0xBE && (b) != 0xB7) ? ((b) ^ 0x20) \
-                                          : ((b) == 0x9F)                               ? 's'          \
-                                                                                        : (b))                                       \
-     : ((b) == 0xC3 && (next) == 0x9F) ? 's'                                                           \
-     : ((b) >= 'A' && (b) <= 'Z')      ? ((b) + 0x20)                                                  \
-     : ((b) >= 'a' && (b) <= 'z')      ? ((b) - 0x20)                                                  \
-                                       : (b))
+    // Pre-fold entire safe slice for verification
+    __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
+    __m512i const needle_safe_folded = sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start), safe_mask);
 
-    sz_u8_t v1_first = b_first, v2_first = sz_latin1_variant_(b_first, prev_first, next_first);
-    sz_u8_t v1_mid = b_mid, v2_mid = sz_latin1_variant_(b_mid, prev_mid, next_mid);
-    sz_u8_t v1_last = b_last, v2_last = sz_latin1_variant_(b_last, prev_last, next_last);
-#undef sz_latin1_variant_
+    // Main loop - 64 positions per iteration (mirrors sz_find_skylake and ASCII kernel structure)
+    for (; haystack_length >= needle_length + 64; haystack += 64, haystack_length -= 64) {
+        // Load and fold haystack at probe positions
+        __m512i const h_first = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first), ~0ULL);
+        __m512i const h_mid = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid), ~0ULL);
+        __m512i const h_last = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last), ~0ULL);
 
-    // Detect if probe positions are on ss/ß patterns - if so, skip that probe (let verification handle it).
-    // ß = C3 9F, ss = 73 73 (or 53 53 for SS). These can't match byte-for-byte.
-    // An 's' followed by 's' could be half of ß in haystack, and vice versa.
-    int skip_first = (b_first == 's' && next_first == 's') || (b_first == 'S' && next_first == 'S') ||
-                     (prev_first == 's' && b_first == 's') || (prev_first == 'S' && b_first == 'S') ||
-                     (b_first == 0xC3 && next_first == 0x9F) || (prev_first == 0xC3 && b_first == 0x9F);
-    int skip_mid = (b_mid == 's' && next_mid == 's') || (b_mid == 'S' && next_mid == 'S') ||
-                   (prev_mid == 's' && b_mid == 's') || (prev_mid == 'S' && b_mid == 'S') ||
-                   (b_mid == 0xC3 && next_mid == 0x9F) || (prev_mid == 0xC3 && b_mid == 0x9F);
-    int skip_last = (b_last == 's' && next_last == 's') || (b_last == 'S' && next_last == 'S') ||
-                    (prev_last == 's' && b_last == 's') || (prev_last == 'S' && b_last == 'S') ||
-                    (b_last == 0xC3 && next_last == 0x9F) || (prev_last == 0xC3 && b_last == 0x9F);
+        // 3-point Raita filter
+        __mmask64 matches = _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(h_first, needle_first_vec),
+                                                      _mm512_cmpeq_epi8_mask(h_mid, needle_mid_vec)),
+                                         _mm512_cmpeq_epi8_mask(h_last, needle_last_vec));
 
-    // Broadcast both variants for each probe position
-    __m512i n_first_v1 = _mm512_set1_epi8((char)v1_first);
-    __m512i n_first_v2 = _mm512_set1_epi8((char)v2_first);
-    __m512i n_mid_v1 = _mm512_set1_epi8((char)v1_mid);
-    __m512i n_mid_v2 = _mm512_set1_epi8((char)v2_mid);
-    __m512i n_last_v1 = _mm512_set1_epi8((char)v1_last);
-    __m512i n_last_v2 = _mm512_set1_epi8((char)v2_last);
+        // Verify candidates
+        while (matches) {
+            int const offset = sz_u64_ctz(matches);
+            sz_cptr_t const candidate = haystack + offset;
 
-    // Constants for Latin1 case folding (only used in verification, not hot loop)
-    __m512i c3_lead = _mm512_set1_epi8((char)0xC3);
-    __m512i x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i x20_vec = _mm512_set1_epi8(0x20);
-    __m512i x9f_vec = _mm512_set1_epi8((char)0x9F);
-    __m512i s_vec = _mm512_set1_epi8('s');
-    __m512i a_upper_vec = _mm512_set1_epi8('A');
-    __m512i subtract26_vec = _mm512_set1_epi8(26);
+            // Fold and compare safe region
+            __m512i const h_safe =
+                sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset), safe_mask);
 
-    // Pre-fold needle safe slice for verification step
-    __mmask64 n_mask = sz_u64_mask_until_(safe_length);
-    __m512i n_raw = _mm512_maskz_loadu_epi8(n_mask, safe_start);
-    __mmask64 n_c3_lead = _mm512_mask_cmpeq_epi8_mask(n_mask, n_raw, c3_lead);
-    __mmask64 n_second = n_c3_lead << 1;
-    __mmask64 n_latin1_upper =
-        _mm512_mask_cmplt_epu8_mask(n_second, _mm512_sub_epi8(n_raw, x80_vec), _mm512_set1_epi8(0x1F));
-    __mmask64 n_ascii_upper =
-        _mm512_mask_cmp_epu8_mask(n_mask, _mm512_sub_epi8(n_raw, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
-    __m512i n_folded_tmp = _mm512_mask_add_epi8(n_raw, n_latin1_upper | n_ascii_upper, n_raw, x20_vec);
-    __mmask64 n_eszett = _mm512_mask_cmpeq_epi8_mask(n_second, n_raw, x9f_vec);
-    sz_u512_vec_t n_folded;
-    n_folded.zmm = _mm512_mask_mov_epi8(n_folded_tmp, n_eszett | (n_eszett >> 1), s_vec);
-
-    sz_cptr_t h = haystack;
-    sz_size_t h_length = haystack_length;
-    if (h_length < needle_length) return SZ_NULL_CHAR;
-
-    // Main loop - NO HAYSTACK FOLDING and NO CONTEXT LOADS in the 3-point filter!
-    while (h_length >= needle_length) {
-        sz_size_t positions = (h_length >= needle_length + 64) ? 64 : (h_length - needle_length + 1);
-        __mmask64 load_mask = sz_u64_mask_until_(positions);
-
-        // Load haystack at 3 probe positions - NO FOLDING, NO PREV BYTE LOADS
-        __m512i h_first = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_first);
-        __m512i h_mid = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_mid);
-        __m512i h_last = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_last);
-
-        // Compare against BOTH case variants: 6 cmpeq + 3 OR + 2 AND = 11 ops
-        // For ss/ß positions, use load_mask (always match) and let verification handle it.
-        __mmask64 match_first =
-            skip_first ? load_mask
-                       : (_mm512_cmpeq_epi8_mask(h_first, n_first_v1) | _mm512_cmpeq_epi8_mask(h_first, n_first_v2));
-        __mmask64 match_mid =
-            skip_mid ? load_mask : (_mm512_cmpeq_epi8_mask(h_mid, n_mid_v1) | _mm512_cmpeq_epi8_mask(h_mid, n_mid_v2));
-        __mmask64 match_last =
-            skip_last ? load_mask
-                      : (_mm512_cmpeq_epi8_mask(h_last, n_last_v1) | _mm512_cmpeq_epi8_mask(h_last, n_last_v2));
-        __mmask64 candidates = match_first & match_mid & match_last;
-
-        while (candidates) {
-            int pos = sz_u64_ctz(candidates);
-            sz_cptr_t candidate = h + pos;
-
-            // Verify full safe region with SIMD (still needs folding, but only for candidates)
-            __m512i h_safe = _mm512_maskz_loadu_epi8(n_mask, candidate + safe_offset);
-            __mmask64 h_c3 = _mm512_mask_cmpeq_epi8_mask(n_mask, h_safe, c3_lead);
-            __mmask64 h_sec = h_c3 << 1;
-            __mmask64 h_upper =
-                _mm512_mask_cmplt_epu8_mask(h_sec, _mm512_sub_epi8(h_safe, x80_vec), _mm512_set1_epi8(0x1F));
-            __mmask64 h_ascii_up =
-                _mm512_mask_cmp_epu8_mask(n_mask, _mm512_sub_epi8(h_safe, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
-            h_safe = _mm512_mask_add_epi8(h_safe, h_upper | h_ascii_up, h_safe, x20_vec);
-            __mmask64 h_eszett = _mm512_mask_cmpeq_epi8_mask(h_sec, h_safe, x9f_vec);
-            h_safe = _mm512_mask_mov_epi8(h_safe, h_eszett | (h_eszett >> 1), s_vec);
-
-            if (_mm512_mask_cmpneq_epi8_mask(n_mask, h_safe, n_folded.zmm) == 0) {
-                // Verify head and tail with full Unicode folding
-                sz_bool_t head_ok = (head_length == 0) ? sz_true_k
-                                                       : sz_utf8_verify_case_insensitive_match_(
-                                                             needle, head_length, candidate, candidate + head_length);
-                sz_bool_t tail_ok = (tail_length == 0)
-                                        ? sz_true_k
-                                        : sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
-                                                                                 candidate + safe_offset + safe_length,
-                                                                                 candidate + needle_length);
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                // Safe region matches - verify head/tail with full Unicode folding
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        sz_utf8_verify_case_insensitive_match_(needle, head_length, candidate, candidate + head_length);
+                if (tail_length > 0)
+                    tail_ok = sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
+                                                                     candidate + safe_offset + safe_length,
+                                                                     candidate + needle_length);
                 if (head_ok && tail_ok) {
                     *matched_length = needle_length;
                     return candidate;
                 }
             }
-            candidates &= candidates - 1;
+            matches &= matches - 1;
         }
+    }
 
-        h += positions;
-        h_length -= positions;
+    // Tail handling with masked loads
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+
+        __m512i const h_first =
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_first), load_mask);
+        __m512i const h_mid =
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_mid), load_mask);
+        __m512i const h_last =
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_last), load_mask);
+
+        __mmask64 matches = _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(h_first, needle_first_vec),
+                                                      _mm512_cmpeq_epi8_mask(h_mid, needle_mid_vec)),
+                                         _mm512_cmpeq_epi8_mask(h_last, needle_last_vec));
+
+        while (matches) {
+            int const offset = sz_u64_ctz(matches);
+            sz_cptr_t const candidate = haystack + offset;
+
+            __m512i const h_safe =
+                sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset), safe_mask);
+
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        sz_utf8_verify_case_insensitive_match_(needle, head_length, candidate, candidate + head_length);
+                if (tail_length > 0)
+                    tail_ok = sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
+                                                                     candidate + safe_offset + safe_length,
+                                                                     candidate + needle_length);
+                if (head_ok && tail_ok) {
+                    *matched_length = needle_length;
+                    return candidate;
+                }
+            }
+            matches &= matches - 1;
+        }
     }
 
     return SZ_NULL_CHAR;
 }
 
 /**
- *  @brief  Simplified Cyrillic case-insensitive search kernel using AVX-512 Raita heuristic.
+ *  @brief  Fold a single byte using Cyrillic case folding rules.
  *
- *  This kernel handles Russian/Ukrainian text with a simplified folding approach:
- *  - Fold second bytes based on their value alone (no lead byte context needed)
- *  - 90-9F → B0-BF (add 0x20) covers А-П → а-п
- *  - A0-AF → 80-8F (subtract 0x20) covers Р-Я → р-я
- *  - ASCII A-Z → a-z (add 0x20)
+ *  Cyrillic uppercase А-Я (U+0410-U+042F): UTF-8 D0 90 - D0 AF (32 letters)
+ *  Cyrillic lowercase а-я (U+0430-U+044F): UTF-8 D0 B0 - D0 BF, D1 80 - D1 8F
  *
- *  This approach eliminates context loads (prev/next bytes) and lead byte transformations.
- *  False positives from non-Cyrillic bytes are filtered by full verification.
+ *  Position 0-15: uppercase D0 90-9F, lowercase D0 B0-BF
+ *  Position 16-31: uppercase D0 A0-AF, lowercase D1 80-8F
+ *
+ *  Folding maps all to canonical form where lead byte is always D0 and second
+ *  byte represents position: 0x90 + position (i.e., same as uppercase range).
+ *  This creates a unique normalized value for each letter regardless of case.
+ *
+ *  @param byte The byte to fold.
+ *  @param prev The previous byte (to detect lead byte context).
+ *  @return The folded byte value.
+ */
+SZ_INTERNAL char sz_cyrillic_fold_byte_(sz_u8_t byte, sz_u8_t prev) {
+    // Lead bytes: D0 and D1 both normalize to D0
+    if (byte == 0xD0 || byte == 0xD1) return (char)0xD0;
+
+    // After D0 lead: uppercase 90-AF stays as-is (canonical form)
+    //                lowercase B0-BF subtracts 0x20 to get canonical form
+    if (prev == 0xD0) {
+        if (byte >= 0x90 && byte <= 0xAF) return (char)byte;          // uppercase positions 0-31
+        if (byte >= 0xB0 && byte <= 0xBF) return (char)(byte - 0x20); // lowercase positions 0-15
+    }
+
+    // After D1 lead: lowercase 80-8F maps to canonical form (positions 16-31)
+    // Position = 0x80 - 0x80 + 16 = 16 + (byte - 0x80), canonical = 0x90 + position
+    // So: 0x90 + 16 + (byte - 0x80) = 0xA0 + byte - 0x80 = byte + 0x20
+    if (prev == 0xD1 && byte >= 0x80 && byte <= 0x8F) return (char)(byte + 0x20);
+
+    // ASCII uppercase
+    if (byte >= 'A' && byte <= 'Z') return (char)(byte + 0x20);
+
+    return (char)byte;
+}
+
+/**
+ *  @brief  Fold a ZMM register using Cyrillic case folding rules.
+ *
+ *  Cyrillic uppercase А-Я (U+0410-U+042F): UTF-8 D0 90 - D0 AF (32 letters)
+ *  Cyrillic lowercase а-я (U+0430-U+044F): UTF-8 D0 B0 - D0 BF, D1 80 - D1 8F
+ *
+ *  Position 0-15: uppercase D0 90-9F, lowercase D0 B0-BF
+ *  Position 16-31: uppercase D0 A0-AF, lowercase D1 80-8F
+ *
+ *  Folding maps all to canonical form (uppercase range 90-AF):
+ *  - After D0: uppercase 90-AF → no change
+ *              lowercase B0-BF → subtract 0x20 (positions 0-15)
+ *  - After D1: lowercase 80-8F → add 0x20 (positions 16-31)
+ *  - Lead bytes D0/D1 → D0
+ *
+ *  @param source The source ZMM register.
+ *  @param mask Valid byte mask.
+ *  @return The folded ZMM register.
+ */
+SZ_INTERNAL __m512i sz_cyrillic_fold_zmm_(__m512i source, __mmask64 mask) {
+    __m512i const d0_vec = _mm512_set1_epi8((char)0xD0);
+    __m512i const d1_vec = _mm512_set1_epi8((char)0xD1);
+    __m512i const xb0_vec = _mm512_set1_epi8((char)0xB0);
+    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
+    __m512i const x20_vec = _mm512_set1_epi8(0x20);
+    __m512i const x10_vec = _mm512_set1_epi8(0x10);
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const range_26_vec = _mm512_set1_epi8(26);
+
+    // Step 1: Detect D0/D1 lead bytes
+    __mmask64 is_d0 = _mm512_mask_cmpeq_epi8_mask(mask, source, d0_vec);
+    __mmask64 is_d1 = _mm512_mask_cmpeq_epi8_mask(mask, source, d1_vec);
+    __mmask64 is_lead = is_d0 | is_d1;
+
+    // Step 2: Detect positions after D0 and after D1
+    __mmask64 after_d0 = is_d0 << 1;
+    __mmask64 after_d1 = is_d1 << 1;
+
+    // Step 3: Fold Cyrillic lowercase after D0 (second bytes B0-BF → subtract 0x20)
+    // Range check: (byte - 0xB0) < 0x10 means byte in [0xB0, 0xBF]
+    __mmask64 cyrillic_d0_lower = _mm512_mask_cmplt_epu8_mask(after_d0, _mm512_sub_epi8(source, xb0_vec), x10_vec);
+
+    // Step 4: Fold Cyrillic lowercase after D1 (second bytes 80-8F → add 0x20)
+    // Range check: (byte - 0x80) < 0x10 means byte in [0x80, 0x8F]
+    __mmask64 cyrillic_d1_lower = _mm512_mask_cmplt_epu8_mask(after_d1, _mm512_sub_epi8(source, x80_vec), x10_vec);
+
+    // Step 5: Fold ASCII uppercase (A-Z) → add 0x20
+    __mmask64 ascii_upper = _mm512_mask_cmplt_epu8_mask(mask, _mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+
+    // Step 6: Apply Cyrillic D0 lowercase folding (subtract 0x20)
+    __m512i result = _mm512_mask_sub_epi8(source, cyrillic_d0_lower, source, x20_vec);
+
+    // Step 7: Apply Cyrillic D1 lowercase folding (add 0x20)
+    result = _mm512_mask_add_epi8(result, cyrillic_d1_lower, result, x20_vec);
+
+    // Step 8: Apply ASCII folding (add 0x20)
+    result = _mm512_mask_add_epi8(result, ascii_upper, result, x20_vec);
+
+    // Step 9: Normalize lead bytes D0/D1 → D0
+    result = _mm512_mask_mov_epi8(result, is_lead, d0_vec);
+
+    return result;
+}
+
+/**
+ *  @brief  Cyrillic case-insensitive substring search using AVX-512 with on-the-fly haystack folding.
+ *
+ *  Uses the Raita heuristic with haystack folding - same clean structure as ASCII and Latin-1 kernels.
+ *  Cyrillic folding: second bytes [90-AF] XOR 0x20, lead bytes D0/D1 normalize to D0.
  *
  *  @param haystack Pointer to the haystack string.
  *  @param haystack_length Length of the haystack in bytes.
@@ -2879,135 +2994,177 @@ SZ_INTERNAL sz_cptr_t sz_utf8_ci_find_latin1_ice_( //
  *  @param matched_length Output: length of the match in haystack bytes.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_ci_find_cyrillic_ice_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,   //
-    sz_cptr_t needle, sz_size_t needle_length,       //
-    sz_cptr_t safe_start, sz_size_t safe_length, sz_size_t *matched_length) {
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_cyrillic_ice_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                                  sz_cptr_t needle, sz_size_t needle_length,
+                                                                  sz_cptr_t safe_start, sz_size_t safe_length,
+                                                                  sz_size_t *matched_length) {
 
-    // Cap safe slice to 64 bytes for single-ZMM verification
+    // Clamp safe slice to single ZMM register
     if (safe_length > 64) safe_length = 64;
 
-    sz_size_t safe_offset = (sz_size_t)(safe_start - needle);
-    sz_size_t head_length = safe_offset;
-    sz_size_t tail_length = needle_length - safe_offset - safe_length;
+    sz_size_t const safe_offset = (sz_size_t)(safe_start - needle);
+    sz_size_t const head_length = safe_offset;
+    sz_size_t const tail_length = needle_length - safe_offset - safe_length;
 
-    // Pick 3 probe positions within the safe slice
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(safe_start, safe_length, &offset_first, &offset_mid, &offset_last);
+    // For 2-byte Cyrillic, pick probe positions at character boundaries (even offsets)
+    // This ensures lead+second bytes are compared together as 16-bit words
+    sz_size_t const safe_chars = safe_length / 2;
+    sz_size_t const offset_first = 0;
+    sz_size_t const offset_mid = (safe_chars / 2) * 2;
+    sz_size_t const offset_last = (safe_chars - 1) * 2;
 
-    // Compute both case variants for each probe byte position.
-    // Instead of folding haystack bytes, we compare against BOTH case variants.
-    // For Cyrillic lead bytes (D0/D1): both are valid. For second bytes: XOR 0x20 flips case.
-    sz_u8_t b_first = (sz_u8_t)safe_start[offset_first];
-    sz_u8_t b_mid = (sz_u8_t)safe_start[offset_mid];
-    sz_u8_t b_last = (sz_u8_t)safe_start[offset_last];
+    // Pre-fold needle safe slice - this handles lead byte context correctly
+    __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
+    __m512i const needle_safe_folded = sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start), safe_mask);
 
-// Compute the case variant of a byte: lead bytes swap D0↔D1, second bytes XOR 0x20
-#define sz_case_variant_(b)                       \
-    (((b) == 0xD0 || (b) == 0xD1)  ? ((b) ^ 0x01) \
-     : ((b) >= 0x80 && (b) < 0xC0) ? ((b) ^ 0x20) \
-     : ((b) >= 'A' && (b) <= 'Z')  ? ((b) + 0x20) \
-     : ((b) >= 'a' && (b) <= 'z')  ? ((b) - 0x20) \
-                                   : (b))
+    // Extract 16-bit probe words from folded needle (lead + second byte together)
+    unsigned char needle_folded_bytes[64];
+    _mm512_storeu_si512(needle_folded_bytes, needle_safe_folded);
+    sz_u16_t const needle_first_word = *(sz_u16_t *)(needle_folded_bytes + offset_first);
+    sz_u16_t const needle_mid_word = *(sz_u16_t *)(needle_folded_bytes + offset_mid);
+    sz_u16_t const needle_last_word = *(sz_u16_t *)(needle_folded_bytes + offset_last);
 
-    sz_u8_t v1_first = b_first, v2_first = sz_case_variant_(b_first);
-    sz_u8_t v1_mid = b_mid, v2_mid = sz_case_variant_(b_mid);
-    sz_u8_t v1_last = b_last, v2_last = sz_case_variant_(b_last);
-#undef sz_case_variant_
+    __m512i const needle_first_vec = _mm512_set1_epi16((short)needle_first_word);
+    __m512i const needle_mid_vec = _mm512_set1_epi16((short)needle_mid_word);
+    __m512i const needle_last_vec = _mm512_set1_epi16((short)needle_last_word);
 
-    // Broadcast both variants for each probe position
-    __m512i n_first_v1 = _mm512_set1_epi8((char)v1_first);
-    __m512i n_first_v2 = _mm512_set1_epi8((char)v2_first);
-    __m512i n_mid_v1 = _mm512_set1_epi8((char)v1_mid);
-    __m512i n_mid_v2 = _mm512_set1_epi8((char)v2_mid);
-    __m512i n_last_v1 = _mm512_set1_epi8((char)v1_last);
-    __m512i n_last_v2 = _mm512_set1_epi8((char)v2_last);
+    // Main loop - step by 63 to handle characters straddling 64-byte boundaries
+    // Use 16-bit comparison (32 positions per ZMM) for proper UTF-8 character matching
+    for (; haystack_length >= needle_length + 63; haystack += 63, haystack_length -= 63) {
+        // Load and fold haystack at probe positions
+        __m512i const h_first = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first), ~0ULL);
+        __m512i const h_mid = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid), ~0ULL);
+        __m512i const h_last = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last), ~0ULL);
 
-    // Constants for ultra-minimal fold (only used in verification, not hot loop)
-    __m512i x90_vec = _mm512_set1_epi8((char)0x90);
-    __m512i xd0_vec = _mm512_set1_epi8((char)0xD0);
-    __m512i x20_vec = _mm512_set1_epi8(0x20);
-    __m512i x02_vec = _mm512_set1_epi8(2);
+        // 3-point Raita filter using 16-bit comparison (32 positions)
+        __mmask32 matches = _kand_mask32(_kand_mask32(_mm512_cmpeq_epi16_mask(h_first, needle_first_vec),
+                                                      _mm512_cmpeq_epi16_mask(h_mid, needle_mid_vec)),
+                                         _mm512_cmpeq_epi16_mask(h_last, needle_last_vec));
 
-// Ultra-minimal fold: XOR 0x20 for 90-AF, normalize D0/D1→D0
-#define sz_fold_cyrillic_(v, mask)                                                                        \
-    do {                                                                                                  \
-        __mmask64 upper_second = _mm512_mask_cmplt_epu8_mask(mask, _mm512_sub_epi8(v, x90_vec), x20_vec); \
-        v = _mm512_xor_si512(v, _mm512_maskz_mov_epi8(upper_second, x20_vec));                            \
-        __mmask64 is_lead = _mm512_mask_cmplt_epu8_mask(mask, _mm512_sub_epi8(v, xd0_vec), x02_vec);      \
-        v = _mm512_mask_mov_epi8(v, is_lead, xd0_vec);                                                    \
-    } while (0)
+        // Verify candidates - each match bit represents 2 bytes
+        while (matches) {
+            int const match_idx = sz_u32_ctz(matches);
+            int const byte_offset = match_idx * 2; // Convert 16-bit index to byte offset
+            sz_cptr_t const candidate = haystack + byte_offset;
 
-    // Pre-fold needle safe slice for verification step
-    __mmask64 n_mask = sz_u64_mask_until_(safe_length);
-    sz_u512_vec_t n_folded;
-    n_folded.zmm = _mm512_maskz_loadu_epi8(n_mask, safe_start);
-    sz_fold_cyrillic_(n_folded.zmm, n_mask);
+            // Fold and compare safe region
+            __m512i const h_safe =
+                sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset), safe_mask);
 
-    sz_cptr_t h = haystack;
-    sz_size_t h_length = haystack_length;
-    if (h_length < needle_length) return SZ_NULL_CHAR;
-
-    // Main loop - NO HAYSTACK FOLDING in the 3-point filter!
-    while (h_length >= needle_length) {
-        sz_size_t positions = (h_length >= needle_length + 64) ? 64 : (h_length - needle_length + 1);
-        __mmask64 load_mask = sz_u64_mask_until_(positions);
-
-        // Load haystack at 3 probe positions - NO FOLDING
-        __m512i h_first = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_first);
-        __m512i h_mid = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_mid);
-        __m512i h_last = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_last);
-
-        // Compare against BOTH case variants: 6 cmpeq + 3 OR + 2 AND = 11 ops (vs ~26 with folding)
-        __mmask64 match_first =
-            _mm512_cmpeq_epi8_mask(h_first, n_first_v1) | _mm512_cmpeq_epi8_mask(h_first, n_first_v2);
-        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(h_mid, n_mid_v1) | _mm512_cmpeq_epi8_mask(h_mid, n_mid_v2);
-        __mmask64 match_last = _mm512_cmpeq_epi8_mask(h_last, n_last_v1) | _mm512_cmpeq_epi8_mask(h_last, n_last_v2);
-        __mmask64 candidates = match_first & match_mid & match_last;
-
-        while (candidates) {
-            int pos = sz_u64_ctz(candidates);
-            sz_cptr_t candidate = h + pos;
-
-            // Verify full safe region with SIMD (still needs folding, but only for candidates)
-            __m512i h_safe = _mm512_maskz_loadu_epi8(n_mask, candidate + safe_offset);
-            sz_fold_cyrillic_(h_safe, n_mask);
-
-            if (_mm512_mask_cmpneq_epi8_mask(n_mask, h_safe, n_folded.zmm) == 0) {
-                // Verify head and tail with full Unicode folding
-                sz_bool_t head_ok = (head_length == 0) ? sz_true_k
-                                                       : sz_utf8_verify_case_insensitive_match_(
-                                                             needle, head_length, candidate, candidate + head_length);
-                sz_bool_t tail_ok = (tail_length == 0)
-                                        ? sz_true_k
-                                        : sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
-                                                                                 candidate + safe_offset + safe_length,
-                                                                                 candidate + needle_length);
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                // Safe region matches - verify head/tail with full Unicode comparison
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        (sz_utf8_case_insensitive_order(needle, head_length, candidate, head_length) == sz_equal_k)
+                            ? sz_true_k
+                            : sz_false_k;
+                if (tail_length > 0)
+                    tail_ok = (sz_utf8_case_insensitive_order(safe_start + safe_length, tail_length,
+                                                              candidate + safe_offset + safe_length,
+                                                              tail_length) == sz_equal_k)
+                                  ? sz_true_k
+                                  : sz_false_k;
                 if (head_ok && tail_ok) {
                     *matched_length = needle_length;
                     return candidate;
                 }
             }
-            candidates &= candidates - 1;
+            matches &= matches - 1;
         }
-
-        h += positions;
-        h_length -= positions;
     }
 
-#undef sz_fold_cyrillic_
+    // Tail handling - we need to check remaining positions where needle could fit
+    if (haystack_length >= needle_length) {
+        sz_size_t const remaining_positions = haystack_length - needle_length + 1;
+        // For 2-byte Cyrillic, we only check even-aligned positions (character boundaries)
+        sz_size_t const remaining_char_positions = (remaining_positions + 1) / 2;
+        __mmask32 const position_mask = sz_u64_mask_until_(remaining_char_positions);
+
+        // Load full data at probe positions (we need enough data to compare the full needle)
+        // The probe loads grab 64 bytes starting from each probe offset
+        __m512i const h_first = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first), ~0ULL);
+        __m512i const h_mid = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid), ~0ULL);
+        __m512i const h_last = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last), ~0ULL);
+
+        // Compare with position mask to only check valid starting positions
+        __mmask32 matches =
+            _kand_mask32(_kand_mask32(_mm512_mask_cmpeq_epi16_mask(position_mask, h_first, needle_first_vec),
+                                      _mm512_mask_cmpeq_epi16_mask(position_mask, h_mid, needle_mid_vec)),
+                         _mm512_mask_cmpeq_epi16_mask(position_mask, h_last, needle_last_vec));
+
+        while (matches) {
+            int const match_idx = sz_u32_ctz(matches);
+            int const byte_offset = match_idx * 2;
+            sz_cptr_t const candidate = haystack + byte_offset;
+
+            __m512i const h_safe =
+                sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset), safe_mask);
+
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        (sz_utf8_case_insensitive_order(needle, head_length, candidate, head_length) == sz_equal_k)
+                            ? sz_true_k
+                            : sz_false_k;
+                if (tail_length > 0)
+                    tail_ok = (sz_utf8_case_insensitive_order(safe_start + safe_length, tail_length,
+                                                              candidate + safe_offset + safe_length,
+                                                              tail_length) == sz_equal_k)
+                                  ? sz_true_k
+                                  : sz_false_k;
+                if (head_ok && tail_ok) {
+                    *matched_length = needle_length;
+                    return candidate;
+                }
+            }
+            matches &= matches - 1;
+        }
+    }
+
     return SZ_NULL_CHAR;
 }
 
 /**
- *  @brief  ASCII case-insensitive search kernel using AVX-512 Raita heuristic.
+ *  @brief  Fold a single ASCII byte to lowercase.
  *
- *  This kernel performs case-insensitive substring search when the needle contains a "safe" ASCII slice -
- *  a contiguous region where all bytes have simple case folding (just +0x20 for A-Z). The algorithm:
- *  1. Selects 3 probe positions within the safe slice using `sz_locate_needle_anomalies_`
- *  2. Pre-computes case-folded (lowercase) versions of probe characters
- *  3. For each 64-byte haystack chunk: case-folds probe positions and compares
- *  4. For candidates: verifies safe region with SIMD, then head/tail serially
+ *  Only transforms A-Z (0x41-0x5A) to a-z (0x61-0x7A).
+ *  All other bytes pass through unchanged.
+ *
+ *  @param c The byte to fold.
+ *  @return The folded byte.
+ */
+SZ_INTERNAL char sz_ascii_fold_byte_(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 0x20) : c; }
+
+/**
+ *  @brief  Fold a ZMM register using ASCII case folding rules.
+ *
+ *  Only transforms A-Z (0x41-0x5A) to a-z (0x61-0x7A).
+ *  All other bytes pass through unchanged - this is the key fix.
+ *
+ *  @param source The source ZMM register.
+ *  @return The folded ZMM register.
+ */
+SZ_INTERNAL __m512i sz_ascii_fold_zmm_(__m512i source) {
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const range_26_vec = _mm512_set1_epi8(26);
+    __m512i const x20_vec = _mm512_set1_epi8(0x20);
+
+    // Only fold bytes in range A-Z: (byte - 'A') < 26
+    __mmask64 ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+
+    return _mm512_mask_add_epi8(source, ascii_upper, source, x20_vec);
+}
+
+/**
+ *  @brief  ASCII case-insensitive substring search using AVX-512 with haystack folding.
+ *
+ *  Uses the Raita heuristic (first/mid/last character probes) with proper masked haystack folding.
+ *  This kernel only handles safe ASCII slices where all positions have simple 1:1 case folding.
+ *  The safe slice detector already excludes problematic patterns like "ss", ligatures, etc.
  *
  *  @param haystack Pointer to the haystack string.
  *  @param haystack_length Length of the haystack in bytes.
@@ -3018,137 +3175,109 @@ SZ_INTERNAL sz_cptr_t sz_utf8_ci_find_cyrillic_ice_( //
  *  @param matched_length Output: length of the match in haystack bytes.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_ci_find_ascii_ice_(  //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
-    sz_cptr_t safe_start, sz_size_t safe_length, sz_size_t *matched_length) {
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                               sz_cptr_t needle, sz_size_t needle_length,
+                                                               sz_cptr_t safe_start, sz_size_t safe_length,
+                                                               sz_size_t *matched_length) {
 
-    // Cap safe slice to 64 bytes for single-ZMM verification
+    // Clamp safe slice to single ZMM register
     if (safe_length > 64) safe_length = 64;
 
-    sz_size_t safe_offset = (sz_size_t)(safe_start - needle);
-    sz_size_t head_length = safe_offset;
-    sz_size_t tail_length = needle_length - safe_offset - safe_length;
+    sz_size_t const safe_offset = (sz_size_t)(safe_start - needle);
+    sz_size_t const head_length = safe_offset;
+    sz_size_t const tail_length = needle_length - safe_offset - safe_length;
 
-    // Pick 3 probe positions within the safe slice
+    // Pick 3 probe positions within the safe slice using Raita heuristic
     sz_size_t offset_first, offset_mid, offset_last;
     sz_locate_needle_anomalies_(safe_start, safe_length, &offset_first, &offset_mid, &offset_last);
 
-    // Compute both case variants for each probe byte position.
-    // Instead of folding haystack bytes, we compare against BOTH case variants.
-    sz_u8_t b_first = (sz_u8_t)safe_start[offset_first];
-    sz_u8_t b_mid = (sz_u8_t)safe_start[offset_mid];
-    sz_u8_t b_last = (sz_u8_t)safe_start[offset_last];
+    // Pre-fold needle probes using proper masked folding (only A-Z → a-z)
+    __m512i const needle_first_vec = _mm512_set1_epi8(sz_ascii_fold_byte_(safe_start[offset_first]));
+    __m512i const needle_mid_vec = _mm512_set1_epi8(sz_ascii_fold_byte_(safe_start[offset_mid]));
+    __m512i const needle_last_vec = _mm512_set1_epi8(sz_ascii_fold_byte_(safe_start[offset_last]));
 
-// Compute the case variant of an ASCII byte
-#define sz_ascii_variant_(b) \
-    (((b) >= 'A' && (b) <= 'Z') ? ((b) + 0x20) : ((b) >= 'a' && (b) <= 'z') ? ((b) - 0x20) : (b))
+    // Pre-fold entire safe slice for verification
+    __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
+    __m512i const needle_safe_folded = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    sz_u8_t v1_first = b_first, v2_first = sz_ascii_variant_(b_first);
-    sz_u8_t v1_mid = b_mid, v2_mid = sz_ascii_variant_(b_mid);
-    sz_u8_t v1_last = b_last, v2_last = sz_ascii_variant_(b_last);
-#undef sz_ascii_variant_
+    // Main loop - 64 positions per iteration (mirrors sz_find_skylake structure)
+    for (; haystack_length >= needle_length + 64; haystack += 64, haystack_length -= 64) {
+        // Load and fold haystack at probe positions (only A-Z → a-z)
+        __m512i const h_first = sz_ascii_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
+        __m512i const h_mid = sz_ascii_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
+        __m512i const h_last = sz_ascii_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
 
-    // For ss/SS in needle, haystack might have ß (C3 9F). Skip those probes, let verification handle it.
-    sz_u8_t prev_first = offset_first > 0 ? (sz_u8_t)safe_start[offset_first - 1] : 0;
-    sz_u8_t prev_mid = offset_mid > 0 ? (sz_u8_t)safe_start[offset_mid - 1] : 0;
-    sz_u8_t prev_last = offset_last > 0 ? (sz_u8_t)safe_start[offset_last - 1] : 0;
-    sz_u8_t next_first = offset_first + 1 < safe_length ? (sz_u8_t)safe_start[offset_first + 1] : 0;
-    sz_u8_t next_mid = offset_mid + 1 < safe_length ? (sz_u8_t)safe_start[offset_mid + 1] : 0;
-    sz_u8_t next_last = offset_last + 1 < safe_length ? (sz_u8_t)safe_start[offset_last + 1] : 0;
+        // 3-point Raita filter
+        __mmask64 matches = _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(h_first, needle_first_vec),
+                                                      _mm512_cmpeq_epi8_mask(h_mid, needle_mid_vec)),
+                                         _mm512_cmpeq_epi8_mask(h_last, needle_last_vec));
 
-    int skip_first = (b_first == 's' && next_first == 's') || (b_first == 'S' && next_first == 'S') ||
-                     (prev_first == 's' && b_first == 's') || (prev_first == 'S' && b_first == 'S');
-    int skip_mid = (b_mid == 's' && next_mid == 's') || (b_mid == 'S' && next_mid == 'S') ||
-                   (prev_mid == 's' && b_mid == 's') || (prev_mid == 'S' && b_mid == 'S');
-    int skip_last = (b_last == 's' && next_last == 's') || (b_last == 'S' && next_last == 'S') ||
-                    (prev_last == 's' && b_last == 's') || (prev_last == 'S' && b_last == 'S');
+        // Verify candidates
+        while (matches) {
+            int const offset = sz_u64_ctz(matches);
+            sz_cptr_t const candidate = haystack + offset;
 
-    // Broadcast both variants for each probe position
-    __m512i n_first_v1 = _mm512_set1_epi8((char)v1_first);
-    __m512i n_first_v2 = _mm512_set1_epi8((char)v2_first);
-    __m512i n_mid_v1 = _mm512_set1_epi8((char)v1_mid);
-    __m512i n_mid_v2 = _mm512_set1_epi8((char)v2_mid);
-    __m512i n_last_v1 = _mm512_set1_epi8((char)v1_last);
-    __m512i n_last_v2 = _mm512_set1_epi8((char)v2_last);
+            // Fold and compare safe region (only A-Z → a-z)
+            __m512i const h_safe = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset));
 
-    // Constants for ASCII case folding + ß handling (only used in verification, not hot loop)
-    __m512i a_upper_vec = _mm512_set1_epi8('A');
-    __m512i subtract26_vec = _mm512_set1_epi8(26);
-    __m512i x20_vec = _mm512_set1_epi8(0x20);
-    __m512i c3_vec = _mm512_set1_epi8((char)0xC3);
-    __m512i x9f_vec = _mm512_set1_epi8((char)0x9F);
-    __m512i s_vec = _mm512_set1_epi8('s');
-
-    // Pre-fold needle safe slice for verification step
-    __mmask64 n_mask = sz_u64_mask_until_(safe_length);
-    __m512i n_raw = _mm512_maskz_loadu_epi8(n_mask, safe_start);
-    __mmask64 n_upper = _mm512_cmp_epu8_mask(_mm512_sub_epi8(n_raw, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
-    sz_u512_vec_t n_folded;
-    n_folded.zmm = _mm512_mask_add_epi8(n_raw, n_upper & n_mask, n_raw, x20_vec);
-
-    sz_cptr_t h = haystack;
-    sz_size_t h_length = haystack_length;
-    if (h_length < needle_length) return SZ_NULL_CHAR;
-
-    // Main loop - NO HAYSTACK FOLDING in the 3-point filter!
-    while (h_length >= needle_length) {
-        sz_size_t positions = (h_length >= needle_length + 64) ? 64 : (h_length - needle_length + 1);
-        __mmask64 load_mask = sz_u64_mask_until_(positions);
-
-        // Load haystack at 3 probe positions - NO FOLDING
-        __m512i h_first = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_first);
-        __m512i h_mid = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_mid);
-        __m512i h_last = _mm512_maskz_loadu_epi8(load_mask, h + safe_offset + offset_last);
-
-        // Compare against BOTH case variants: 6 cmpeq + 3 OR + 2 AND = 11 ops (vs ~14 with folding)
-        // For ss positions, use load_mask (always match) since haystack might have ß.
-        __mmask64 match_first =
-            skip_first ? load_mask
-                       : (_mm512_cmpeq_epi8_mask(h_first, n_first_v1) | _mm512_cmpeq_epi8_mask(h_first, n_first_v2));
-        __mmask64 match_mid =
-            skip_mid ? load_mask : (_mm512_cmpeq_epi8_mask(h_mid, n_mid_v1) | _mm512_cmpeq_epi8_mask(h_mid, n_mid_v2));
-        __mmask64 match_last =
-            skip_last ? load_mask
-                      : (_mm512_cmpeq_epi8_mask(h_last, n_last_v1) | _mm512_cmpeq_epi8_mask(h_last, n_last_v2));
-        __mmask64 candidates = match_first & match_mid & match_last;
-
-        while (candidates) {
-            int pos = sz_u64_ctz(candidates);
-            sz_cptr_t candidate = h + pos;
-
-            // Verify full safe region with SIMD (still needs folding, but only for candidates)
-            __m512i h_safe = _mm512_maskz_loadu_epi8(n_mask, candidate + safe_offset);
-            // Fold ASCII uppercase to lowercase
-            __mmask64 upper_safe =
-                _mm512_cmp_epu8_mask(_mm512_sub_epi8(h_safe, a_upper_vec), subtract26_vec, _MM_CMPINT_LT);
-            h_safe = _mm512_mask_add_epi8(h_safe, upper_safe & n_mask, h_safe, x20_vec);
-            // Fold ß (C3 9F) to "ss" - both bytes become 's'
-            __mmask64 h_c3 = _mm512_cmpeq_epi8_mask(h_safe, c3_vec);
-            __mmask64 h_9f_second = (h_c3 << 1) & _mm512_cmpeq_epi8_mask(h_safe, x9f_vec);
-            __mmask64 h_c3_eszett = h_9f_second >> 1;
-            h_safe = _mm512_mask_mov_epi8(h_safe, h_c3_eszett | h_9f_second, s_vec);
-
-            if (_mm512_mask_cmpneq_epi8_mask(n_mask, h_safe, n_folded.zmm) == 0) {
-                // Verify head and tail with full Unicode folding
-                sz_bool_t head_ok = (head_length == 0) ? sz_true_k
-                                                       : sz_utf8_verify_case_insensitive_match_(
-                                                             needle, head_length, candidate, candidate + head_length);
-                sz_bool_t tail_ok = (tail_length == 0)
-                                        ? sz_true_k
-                                        : sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
-                                                                                 candidate + safe_offset + safe_length,
-                                                                                 candidate + needle_length);
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                // Safe region matches - verify head/tail with full Unicode folding
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        sz_utf8_verify_case_insensitive_match_(needle, head_length, candidate, candidate + head_length);
+                if (tail_length > 0)
+                    tail_ok = sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
+                                                                     candidate + safe_offset + safe_length,
+                                                                     candidate + needle_length);
                 if (head_ok && tail_ok) {
                     *matched_length = needle_length;
                     return candidate;
                 }
             }
-            candidates &= candidates - 1;
+            matches &= matches - 1;
         }
+    }
 
-        h += positions;
-        h_length -= positions;
+    // Tail handling with masked loads
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+
+        __m512i const h_first =
+            sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_first));
+        __m512i const h_mid =
+            sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_mid));
+        __m512i const h_last =
+            sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack + safe_offset + offset_last));
+
+        __mmask64 matches = _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(h_first, needle_first_vec),
+                                                      _mm512_cmpeq_epi8_mask(h_mid, needle_mid_vec)),
+                                         _mm512_cmpeq_epi8_mask(h_last, needle_last_vec));
+
+        while (matches) {
+            int const offset = sz_u64_ctz(matches);
+            sz_cptr_t const candidate = haystack + offset;
+
+            __m512i const h_safe = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, candidate + safe_offset));
+
+            if (_mm512_mask_cmpneq_epi8_mask(safe_mask, h_safe, needle_safe_folded) == 0) {
+                sz_bool_t head_ok = sz_true_k;
+                sz_bool_t tail_ok = sz_true_k;
+                if (head_length > 0)
+                    head_ok =
+                        sz_utf8_verify_case_insensitive_match_(needle, head_length, candidate, candidate + head_length);
+                if (tail_length > 0)
+                    tail_ok = sz_utf8_verify_case_insensitive_match_(safe_start + safe_length, tail_length,
+                                                                     candidate + safe_offset + safe_length,
+                                                                     candidate + needle_length);
+                if (head_ok && tail_ok) {
+                    *matched_length = needle_length;
+                    return candidate;
+                }
+            }
+            matches &= matches - 1;
+        }
     }
 
     return SZ_NULL_CHAR;
@@ -3230,16 +3359,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         sz_utf8_case_insensitive_find_ice_can_use_cyrillic_path_(needle, needle_length, &cyrillic_len);
 
     // Select path with longest safe slice
-    // Minimum thresholds: ASCII needs 3 bytes for Raita, Latin1/Cyrillic need 4 (2 chars × 2 bytes)
+    // Minimum thresholds: ASCII needs 3 bytes for Raita, Latin1/Cyrillic need 4 (2 chars x 2 bytes)
     if (ascii_len >= latin1_len && ascii_len >= cyrillic_len && ascii_len >= 3)
-        return sz_utf8_ci_find_ascii_ice_(haystack, haystack_length, needle, needle_length, ascii_start, ascii_len,
-                                          matched_length);
+        return sz_utf8_case_insensitive_find_ascii_ice_(haystack, haystack_length, needle, needle_length, ascii_start,
+                                                        ascii_len, matched_length);
     if (latin1_len >= cyrillic_len && latin1_len >= 4)
-        return sz_utf8_ci_find_latin1_ice_(haystack, haystack_length, needle, needle_length, latin1_start, latin1_len,
-                                           matched_length);
+        return sz_utf8_case_insensitive_find_latin1_ice_(haystack, haystack_length, needle, needle_length, latin1_start,
+                                                         latin1_len, matched_length);
     if (cyrillic_len >= 4)
-        return sz_utf8_ci_find_cyrillic_ice_(haystack, haystack_length, needle, needle_length, cyrillic_start,
-                                             cyrillic_len, matched_length);
+        return sz_utf8_case_insensitive_find_cyrillic_ice_(haystack, haystack_length, needle, needle_length,
+                                                           cyrillic_start, cyrillic_len, matched_length);
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);

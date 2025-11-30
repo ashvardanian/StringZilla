@@ -9,7 +9,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_TOKENS=file` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
+ *  - `STRINGWARS_TOKENS=line` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -25,7 +25,7 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_unicode_cpp20
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=file build_release/stringzilla_bench_unicode_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=line build_release/stringzilla_bench_unicode_cpp20
  *  @endcode
  *
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
@@ -149,7 +149,7 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual testing
-        environment_t::tokenization_t::file_k);
+        environment_t::tokenization_t::lines_k);
 
     std::printf("Starting Unicode benchmarks...\n");
 
