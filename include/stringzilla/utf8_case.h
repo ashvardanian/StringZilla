@@ -1596,7 +1596,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             // Only consider characters we're actually processing
             needs_serial &= (__mmask16)((1u << num_chars) - 1);
 
-            // Handle serial-needed characters by processing them one at a time
+            // Handle serial-needed characters by processing them one at a time (assumes valid UTF-8)
             if (needs_serial) {
                 sz_size_t first_special = (sz_size_t)sz_u64_ctz((sz_u64_t)needs_serial);
                 if (first_special == 0) {
@@ -1604,18 +1604,12 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     sz_rune_t rune;
                     sz_rune_length_t rune_length;
                     sz_rune_parse(source, &rune, &rune_length);
-                    if (rune_length == sz_utf8_invalid_k) {
-                        *target++ = *source++;
-                        source_length--;
-                    }
-                    else {
-                        sz_rune_t folded_runes[4];
-                        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
-                        for (sz_size_t i = 0; i != folded_count; ++i)
-                            target += sz_rune_export(folded_runes[i], (sz_u8_t *)target);
-                        source += rune_length;
-                        source_length -= rune_length;
-                    }
+                    sz_rune_t folded_runes[4];
+                    sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+                    for (sz_size_t i = 0; i != folded_count; ++i)
+                        target += sz_rune_export(folded_runes[i], (sz_u8_t *)target);
+                    source += rune_length;
+                    source_length -= rune_length;
                     continue;
                 }
                 // Truncate to only process characters before the special one
@@ -1965,22 +1959,16 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     if (needs_serial_e1) {
                         sz_size_t first_special = sz_u64_ctz(needs_serial_e1);
                         if (first_special == 0) {
-                            // First char needs serial processing
+                            // First char needs serial processing (assumes valid UTF-8)
                             sz_rune_t rune;
                             sz_rune_length_t rune_length;
                             sz_rune_parse(source, &rune, &rune_length);
-                            if (rune_length == sz_utf8_invalid_k) {
-                                *target++ = *source++;
-                                source_length--;
-                            }
-                            else {
-                                sz_rune_t folded_runes[4];
-                                sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
-                                for (sz_size_t i = 0; i != folded_count; ++i)
-                                    target += sz_rune_export(folded_runes[i], (sz_u8_t *)target);
-                                source += rune_length;
-                                source_length -= rune_length;
-                            }
+                            sz_rune_t folded_runes[4];
+                            sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+                            for (sz_size_t i = 0; i != folded_count; ++i)
+                                target += sz_rune_export(folded_runes[i], (sz_u8_t *)target);
+                            source += rune_length;
+                            source_length -= rune_length;
                             continue;
                         }
                         three_byte_length = first_special;
@@ -2175,15 +2163,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 break;
             }
 
+            // Serial fallback for remaining bytes (assumes valid UTF-8)
             sz_rune_t rune;
             sz_rune_length_t rune_length;
             sz_rune_parse(source, &rune, &rune_length);
-            if (rune_length == sz_utf8_invalid_k) {
-                // Invalid UTF-8: copy byte as-is and continue
-                *target++ = *source++;
-                source_length--;
-                continue;
-            }
 
             sz_rune_t folded[4];
             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
