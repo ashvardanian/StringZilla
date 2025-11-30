@@ -112,6 +112,7 @@ static PyTypeObject StrsType;
 static PyTypeObject SplitIteratorType;
 static PyTypeObject Utf8SplitLinesIteratorType;
 static PyTypeObject Utf8SplitWhitespaceIteratorType;
+static PyTypeObject Utf8WordBoundaryIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -230,6 +231,26 @@ typedef struct {
     sz_bool_t skip_empty;
 
 } Utf8SplitWhitespaceIterator;
+
+/**
+ *  @brief  Iterator for finding word boundaries in UTF-8 text per Unicode TR29.
+ *
+ *  Uses sz_utf8_word_find_boundary to find boundaries, supporting all TR29 rules.
+ *  Yields words (text segments between consecutive word boundaries).
+ */
+typedef struct {
+    PyObject ob_base;
+
+    PyObject *text_obj; //< For reference counting
+
+    sz_cptr_t start;      //< Start of current word
+    sz_cptr_t end;        //< End of original text (immutable)
+    sz_cptr_t text_start; //< Start of original text (for reverse iteration)
+
+    /// @brief  Should we skip empty segments (consecutive boundaries)?
+    sz_bool_t skip_empty;
+
+} Utf8WordBoundaryIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -4458,6 +4479,76 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     return (PyObject *)result_obj;
 }
 
+static char const doc_utf8_word_iter[] = //
+    "utf8_word_iter(string, /, skip_empty=False)\n"
+    "\n"
+    "Return an iterator yielding words per Unicode TR29 word boundary rules.\n"
+    "Unlike str.split(), this is TR29 compliant and supports all Unicode scripts.\n"
+    "\n"
+    "Args:\n"
+    "    string: The input UTF-8 string to split into words.\n"
+    "    skip_empty: If True, skip empty segments between consecutive boundaries.\n"
+    "\n"
+    "Returns:\n"
+    "    Iterator yielding Str objects for each word.\n";
+
+static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *kwnames) {
+    int min_args = 1, max_args = 2;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_word_iter() requires %zd to %zd arguments", min_args, max_args);
+        return NULL;
+    }
+
+    PyObject *text_obj = args[0];
+    int skip_empty = 0;
+
+    // Parse keyword arguments
+    if (kwnames) {
+        Py_ssize_t n_kwnames = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < n_kwnames; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0) { skip_empty = PyObject_IsTrue(value); }
+        }
+    }
+    // Check positional skip_empty
+    if (positional_args_count > 1) { skip_empty = PyObject_IsTrue(args[1]); }
+
+    sz_string_view_t text_view;
+    if (PyObject_TypeCheck(text_obj, &StrType)) {
+        Str *str_obj = (Str *)text_obj;
+        text_view = str_obj->memory;
+    }
+    else if (PyUnicode_Check(text_obj)) {
+        Py_ssize_t signed_length;
+        text_view.start = PyUnicode_AsUTF8AndSize(text_obj, &signed_length);
+        if (!text_view.start) return NULL;
+        text_view.length = (sz_size_t)signed_length;
+    }
+    else if (PyBytes_Check(text_obj)) {
+        text_view.start = PyBytes_AS_STRING(text_obj);
+        text_view.length = (sz_size_t)PyBytes_GET_SIZE(text_obj);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Expected str, bytes, or Str");
+        return NULL;
+    }
+
+    Utf8WordBoundaryIterator *iter = PyObject_New(Utf8WordBoundaryIterator, &Utf8WordBoundaryIteratorType);
+    if (!iter) return PyErr_NoMemory();
+
+    iter->text_obj = text_obj;
+    Py_INCREF(text_obj);
+    iter->start = text_view.start;
+    iter->end = text_view.start + text_view.length;
+    iter->text_start = text_view.start;
+    iter->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+
+    (void)self; // Unused
+    return (PyObject *)iter;
+}
+
 static char const doc_splitlines[] = //
     "Split a string by line breaks.\n"
     "\n"
@@ -4920,6 +5011,7 @@ static PyMethodDef Str_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
@@ -5294,6 +5386,103 @@ static PyTypeObject Utf8SplitWhitespaceIteratorType = {
     .tp_iternext = (iternextfunc)Utf8SplitWhitespaceIteratorType_next,
 };
 
+#pragma endregion
+
+#pragma region UTF8 Word Boundary Iterator
+
+static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *self) {
+    // Termination: start >= end means we're done
+    if (self->start >= self->end) return NULL;
+
+    // Find next word boundary
+    sz_size_t boundary_width = 0;
+    sz_cptr_t boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
+
+    // If boundary is at start (empty segment) or at end
+    if (boundary == self->start || boundary >= self->end) {
+        // Return remaining text as last word
+        sz_size_t word_len = (sz_size_t)(self->end - self->start);
+        if (word_len == 0) return NULL;
+
+        // Create a new `Str` object
+        Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+        result_obj->memory.start = self->start;
+        result_obj->memory.length = word_len;
+        result_obj->parent = self->text_obj;
+        Py_INCREF(self->text_obj);
+
+        self->start = self->end; // Mark as done
+        return (PyObject *)result_obj;
+    }
+
+    // Get word length (from current position to boundary)
+    sz_size_t word_len = (sz_size_t)(boundary - self->start);
+
+    // Skip empty segments if requested
+    while (self->skip_empty && word_len == 0 && boundary < self->end) {
+        self->start = boundary;
+        boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
+        if (boundary == self->start) break; // Avoid infinite loop
+        word_len = (sz_size_t)(boundary - self->start);
+    }
+
+    if (word_len == 0 && self->skip_empty) {
+        return NULL; // No more non-empty segments
+    }
+
+    // Create a new `Str` object for the word
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->memory.start = self->start;
+    result_obj->memory.length = word_len;
+    result_obj->parent = self->text_obj;
+    Py_INCREF(self->text_obj);
+
+    // Move start to next word
+    self->start = boundary;
+
+    return (PyObject *)result_obj;
+}
+
+static void Utf8WordBoundaryIteratorType_dealloc(Utf8WordBoundaryIterator *self) {
+    Py_XDECREF(self->text_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8WordBoundaryIteratorType_iter(PyObject *self) {
+    Py_INCREF(self);
+    return self;
+}
+
+static char const doc_Utf8WordBoundaryIterator[] = //
+    "Utf8WordBoundaryIterator(string, ...)\n"
+    "\n"
+    "UTF-8 aware word boundary iterator per Unicode TR29 algorithm.\n"
+    "Yields words (text segments between consecutive word boundaries).\n"
+    "\n"
+    "Created by:\n"
+    "  - Str.utf8_word_iter()\n"
+    "  - sz.utf8_word_iter()\n"
+    "\n"
+    "TR29 Word_Break rules implemented:\n"
+    "  - WB3: CR x LF (no break)\n"
+    "  - WB4: Ignore Extend/Format/ZWJ\n"
+    "  - WB5-WB13: Letter, number, punctuation rules\n"
+    "  - WB15-WB16: Regional Indicator pairs\n";
+
+static PyTypeObject Utf8WordBoundaryIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8WordBoundaryIterator",
+    .tp_basicsize = sizeof(Utf8WordBoundaryIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8WordBoundaryIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8WordBoundaryIterator,
+    .tp_iter = Utf8WordBoundaryIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8WordBoundaryIteratorType_next,
+};
 #pragma endregion
 
 #pragma region Hasher
@@ -7253,6 +7442,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
@@ -7301,6 +7491,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8WordBoundaryIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 
