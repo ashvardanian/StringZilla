@@ -54,18 +54,12 @@ __Who is this for?__
 
 ## Performance
 
-<table style="width: 100%; text-align: center; table-layout: fixed;">
-  <colgroup>
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-  </colgroup>
+<table>
   <tr>
-    <th align="center">C</th>
-    <th align="center">C++</th>
-    <th align="center">Python</th>
-    <th align="center">StringZilla</th>
+    <th align="center" width="25%">C</th>
+    <th align="center" width="25%">C++</th>
+    <th align="center" width="25%">Python</th>
+    <th align="center" width="25%">StringZilla</th>
   </tr>
   <!-- Substrings, normal order -->
   <tr>
@@ -170,12 +164,12 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>std::uniform_int_distribution</code><br/>
+      <code>uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
     <td align="center">
-      <code>join(random.choices(...))</code><br/>
+      <code>join(random.choices(x))</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>13.3</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>5.9</b> MB/s
     </td>
@@ -328,10 +322,15 @@ Consider contributing if you need a feature that's not yet implemented.
 | Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| SHA-256 Checksums              |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
 | Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
+| One-Shot & Streaming Hashes    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Cryptographic Hashes           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
+| Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+|                                |          |       |       |        |       |       |       |       |
+| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Case-Insensitive UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ⚪    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
