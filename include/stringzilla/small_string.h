@@ -256,6 +256,8 @@ SZ_PUBLIC void sz_string_unpack( //
 }
 
 SZ_PUBLIC sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
+    // Fast path for self-comparison
+    if (a == b) return sz_true_k;
     // Tempting to say that the external.length is bitwise the same even if it includes
     // some bytes of the on-stack payload, but we don't at this writing maintain that invariant.
     // (An on-stack string includes noise bytes in the high-order bits of external.length. So do this
@@ -393,6 +395,9 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
 
     // The user intended to extend the string.
     offset = sz_min_of_two(offset, string_length);
+
+    // Guard against integer overflow in size calculation.
+    if (added_length > SZ_SSIZE_MAX - string_length - 1) return SZ_NULL_CHAR;
 
     // If we are lucky, no memory allocations will be needed.
     if (string_length + added_length < string_space) {
