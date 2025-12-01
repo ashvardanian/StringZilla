@@ -2830,10 +2830,10 @@ class basic_string {
 #endif // !SZ_AVOID_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
-    size_type size() const noexcept { return view().size(); }
+    size_type size() const noexcept { return sz_string_length(&string_); }
     size_type length() const noexcept { return size(); }
     size_type max_size() const noexcept { return npos - 1; }
-    bool empty() const noexcept { return sz_string_is_empty(&string_); }
+    bool empty() const noexcept { return sz_string_length(&string_) == 0; }
     size_type capacity() const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;

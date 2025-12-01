@@ -151,9 +151,9 @@ SZ_PUBLIC void sz_string_unpack( //
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
 /**
- *  @brief  Branchless check if the string is empty.
+ *  @brief  Returns the length of the string in a branchless manner.
  */
-SZ_PUBLIC sz_bool_t sz_string_is_empty(sz_string_t const *string);
+SZ_PUBLIC sz_size_t sz_string_length(sz_string_t const *string);
 
 /**
  *  @brief  Constructs a string of a given ::length with noisy contents.
@@ -237,10 +237,10 @@ SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_si
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
 }
 
-SZ_PUBLIC sz_bool_t sz_string_is_empty(sz_string_t const *string) {
+SZ_PUBLIC sz_size_t sz_string_length(sz_string_t const *string) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - 1ull;
-    return (sz_bool_t)((string->external.length & (0x00000000000000FFull | is_big_mask)) == 0);
+    return string->external.length & (0x00000000000000FFull | is_big_mask);
 }
 
 SZ_PUBLIC void sz_string_unpack( //
