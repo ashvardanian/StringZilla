@@ -1132,7 +1132,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         sz_rune_t rune;
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &rune)) break;
         window_runes[window_count] = rune;
-        if (haystack_iter.pending_idx == 1 || !haystack_iter.pending_count) current_source = before_ptr;
+        current_source = haystack_iter.pending_idx <= 1 ? before_ptr : current_source;
         window_sources[window_count] = current_source;
         window_hash = window_hash * 257 + rune;
         window_count++;
@@ -1145,11 +1145,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
 
     for (;;) {
         if (window_hash == needle_hash) {
-            sz_bool_t prefix_matches = sz_true_k;
-            for (sz_size_t i = 0; i < needle_prefix_count && prefix_matches; ++i)
-                if (window_runes[(ring_head + i) % needle_prefix_count] != needle_runes[i]) prefix_matches = sz_false_k;
+            // The ring buffer is a circular array where `ring_head` points to the oldest (first) element.
+            // A naive approach would use `window_runes[(ring_head + i) % needle_prefix_count]` for each comparison,
+            // but modulo is expensive. Instead, we compare in two contiguous segments:
+            //   - First segment:  window_runes[ring_head..needle_prefix_count) maps to needle_runes[0..first_segment)
+            //   - Second segment: window_runes[0..ring_head) maps to needle_runes[first_segment..needle_prefix_count)
+            sz_size_t first_segment = needle_prefix_count - ring_head;
+            sz_size_t mismatches = 0;
+            for (sz_size_t i = 0; i < first_segment; ++i) mismatches += window_runes[ring_head + i] != needle_runes[i];
+            for (sz_size_t i = 0; i < ring_head; ++i) mismatches += window_runes[i] != needle_runes[first_segment + i];
 
-            if (prefix_matches) {
+            if (!mismatches) {
                 if (needle_total_count <= ring_capacity) {
                     *match_length = (sz_size_t)(window_end - window_start);
                     return window_start;
@@ -1179,11 +1185,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         window_hash -= window_runes[ring_head] * hash_multiplier;
         window_hash = window_hash * 257 + new_rune;
 
-        sz_size_t next_head = (ring_head + 1) % needle_prefix_count;
+        // Advance ring head, avoiding modulo with a conditional (cheaper than integer division)
+        sz_size_t next_head = ring_head + 1;
+        next_head = next_head == needle_prefix_count ? 0 : next_head;
         window_start = window_sources[next_head];
 
         window_runes[ring_head] = new_rune;
-        if (haystack_iter.pending_idx == 1 || !haystack_iter.pending_count) current_source = before_ptr;
+        current_source = haystack_iter.pending_idx <= 1 ? before_ptr : current_source;
         window_sources[ring_head] = current_source;
 
         ring_head = next_head;
