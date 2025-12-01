@@ -3452,8 +3452,9 @@ class basic_string {
         // Update the string length appropriately
         if (actual_count > string_length) {
             string_start[actual_count] = '\0';
-            // ! Knowing the layout of the string, we can perform this operation safely,
-            // ! even if its located on stack.
+            // Safe for both SSO and heap strings: on little-endian, internal.length
+            // overlaps with LSB of external.length, so += affects only the length byte.
+            // On big-endian, the struct layout places them at matching positions.
             string_.external.length += actual_count - string_length;
         }
         else { sz_string_erase(&string_, actual_count, SZ_SIZE_MAX); }
@@ -4190,8 +4191,9 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
     if (count > string_length) {
         sz_fill(string_start + string_length, count - string_length, character);
         string_start[count] = '\0';
-        // Knowing the layout of the string, we can perform this operation safely,
-        // even if its located on stack.
+        // Safe for both SSO and heap strings: on little-endian, internal.length
+        // overlaps with LSB of external.length, so += affects only the length byte.
+        // On big-endian, the struct layout places them at matching positions.
         string_.external.length += count - string_length;
     }
     else { sz_string_erase(&string_, count, SZ_SIZE_MAX); }

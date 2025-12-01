@@ -197,9 +197,9 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
  *          Performs no allocations or deallocations and can't fail.
  *
  *  @param string       String to clean.
- *  @param offset       Offset of the first byte to remove.
+ *  @param offset       Offset of the first byte to remove. If >= length, no bytes are removed.
  *  @param length       Number of bytes to remove. Out-of-bound ranges will be capped.
- *  @return             Number of bytes removed.
+ *  @return             Number of bytes removed (0 if offset >= string length).
  */
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
