@@ -2833,7 +2833,7 @@ class basic_string {
     size_type size() const noexcept { return view().size(); }
     size_type length() const noexcept { return size(); }
     size_type max_size() const noexcept { return npos - 1; }
-    bool empty() const noexcept { return string_.external.length == 0; }
+    bool empty() const noexcept { return sz_string_is_empty(&string_); }
     size_type capacity() const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;

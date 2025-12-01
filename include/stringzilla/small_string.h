@@ -95,9 +95,21 @@ typedef union sz_string_t {
 
 } sz_string_t;
 
+/*
+ *  Verify structure layout for branchless length extraction.
+ *  On little-endian: internal.length (8-bit) overlaps with LSB of external.length at offset 8.
+ *  On big-endian: internal.length is at offset 31, external.length at offset 24.
+ */
 #if !SZ_AVOID_LIBC // `offsetof` comes from `stddef.h`, which is part of the C standard library.
 sz_static_assert(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
                  Alignment_confusion_between_internal_and_external_storage);
+#if !SZ_IS_BIG_ENDIAN_
+sz_static_assert(offsetof(sz_string_t, internal.length) == 8, Internal_length_offset_mismatch_on_little_endian);
+sz_static_assert(offsetof(sz_string_t, external.length) == 8, External_length_offset_mismatch_on_little_endian);
+#else
+sz_static_assert(offsetof(sz_string_t, internal.length) == 31, Internal_length_offset_mismatch_on_big_endian);
+sz_static_assert(offsetof(sz_string_t, external.length) == 24, External_length_offset_mismatch_on_big_endian);
+#endif
 #endif
 
 #pragma endregion // Core Structure
@@ -137,6 +149,11 @@ SZ_PUBLIC void sz_string_unpack( //
  * @param length       Number of bytes in the string, before the SZ_NULL character.
  */
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
+
+/**
+ *  @brief  Branchless check if the string is empty.
+ */
+SZ_PUBLIC sz_bool_t sz_string_is_empty(sz_string_t const *string);
 
 /**
  *  @brief  Constructs a string of a given ::length with noisy contents.
@@ -218,6 +235,12 @@ SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_si
     *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
+}
+
+SZ_PUBLIC sz_bool_t sz_string_is_empty(sz_string_t const *string) {
+    sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
+    sz_size_t is_big_mask = is_small - 1ull;
+    return (sz_bool_t)((string->external.length & (0x00000000000000FFull | is_big_mask)) == 0);
 }
 
 SZ_PUBLIC void sz_string_unpack( //

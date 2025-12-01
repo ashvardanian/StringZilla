@@ -104,10 +104,10 @@
  *  Fall back to legacy macros and known arch tags when unavailable.
  */
 #if !defined(SZ_IS_BIG_ENDIAN_)
-#if (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)) ||                                           \
-    (defined(__BYTE_ORDER) && (__BYTE_ORDER == __BIG_ENDIAN)) || defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN) ||    \
-    defined(BIG_ENDIAN) || defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || \
-    defined(__MIBSEB) || defined(__MIBSEB__) || defined(__s390x__) || defined(__s390__)
+#if (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)) ||                                         \
+    (defined(__BYTE_ORDER) && (__BYTE_ORDER == __BIG_ENDIAN)) || defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN) ||  \
+    defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || \
+    defined(__MIBSEB__) || defined(__s390x__) || defined(__s390__)
 #define SZ_IS_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
 #else
 #define SZ_IS_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
