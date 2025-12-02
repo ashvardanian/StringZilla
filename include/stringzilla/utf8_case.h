@@ -1940,6 +1940,78 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 }
             }
 
+            // 3.2. Latin Extended Additional fast path: E1 B8-BB (U+1E00-1EFF)
+            //
+            // Vietnamese and other Latin Extended Additional characters use parity folding:
+            //   - Even codepoints are uppercase → +1 to get lowercase
+            //   - Odd codepoints are lowercase → no change
+            // UTF-8 third byte determines parity: even third byte = even codepoint.
+            //
+            // Exceptions that need serial handling:
+            //   - U+1E9E (E1 BA 9E): Capital ẞ → expands to "ss"
+            //   - U+1E96-1E9B range has some special chars but they don't expand
+            if (is_e1_lead && source_length >= 3) {
+                __m512i second_bytes =
+                    _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(1)), source_vec.zmm);
+                __m512i third_bytes =
+                    _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(2)), source_vec.zmm);
+
+                // Check for Latin Ext Add second bytes: B8, B9, BA, BB
+                __mmask64 safe_e1_mask = is_e1_lead & (load_mask >> 1);
+                __mmask64 is_latin_ext_e1 =
+                    _mm512_mask_cmp_epu8_mask(safe_e1_mask, _mm512_sub_epi8(second_bytes, _mm512_set1_epi8((char)0xB8)),
+                                              _mm512_set1_epi8(0x04), _MM_CMPINT_LT); // 0xB8-0xBB
+
+                // Check for Capital ẞ (E1 BA 9E) which expands to "ss"
+                __mmask64 is_ba_second =
+                    _mm512_mask_cmpeq_epi8_mask(safe_e1_mask, second_bytes, _mm512_set1_epi8((char)0xBA));
+                __mmask64 is_eszett = is_ba_second & _mm512_mask_cmpeq_epi8_mask(is_ba_second << 1, third_bytes,
+                                                                                 _mm512_set1_epi8((char)0x9E));
+
+                // All E1 leads must be Latin Ext Add (no Greek Ext BC-BF, Georgian 82/83)
+                __mmask64 non_latin_ext_e1 = safe_e1_mask & ~is_latin_ext_e1;
+                if (!non_latin_ext_e1 && is_latin_ext_e1 && !is_eszett) {
+                    // Pure Latin Extended Additional content
+                    // Accept ASCII + Latin Ext Add E1 + continuations
+                    __mmask64 is_valid_latin_ext = ~is_non_ascii | is_latin_ext_e1 | is_cont;
+                    is_valid_latin_ext &= ~(is_four_byte_lead | is_ef_lead);
+                    sz_size_t latin_ext_length = sz_u64_ctz(~is_valid_latin_ext | ~load_mask);
+
+                    // Don't split 3-byte sequences
+                    if (latin_ext_length >= 1 && latin_ext_length < 64) {
+                        __mmask64 prefix = sz_u64_mask_until_(latin_ext_length);
+                        __mmask64 leads_in_prefix = is_three_byte_lead & prefix;
+                        __mmask64 safe_mask = latin_ext_length >= 3 ? sz_u64_mask_until_(latin_ext_length - 2) : 0;
+                        __mmask64 unsafe = leads_in_prefix & ~safe_mask;
+                        if (unsafe) latin_ext_length = sz_u64_ctz(unsafe);
+                    }
+
+                    if (latin_ext_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(latin_ext_length);
+
+                        // Find third byte positions of Latin Ext Add chars
+                        __mmask64 third_positions = (is_latin_ext_e1 & prefix_mask) << 2;
+                        third_positions &= prefix_mask;
+
+                        // Check parity: even third byte = uppercase (fold +1)
+                        __mmask64 is_even_third =
+                            ~_mm512_test_epi8_mask(source_vec.zmm, _mm512_set1_epi8(0x01)) & third_positions;
+
+                        // Apply folding
+                        __m512i folded = source_vec.zmm;
+                        folded = _mm512_mask_add_epi8(folded, is_even_third, folded, _mm512_set1_epi8(0x01));
+
+                        // Also fold ASCII A-Z
+                        folded = _mm512_mask_add_epi8(folded, sz_ice_is_ascii_upper_(source_vec.zmm) & prefix_mask,
+                                                      folded, x20_vec);
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                        target += latin_ext_length, source += latin_ext_length, source_length -= latin_ext_length;
+                        continue;
+                    }
+                }
+            }
+
             // Slow path: Has 2-byte, 4-byte, or E1/E2/EF leads that need special handling
             // EA with problematic second bytes (is_ea_complex) also needs special handling
             // But plain EA (Hangul) is safe
