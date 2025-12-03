@@ -426,6 +426,16 @@ x: Strs = text.split_byteset(separator='chars', maxsplit=sys.maxsize, keepsepara
 x: Strs = text.rsplit_byteset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
 ```
 
+StringZilla also provides string trimming functions and random string generation:
+
+```py
+x: str = text.lstrip('chars')  # Strip leading characters
+x: str = text.rstrip('chars')  # Strip trailing characters
+x: str = text.strip('chars')   # Strip both ends
+x: bytes = sz.random(length=100, seed=42, alphabet='ACGT')  # Random string generation
+sz.fill_random(buffer, seed=42, alphabet=None)  # Fill mutable buffer with random bytes
+```
+
 You can also transform the string using Look-Up Tables (LUTs), mapping it to a different character set.
 This would result in a copy - `str` for `str` inputs and `bytes` for other types.
 
@@ -519,7 +529,7 @@ If all the chunks are located in consecutive memory regions, the memory overhead
 ```python
 lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
-lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
+lines_shuffled: Strs = lines.shuffled(seed=42) # or shuffle all lines and shard with slices
 lines_sorted: Strs = lines.sorted() # returns a new Strs in sorted order
 order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
@@ -819,7 +829,8 @@ sz_sha256_state_digest(&sha_state, digest);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
-sz_sequence_argsort(&array, &your_config);
+sz_sorted_idx_t order[your_count];
+sz_sequence_argsort(&array, NULL, order); // NULL allocator uses default
 ```
 
 <details>
@@ -856,12 +867,12 @@ The `sz_find_byteset` maps to `strspn` and `strcspn`, while `sz_rfind_byteset` h
         <td><code>sz_find_byte(haystack, haystack_length, needle)</code></td>
     </tr>
     <tr>
-        <td><code>strcspn(haystack, needles)</code></td>
-        <td><code>sz_rfind_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strcspn(haystack, reject)</code></td>
+        <td><code>sz_find_byteset(haystack, haystack_length, reject_bitset)</code></td>
     </tr>
     <tr>
-        <td><code>strspn(haystack, needles)</code></td>
-        <td><code>sz_find_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strspn(haystack, accept)</code></td>
+        <td><code>sz_find_byte_not_from(haystack, haystack_length, accept, accept_length)</code></td>
     </tr>
     <tr>
         <td><code>memmem(haystack, haystack_length, needle, needle_length)</code>, <code>strstr</code></td>

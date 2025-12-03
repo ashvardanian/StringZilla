@@ -2821,6 +2821,12 @@ typedef struct {
  *  @param[in] prev_rune Previous codepoint (0 if at start)
  *  @param[in] next_rune Next codepoint (0 if at end)
  *  @return Safety flags for each script path
+ *
+ *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
+ *        codepoint in StringZilla's length-based strings. This works because:
+ *        1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
+ *        2. Ligature checks use inequality (lower_prev != 'f'), and 0 never matches letters
+ *        3. NUL doesn't participate in any Unicode case folding or ligature expansions
  */
 SZ_INTERNAL sz_char_script_safety_t sz_utf8_char_script_safety_(sz_rune_t rune, sz_size_t rune_bytes,
                                                                 sz_rune_t prev_rune, sz_rune_t next_rune) {
