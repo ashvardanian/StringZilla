@@ -1003,8 +1003,8 @@ typedef union sz_u512_vec_t {
  *  @note This function does not perform any bounds checking on the input string.
  */
 SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
-    sz_u8_t const *c = (sz_u8_t const *)utf8;
-    sz_u8_t lead = *c++;
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
+    sz_u8_t lead = *u8s++;
 
     // Branchless UTF-8 length detection using arithmetic.
     // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
@@ -1018,15 +1018,35 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t 
     // Single-byte rune (0xxxxxxx)
     case 1: rune = lead; break;
     // Two-byte rune (110xxxxx 10xxxxxx)
-    case 2: rune = (lead & 0x1FU) << 6 | (c[0] & 0x3FU); break;
+    case 2: rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
     // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-    case 3: rune = (lead & 0x0FU) << 12 | (c[0] & 0x3FU) << 6 | (c[1] & 0x3FU); break;
+    case 3: rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
     // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-    default: rune = (lead & 0x07U) << 18 | (c[0] & 0x3FU) << 12 | (c[1] & 0x3FU) << 6 | (c[2] & 0x3FU); break;
+    default: rune = (lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU); break;
     }
 
     *runes = rune;
     *runes_lengths = len;
+}
+
+/**
+ *  @brief  Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
+ *  @param[in] utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
+ *  @param[out] rune Output parameter to store the extracted UTF-32 codepoint.
+ *  @param[out] rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
+ *  @note This function does not perform any bounds checking on the input string.
+ */
+SZ_PUBLIC void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8_end;
+
+    // Scan backwards to find the lead byte (not a continuation byte 10xxxxxx)
+    sz_rune_length_t len = 1;
+    for (--u8s; (*u8s & 0xC0) == 0x80 && len < 4; --u8s, ++len) {}
+
+    // Now u8s points to the lead byte, len is the sequence length
+    sz_rune_parse((sz_cptr_t)u8s, rune, rune_length);
+    sz_assert_(*rune_length == len && "Inconsistent rune length detected in sz_rune_rparse.");
 }
 
 /**
