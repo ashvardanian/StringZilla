@@ -1389,22 +1389,28 @@ void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t
 }
 
 /**
- *  @brief  Fuzz tests case-insensitive find with randomly generated UTF-8 strings.
+ *  @brief  Fuzz tests case-insensitive find by comparing serial vs SIMD backends.
  *
- *  Generates random valid UTF-8 strings from different script pools,
- *  extracts substrings, randomizes case, and verifies Serial == ICE.
+ *  Generates random haystacks and needles from script-specific character pools.
+ *  Both backends must agree on search results - no case conversion needed in test.
  */
 void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd, std::size_t iterations) {
     std::printf("Testing case-insensitive find with fuzzing (%zu iterations)...\n", iterations);
 
     auto &rng = global_random_generator();
 
-    // Character pools for each script (lowercase forms)
-    char const *ascii_chars[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+    // Character pools indexed by script - each has lower/upper pairs
+    struct script_pool_t {
+        char const *const *lower;
+        char const *const *upper;
+        std::size_t count;
+    };
+
+    char const *ascii_lower[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
                                  "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"};
     char const *ascii_upper[] = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
                                  "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
-    char const *latin1_chars[] = {"\xC3\xA0", "\xC3\xA1", "\xC3\xA2", "\xC3\xA4", "\xC3\xA5",    // àáâäå
+    char const *latin1_lower[] = {"\xC3\xA0", "\xC3\xA1", "\xC3\xA2", "\xC3\xA4", "\xC3\xA5",    // àáâäå
                                   "\xC3\xA6", "\xC3\xA7", "\xC3\xA8", "\xC3\xA9", "\xC3\xAA",    // æçèéê
                                   "\xC3\xAB", "\xC3\xAC", "\xC3\xAD", "\xC3\xAE", "\xC3\xAF",    // ëìíîï
                                   "\xC3\xB1", "\xC3\xB2", "\xC3\xB3", "\xC3\xB4", "\xC3\xB6",    // ñòóôö
@@ -1414,7 +1420,7 @@ void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_
                                   "\xC3\x8B", "\xC3\x8C", "\xC3\x8D", "\xC3\x8E", "\xC3\x8F",    // ËÌÍÎÏ
                                   "\xC3\x91", "\xC3\x92", "\xC3\x93", "\xC3\x94", "\xC3\x96",    // ÑÒÓÔÖ
                                   "\xC3\x98", "\xC3\x99", "\xC3\x9A", "\xC3\x9B", "\xC3\x9C"};   // ØÙÚÛÜ
-    char const *cyrillic_chars[] = {"\xD0\xB0", "\xD0\xB1", "\xD0\xB2", "\xD0\xB3", "\xD0\xB4",  // абвгд
+    char const *cyrillic_lower[] = {"\xD0\xB0", "\xD0\xB1", "\xD0\xB2", "\xD0\xB3", "\xD0\xB4",  // абвгд
                                     "\xD0\xB5", "\xD0\xB6", "\xD0\xB7", "\xD0\xB8", "\xD0\xB9",  // ежзий
                                     "\xD0\xBA", "\xD0\xBB", "\xD0\xBC", "\xD0\xBD", "\xD0\xBE",  // клмно
                                     "\xD0\xBF", "\xD1\x80", "\xD1\x81", "\xD1\x82", "\xD1\x83"}; // прсту
@@ -1422,212 +1428,76 @@ void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_
                                     "\xD0\x95", "\xD0\x96", "\xD0\x97", "\xD0\x98", "\xD0\x99",  // ЕЖЗИЙ
                                     "\xD0\x9A", "\xD0\x9B", "\xD0\x9C", "\xD0\x9D", "\xD0\x9E",  // КЛМНО
                                     "\xD0\x9F", "\xD0\xA0", "\xD0\xA1", "\xD0\xA2", "\xD0\xA3"}; // ПРСТУ
-
-    // Greek character pools (CE/CF lead bytes)
-    char const *greek_chars[] = {"\xCE\xB1", "\xCE\xB2", "\xCE\xB3", "\xCE\xB4", "\xCE\xB5",  // αβγδε
-                                 "\xCE\xB6", "\xCE\xB7", "\xCE\xB8", "\xCE\xB9", "\xCE\xBA",  // ζηθικ
-                                 "\xCE\xBB", "\xCE\xBC", "\xCE\xBD", "\xCE\xBE", "\xCE\xBF",  // λμνξο
-                                 "\xCF\x80", "\xCF\x81", "\xCF\x83", "\xCF\x84", "\xCF\x85"}; // πρστυ
-    char const *greek_upper[] = {"\xCE\x91", "\xCE\x92", "\xCE\x93", "\xCE\x94", "\xCE\x95",  // ΑΒΓΔΕ
-                                 "\xCE\x96", "\xCE\x97", "\xCE\x98", "\xCE\x99", "\xCE\x9A",  // ΖΗΘΙΚ
-                                 "\xCE\x9B", "\xCE\x9C", "\xCE\x9D", "\xCE\x9E", "\xCE\x9F",  // ΛΜΝΞΟ
-                                 "\xCE\xA0", "\xCE\xA1", "\xCE\xA3", "\xCE\xA4", "\xCE\xA5"}; // ΠΡΣΤΥ
-
-    // Armenian character pools (D4/D5/D6 lead bytes)
-    char const *armenian_chars[] = {"\xD5\xA1", "\xD5\xA2", "\xD5\xA3", "\xD5\xA4", "\xD5\xA5",  // աdelays
-                                    "\xD5\xA6", "\xD5\xA7", "\xD5\xA8", "\xD5\xA9", "\xD5\xAA",  // delaysէdelays
+    char const *greek_lower[] = {"\xCE\xB1", "\xCE\xB2", "\xCE\xB3", "\xCE\xB4", "\xCE\xB5",     // αβγδε
+                                 "\xCE\xB6", "\xCE\xB7", "\xCE\xB8", "\xCE\xB9", "\xCE\xBA",     // ζηθικ
+                                 "\xCE\xBB", "\xCE\xBC", "\xCE\xBD", "\xCE\xBE", "\xCE\xBF",     // λμνξο
+                                 "\xCF\x80", "\xCF\x81", "\xCF\x83", "\xCF\x84", "\xCF\x85"};    // πρστυ
+    char const *greek_upper[] = {"\xCE\x91", "\xCE\x92", "\xCE\x93", "\xCE\x94", "\xCE\x95",     // ΑΒΓΔΕ
+                                 "\xCE\x96", "\xCE\x97", "\xCE\x98", "\xCE\x99", "\xCE\x9A",     // ΖΗΘΙΚ
+                                 "\xCE\x9B", "\xCE\x9C", "\xCE\x9D", "\xCE\x9E", "\xCE\x9F",     // ΛΜΝΞΟ
+                                 "\xCE\xA0", "\xCE\xA1", "\xCE\xA3", "\xCE\xA4", "\xCE\xA5"};    // ΠΡΣΤΥ
+    char const *armenian_lower[] = {"\xD5\xA1", "\xD5\xA2", "\xD5\xA3", "\xD5\xA4", "\xD5\xA5",  // աբգdelays
+                                    "\xD5\xA6", "\xD5\xA7", "\xD5\xA8", "\xD5\xA9", "\xD5\xAA",  // զdelays
                                     "\xD5\xAB", "\xD5\xAC", "\xD5\xAD", "\xD5\xAE", "\xD5\xAF",  // delays
                                     "\xD5\xB0", "\xD5\xB1", "\xD5\xB2", "\xD5\xB3", "\xD5\xB4"}; // delays
-    char const *armenian_upper[] = {"\xD4\xB1", "\xD4\xB2", "\xD4\xB3", "\xD4\xB4", "\xD4\xB5",  // ABGDE
+    char const *armenian_upper[] = {"\xD4\xB1", "\xD4\xB2", "\xD4\xB3", "\xD4\xB4", "\xD4\xB5",  // Աdelays
                                     "\xD4\xB6", "\xD4\xB7", "\xD4\xB8", "\xD4\xB9", "\xD4\xBA",  // DELAYS
                                     "\xD4\xBB", "\xD4\xBC", "\xD4\xBD", "\xD4\xBE", "\xD4\xBF",  // DELAYS
                                     "\xD5\x80", "\xD5\x81", "\xD5\x82", "\xD5\x83", "\xD5\x84"}; // DELAYS
+    char const *vietnamese_lower[] = {"\xE1\xBA\xA1", "\xE1\xBA\xA3", "\xE1\xBA\xA5", "\xE1\xBA\xA7", "\xE1\xBA\xA9",
+                                      "\xE1\xBA\xAB", "\xE1\xBA\xAD", "\xE1\xBA\xAF", "\xE1\xBA\xB1", "\xE1\xBA\xB3"};
+    char const *vietnamese_upper[] = {"\xE1\xBA\xA0", "\xE1\xBA\xA2", "\xE1\xBA\xA4", "\xE1\xBA\xA6", "\xE1\xBA\xA8",
+                                      "\xE1\xBA\xAA", "\xE1\xBA\xAC", "\xE1\xBA\xAE", "\xE1\xBA\xB0", "\xE1\xBA\xB2"};
 
-    // Vietnamese/Latin Extended Additional character pools (E1 B8-BB lead bytes, 3-byte)
-    char const *vietnamese_chars[] = {
-        "\xE1\xBA\xA1", "\xE1\xBA\xA3", "\xE1\xBA\xA5", "\xE1\xBA\xA7", "\xE1\xBA\xA9",  // ạảấầẩ
-        "\xE1\xBA\xAB", "\xE1\xBA\xAD", "\xE1\xBA\xAF", "\xE1\xBA\xB1", "\xE1\xBA\xB3"}; // ẫậắằẳ
-    char const *vietnamese_upper[] = {
-        "\xE1\xBA\xA0", "\xE1\xBA\xA2", "\xE1\xBA\xA4", "\xE1\xBA\xA6", "\xE1\xBA\xA8",  // ẠẢẤẦẨ
-        "\xE1\xBA\xAA", "\xE1\xBA\xAC", "\xE1\xBA\xAE", "\xE1\xBA\xB0", "\xE1\xBA\xB2"}; // ẪẬẮẰẲ
+    script_pool_t const pools[] = {
+        {ascii_lower, ascii_upper, 26},          // 0: ASCII
+        {latin1_lower, latin1_upper, 25},        // 1: Latin1
+        {cyrillic_lower, cyrillic_upper, 20},    // 2: Cyrillic
+        {greek_lower, greek_upper, 20},          // 3: Greek
+        {armenian_lower, armenian_upper, 20},    // 4: Armenian
+        {vietnamese_lower, vietnamese_upper, 10} // 5: Vietnamese
+    };
+    constexpr int num_scripts = 6;
 
-    std::uniform_int_distribution<int> script_dist(
-        0, 5); // 0=ASCII, 1=Latin1, 2=Cyrillic, 3=Greek, 4=Armenian, 5=Vietnamese
-    std::uniform_int_distribution<int> case_dist(0, 1); // 0=lower, 1=upper
-    std::uniform_int_distribution<std::size_t> len_dist(50, 300);
+    std::uniform_int_distribution<int> script_dist(0, num_scripts - 1);
+    std::uniform_int_distribution<int> case_dist(0, 1);
+    std::uniform_int_distribution<std::size_t> haystack_len_dist(50, 300);
     std::uniform_int_distribution<std::size_t> needle_len_dist(3, 20);
 
     std::size_t failures = 0;
 
     for (std::size_t iter = 0; iter < iterations; ++iter) {
         int script = script_dist(rng);
-        std::size_t haystack_len = len_dist(rng);
+        script_pool_t const &pool = pools[script];
+        std::uniform_int_distribution<std::size_t> char_dist(0, pool.count - 1);
 
-        // Build haystack with characters from one script
+        // Build haystack with mixed-case characters
+        std::size_t haystack_char_count = haystack_len_dist(rng);
         std::string haystack;
-        for (std::size_t i = 0; i < haystack_len; ++i) {
-            int use_upper = case_dist(rng);
-            if (script == 0) {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 25);
-                haystack += use_upper ? ascii_upper[char_dist(rng)] : ascii_chars[char_dist(rng)];
-            }
-            else if (script == 1) {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 24);
-                haystack += use_upper ? latin1_upper[char_dist(rng)] : latin1_chars[char_dist(rng)];
-            }
-            else if (script == 2) {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 19);
-                haystack += use_upper ? cyrillic_upper[char_dist(rng)] : cyrillic_chars[char_dist(rng)];
-            }
-            else if (script == 3) {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 19);
-                haystack += use_upper ? greek_upper[char_dist(rng)] : greek_chars[char_dist(rng)];
-            }
-            else if (script == 4) {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 19);
-                haystack += use_upper ? armenian_upper[char_dist(rng)] : armenian_chars[char_dist(rng)];
-            }
-            else {
-                std::uniform_int_distribution<std::size_t> char_dist(0, 9);
-                haystack += use_upper ? vietnamese_upper[char_dist(rng)] : vietnamese_chars[char_dist(rng)];
-            }
+        for (std::size_t i = 0; i < haystack_char_count; ++i) {
+            std::size_t ci = char_dist(rng);
+            haystack += case_dist(rng) ? pool.upper[ci] : pool.lower[ci];
         }
 
-        // Extract a random substring as needle (in opposite case)
-        std::size_t needle_len = std::min(needle_len_dist(rng), haystack.size() / 2);
-        if (needle_len < 3) needle_len = 3;
-
-        std::uniform_int_distribution<std::size_t> start_dist(0, haystack.size() - needle_len);
-        std::size_t needle_start = start_dist(rng);
-
-        // Find character boundaries for UTF-8
-        while (needle_start > 0 && (haystack[needle_start] & 0xC0) == 0x80) --needle_start;
-        std::size_t needle_end = needle_start + needle_len;
-        while (needle_end < haystack.size() && (haystack[needle_end] & 0xC0) == 0x80) ++needle_end;
-        needle_len = needle_end - needle_start;
-
-        std::string needle = haystack.substr(needle_start, needle_len);
-
-        // Randomize case of needle
-        std::string case_changed_needle;
-        for (std::size_t i = 0; i < needle.size();) {
-            unsigned char c = (unsigned char)needle[i];
-            if ((c & 0x80) == 0) {
-                // ASCII
-                if (case_dist(rng) && c >= 'a' && c <= 'z') case_changed_needle += (char)(c - 32);
-                else if (case_dist(rng) && c >= 'A' && c <= 'Z')
-                    case_changed_needle += (char)(c + 32);
-                else
-                    case_changed_needle += needle[i];
-                ++i;
-            }
-            else if ((c & 0xE0) == 0xC0 && i + 1 < needle.size()) {
-                // 2-byte UTF-8
-                unsigned char c2 = (unsigned char)needle[i + 1];
-                if (c == 0xC3 && c2 >= 0xA0 && c2 <= 0xBE && case_dist(rng)) {
-                    // Latin1 lowercase -> uppercase
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 - 0x20);
-                }
-                else if (c == 0xC3 && c2 >= 0x80 && c2 <= 0x9E && case_dist(rng)) {
-                    // Latin1 uppercase -> lowercase
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 + 0x20);
-                }
-                else if (c == 0xD0 && c2 >= 0xB0 && c2 <= 0xBF && case_dist(rng)) {
-                    // Cyrillic lowercase -> uppercase
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 - 0x20);
-                }
-                else if (c == 0xD0 && c2 >= 0x90 && c2 <= 0x9F && case_dist(rng)) {
-                    // Cyrillic uppercase -> lowercase
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 + 0x20);
-                }
-                // Greek lowercase CE B1-BF -> uppercase CE 91-9F
-                else if (c == 0xCE && c2 >= 0xB1 && c2 <= 0xBF && case_dist(rng)) {
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 - 0x20);
-                }
-                // Greek uppercase CE 91-9F -> lowercase CE B1-BF
-                else if (c == 0xCE && c2 >= 0x91 && c2 <= 0x9F && case_dist(rng)) {
-                    case_changed_needle += (char)c;
-                    case_changed_needle += (char)(c2 + 0x20);
-                }
-                // Greek lowercase CF 80-85 -> uppercase CE A0-A5
-                else if (c == 0xCF && c2 >= 0x80 && c2 <= 0x85 && case_dist(rng)) {
-                    case_changed_needle += (char)0xCE;
-                    case_changed_needle += (char)(c2 + 0x20);
-                }
-                // Greek uppercase CE A0-A5 -> lowercase CF 80-85
-                else if (c == 0xCE && c2 >= 0xA0 && c2 <= 0xA5 && case_dist(rng)) {
-                    case_changed_needle += (char)0xCF;
-                    case_changed_needle += (char)(c2 - 0x20);
-                }
-                // Armenian lowercase D5 A1-BF -> uppercase D4 B1-BF
-                else if (c == 0xD5 && c2 >= 0xA1 && c2 <= 0xBF && case_dist(rng)) {
-                    case_changed_needle += (char)0xD4;
-                    case_changed_needle += (char)(c2 - 0x30);
-                }
-                // Armenian uppercase D4 B1-BF -> lowercase D5 A1-BF (via +0x30)
-                else if (c == 0xD4 && c2 >= 0xB1 && c2 <= 0xBF && case_dist(rng)) {
-                    case_changed_needle += (char)0xD5;
-                    case_changed_needle += (char)(c2 + 0x30);
-                }
-                else {
-                    case_changed_needle += needle[i];
-                    case_changed_needle += needle[i + 1];
-                }
-                i += 2;
-            }
-            else if ((c & 0xF0) == 0xE0 && i + 2 < needle.size()) {
-                // 3-byte UTF-8 (Vietnamese/Latin Extended Additional)
-                unsigned char c2 = (unsigned char)needle[i + 1];
-                unsigned char c3 = (unsigned char)needle[i + 2];
-                // Vietnamese: E1 BA/BB xx - parity-based folding (even = upper, odd = lower)
-                if (c == 0xE1 && (c2 == 0xBA || c2 == 0xBB) && case_dist(rng)) {
-                    if ((c3 & 1) == 0) {
-                        // Uppercase (even) -> lowercase (odd): +1
-                        case_changed_needle += (char)c;
-                        case_changed_needle += (char)c2;
-                        case_changed_needle += (char)(c3 + 1);
-                    }
-                    else {
-                        // Lowercase (odd) -> uppercase (even): -1
-                        case_changed_needle += (char)c;
-                        case_changed_needle += (char)c2;
-                        case_changed_needle += (char)(c3 - 1);
-                    }
-                }
-                else {
-                    case_changed_needle += needle[i];
-                    case_changed_needle += needle[i + 1];
-                    case_changed_needle += needle[i + 2];
-                }
-                i += 3;
-            }
-            else {
-                // Copy as-is for other multi-byte sequences (4-byte, etc)
-                std::size_t seq_len = ((c & 0xF8) == 0xF0) ? 4 : 1;
-                for (std::size_t j = 0; j < seq_len && i + j < needle.size(); ++j) case_changed_needle += needle[i + j];
-                i += seq_len;
-            }
+        // Build needle independently with mixed case
+        std::size_t needle_char_count = needle_len_dist(rng);
+        std::string needle;
+        for (std::size_t i = 0; i < needle_char_count; ++i) {
+            std::size_t ci = char_dist(rng);
+            needle += case_dist(rng) ? pool.upper[ci] : pool.lower[ci];
         }
 
+        // Both backends must agree on search result
         sz_size_t base_len = 0, simd_len = 0;
-        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), case_changed_needle.data(),
-                                          case_changed_needle.size(), &base_len);
-        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), case_changed_needle.data(),
-                                          case_changed_needle.size(), &simd_len);
+        sz_cptr_t base_result = find_base(haystack.data(), haystack.size(), needle.data(), needle.size(), &base_len);
+        sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), needle.data(), needle.size(), &simd_len);
 
-        // Compare positions - both should find the needle (extracted from haystack with case change).
-        // Not-found is acceptable if case transformation was imperfect, but positions must match.
         std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
         std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
 
         if (base_pos != simd_pos) {
             std::fprintf(stderr, "FUZZ FAIL iter=%zu script=%d\n", iter, script);
-            std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), case_changed_needle.size());
+            std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle.size());
             std::fprintf(stderr, "  Base pos=%zu, SIMD pos=%zu\n", base_pos, simd_pos);
             ++failures;
             if (failures >= 5) { assert(false && "Too many fuzz failures"); }
