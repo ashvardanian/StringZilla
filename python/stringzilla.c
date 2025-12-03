@@ -1609,17 +1609,64 @@ static char const doc_hmac_sha256[] = //
 static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
     sz_unused_(self);
-    if (positional_args_count != 2 || args_names_tuple) {
-        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly two positional arguments");
+
+    // Parse arguments
+    PyObject *key_obj = NULL;
+    PyObject *message_obj = NULL;
+
+    // Get count of keyword arguments
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+
+    // Validate total argument count
+    if (total_args != 2) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly 2 arguments");
+        return NULL;
+    }
+
+    // Handle positional arguments
+    if (positional_args_count >= 1) key_obj = args[0];
+    if (positional_args_count >= 2) message_obj = args[1];
+
+    // Handle keyword arguments
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "key") == 0) {
+                if (key_obj) {
+                    PyErr_SetString(PyExc_TypeError, "key specified twice");
+                    return NULL;
+                }
+                key_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "message") == 0) {
+                if (message_obj) {
+                    PyErr_SetString(PyExc_TypeError, "message specified twice");
+                    return NULL;
+                }
+                message_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Validate all required arguments are provided
+    if (!key_obj || !message_obj) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() missing required arguments");
         return NULL;
     }
 
     sz_string_view_t key, message;
-    if (!sz_py_export_string_like(args[0], &key.start, &key.length)) {
+    if (!sz_py_export_string_like(key_obj, &key.start, &key.length)) {
         wrap_current_exception("Key must be string-like");
         return NULL;
     }
-    if (!sz_py_export_string_like(args[1], &message.start, &message.length)) {
+    if (!sz_py_export_string_like(message_obj, &message.start, &message.length)) {
         wrap_current_exception("Message must be string-like");
         return NULL;
     }

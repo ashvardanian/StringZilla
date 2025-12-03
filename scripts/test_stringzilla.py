@@ -1103,6 +1103,47 @@ def test_hmac_sha256(key_length: int, message_length: int, seed_value: int):
     assert result_str == expected
 
 
+def test_hmac_sha256_kwargs():
+    """Test hmac_sha256 with keyword arguments"""
+    key = b"secret"
+    message = b"Hello, world!"
+
+    # Test against Python's hmac module
+    expected = hmac.new(key, message, hashlib.sha256).digest()
+
+    # Test with positional arguments
+    result_positional = sz.hmac_sha256(key, message)
+    assert result_positional == expected
+
+    # Test with keyword arguments (as shown in README line 483)
+    result_kwargs = sz.hmac_sha256(key=key, message=message)
+    assert result_kwargs == expected
+
+    # Test with mixed arguments
+    result_mixed = sz.hmac_sha256(key, message=message)
+    assert result_mixed == expected
+
+    # Test with reversed keyword arguments
+    result_reversed = sz.hmac_sha256(message=message, key=key)
+    assert result_reversed == expected
+
+    # Missing argument
+    with pytest.raises(TypeError, match="expects exactly 2 arguments"):
+        sz.hmac_sha256(key=key)
+
+    # Duplicate argument
+    with pytest.raises(TypeError, match="key specified twice"):
+        sz.hmac_sha256(key, key=key)
+
+    # Unknown keyword argument (only detected when total args == 2)
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        sz.hmac_sha256(key=key, unknown=b"test")
+
+    # Too many arguments (3 args)
+    with pytest.raises(TypeError, match="expects exactly 2 arguments"):
+        sz.hmac_sha256(key=key, message=message, unknown=b"test")
+
+
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
