@@ -2721,6 +2721,119 @@ SZ_INTERNAL __m512i sz_latin1_fold_zmm_(__m512i source) {
 }
 
 /**
+ *  @brief  UTF-8 aware probe info for case-insensitive search.
+ *
+ *  For multi-byte UTF-8 scripts (2-4 bytes), probes should target the last byte of each
+ *  codepoint (continuation bytes have more discriminative power than lead bytes).
+ *  Each probe has:
+ *  - offset: byte position within the needle
+ *  - prefix: distance from the codepoint start (0 for 1-byte, 1 for 2-byte, etc.)
+ *
+ *  The caller uses: load_offset = probe_offset - prefix, then shifts comparison mask >> prefix.
+ */
+typedef struct {
+    sz_size_t offset_first; ///< Byte offset of first probe
+    sz_size_t offset_mid;   ///< Byte offset of middle probe
+    sz_size_t offset_last;  ///< Byte offset of last probe
+    sz_size_t prefix_first; ///< Bytes before first probe within its codepoint (0-3)
+    sz_size_t prefix_mid;   ///< Bytes before mid probe within its codepoint (0-3)
+    sz_size_t prefix_last;  ///< Bytes before last probe within its codepoint (0-3)
+} sz_utf8_needle_probes_t;
+
+/**
+ *  @brief  Select 3 diverse probe positions for UTF-8 case-insensitive search.
+ *
+ *  Unlike sz_locate_needle_anomalies_ which operates on raw bytes, this function:
+ *  1. Decodes the needle character-by-character
+ *  2. For each codepoint, prefers the LAST byte (most discriminative)
+ *  3. Selects first, middle, and last codepoints' probe bytes
+ *  4. Records prefix (offset within codepoint) for load alignment
+ *
+ *  @param needle        Pointer to needle bytes (original, not folded)
+ *  @param needle_length Length of needle in bytes
+ *  @return Probe positions and their prefix sizes
+ */
+SZ_INTERNAL sz_utf8_needle_probes_t sz_utf8_locate_needle_anomalies_(sz_cptr_t needle, sz_size_t needle_length) {
+    sz_utf8_needle_probes_t result;
+
+    // Parse needle into codepoints (max 256 to avoid stack overflow)
+    sz_size_t codepoint_count = 0;
+    sz_size_t codepoint_starts[256];
+    sz_size_t codepoint_lengths[256];
+
+    sz_u8_t const *ptr = (sz_u8_t const *)needle;
+    sz_u8_t const *end = ptr + needle_length;
+
+    while (ptr < end && codepoint_count < 256) {
+        sz_u8_t lead = *ptr;
+        // Branchless UTF-8 length: 1 + (lead >= 0xC0) + (lead >= 0xE0) + (lead >= 0xF0)
+        sz_size_t len = 1 + (lead >= 0xC0) + (lead >= 0xE0) + (lead >= 0xF0);
+        if (ptr + len > end) len = end - ptr; // Clamp to remaining bytes
+
+        codepoint_starts[codepoint_count] = (sz_size_t)(ptr - (sz_u8_t const *)needle);
+        codepoint_lengths[codepoint_count] = len;
+        codepoint_count++;
+        ptr += len;
+    }
+
+    if (codepoint_count == 0) {
+        result.offset_first = result.offset_mid = result.offset_last = 0;
+        result.prefix_first = result.prefix_mid = result.prefix_last = 0;
+        return result;
+    }
+
+    // Select first, middle, last codepoints
+    sz_size_t idx_first = 0;
+    sz_size_t idx_mid = codepoint_count / 2;
+    sz_size_t idx_last = codepoint_count - 1;
+
+    // For each codepoint, probe the LAST byte (most discriminative)
+    // offset = start + (length - 1), prefix = length - 1
+    result.offset_first = codepoint_starts[idx_first] + codepoint_lengths[idx_first] - 1;
+    result.prefix_first = codepoint_lengths[idx_first] - 1;
+
+    result.offset_mid = codepoint_starts[idx_mid] + codepoint_lengths[idx_mid] - 1;
+    result.prefix_mid = codepoint_lengths[idx_mid] - 1;
+
+    result.offset_last = codepoint_starts[idx_last] + codepoint_lengths[idx_last] - 1;
+    result.prefix_last = codepoint_lengths[idx_last] - 1;
+
+    // Handle duplicates: try to find different probe bytes
+    sz_u8_t const *needle_u8 = (sz_u8_t const *)needle;
+    if (codepoint_count > 3 && (needle_u8[result.offset_first] == needle_u8[result.offset_mid] ||
+                                needle_u8[result.offset_first] == needle_u8[result.offset_last] ||
+                                needle_u8[result.offset_mid] == needle_u8[result.offset_last])) {
+
+        // Pivot middle codepoint right to find different byte
+        while (idx_mid + 1 < idx_last) {
+            sz_size_t candidate_offset = codepoint_starts[idx_mid + 1] + codepoint_lengths[idx_mid + 1] - 1;
+            if (needle_u8[candidate_offset] != needle_u8[result.offset_first]) {
+                idx_mid++;
+                result.offset_mid = candidate_offset;
+                result.prefix_mid = codepoint_lengths[idx_mid] - 1;
+                break;
+            }
+            idx_mid++;
+        }
+
+        // Pivot last codepoint left to find different byte
+        while (idx_last > idx_mid + 1) {
+            sz_size_t candidate_offset = codepoint_starts[idx_last - 1] + codepoint_lengths[idx_last - 1] - 1;
+            if (needle_u8[candidate_offset] != needle_u8[result.offset_first] &&
+                needle_u8[candidate_offset] != needle_u8[result.offset_mid]) {
+                idx_last--;
+                result.offset_last = candidate_offset;
+                result.prefix_last = codepoint_lengths[idx_last] - 1;
+                break;
+            }
+            idx_last--;
+        }
+    }
+
+    return result;
+}
+
+/**
  *  @brief  Latin-1 case-insensitive substring search using AVX-512.
  *
  *  Strategy: Use 3-point Raita filter on folded needle bytes, load haystack at probe offsets,
@@ -2758,34 +2871,42 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_latin1_ice_(sz_cptr_t haysta
     __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
     __m512i const needle_safe_folded = sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    // Pick random anomalies similar to our case-sensitive algorithm, but only within the folded needle
+    // Select 3 diverse probe positions using UTF-8 aware selection.
+    // This function picks the last byte of each codepoint (more discriminative) and returns
+    // both the probe offset and the prefix (distance from codepoint start) for load alignment.
+    sz_utf8_needle_probes_t const probes = sz_utf8_locate_needle_anomalies_(safe_start, safe_length);
+    sz_size_t const load_first = probes.offset_first - probes.prefix_first;
+    sz_size_t const load_mid = probes.offset_mid - probes.prefix_mid;
+    sz_size_t const load_last = probes.offset_last - probes.prefix_last;
+
+    // Extract folded probe bytes for comparison
     char needle_safe_folded_bytes[64];
     _mm512_mask_storeu_epi8(needle_safe_folded_bytes, safe_mask, needle_safe_folded);
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(needle_safe_folded_bytes, safe_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast needle probe bytes for comparisons with pulled haystack data
     sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_last]);
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_last]);
 
-    // Main loop - step by 63 bytes to properly handle boundary cases of 2-byte matches
+    // Main loop - step by 62 bytes to handle 2-byte chars at boundaries plus 1-byte lookback
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
-    for (; haystack_length >= needle_length + 64; haystack += 63, haystack_length -= 63) {
-        // Load haystack parts at different offsets
-        haystack_first_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
-        haystack_mid_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
-        haystack_last_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
+    for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
+        // Load haystack parts at adjusted offsets (aligned to codepoint start)
+        haystack_first_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_first));
+        haystack_mid_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_mid));
+        haystack_last_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_last));
 
         // 3-point Raita filter: find positions where all 3 probes match
-        sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm));
+        // Shift masks by prefix to align probe byte position
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
+        sz_u64_t matches = _kand_mask64(_kand_mask64(match_first, match_mid), match_last);
 
-        // Exclude position 63 - handle in next iteration to avoid incomplete match
-        matches &= 0x7FFFFFFFFFFFFFFFULL;
+        // Exclude positions 62-63 - handle in next iteration to avoid incomplete match
+        matches &= 0x3FFFFFFFFFFFFFFFULL;
 
         // Verify all match candidates found
         while (matches) {
@@ -2814,19 +2935,34 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_latin1_ice_(sz_cptr_t haysta
 
     // Tail: use masked loads for remaining positions (single iteration)
     if (haystack_length >= needle_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        sz_size_t tail_positions = haystack_length - needle_length + 1;
+        // For 2-byte scripts, we need to load at least 2 bytes for the fold function to work correctly.
+        // The fold function needs to see lead+continuation pairs. We also add prefix for the shift.
+        sz_size_t avail_first = haystack_length - safe_offset - load_first;
+        sz_size_t avail_mid = haystack_length - safe_offset - load_mid;
+        sz_size_t avail_last = haystack_length - safe_offset - load_last;
+        sz_size_t need_first = tail_positions + probes.prefix_first;
+        if (need_first < 2) need_first = 2;
+        sz_size_t need_mid = tail_positions + probes.prefix_mid;
+        if (need_mid < 2) need_mid = 2;
+        sz_size_t need_last = tail_positions + probes.prefix_last;
+        if (need_last < 2) need_last = 2;
+        __mmask64 tail_mask_first = sz_u64_mask_until_(need_first < avail_first ? need_first : avail_first);
+        __mmask64 tail_mask_mid = sz_u64_mask_until_(need_mid < avail_mid ? need_mid : avail_mid);
+        __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
         haystack_first_vec.zmm =
-            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first));
         haystack_mid_vec.zmm =
-            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_mid));
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid));
         haystack_last_vec.zmm =
-            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_last));
+            sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last));
 
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
         sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm)) &
-            tail_mask;
+            _kand_mask64(_kand_mask64(match_first, match_mid), match_last) & sz_u64_mask_until_(tail_positions);
 
         while (matches) {
             int const idx = sz_u64_ctz(matches);
@@ -2975,11 +3111,13 @@ SZ_INTERNAL __m512i sz_cyrillic_fold_zmm_(__m512i source) {
 
     // Step 3: Fold Cyrillic lowercase after D0 (second bytes B0-BF → subtract 0x20)
     // Range check: (byte - 0xB0) < 0x10 means byte in [0xB0, 0xBF]
-    __mmask64 is_cyrillic_d0_lower = _mm512_mask_cmplt_epu8_mask(is_after_d0, _mm512_sub_epi8(source, xb0_vec), x10_vec);
+    __mmask64 is_cyrillic_d0_lower =
+        _mm512_mask_cmplt_epu8_mask(is_after_d0, _mm512_sub_epi8(source, xb0_vec), x10_vec);
 
     // Step 4: Fold Cyrillic lowercase after D1 (second bytes 80-8F → add 0x20)
     // Range check: (byte - 0x80) < 0x10 means byte in [0x80, 0x8F]
-    __mmask64 is_cyrillic_d1_lower = _mm512_mask_cmplt_epu8_mask(is_after_d1, _mm512_sub_epi8(source, x80_vec), x10_vec);
+    __mmask64 is_cyrillic_d1_lower =
+        _mm512_mask_cmplt_epu8_mask(is_after_d1, _mm512_sub_epi8(source, x80_vec), x10_vec);
 
     // Step 5: Fold ASCII uppercase (A-Z) → add 0x20
     __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
@@ -3036,34 +3174,43 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_cyrillic_ice_(sz_cptr_t hays
     __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
     __m512i const needle_safe_folded = sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    // Pick diverse probe positions using anomaly detection on folded bytes
+    // Select 3 diverse probe positions using UTF-8 aware selection.
+    // This function picks the last byte of each codepoint (more discriminative) and returns
+    // both the probe offset and the prefix (distance from codepoint start) for load alignment.
+    sz_utf8_needle_probes_t const probes = sz_utf8_locate_needle_anomalies_(safe_start, safe_length);
+    sz_size_t const load_first = probes.offset_first - probes.prefix_first;
+    sz_size_t const load_mid = probes.offset_mid - probes.prefix_mid;
+    sz_size_t const load_last = probes.offset_last - probes.prefix_last;
+
+    // Extract folded probe bytes for comparison
     char needle_safe_folded_bytes[64];
     _mm512_mask_storeu_epi8(needle_safe_folded_bytes, safe_mask, needle_safe_folded);
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(needle_safe_folded_bytes, safe_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast needle probe bytes for comparisons
     sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_last]);
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_last]);
 
-    // Main loop - step by 63 bytes to handle 2-byte chars at boundaries
+    // Main loop - step by 62 bytes to handle 2-byte chars at boundaries plus 1-byte lookback
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
-    for (; haystack_length >= needle_length + 64; haystack += 63, haystack_length -= 63) {
-        // Load haystack parts at different offsets
-        haystack_first_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
-        haystack_mid_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
-        haystack_last_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
+    for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
+        // Load haystack parts at adjusted offsets (aligned to codepoint start)
+        haystack_first_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_first));
+        haystack_mid_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_mid));
+        haystack_last_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_last));
+
+        // Compare and shift masks by prefix to align probe byte position
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
 
         // 3-point Raita filter: find positions where all 3 probes match
-        sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm));
+        sz_u64_t matches = _kand_mask64(_kand_mask64(match_first, match_mid), match_last);
 
-        // Exclude position 63 - handle in next iteration to avoid incomplete match
-        matches &= 0x7FFFFFFFFFFFFFFFULL;
+        // Exclude positions 62-63 - handle in next iteration to avoid incomplete match
+        matches &= 0x3FFFFFFFFFFFFFFFULL;
 
         // Verify all match candidates found
         while (matches) {
@@ -3092,19 +3239,37 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_cyrillic_ice_(sz_cptr_t hays
 
     // Tail: use masked loads for remaining positions (single iteration)
     if (haystack_length >= needle_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        sz_size_t tail_positions = haystack_length - needle_length + 1;
+        // For 2-byte scripts, we need to load at least 2 bytes for the fold function to work correctly.
+        // The fold function needs to see lead+continuation pairs. We also add prefix for the shift.
+        sz_size_t avail_first = haystack_length - safe_offset - load_first;
+        sz_size_t avail_mid = haystack_length - safe_offset - load_mid;
+        sz_size_t avail_last = haystack_length - safe_offset - load_last;
+        sz_size_t need_first = tail_positions + probes.prefix_first;
+        if (need_first < 2) need_first = 2;
+        sz_size_t need_mid = tail_positions + probes.prefix_mid;
+        if (need_mid < 2) need_mid = 2;
+        sz_size_t need_last = tail_positions + probes.prefix_last;
+        if (need_last < 2) need_last = 2;
+        __mmask64 tail_mask_first = sz_u64_mask_until_(need_first < avail_first ? need_first : avail_first);
+        __mmask64 tail_mask_mid = sz_u64_mask_until_(need_mid < avail_mid ? need_mid : avail_mid);
+        __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
+
         haystack_first_vec.zmm =
-            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
+            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first));
         haystack_mid_vec.zmm =
-            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_mid));
+            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid));
         haystack_last_vec.zmm =
-            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_last));
+            sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last));
+
+        // Compare and shift masks by prefix
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
 
         sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm)) &
-            tail_mask;
+            _kand_mask64(_kand_mask64(match_first, match_mid), match_last) & sz_u64_mask_until_(tail_positions);
 
         while (matches) {
             int const idx = sz_u64_ctz(matches);
@@ -3254,9 +3419,7 @@ SZ_INTERNAL __m512i sz_armenian_fold_zmm_(__m512i source) {
     __m512i const xb1_vec = _mm512_set1_epi8((char)0xB1);
     __m512i const x0f_vec = _mm512_set1_epi8(0x0F);
     __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i const x17_vec = _mm512_set1_epi8(0x17);
     __m512i const x30_vec = _mm512_set1_epi8(0x30);
-    __m512i const x90_vec = _mm512_set1_epi8((char)0x90);
     __m512i const a_upper_vec = _mm512_set1_epi8('A');
     __m512i const range_26_vec = _mm512_set1_epi8(26);
 
@@ -3269,44 +3432,58 @@ SZ_INTERNAL __m512i sz_armenian_fold_zmm_(__m512i source) {
     __mmask64 is_after_d4 = is_d4 << 1;
     __mmask64 is_after_d5 = is_d5 << 1;
 
-    // Step 3: Armenian uppercase after D4 (B1-BF → fold to D5 E1-EF, but we use D5 81-8F via wrapping)
+    // Step 3: Armenian uppercase after D4 (B1-BF → fold to D5 A1-AF)
     // Range check: (byte - 0xB1) < 0x0F means byte in [0xB1, 0xBF]
-    __mmask64 is_armenian_d4_upper = _mm512_mask_cmplt_epu8_mask(is_after_d4, _mm512_sub_epi8(source, xb1_vec), x0f_vec);
+    // Unicode: U+0531-U+053F (D4 B1-BF) → U+0561-U+056F (D5 A1-AF)
+    // Mapping: lead D4→D5, continuation subtract 0x10 (B1→A1, etc.)
+    __mmask64 is_armenian_d4_upper =
+        _mm512_mask_cmplt_epu8_mask(is_after_d4, _mm512_sub_epi8(source, xb1_vec), x0f_vec);
 
-    // Step 4: Armenian uppercase after D5 (80-96 → fold, 90-96 wraps to D6)
+    // Step 4: Armenian uppercase after D5 (80-96 → fold to D5 B0-BF or D6 80-86)
+    // Unicode: U+0540-U+0556 (D5 80-96) → U+0570-U+0586 (D5 B0-BF, D6 80-86)
+    // Mapping: continuation add 0x30, lead stays D5 for 80-8F, changes to D6 for 90-96
     // Range check: (byte - 0x80) < 0x17 means byte in [0x80, 0x96]
-    __mmask64 is_armenian_d5_upper = _mm512_mask_cmplt_epu8_mask(is_after_d5, _mm512_sub_epi8(source, x80_vec), x17_vec);
+    __m512i const x17_vec = _mm512_set1_epi8(0x17);
+    __m512i const x10_vec = _mm512_set1_epi8(0x10);
+    __mmask64 is_armenian_d5_upper =
+        _mm512_mask_cmplt_epu8_mask(is_after_d5, _mm512_sub_epi8(source, x80_vec), x17_vec);
 
-    // Step 5: Detect which D5 uppercase chars will wrap to D6 (second byte >= 0x90 after folding)
-    // D5 90-96 + 0x30 = D5 C0-C6, which is invalid → wraps to D6 80-86
+    // Step 5: Detect which D5 uppercase chars will wrap to D6 (byte >= 0x90)
+    // D5 90-96 + 0x30 = D5 C0-C6, which is invalid → wrap to D6 80-86 (subtract 0x40)
+    __m512i const x90_vec = _mm512_set1_epi8((char)0x90);
     __mmask64 is_d5_will_wrap = _mm512_mask_cmpge_epu8_mask(is_armenian_d5_upper, source, x90_vec);
 
     // Step 6: Fold ASCII uppercase (A-Z) → add 0x20
     __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
 
-    // Step 7: Apply Armenian folding (+0x30 to second bytes)
-    __m512i result = _mm512_mask_add_epi8(source, is_armenian_d4_upper | is_armenian_d5_upper, source, x30_vec);
+    // Step 7: Apply Armenian D4 folding (subtract 0x10 from continuation, later change lead)
+    __m512i result = _mm512_mask_sub_epi8(source, is_armenian_d4_upper, source, x10_vec);
 
-    // Step 8: Fix wrapped D5 bytes (subtract 0x40 to bring C0-C6 down to 80-86)
+    // Step 8: Apply Armenian D5 folding (add 0x30 to continuation)
+    result = _mm512_mask_add_epi8(result, is_armenian_d5_upper, result, x30_vec);
+
+    // Step 9: Fix wrapped D5 bytes (subtract 0x40 to bring C0-C6 down to 80-86)
     __m512i const x40_vec = _mm512_set1_epi8(0x40);
     result = _mm512_mask_sub_epi8(result, is_d5_will_wrap, result, x40_vec);
 
-    // Step 9: For D4 uppercase, change lead byte D4 → D5
+    // Step 10: For D4 uppercase, change lead byte D4 → D5
     __mmask64 is_lead_d4_to_d5 = is_armenian_d4_upper >> 1;
     result = _mm512_mask_mov_epi8(result, is_lead_d4_to_d5, d5_vec);
 
-    // Step 10: For D5 wrapping uppercase, change lead byte D5 → D6
+    // Step 11: For D5 wrapping uppercase (90-96), change lead byte D5 → D6
     __mmask64 is_lead_d5_to_d6 = is_d5_will_wrap >> 1;
     result = _mm512_mask_mov_epi8(result, is_lead_d5_to_d6, d6_vec);
 
-    // Step 11: Apply ASCII folding (add 0x20)
+    // Step 12: Apply ASCII folding (add 0x20)
     __m512i const x20_vec = _mm512_set1_epi8(0x20);
     result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
 
-    // Step 12: Preserve lead bytes that didn't change
+    // Step 13: Preserve lead bytes that didn't change
+    // D5 lead bytes should stay D5 (original D5 not wrapping + converted from D4)
+    // D6 lead bytes should stay D6 (original D6 + converted from D5 wrapping)
     __mmask64 is_keep_d5 = (is_d5 & ~is_lead_d5_to_d6) | is_lead_d4_to_d5;
-    __mmask64 is_keep_d6 = (is_d6) | is_lead_d5_to_d6;
-    result = _mm512_mask_mov_epi8(result, is_keep_d5 & ~is_keep_d6, d5_vec);
+    __mmask64 is_keep_d6 = is_d6 | is_lead_d5_to_d6;
+    result = _mm512_mask_mov_epi8(result, is_keep_d5, d5_vec);
     result = _mm512_mask_mov_epi8(result, is_keep_d6, d6_vec);
 
     return result;
@@ -3349,34 +3526,41 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_armenian_ice_(sz_cptr_t hays
     __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
     __m512i const needle_safe_folded = sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    // Pick diverse probe positions using anomaly detection on folded bytes
+    // Pick diverse probe positions using UTF-8 aware anomaly detection
+    // This selects the last byte of first/mid/last codepoints, tracking prefix (offset within codepoint)
+    sz_utf8_needle_probes_t const probes = sz_utf8_locate_needle_anomalies_(safe_start, safe_length);
+    sz_size_t const load_first = probes.offset_first - probes.prefix_first;
+    sz_size_t const load_mid = probes.offset_mid - probes.prefix_mid;
+    sz_size_t const load_last = probes.offset_last - probes.prefix_last;
+
+    // Extract folded probe bytes from needle
     char needle_safe_folded_bytes[64];
     _mm512_mask_storeu_epi8(needle_safe_folded_bytes, safe_mask, needle_safe_folded);
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(needle_safe_folded_bytes, safe_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast needle probe bytes for comparisons
     sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_last]);
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_last]);
 
-    // Main loop - step by 63 bytes to handle 2-byte chars at boundaries
+    // Main loop - step by 62 bytes to handle 2-byte chars at boundaries plus 1-byte lookback
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
-    for (; haystack_length >= needle_length + 64; haystack += 63, haystack_length -= 63) {
-        // Load haystack parts at different offsets
-        haystack_first_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
-        haystack_mid_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
-        haystack_last_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
+    for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
+        // Load haystack parts at codepoint-aligned offsets (load_* = probe offset - prefix)
+        haystack_first_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_first));
+        haystack_mid_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_mid));
+        haystack_last_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_last));
 
         // 3-point Raita filter: find positions where all 3 probes match
-        sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm));
+        // Shift masks by prefix to align results (compare at continuation byte position)
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
+        sz_u64_t matches = _kand_mask64(_kand_mask64(match_first, match_mid), match_last);
 
-        // Exclude position 63 - handle in next iteration to avoid incomplete match
-        matches &= 0x7FFFFFFFFFFFFFFFULL;
+        // Exclude positions 62-63 - handle in next iteration to avoid incomplete match
+        matches &= 0x3FFFFFFFFFFFFFFFULL;
 
         // Verify all match candidates found
         while (matches) {
@@ -3405,19 +3589,34 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_armenian_ice_(sz_cptr_t hays
 
     // Tail: use masked loads for remaining positions (single iteration)
     if (haystack_length >= needle_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        sz_size_t tail_positions = haystack_length - needle_length + 1;
+        // For 2-byte scripts, we need to load at least 2 bytes for the fold function to work correctly.
+        // The fold function needs to see lead+continuation pairs. We also add prefix for the shift.
+        sz_size_t avail_first = haystack_length - safe_offset - load_first;
+        sz_size_t avail_mid = haystack_length - safe_offset - load_mid;
+        sz_size_t avail_last = haystack_length - safe_offset - load_last;
+        sz_size_t need_first = tail_positions + probes.prefix_first;
+        if (need_first < 2) need_first = 2;
+        sz_size_t need_mid = tail_positions + probes.prefix_mid;
+        if (need_mid < 2) need_mid = 2;
+        sz_size_t need_last = tail_positions + probes.prefix_last;
+        if (need_last < 2) need_last = 2;
+        __mmask64 tail_mask_first = sz_u64_mask_until_(need_first < avail_first ? need_first : avail_first);
+        __mmask64 tail_mask_mid = sz_u64_mask_until_(need_mid < avail_mid ? need_mid : avail_mid);
+        __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
         haystack_first_vec.zmm =
-            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
+            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first));
         haystack_mid_vec.zmm =
-            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_mid));
+            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid));
         haystack_last_vec.zmm =
-            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_last));
+            sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last));
 
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
         sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm)) &
-            tail_mask;
+            _kand_mask64(_kand_mask64(match_first, match_mid), match_last) & sz_u64_mask_until_(tail_positions);
 
         while (matches) {
             int const idx = sz_u64_ctz(matches);
@@ -3561,20 +3760,23 @@ SZ_INTERNAL __m512i sz_greek_fold_zmm_(__m512i source) {
     // Step 1: Detect CE/CF lead bytes
     __mmask64 is_ce = _mm512_cmpeq_epi8_mask(source, ce_vec);
     __mmask64 is_cf = _mm512_cmpeq_epi8_mask(source, cf_vec);
-    __mmask64 is_lead = is_ce | is_cf;
+    (void)is_cf; // Used only for final sigma detection below
 
     // Step 2: Detect positions after CE and after CF
     __mmask64 is_after_ce = is_ce << 1;
     __mmask64 is_after_cf = is_cf << 1;
 
-    // Step 3: Greek uppercase after CE (91-A9 → add 0x20, wrapping to CF for A0-A9)
+    // Step 3: Greek uppercase after CE (91-A9)
     // Range check: (byte - 0x91) < 0x19 means byte in [0x91, 0xA9]
     __mmask64 is_greek_ce_upper = _mm512_mask_cmplt_epu8_mask(is_after_ce, _mm512_sub_epi8(source, x91_vec), x19_vec);
 
     // Step 4: Handle CE/CF boundary crossing for uppercase A0-A9:
-    // CE A0 → CF 80 (add 0x20 to second byte, change lead CE → CF)
-    // We detect if second byte >= A0 (will wrap to CF after adding 0x20)
+    // CE A0 (Π, U+03A0) → CF 80 (π, U+03C0)
+    // CE A1 (Ρ, U+03A1) → CF 81 (ρ, U+03C1)
+    // etc. For these, we SUBTRACT 0x20 from second byte and change lead CE → CF
     __mmask64 is_will_wrap = _mm512_mask_cmpge_epu8_mask(is_greek_ce_upper, source, xa0_vec);
+    // Non-wrapping: 91-9F, we ADD 0x20 (e.g., CE 91 → CE B1)
+    __mmask64 is_no_wrap = is_greek_ce_upper & ~is_will_wrap;
 
     // Step 5: Final sigma normalization: CF 82 → CF 83
     __mmask64 is_final_sigma = _mm512_mask_cmpeq_epi8_mask(is_after_cf, source, x82_vec);
@@ -3582,8 +3784,11 @@ SZ_INTERNAL __m512i sz_greek_fold_zmm_(__m512i source) {
     // Step 6: Fold ASCII uppercase (A-Z) → add 0x20
     __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
 
-    // Step 7: Apply Greek uppercase folding (add 0x20 to second bytes)
-    __m512i result = _mm512_mask_add_epi8(source, is_greek_ce_upper, source, x20_vec);
+    // Step 7a: Apply Greek uppercase folding for non-wrapping range (91-9F): ADD 0x20
+    __m512i result = _mm512_mask_add_epi8(source, is_no_wrap, source, x20_vec);
+
+    // Step 7b: Apply Greek uppercase folding for wrapping range (A0-A9): SUBTRACT 0x20
+    result = _mm512_mask_sub_epi8(result, is_will_wrap, source, x20_vec);
 
     // Step 8: For positions that wrap, change lead byte CE → CF (shift by 1 position)
     __mmask64 is_lead_wrap = is_will_wrap >> 1;
@@ -3595,9 +3800,10 @@ SZ_INTERNAL __m512i sz_greek_fold_zmm_(__m512i source) {
     // Step 10: Apply ASCII folding (add 0x20)
     result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
 
-    // Step 11: Normalize non-wrapping lead bytes to CE
-    __mmask64 is_keep_ce = is_lead & ~is_lead_wrap;
-    result = _mm512_mask_mov_epi8(result, is_keep_ce, ce_vec);
+    // Step 11: Keep CE lead bytes for non-wrapping uppercase (91-9F range)
+    // We only touch CE lead bytes that had uppercase folding applied (shift by 1 from is_no_wrap)
+    __mmask64 is_ce_upper_lead = is_no_wrap >> 1;
+    result = _mm512_mask_mov_epi8(result, is_ce_upper_lead, ce_vec);
 
     return result;
 }
@@ -3639,34 +3845,41 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_greek_ice_(sz_cptr_t haystac
     __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
     __m512i const needle_safe_folded = sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    // Pick diverse probe positions using anomaly detection on folded bytes
+    // Pick diverse probe positions using UTF-8 aware anomaly detection
+    // This selects the last byte of first/mid/last codepoints, tracking prefix (offset within codepoint)
+    sz_utf8_needle_probes_t const probes = sz_utf8_locate_needle_anomalies_(safe_start, safe_length);
+    sz_size_t const load_first = probes.offset_first - probes.prefix_first;
+    sz_size_t const load_mid = probes.offset_mid - probes.prefix_mid;
+    sz_size_t const load_last = probes.offset_last - probes.prefix_last;
+
+    // Extract folded probe bytes from needle
     char needle_safe_folded_bytes[64];
     _mm512_mask_storeu_epi8(needle_safe_folded_bytes, safe_mask, needle_safe_folded);
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(needle_safe_folded_bytes, safe_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast needle probe bytes for comparisons
     sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_last]);
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_last]);
 
-    // Main loop - step by 63 bytes to handle 2-byte chars at boundaries
+    // Main loop - step by 62 bytes to handle 2-byte chars at boundaries plus 1-byte lookback
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
-    for (; haystack_length >= needle_length + 64; haystack += 63, haystack_length -= 63) {
-        // Load haystack parts at different offsets
-        haystack_first_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
-        haystack_mid_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
-        haystack_last_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
+    for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
+        // Load haystack parts at codepoint-aligned offsets (load_* = probe offset - prefix)
+        haystack_first_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_first));
+        haystack_mid_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_mid));
+        haystack_last_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_last));
 
         // 3-point Raita filter: find positions where all 3 probes match
-        sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm));
+        // Shift masks by prefix to align results (compare at continuation byte position)
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
+        sz_u64_t matches = _kand_mask64(_kand_mask64(match_first, match_mid), match_last);
 
-        // Exclude position 63 - handle in next iteration to avoid incomplete match
-        matches &= 0x7FFFFFFFFFFFFFFFULL;
+        // Exclude positions 62-63 - handle in next iteration to avoid incomplete match
+        matches &= 0x3FFFFFFFFFFFFFFFULL;
 
         // Verify all match candidates found
         while (matches) {
@@ -3695,19 +3908,34 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_greek_ice_(sz_cptr_t haystac
 
     // Tail: use masked loads for remaining positions (single iteration)
     if (haystack_length >= needle_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        sz_size_t tail_positions = haystack_length - needle_length + 1;
+        // For 2-byte scripts, we need to load at least 2 bytes for the fold function to work correctly.
+        // The fold function needs to see lead+continuation pairs. We also add prefix for the shift.
+        sz_size_t avail_first = haystack_length - safe_offset - load_first;
+        sz_size_t avail_mid = haystack_length - safe_offset - load_mid;
+        sz_size_t avail_last = haystack_length - safe_offset - load_last;
+        sz_size_t need_first = tail_positions + probes.prefix_first;
+        if (need_first < 2) need_first = 2;
+        sz_size_t need_mid = tail_positions + probes.prefix_mid;
+        if (need_mid < 2) need_mid = 2;
+        sz_size_t need_last = tail_positions + probes.prefix_last;
+        if (need_last < 2) need_last = 2;
+        __mmask64 tail_mask_first = sz_u64_mask_until_(need_first < avail_first ? need_first : avail_first);
+        __mmask64 tail_mask_mid = sz_u64_mask_until_(need_mid < avail_mid ? need_mid : avail_mid);
+        __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
         haystack_first_vec.zmm =
-            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
+            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first));
         haystack_mid_vec.zmm =
-            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_mid));
+            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid));
         haystack_last_vec.zmm =
-            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_last));
+            sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last));
 
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
         sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm)) &
-            tail_mask;
+            _kand_mask64(_kand_mask64(match_first, match_mid), match_last) & sz_u64_mask_until_(tail_positions);
 
         while (matches) {
             int const idx = sz_u64_ctz(matches);
@@ -3790,8 +4018,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_can_use_vietnamese_path_
             sz_u8_t third = (sz_u8_t)needle[i + 2];
             // E1 B8-BB: Latin Extended Additional range
             if (second >= 0xB8 && second <= 0xBB) {
-                // Exclude Capital Sharp S: E1 BA 9E (U+1E9E) which expands to "ss"
-                if (second == 0xBA && third == 0x9E) {
+                // Exclude U+1E96-U+1E9E (E1 BA 96-9E) which expand to multiple codepoints
+                if (second == 0xBA && third >= 0x96 && third <= 0x9E) {
                     // Unsafe - finalize current slice
                     if (current_length > best_length) {
                         best_length = current_length;
@@ -3926,9 +4154,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_vietnamese_ice_(sz_cptr_t ha
         sz_u8_t byte63 = (sz_u8_t)safe_start[63];
         sz_u8_t byte62 = (sz_u8_t)safe_start[62];
         if (byte63 == 0xE1) safe_length = 63;
-        else if (byte62 == 0xE1) safe_length = 62;
+        else if (byte62 == 0xE1)
+            safe_length = 62;
         // Also handle C2/C3 (2-byte) at position 63
-        else if (byte63 == 0xC2 || byte63 == 0xC3) safe_length = 63;
+        else if (byte63 == 0xC2 || byte63 == 0xC3)
+            safe_length = 63;
     }
 
     sz_size_t const safe_offset = (sz_size_t)(safe_start - needle);
@@ -3939,31 +4169,38 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_vietnamese_ice_(sz_cptr_t ha
     __mmask64 const safe_mask = sz_u64_mask_until_(safe_length);
     __m512i const needle_safe_folded = sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(safe_mask, safe_start));
 
-    // Pick diverse probe positions using anomaly detection on folded bytes
+    // Pick diverse probe positions using UTF-8 aware anomaly detection
+    // This selects the last byte of first/mid/last codepoints, tracking prefix (offset within codepoint)
+    sz_utf8_needle_probes_t const probes = sz_utf8_locate_needle_anomalies_(safe_start, safe_length);
+    sz_size_t const load_first = probes.offset_first - probes.prefix_first;
+    sz_size_t const load_mid = probes.offset_mid - probes.prefix_mid;
+    sz_size_t const load_last = probes.offset_last - probes.prefix_last;
+
+    // Extract folded probe bytes from needle
     char needle_safe_folded_bytes[64];
     _mm512_mask_storeu_epi8(needle_safe_folded_bytes, safe_mask, needle_safe_folded);
-    sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(needle_safe_folded_bytes, safe_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast needle probe bytes for comparisons
     sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[offset_last]);
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probes.offset_last]);
 
     // Main loop - step by 62 bytes to handle 3-byte chars at boundaries
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
     for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
-        // Load haystack parts at different offsets
-        haystack_first_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_first));
-        haystack_mid_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_mid));
-        haystack_last_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + offset_last));
+        // Load haystack parts at codepoint-aligned offsets (load_* = probe offset - prefix)
+        haystack_first_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_first));
+        haystack_mid_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_mid));
+        haystack_last_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack + safe_offset + load_last));
 
         // 3-point Raita filter: find positions where all 3 probes match
-        sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm));
+        // Shift masks by prefix to align results (compare at continuation byte position)
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
+        sz_u64_t matches = _kand_mask64(_kand_mask64(match_first, match_mid), match_last);
 
         // Exclude positions 62-63 - handle in next iteration
         matches &= 0x3FFFFFFFFFFFFFFFULL;
@@ -3995,19 +4232,34 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_vietnamese_ice_(sz_cptr_t ha
 
     // Tail: use masked loads for remaining positions (single iteration)
     if (haystack_length >= needle_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        sz_size_t tail_positions = haystack_length - needle_length + 1;
+        // For 3-byte scripts, we need to load at least 3 bytes for the fold function to work correctly.
+        // The fold function needs to see complete lead+continuation triplets. We also add prefix for the shift.
+        sz_size_t avail_first = haystack_length - safe_offset - load_first;
+        sz_size_t avail_mid = haystack_length - safe_offset - load_mid;
+        sz_size_t avail_last = haystack_length - safe_offset - load_last;
+        sz_size_t need_first = tail_positions + probes.prefix_first;
+        if (need_first < 3) need_first = 3;
+        sz_size_t need_mid = tail_positions + probes.prefix_mid;
+        if (need_mid < 3) need_mid = 3;
+        sz_size_t need_last = tail_positions + probes.prefix_last;
+        if (need_last < 3) need_last = 3;
+        __mmask64 tail_mask_first = sz_u64_mask_until_(need_first < avail_first ? need_first : avail_first);
+        __mmask64 tail_mask_mid = sz_u64_mask_until_(need_mid < avail_mid ? need_mid : avail_mid);
+        __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
         haystack_first_vec.zmm =
-            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
+            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first));
         haystack_mid_vec.zmm =
-            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_mid));
+            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid));
         haystack_last_vec.zmm =
-            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_last));
+            sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last));
 
+        __mmask64 match_first =
+            _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> probes.prefix_first;
+        __mmask64 match_mid = _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm) >> probes.prefix_mid;
+        __mmask64 match_last = _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm) >> probes.prefix_last;
         sz_u64_t matches =
-            _kand_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm),
-                                      _mm512_cmpeq_epi8_mask(haystack_mid_vec.zmm, probe_mid_vec.zmm)),
-                         _mm512_cmpeq_epi8_mask(haystack_last_vec.zmm, probe_last_vec.zmm)) &
-            tail_mask;
+            _kand_mask64(_kand_mask64(match_first, match_mid), match_last) & sz_u64_mask_until_(tail_positions);
 
         while (matches) {
             int const idx = sz_u64_ctz(matches);
