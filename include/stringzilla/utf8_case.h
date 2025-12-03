@@ -2783,17 +2783,16 @@ typedef struct {
  *  After analysis, only the best window is returned in sz_needle_analysis_t.
  */
 typedef struct {
-    sz_size_t start;           ///< Start offset of window within needle (in bytes)
-    sz_size_t length;          ///< Length of window in bytes
-    sz_size_t codepoint_count; ///< Number of codepoints in window
+    sz_size_t start;  ///< Start offset of window within needle (in bytes)
+    sz_size_t length; ///< Length of window in bytes
 
     // Probe positions for 3-point Raita filter (last byte of first/mid/last codepoints)
-    sz_size_t probe_first;  ///< Byte offset of first probe (relative to window start)
-    sz_size_t probe_mid;    ///< Byte offset of mid probe (relative to window start)
-    sz_size_t probe_last;   ///< Byte offset of last probe (relative to window start)
-    sz_size_t prefix_first; ///< UTF-8 prefix for first probe (0 for ASCII, 1+ for multi-byte)
-    sz_size_t prefix_mid;   ///< UTF-8 prefix for mid probe
-    sz_size_t prefix_last;  ///< UTF-8 prefix for last probe
+    sz_size_t probe_first; ///< Byte offset of first probe (relative to window start)
+    sz_size_t probe_mid;   ///< Byte offset of mid probe (relative to window start)
+    sz_size_t probe_last;  ///< Byte offset of last probe (relative to window start)
+    sz_u8_t prefix_first;  ///< UTF-8 prefix for first probe (0-3)
+    sz_u8_t prefix_mid;    ///< UTF-8 prefix for mid probe (0-3)
+    sz_u8_t prefix_last;   ///< UTF-8 prefix for last probe (0-3)
 } sz_script_window_t;
 
 /**
@@ -2975,7 +2974,6 @@ SZ_INTERNAL sz_char_script_safety_t sz_utf8_char_script_safety_(sz_rune_t rune, 
 SZ_INTERNAL void sz_script_window_init_(sz_script_window_t *window) {
     window->start = 0;
     window->length = 0;
-    window->codepoint_count = 0;
     window->probe_first = 0;
     window->probe_mid = 0;
     window->probe_last = 0;
@@ -2985,12 +2983,11 @@ SZ_INTERNAL void sz_script_window_init_(sz_script_window_t *window) {
 }
 
 /**
- *  @brief  Copy window from src to dst.
+ *  @brief  Copy window from src to dst (excluding codepoint_count which is tracked separately).
  */
 SZ_INTERNAL void sz_script_window_copy_(sz_script_window_t *dst, sz_script_window_t const *src) {
     dst->start = src->start;
     dst->length = src->length;
-    dst->codepoint_count = src->codepoint_count;
     dst->probe_first = src->probe_first;
     dst->probe_mid = src->probe_mid;
     dst->probe_last = src->probe_last;
@@ -3005,21 +3002,20 @@ SZ_INTERNAL void sz_script_window_copy_(sz_script_window_t *dst, sz_script_windo
  *  Called after finding the best window to compute first/mid/last probe positions
  *  based on codepoint boundaries within the window.
  *
- *  @param window        Window to finalize (modified in place)
- *  @param needle        Original needle bytes
- *  @param needle_length Total needle length
+ *  @param window         Window to finalize (modified in place)
+ *  @param needle         Original needle bytes
+ *  @param codepoint_count Number of codepoints in the window
  */
 SZ_INTERNAL void sz_script_window_finalize_probes_(sz_script_window_t *window, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
-    (void)needle_length;
-    if (window->codepoint_count == 0) return;
+                                                   sz_size_t codepoint_count) {
+    if (codepoint_count == 0) return;
 
     // Parse the window to find first, mid, last codepoints
     sz_u8_t const *ptr = (sz_u8_t const *)needle + window->start;
     sz_u8_t const *end = ptr + window->length;
 
     sz_size_t codepoint_idx = 0;
-    sz_size_t mid_idx = window->codepoint_count / 2;
+    sz_size_t mid_idx = codepoint_count / 2;
 
     sz_size_t first_start = 0, first_len = 0;
     sz_size_t mid_start = 0, mid_len = 0;
@@ -3054,11 +3050,11 @@ SZ_INTERNAL void sz_script_window_finalize_probes_(sz_script_window_t *window, s
 
     // Probe position = last byte of codepoint (relative to window start), prefix = bytes before probe
     window->probe_first = first_start + first_len - 1;
-    window->prefix_first = first_len - 1;
+    window->prefix_first = (sz_u8_t)(first_len - 1);
     window->probe_mid = mid_start + mid_len - 1;
-    window->prefix_mid = mid_len - 1;
+    window->prefix_mid = (sz_u8_t)(mid_len - 1);
     window->probe_last = last_start + last_len - 1;
-    window->prefix_last = last_len - 1;
+    window->prefix_last = (sz_u8_t)(last_len - 1);
 }
 
 /**
@@ -3093,6 +3089,13 @@ SZ_INTERNAL sz_needle_analysis_t sz_utf8_analyze_needle_(sz_cptr_t needle, sz_si
     sz_script_window_init_(&curr_greek);
     sz_script_window_init_(&curr_armenian);
     sz_script_window_init_(&curr_vietnamese);
+
+    // Codepoint counts tracked separately (not stored in final struct to save space)
+    // curr_*_cp = count for current window being built, best_*_cp = count for best window found
+    sz_size_t curr_ascii_cp = 0, curr_latin1_cp = 0, curr_cyrillic_cp = 0;
+    sz_size_t curr_greek_cp = 0, curr_armenian_cp = 0, curr_vietnamese_cp = 0;
+    sz_size_t best_ascii_cp = 0, best_latin1_cp = 0, best_cyrillic_cp = 0;
+    sz_size_t best_greek_cp = 0, best_armenian_cp = 0, best_vietnamese_cp = 0;
 
     // Track whether each non-ASCII path has seen its specific chars (for validity)
     sz_bool_t has_latin1 = sz_false_k;     // C2/C3 2-byte chars
@@ -3153,21 +3156,23 @@ SZ_INTERNAL sz_needle_analysis_t sz_utf8_analyze_needle_(sz_cptr_t needle, sz_si
         sz_char_script_safety_t safety = sz_utf8_char_script_safety_(rune, rune_bytes, prev_rune, next_rune);
 
 // Helper macro to update window for a script
-#define sz_update_window_(script)                                                          \
-    do {                                                                                   \
-        if (safety.script) {                                                               \
-            /* Safe: extend current window */                                              \
-            if (curr_##script.codepoint_count == 0) { curr_##script.start = byte_offset; } \
-            curr_##script.length = byte_offset + rune_bytes - curr_##script.start;         \
-            curr_##script.codepoint_count++;                                               \
-        }                                                                                  \
-        else {                                                                             \
-            /* Unsafe: finalize current, update best if longer, reset current */           \
-            if (curr_##script.length > result.script.length) {                             \
-                sz_script_window_copy_(&result.script, &curr_##script);                    \
-            }                                                                              \
-            sz_script_window_init_(&curr_##script);                                        \
-        }                                                                                  \
+#define sz_update_window_(script)                                                  \
+    do {                                                                           \
+        if (safety.script) {                                                       \
+            /* Safe: extend current window */                                      \
+            if (curr_##script##_cp == 0) { curr_##script.start = byte_offset; }    \
+            curr_##script.length = byte_offset + rune_bytes - curr_##script.start; \
+            curr_##script##_cp++;                                                  \
+        }                                                                          \
+        else {                                                                     \
+            /* Unsafe: finalize current, update best if longer, reset current */   \
+            if (curr_##script.length > result.script.length) {                     \
+                sz_script_window_copy_(&result.script, &curr_##script);            \
+                best_##script##_cp = curr_##script##_cp;                           \
+            }                                                                      \
+            sz_script_window_init_(&curr_##script);                                \
+            curr_##script##_cp = 0;                                                \
+        }                                                                          \
     } while (0)
 
         sz_update_window_(ascii);
@@ -3184,10 +3189,13 @@ SZ_INTERNAL sz_needle_analysis_t sz_utf8_analyze_needle_(sz_cptr_t needle, sz_si
     }
 
     // Finalize remaining current windows (end of needle reached)
-#define sz_finalize_window_(script)                                                                                  \
-    do {                                                                                                             \
-        if (curr_##script.length > result.script.length) { sz_script_window_copy_(&result.script, &curr_##script); } \
-        sz_script_window_finalize_probes_(&result.script, needle, needle_length);                                    \
+#define sz_finalize_window_(script)                                                    \
+    do {                                                                               \
+        if (curr_##script.length > result.script.length) {                             \
+            sz_script_window_copy_(&result.script, &curr_##script);                    \
+            best_##script##_cp = curr_##script##_cp;                                   \
+        }                                                                              \
+        sz_script_window_finalize_probes_(&result.script, needle, best_##script##_cp); \
     } while (0)
 
     sz_finalize_window_(ascii);
@@ -3201,26 +3209,11 @@ SZ_INTERNAL sz_needle_analysis_t sz_utf8_analyze_needle_(sz_cptr_t needle, sz_si
 
     // Invalidate non-ASCII windows that contain no script-specific chars
     // A window is only valid if it contains at least one char from that script
-    if (!has_latin1) {
-        result.latin1.length = 0;
-        result.latin1.codepoint_count = 0;
-    }
-    if (!has_cyrillic) {
-        result.cyrillic.length = 0;
-        result.cyrillic.codepoint_count = 0;
-    }
-    if (!has_greek) {
-        result.greek.length = 0;
-        result.greek.codepoint_count = 0;
-    }
-    if (!has_armenian) {
-        result.armenian.length = 0;
-        result.armenian.codepoint_count = 0;
-    }
-    if (!has_vietnamese) {
-        result.vietnamese.length = 0;
-        result.vietnamese.codepoint_count = 0;
-    }
+    if (!has_latin1) { result.latin1.length = 0; }
+    if (!has_cyrillic) { result.cyrillic.length = 0; }
+    if (!has_greek) { result.greek.length = 0; }
+    if (!has_armenian) { result.armenian.length = 0; }
+    if (!has_vietnamese) { result.vietnamese.length = 0; }
 
     return result;
 }
