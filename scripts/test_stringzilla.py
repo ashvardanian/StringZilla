@@ -1197,6 +1197,163 @@ def test_str_to_pyarrow_conversion():
     assert arrow_buffer.to_pybytes() == native.encode("utf-8")
 
 
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_to_pyarrow_conversion():
+    """Test PyArrow property getters for Strs with tape-based layouts."""
+    # Test with a list of strings (should create U32_TAPE layout by default)
+    native_list = ["hello", "world", "test", "", "python"]
+    strs = Strs(native_list)
+
+    # Check that all properties return valid values
+    assert isinstance(strs.tape_address, int) and strs.tape_address != 0, "tape_address should be non-zero"
+    assert isinstance(strs.offsets_address, int) and strs.offsets_address != 0, "offsets_address should be non-zero"
+    assert isinstance(strs.tape_nbytes, int) and strs.tape_nbytes >= 0, "tape_nbytes should be non-negative"
+    assert isinstance(strs.offsets_nbytes, int) and strs.offsets_nbytes > 0, "offsets_nbytes should be positive"
+    assert isinstance(strs.offsets_are_large, bool), "offsets_are_large should be a boolean"
+
+    # Calculate expected tape size (sum of all string lengths)
+    expected_tape_nbytes = sum(len(s) for s in native_list)
+    assert strs.tape_nbytes == expected_tape_nbytes, f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+
+    # For 5 strings, we should have 6 offsets (N+1 format)
+    # Offsets should be either 4 bytes (u32) or 8 bytes (u64) each
+    expected_offsets_count = len(native_list) + 1
+    if strs.offsets_are_large:
+        expected_offsets_nbytes = expected_offsets_count * 8
+    else:
+        expected_offsets_nbytes = expected_offsets_count * 4
+    assert strs.offsets_nbytes == expected_offsets_nbytes, \
+        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+
+    # Create PyArrow buffers from the properties
+    tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
+    offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
+
+    # Verify the tape contains the concatenated strings
+    concatenated = "".join(native_list)
+    assert tape_buffer.to_pybytes() == concatenated.encode("utf-8"), "Tape should contain concatenated strings"
+
+    # Create an Arrow array from the buffers
+    if strs.offsets_are_large:
+        arrow_array = pa.Array.from_buffers(
+            pa.large_string(),
+            len(native_list),
+            [None, offsets_buffer, tape_buffer]
+        )
+    else:
+        arrow_array = pa.Array.from_buffers(
+            pa.string(),
+            len(native_list),
+            [None, offsets_buffer, tape_buffer]
+        )
+
+    # Verify the Arrow array matches the original data
+    assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_pyarrow_empty():
+    """Test PyArrow properties with empty Strs - auto-converts FRAGMENTED to tape."""
+    strs = Strs([])
+
+    # Empty Strs starts as FRAGMENTED but tape accessors auto-convert to tape layout
+    # For empty, we get valid values but with 0/empty content
+    tape_addr = strs.tape_address
+    assert tape_addr is not None and tape_addr >= 0
+
+    offsets_addr = strs.offsets_address
+    assert offsets_addr is not None and offsets_addr >= 0
+
+    tape_bytes = strs.tape_nbytes
+    assert tape_bytes == 0  # No strings = no tape content
+
+    offsets_bytes = strs.offsets_nbytes
+    assert offsets_bytes == 4  # Arrow uses N+1 offsets, so 1 offset for 0 strings (u32 = 4 bytes)
+
+    are_large = strs.offsets_are_large
+    assert are_large == False  # Default to u32 offsets
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_pyarrow_large_strings():
+    """Test PyArrow properties with strings that might require u64 offsets."""
+    # Create strings with total size that could trigger u64 layout
+    large_string = "x" * 10000
+    native_list = [large_string, "small", large_string, ""]
+    strs = Strs(native_list)
+
+    # Check properties work correctly
+    assert isinstance(strs.offsets_are_large, bool), "offsets_are_large should be boolean"
+    assert strs.tape_nbytes == sum(len(s) for s in native_list), "tape_nbytes should match total length"
+
+    expected_offsets_count = len(native_list) + 1
+    offset_size = 8 if strs.offsets_are_large else 4
+    assert strs.offsets_nbytes == expected_offsets_count * offset_size, "offsets_nbytes should be correct"
+
+    # Create PyArrow array and verify
+    tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
+    offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
+
+    if strs.offsets_are_large:
+        arrow_array = pa.Array.from_buffers(
+            pa.large_string(),
+            len(native_list),
+            [None, offsets_buffer, tape_buffer]
+        )
+    else:
+        arrow_array = pa.Array.from_buffers(
+            pa.string(),
+            len(native_list),
+            [None, offsets_buffer, tape_buffer]
+        )
+
+    assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_pyarrow_fragmented_conversion():
+    """Test that FRAGMENTED layout auto-converts to tape when accessing tape properties."""
+    # Create a tape-based Strs from split
+    text = Str("apple banana cherry date")
+    tape_strs = text.split(" ")
+
+    # shuffled() returns a FRAGMENTED layout
+    fragmented_strs = tape_strs.shuffled(seed=42)
+
+    # Verify we can access tape properties (triggers conversion)
+    tape_addr = fragmented_strs.tape_address
+    assert tape_addr > 0, "tape_address should be valid"
+
+    offsets_addr = fragmented_strs.offsets_address
+    assert offsets_addr > 0, "offsets_address should be valid"
+
+    tape_bytes = fragmented_strs.tape_nbytes
+    expected_bytes = sum(len(str(fragmented_strs[i])) for i in range(len(fragmented_strs)))
+    assert tape_bytes == expected_bytes, f"tape_nbytes should be {expected_bytes}, got {tape_bytes}"
+
+    offsets_bytes = fragmented_strs.offsets_nbytes
+    expected_offsets = (len(fragmented_strs) + 1) * 4  # u32 offsets
+    assert offsets_bytes == expected_offsets, f"offsets_nbytes should be {expected_offsets}, got {offsets_bytes}"
+
+    are_large = fragmented_strs.offsets_are_large
+    assert are_large == False, "Small strings should use u32 offsets"
+
+    # Verify we can create a valid PyArrow array from the converted data
+    tape_buffer = pa.foreign_buffer(fragmented_strs.tape_address, fragmented_strs.tape_nbytes, fragmented_strs)
+    offsets_buffer = pa.foreign_buffer(fragmented_strs.offsets_address, fragmented_strs.offsets_nbytes, fragmented_strs)
+
+    arrow_array = pa.Array.from_buffers(
+        pa.string(),
+        len(fragmented_strs),
+        [None, offsets_buffer, tape_buffer]
+    )
+
+    # The data should match (order is shuffled)
+    arrow_list = arrow_array.to_pylist()
+    original_list = [str(fragmented_strs[i]) for i in range(len(fragmented_strs))]
+    assert arrow_list == original_list, "Arrow array should match shuffled strings"
+
+
 @pytest.mark.parametrize("container_class", [tuple, list, iter])
 @pytest.mark.parametrize("view", [False, True])
 def test_strs_from_python_basic(container_class: type, view: bool):

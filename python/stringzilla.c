@@ -1843,12 +1843,142 @@ static int Str_in(Str *self, PyObject *needle_obj) {
     return sz_find(self->memory.start, self->memory.length, needle.start, needle.length) != NULL;
 }
 
-static PyObject *Strs_get_tape(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_are_large(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_tape_address(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_address(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_tape_nbytes(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_nbytes(Str *self, void *closure) { return NULL; }
+/**
+ *  @brief  Ensures the Strs is in a tape layout (not fragmented).
+ *          Converts FRAGMENTED to TAPE if necessary.
+ *  @return 1 on success, 0 on failure (sets Python exception).
+ */
+static int Strs_ensure_tape_layout(Strs *self) {
+    if (self->layout != STRS_FRAGMENTED) return 1; // Already in tape layout
+
+    // Get the default allocator
+    sz_memory_allocator_t allocator;
+    sz_memory_allocator_init_default(&allocator);
+
+    // Convert fragmented to tape
+    if (!sz_py_replace_fragmented_allocator(self, &self->data.fragmented.allocator, &allocator)) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to convert fragmented layout to tape");
+        return 0;
+    }
+    return 1;
+}
+
+static PyObject *Strs_get_tape(Strs *self, void *closure) {
+    // Ensure we're in tape layout
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+    // Return self to allow chaining: strs.tape.tape_address
+    Py_INCREF(self);
+    return (PyObject *)self;
+}
+
+static PyObject *Strs_get_offsets_are_large(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    switch (self->layout) {
+    case STRS_U32_TAPE:
+    case STRS_U32_TAPE_VIEW: Py_RETURN_FALSE;
+    case STRS_U64_TAPE:
+    case STRS_U64_TAPE_VIEW: Py_RETURN_TRUE;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+}
+
+static PyObject *Strs_get_tape_address(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_cptr_t tape_ptr = NULL;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: tape_ptr = self->data.u32_tape_view.data; break;
+    case STRS_U32_TAPE: tape_ptr = self->data.u32_tape.data; break;
+    case STRS_U64_TAPE_VIEW: tape_ptr = self->data.u64_tape_view.data; break;
+    case STRS_U64_TAPE: tape_ptr = self->data.u64_tape.data; break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t((sz_size_t)tape_ptr);
+}
+
+static PyObject *Strs_get_offsets_address(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    void *offsets_ptr = NULL;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: offsets_ptr = self->data.u32_tape_view.offsets; break;
+    case STRS_U32_TAPE: offsets_ptr = self->data.u32_tape.offsets; break;
+    case STRS_U64_TAPE_VIEW: offsets_ptr = self->data.u64_tape_view.offsets; break;
+    case STRS_U64_TAPE: offsets_ptr = self->data.u64_tape.offsets; break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t((sz_size_t)offsets_ptr);
+}
+
+static PyObject *Strs_get_tape_nbytes(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_size_t tape_nbytes = 0;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: {
+        sz_size_t count = self->data.u32_tape_view.count;
+        sz_u32_t *offsets = self->data.u32_tape_view.offsets;
+        // The tape size is the last offset (offsets[count])
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U32_TAPE: {
+        sz_size_t count = self->data.u32_tape.count;
+        sz_u32_t *offsets = self->data.u32_tape.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U64_TAPE_VIEW: {
+        sz_size_t count = self->data.u64_tape_view.count;
+        sz_u64_t *offsets = self->data.u64_tape_view.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U64_TAPE: {
+        sz_size_t count = self->data.u64_tape.count;
+        sz_u64_t *offsets = self->data.u64_tape.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t(tape_nbytes);
+}
+
+static PyObject *Strs_get_offsets_nbytes(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_size_t count = 0;
+    sz_size_t offset_size = 0;
+
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW:
+        count = self->data.u32_tape_view.count;
+        offset_size = sizeof(sz_u32_t);
+        break;
+    case STRS_U32_TAPE:
+        count = self->data.u32_tape.count;
+        offset_size = sizeof(sz_u32_t);
+        break;
+    case STRS_U64_TAPE_VIEW:
+        count = self->data.u64_tape_view.count;
+        offset_size = sizeof(sz_u64_t);
+        break;
+    case STRS_U64_TAPE:
+        count = self->data.u64_tape.count;
+        offset_size = sizeof(sz_u64_t);
+        break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    // Arrow format uses N+1 offsets for N strings
+    sz_size_t offsets_nbytes = (count + 1) * offset_size;
+    return PyLong_FromSize_t(offsets_nbytes);
+}
 
 static Py_ssize_t Strs_len(Strs *self) {
     switch (self->layout) {
