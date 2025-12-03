@@ -184,6 +184,25 @@
 #endif
 
 /**
+ *  @brief  C99 static array parameter annotation for minimum array size.
+ *          In C, expands to `static n` enabling compiler bounds checking.
+ *          In C++, expands to nothing as this syntax is not supported.
+ *
+ *  @see    https://lwn.net/Articles/1046840/
+ *
+ *  Example usage:
+ *  @code{.c}
+ *      void hash_digest(uint8_t digest[sz_at_least_(32)]);
+ *      void lookup(uint8_t const lut[sz_at_least_(256)]);
+ *  @endcode
+ */
+#if defined(__cplusplus)
+#define sz_at_least_(n)
+#else
+#define sz_at_least_(n) static n
+#endif
+
+/**
  *  @brief  Largest prime number that fits into 16 bits.
  */
 #define SZ_U16_MAX_PRIME (65521u)

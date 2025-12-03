@@ -273,7 +273,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
  *  @param[in] state The state to finalize.
  *  @param[out] digest Output buffer for the 32-byte (256-bit) hash.
  */
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest);
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
@@ -321,7 +321,7 @@ SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state);
 SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t *digest);
+SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
@@ -381,7 +381,7 @@ SZ_PUBLIC void sz_sha256_state_init_ice(sz_sha256_state_t *state);
 SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state, sz_u8_t *digest);
+SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
@@ -420,7 +420,7 @@ SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state);
 SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t *digest);
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
@@ -576,7 +576,8 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_ve
     return result;
 }
 
-SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec, sz_u8_t const order[16]) {
+SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
+                                                          sz_u8_t const order[sz_at_least_(16)]) {
     sz_u128_vec_t result;
     // Unroll the loop for 16 bytes
     result.u8s[0] = state_vec.u8s[order[0]];
@@ -1040,7 +1041,8 @@ SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
+                                                 sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_u32_t message_schedule[16];
     sz_u32_t a, b, c, d, e, f, g, h, temp1, temp2;
@@ -1148,7 +1150,7 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
     state_ptr->hash[7] = hash[7];
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -1702,7 +1704,8 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_goldmont_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+SZ_INTERNAL void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
+                                                   sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load and byte-swap the first 16 words (big-endian) using SSE
@@ -1925,7 +1928,7 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_
     _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_load_si128((__m128i const *)&hash[4]));
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -2841,7 +2844,7 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_ice_(sz_hash_minimal_x4_t_ *state, __
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+SZ_INTERNAL void sz_sha256_process_block_ice_(sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load entire 64-byte block with single 512-bit load and byte-swap
@@ -3107,7 +3110,7 @@ SZ_PUBLIC void sz_sha256_state_update_ice(sz_sha256_state_t *state_ptr, sz_cptr_
     _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_load_si256((__m256i const *)hash));
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_ice(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -3675,7 +3678,7 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_neon_(sz_u32_t hash[8], sz_u8_t const block[64]) {
+SZ_INTERNAL void sz_sha256_process_block_neon_(sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Pre-load all round constants using multi-vector loads (4x16 = 64 bytes per load)
@@ -3903,7 +3906,7 @@ SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state_ptr, sz_cptr
  *  @param  state   Pointer to SHA256 state structure (not modified).
  *  @param  digest  Output buffer for 32-byte (256-bit) hash digest.
  */
-SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state_ptr, sz_u8_t *digest) {
+SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -4272,7 +4275,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
 #endif
 }
 
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
 #if SZ_USE_NEON_SHA
     sz_sha256_state_digest_neon(state, digest);
 #elif SZ_USE_ICE

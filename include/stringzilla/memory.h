@@ -146,7 +146,7 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa     sz_lookup_serial, sz_lookup_haswell, sz_lookup_ice, sz_lookup_neon
  */
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 
 /** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
@@ -155,7 +155,7 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_copy */
@@ -165,7 +165,8 @@ SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 /** @copydoc sz_rfind_fill */
 SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                 char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_SKYLAKE
@@ -179,7 +180,7 @@ SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value)
 
 #if SZ_USE_ICE
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_NEON
@@ -190,7 +191,7 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 /** @copydoc sz_rfind_fill */
 SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 #endif
 
 #pragma endregion // Core API
@@ -207,7 +208,7 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  */
-SZ_PUBLIC void sz_lookup_init_lower(sz_ptr_t lut) {
+SZ_PUBLIC void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
     static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -239,7 +240,7 @@ SZ_PUBLIC void sz_lookup_init_lower(sz_ptr_t lut) {
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  */
-SZ_PUBLIC void sz_lookup_init_upper(sz_ptr_t lut) {
+SZ_PUBLIC void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
     static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -265,7 +266,7 @@ SZ_PUBLIC void sz_lookup_init_upper(sz_ptr_t lut) {
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
  *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-SZ_PUBLIC void sz_lookup_init_ascii(sz_ptr_t lut) {
+SZ_PUBLIC void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t i = 0; i < 256; ++i) lut[i] = (sz_u8_t)(i & 0x7F);
 }
 
@@ -304,7 +305,7 @@ SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 
 #pragma region Serial Implementation
 
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, sz_cptr_t lut) {
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, char const lut[sz_at_least_(256)]) {
     sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
     sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
     sz_u8_t *unsigned_result = (sz_u8_t *)result;
@@ -600,7 +601,8 @@ SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
 }
 
-SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                 char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -996,7 +998,7 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
 #endif
 
-SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -1183,7 +1185,7 @@ SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length) sz_fill_serial(target, length, value);
 }
 
-SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -1383,7 +1385,7 @@ SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     }
 }
 
-SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
 
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);
@@ -1506,7 +1508,7 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #endif
 }
 
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
 #if SZ_USE_ICE
     sz_lookup_ice(target, length, source, lut);
 #elif SZ_USE_HASWELL
