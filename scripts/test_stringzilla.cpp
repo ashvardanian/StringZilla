@@ -1137,6 +1137,76 @@ void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_
         // Mixed Vietnamese + ASCII
         {"Hello \xE1\xBB\x86 World", "\xE1\xBB\x87", "Vietnamese Ệ vs ệ in ASCII"},
 
+        // Georgian path tests (E1 82/83 for Asomtavruli/Mkhedruli, E1 B2 for Mtavruli, E2 B4 for lowercase)
+        // Uppercase Asomtavruli Ⴀ (E1 82 A0) -> lowercase ⴀ (E2 B4 80)
+        // Mkhedruli ა (E1 83 90) is already lowercase, Mtavruli Ა (E1 B2 90) is uppercase
+        {"\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2", "\xE2\xB4\x80\xE2\xB4\x81\xE2\xB4\x82",
+         "Georgian Ⴀ Ⴁ Ⴂ to ⴀⴁⴂ (Asomtavruli upper to lower)"},
+        {"\xE2\xB4\x80\xE2\xB4\x81\xE2\xB4\x82", "\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2",
+         "Georgian ⴀⴁⴂ to ႠႡႢ (lower to Asomtavruli upper)"},
+        {"\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92", "\xE1\x83\x90\xE1\x83\x91\xE1\x83\x92",
+         "Georgian Ა Ბ Გ to აბგ (Mtavruli upper to Mkhedruli lower)"},
+        {"\xE1\x83\x90\xE1\x83\x91\xE1\x83\x92", "\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92",
+         "Georgian აბგ to ᲐᲑᲒ (Mkhedruli lower to Mtavruli upper)"},
+        // Georgian + ASCII mixed
+        {"Hello \xE1\x83\x90\xE1\x83\x91\xE1\x83\x92 World", "\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92",
+         "Georgian აბგ in ASCII context"},
+
+        // Cherokee path tests (E1 8E/8F for uppercase, EA AD/AE/AF for lowercase supplement)
+        // Cherokee is unusual: lowercase folds TO uppercase (opposite of most scripts!)
+        // Uppercase Ꭰ (E1 8E A0) is the fold target of lowercase ꭰ (EA AD B0)
+        {"\xE1\x8E\xA0\xE1\x8E\xA1\xE1\x8E\xA2", "\xEA\xAD\xB0\xEA\xAD\xB1\xEA\xAD\xB2",
+         "Cherokee Ꭰ Ꭱ Ꭲ vs ꭰꭱꭲ (upper vs lower supplement)"},
+        {"\xEA\xAD\xB0\xEA\xAD\xB1\xEA\xAD\xB2", "\xE1\x8E\xA0\xE1\x8E\xA1\xE1\x8E\xA2",
+         "Cherokee ꭰꭱꭲ vs ᎠᎡᎢ (lower supplement vs upper)"},
+        // Cherokee + ASCII mixed
+        {"Hello \xE1\x8E\xA0\xE1\x8E\xA1 World", "\xEA\xAD\xB0\xEA\xAD\xB1", "Cherokee ᎠᎡ in ASCII context"},
+
+        // Coptic path tests (E2 B2/B3 lead bytes) - separate script from Greek
+        // Uppercase Ϣ (E2 B2 A2) -> lowercase ϣ (E2 B2 A3)
+        {"\xE2\xB2\xA0\xE2\xB2\xA2\xE2\xB2\xA4", "\xE2\xB2\xA1\xE2\xB2\xA3\xE2\xB2\xA5",
+         "Coptic Ⲡ Ⲣ Ⲥ to ⲡⲣⲥ (upper to lower)"},
+        {"\xE2\xB2\xA1\xE2\xB2\xA3\xE2\xB2\xA5", "\xE2\xB2\xA0\xE2\xB2\xA2\xE2\xB2\xA4",
+         "Coptic ⲡⲣⲥ to ⲠⲢⲤ (lower to upper)"},
+
+        // Glagolitic path tests (E2 B0 80-BF for uppercase, E2 B1 80-9F for lowercase)
+        // Uppercase Ⰰ (E2 B0 80) -> lowercase ⰰ (E2 B1 80)
+        {"\xE2\xB0\x80\xE2\xB0\x81\xE2\xB0\x82", "\xE2\xB1\x80\xE2\xB1\x81\xE2\xB1\x82",
+         "Glagolitic Ⰰ Ⰱ Ⰲ to ⰰⰱⰲ (upper to lower)"},
+        {"\xE2\xB1\x80\xE2\xB1\x81\xE2\xB1\x82", "\xE2\xB0\x80\xE2\xB0\x81\xE2\xB0\x82",
+         "Glagolitic ⰰⰱⰲ to ႠჁჂ (lower to upper)"},
+
+        // Caseless script tests (should trigger fast binary search path)
+        // These needles contain NO bicameral characters, so sz_utf8_is_fully_caseless_ returns true
+        // Arabic (right-to-left, no textual form in comments)
+        {"\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85", "\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85",
+         "Arabic caseless exact match"},
+        // Hebrew (right-to-left, no textual form in comments)
+        {"\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", "Hebrew caseless exact match"},
+        // CJK - 中文 (zhōngwén)
+        {"\xE4\xB8\xAD\xE6\x96\x87\xE6\xB5\x8B\xE8\xAF\x95", "\xE4\xB8\xAD\xE6\x96\x87",
+         "CJK 中文测试 find 中文 (caseless)"},
+        // Japanese Hiragana - あいう (aiū)
+        {"\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86\xE3\x81\x88\xE3\x81\x8A", "\xE3\x81\x84\xE3\x81\x86",
+         "Hiragana あいうえお find いう (caseless)"},
+        // Japanese Katakana - アイウ (aiu)
+        {"\xE3\x82\xA2\xE3\x82\xA4\xE3\x82\xA6", "\xE3\x82\xA2\xE3\x82\xA4", "Katakana アイウ find アイ (caseless)"},
+        // Thai - สวัสดี (sawatdee)
+        {"\xE0\xB8\xAA\xE0\xB8\xA7\xE0\xB8\xB1\xE0\xB8\xAA\xE0\xB8\x94\xE0\xB8\xB5",
+         "\xE0\xB8\xAA\xE0\xB8\xA7\xE0\xB8\xB1\xE0\xB8\xAA", "Thai สวัสดี find สวัส (caseless)"},
+        // Devanagari - नमस्ते (namaste)
+        {"\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\xA4\xE0\xA5\x87", "\xE0\xA4\xA8\xE0\xA4\xAE",
+         "Devanagari नमस्ते find नम (caseless)"},
+        // Korean Hangul - 안녕하세요 (annyeonghaseyo)
+        {"\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94", "\xEB\x85\x95\xED\x95\x98",
+         "Hangul 안녕하세요 find 녕하 (caseless)"},
+        // Emoji - caseless symbols
+        {"\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82", "\xF0\x9F\x98\x81", "Emoji 😀😁😂 find 😁 (caseless)"},
+        // Mixed caseless + cased: CJK haystack with ASCII needle (should NOT match)
+        {"\xE4\xB8\xAD\xE6\x96\x87", "abc", "CJK 中文 vs ASCII abc (not found)"},
+        // Numbers and punctuation (caseless)
+        {"12345!@#$%", "345", "Numbers/punctuation caseless match"},
+
         // Script-crossing edge cases
         {"\xCE\xB1\xCE\xB2\xCE\xB3"
          "ABC",
