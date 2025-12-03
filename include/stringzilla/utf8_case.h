@@ -954,6 +954,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_ru
         if (lead < 0x80) {
             *out_rune = sz_ascii_fold_(lead);
             it->ptr++;
+            it->pending_count = 0; // Clear pending buffer
+            it->pending_idx = 0;   // Signal first rune of new codepoint for source tracking
             return sz_true_k;
         }
 
@@ -1181,23 +1183,30 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
 
             if (!mismatches) {
                 if (needle_total_count <= ring_capacity) {
-                    *match_length = (sz_size_t)(window_end - window_start);
-                    return window_start;
+                    // Verify the match to handle edge cases where window_start includes partial
+                    // multi-rune expansions (e.g., ß→ss where only the second 's' is in the match)
+                    if (sz_utf8_verify_case_insensitive_match_(needle, needle_length, window_start, window_end)) {
+                        *match_length = (sz_size_t)(window_end - window_start);
+                        return window_start;
+                    }
+                    // Rune hash matched but byte-level verification failed, continue searching
                 }
-                sz_size_t haystack_tail_length = haystack_length - (sz_size_t)(window_end - haystack);
-                sz_utf8_folded_iter_t needle_tail_iter, haystack_tail_iter;
-                sz_utf8_folded_iter_init_(&needle_tail_iter, needle_tail, needle_tail_length);
-                sz_utf8_folded_iter_init_(&haystack_tail_iter, window_end, haystack_tail_length);
-                sz_rune_t needle_tail_rune, haystack_tail_rune;
-                sz_bool_t tail_matches = sz_true_k;
-                while (tail_matches && sz_utf8_folded_iter_next_(&needle_tail_iter, &needle_tail_rune)) {
-                    if (!sz_utf8_folded_iter_next_(&haystack_tail_iter, &haystack_tail_rune) ||
-                        needle_tail_rune != haystack_tail_rune)
-                        tail_matches = sz_false_k;
-                }
-                if (tail_matches) {
-                    *match_length = (sz_size_t)(haystack_tail_iter.ptr - window_start);
-                    return window_start;
+                else {
+                    sz_size_t haystack_tail_length = haystack_length - (sz_size_t)(window_end - haystack);
+                    sz_utf8_folded_iter_t needle_tail_iter, haystack_tail_iter;
+                    sz_utf8_folded_iter_init_(&needle_tail_iter, needle_tail, needle_tail_length);
+                    sz_utf8_folded_iter_init_(&haystack_tail_iter, window_end, haystack_tail_length);
+                    sz_rune_t needle_tail_rune, haystack_tail_rune;
+                    sz_bool_t tail_matches = sz_true_k;
+                    while (tail_matches && sz_utf8_folded_iter_next_(&needle_tail_iter, &needle_tail_rune)) {
+                        if (!sz_utf8_folded_iter_next_(&haystack_tail_iter, &haystack_tail_rune) ||
+                            needle_tail_rune != haystack_tail_rune)
+                            tail_matches = sz_false_k;
+                    }
+                    if (tail_matches) {
+                        *match_length = (sz_size_t)(haystack_tail_iter.ptr - window_start);
+                        return window_start;
+                    }
                 }
             }
         }
@@ -1212,13 +1221,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         // Advance ring head, avoiding modulo with a conditional (cheaper than integer division)
         sz_size_t next_head = ring_head + 1;
         next_head = next_head == needle_prefix_count ? 0 : next_head;
-        window_start = window_sources[next_head];
 
         window_runes[ring_head] = new_rune;
         current_source = haystack_iter.pending_idx <= 1 ? before_ptr : current_source;
         window_sources[ring_head] = current_source;
 
         ring_head = next_head;
+        window_start = window_sources[ring_head];
         window_end = haystack_iter.ptr;
     }
 
