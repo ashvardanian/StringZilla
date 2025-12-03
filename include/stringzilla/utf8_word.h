@@ -59,8 +59,8 @@ typedef enum sz_tr29_word_break_t {
 /**
  *  @brief  Get the Unicode TR29 Word_Break property for a codepoint.
  *
- *  Returns one of the 16 Word_Break property values (sz_tr29_word_break_other_k through sz_tr29_word_break_mid_quotes_k).
- *  This is the foundation for TR29-compliant word boundary detection.
+ *  Returns one of the 16 Word_Break property values (sz_tr29_word_break_other_k through
+ *  sz_tr29_word_break_mid_quotes_k). This is the foundation for TR29-compliant word boundary detection.
  *
  *  @param[in] rune The Unicode codepoint to classify.
  *  @return The Word_Break property value (0-15).
@@ -86,8 +86,8 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
  *  Scans forward from the start of text to find the first word boundary position.
  *  Returns a pointer to the boundary position and optionally outputs the boundary width.
  *
- *  @param[in]  text           UTF-8 encoded text.
- *  @param[in]  length         Byte length of text.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of text.
  *  @param[out] boundary_width Optional output: bytes spanning the boundary.
  *  @return Pointer to boundary position, or text+length at end.
  */
@@ -96,8 +96,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length
 /**
  *  @brief  Find the previous word boundary in UTF-8 text (dispatch function).
  *
- *  @param[in]  text           UTF-8 encoded text.
- *  @param[in]  length         Byte length of text.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of text.
  *  @param[out] boundary_width Optional output: bytes spanning the boundary.
  *  @return Pointer to boundary position, or text at start.
  */
@@ -112,9 +112,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t lengt
  *  - WB5-WB13: Letter, number, and punctuation rules
  *  - WB15-WB16: Regional Indicator pair rules
  *
- *  @param[in] text   UTF-8 encoded text.
+ *  @param[in] text UTF-8 encoded text.
  *  @param[in] length Byte length of text.
- *  @param[in] pos    Byte offset to check (must be start of a UTF-8 codepoint).
+ *  @param[in] pos Byte offset to check (must be start of a UTF-8 codepoint).
  *  @return sz_true_k if pos is a word boundary, sz_false_k otherwise.
  *
  *  @note Position 0 and position == length are always boundaries (SOT/EOT).
@@ -790,7 +790,8 @@ SZ_INTERNAL sz_size_t sz_utf8_char_length_(sz_u8_t lead) {
  *  @brief  Check if property is WB4-ignorable (Extend, Format, ZWJ).
  */
 SZ_INTERNAL sz_bool_t sz_wb_is_ignorable_(sz_u8_t prop) {
-    return (sz_bool_t)(prop == sz_tr29_word_break_extend_k || prop == sz_tr29_word_break_format_k || prop == sz_tr29_word_break_zwj_k);
+    return (sz_bool_t)(prop == sz_tr29_word_break_extend_k || prop == sz_tr29_word_break_format_k ||
+                       prop == sz_tr29_word_break_zwj_k);
 }
 
 /**
@@ -804,7 +805,9 @@ SZ_INTERNAL sz_bool_t sz_wb_is_ahletter_(sz_u8_t prop) {
  *  @brief  Check if property is MidNumLetQ (MidNumLet or Single_Quote).
  *          In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
  */
-SZ_INTERNAL sz_bool_t sz_wb_is_midnumletq_(sz_u8_t prop) { return (sz_bool_t)(prop == sz_tr29_word_break_mid_quotes_k); }
+SZ_INTERNAL sz_bool_t sz_wb_is_midnumletq_(sz_u8_t prop) {
+    return (sz_bool_t)(prop == sz_tr29_word_break_mid_quotes_k);
+}
 
 /**
  *  @brief  Skip forward past WB4-ignorable characters (Extend, Format, ZWJ).
@@ -922,10 +925,14 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if (prev_prop == sz_tr29_word_break_cr_k && after_prop == sz_tr29_word_break_lf_k) return sz_false_k;
 
     // WB3a: Break after Newline, CR, LF
-    if (prev_prop == sz_tr29_word_break_newline_k || prev_prop == sz_tr29_word_break_cr_k || prev_prop == sz_tr29_word_break_lf_k) return sz_true_k;
+    if (prev_prop == sz_tr29_word_break_newline_k || prev_prop == sz_tr29_word_break_cr_k ||
+        prev_prop == sz_tr29_word_break_lf_k)
+        return sz_true_k;
 
     // WB3b: Break before Newline, CR, LF
-    if (after_prop == sz_tr29_word_break_newline_k || after_prop == sz_tr29_word_break_cr_k || after_prop == sz_tr29_word_break_lf_k) return sz_true_k;
+    if (after_prop == sz_tr29_word_break_newline_k || after_prop == sz_tr29_word_break_cr_k ||
+        after_prop == sz_tr29_word_break_lf_k)
+        return sz_true_k;
 
     // WB3c: Do not break within emoji ZWJ sequences
     // (Simplified: don't break ZWJ × anything)
@@ -942,7 +949,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if (sz_wb_is_ahletter_(prev_prop) && sz_wb_is_ahletter_(after_prop)) return sz_false_k;
 
     // WB6: Do not break AHLetter × (MidLetter|MidNumLetQ) × AHLetter
-    if (sz_wb_is_ahletter_(prev_prop) && (after_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(after_prop))) {
+    if (sz_wb_is_ahletter_(prev_prop) &&
+        (after_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(after_prop))) {
         // Look ahead to see if followed by AHLetter
         sz_size_t lookahead = after_pos;
         lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
@@ -955,7 +963,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     }
 
     // WB7: Do not break AHLetter (MidLetter|MidNumLetQ) × AHLetter
-    if ((prev_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(prev_prop)) && sz_wb_is_ahletter_(after_prop)) {
+    if ((prev_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(prev_prop)) &&
+        sz_wb_is_ahletter_(after_prop)) {
         // Look back to see if preceded by AHLetter
         // This requires looking at the character before prev
         sz_size_t prev_prev_end = pos - 1;
@@ -971,7 +980,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     }
 
     // WB7a: Do not break Hebrew_Letter × Single_Quote
-    if (prev_prop == sz_tr29_word_break_hebrew_letter_k && after_prop == sz_tr29_word_break_mid_quotes_k) return sz_false_k;
+    if (prev_prop == sz_tr29_word_break_hebrew_letter_k && after_prop == sz_tr29_word_break_mid_quotes_k)
+        return sz_false_k;
 
     // WB8: Do not break Numeric × Numeric
     if (prev_prop == sz_tr29_word_break_numeric_k && after_prop == sz_tr29_word_break_numeric_k) return sz_false_k;
@@ -983,7 +993,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if (prev_prop == sz_tr29_word_break_numeric_k && sz_wb_is_ahletter_(after_prop)) return sz_false_k;
 
     // WB11: Do not break Numeric × (MidNum|MidNumLetQ) × Numeric
-    if (prev_prop == sz_tr29_word_break_numeric_k && (after_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(after_prop))) {
+    if (prev_prop == sz_tr29_word_break_numeric_k &&
+        (after_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(after_prop))) {
         sz_size_t lookahead = after_pos;
         lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
         if (lookahead < length) {
@@ -995,7 +1006,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     }
 
     // WB12: Do not break Numeric (MidNum|MidNumLetQ) × Numeric (reverse of WB11)
-    if ((prev_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(prev_prop)) && after_prop == sz_tr29_word_break_numeric_k) {
+    if ((prev_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(prev_prop)) &&
+        after_prop == sz_tr29_word_break_numeric_k) {
         // Check if preceded by Numeric
         sz_size_t prev_prev_end = pos - 1;
         while (prev_prev_end > 0 && ((sz_u8_t)text[prev_prev_end] & 0xC0) == 0x80) prev_prev_end--;
@@ -1013,14 +1025,15 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if (prev_prop == sz_tr29_word_break_katakana_k && after_prop == sz_tr29_word_break_katakana_k) return sz_false_k;
 
     // WB13a: Do not break (AHLetter|Numeric|Katakana|ExtendNumLet) × ExtendNumLet
-    if ((sz_wb_is_ahletter_(prev_prop) || prev_prop == sz_tr29_word_break_numeric_k || prev_prop == sz_tr29_word_break_katakana_k ||
-         prev_prop == sz_tr29_word_break_extendnumlet_k) &&
+    if ((sz_wb_is_ahletter_(prev_prop) || prev_prop == sz_tr29_word_break_numeric_k ||
+         prev_prop == sz_tr29_word_break_katakana_k || prev_prop == sz_tr29_word_break_extendnumlet_k) &&
         after_prop == sz_tr29_word_break_extendnumlet_k)
         return sz_false_k;
 
     // WB13b: Do not break ExtendNumLet × (AHLetter|Numeric|Katakana)
     if (prev_prop == sz_tr29_word_break_extendnumlet_k &&
-        (sz_wb_is_ahletter_(after_prop) || after_prop == sz_tr29_word_break_numeric_k || after_prop == sz_tr29_word_break_katakana_k))
+        (sz_wb_is_ahletter_(after_prop) || after_prop == sz_tr29_word_break_numeric_k ||
+         after_prop == sz_tr29_word_break_katakana_k))
         return sz_false_k;
 
     // WB15/16: Do not break between Regional Indicators (keep pairs together)
@@ -1040,9 +1053,9 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
  *  Scans forward from the start of text to find the first word boundary position
  *  after position 0 (since position 0 is always a boundary).
  *
- *  @param[in]  text           UTF-8 encoded text.
- *  @param[in]  length         Byte length of text.
- *  @param[out] boundary_width Optional: outputs bytes consumed to reach boundary.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of text.
+ *  @param[out] boundary_width Outputs bytes consumed to reach boundary.
  *  @return Pointer to boundary position, or text+length if at end.
  */
 SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
@@ -1075,9 +1088,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t 
  *  Scans backward from the end of text to find the last word boundary position
  *  before position length (since position length is always a boundary).
  *
- *  @param[in]  text           UTF-8 encoded text.
- *  @param[in]  length         Byte length of text.
- *  @param[out] boundary_width Optional: outputs bytes from boundary to end.
+ *  @param[in] text UTF-8 encoded text.
+ *  @param[in] length Byte length of text.
+ *  @param[out] boundary_width Outputs bytes from boundary to end.
  *  @return Pointer to boundary position, or text if at start.
  */
 SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
