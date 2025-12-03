@@ -1090,6 +1090,189 @@ SZ_INTERNAL sz_bool_t sz_utf8_is_fully_caseless_(sz_cptr_t str, sz_size_t len) {
 }
 
 /**
+ *  @brief  Hash-free case-insensitive search for needles that fold to exactly 1 rune.
+ *          Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' which folds to 'ss' = 2 runes).
+ *
+ *  Single-pass algorithm: parses each source rune, folds it, checks if it produces
+ *  exactly one rune matching the target. No iterator overhead, no verification needed.
+ *
+ *  @param[in] target_folded The single folded rune to search for.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_1folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_rune_t needle_folded, sz_size_t *match_length) {
+
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+
+    // Each haystack rune may fold in up to 3 runes
+    sz_rune_t haystack_rune;
+    sz_rune_length_t haystack_rune_length;
+
+    // If we simply initialize the runes for zero, the code will break
+    // when the needle itself is the NUL character
+    sz_rune_t haystack_folded_runes[3] = {~needle_folded};
+    while (haystack < haystack_end) {
+        sz_rune_parse(haystack, &haystack_rune, &haystack_rune_length);
+        sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes);
+
+        // Perform branchless equality check via arithmetic
+        sz_u32_t has_match =                              //
+            (haystack_folded_runes[0] == needle_folded) + //
+            (haystack_folded_runes[1] == needle_folded) + //
+            (haystack_folded_runes[2] == needle_folded);
+
+        if (has_match) {
+            *match_length = haystack_rune_length;
+            return haystack;
+        }
+
+        haystack += haystack_rune_length;
+    }
+
+    *match_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+/**
+ *  @brief  Hash-free case-insensitive search for needles that fold to exactly 2 runes.
+ *          Examples: 'ab', 'AB', 'ß' (folds to 'ss'), 'ﬁ' (folds to 'fi').
+ *
+ *  Single-pass sliding window over the folded rune stream. Handles expansions (ß→ss)
+ *  by buffering folded runes from each source and tracking source boundaries.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_size_t *match_length) {
+
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+
+    // Each haystack rune may fold in up to 3 runes, but we also keep an extra slot
+    // for the last folded rune from the previous iterato step
+    sz_rune_t haystack_rune;
+    sz_rune_length_t haystack_rune_length, haystack_last_rune_length = sz_utf8_invalid_k;
+
+    // If we simply initialize the runes for zero, the code will break
+    // when the needle itself is the NUL character
+    sz_rune_t haystack_folded_runes[4] = {~first_needle_folded};
+    while (haystack < haystack_end) {
+        sz_rune_parse(haystack, &haystack_rune, &haystack_rune_length);
+
+        // Export into the last 3 rune entries of the 4-element array,
+        // keeping the first position with historical data untouched
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 1);
+
+        // Perform branchless equality check via arithmetic
+        sz_u32_t has_match_f0 = first_needle_folded == haystack_folded_runes[0];
+        sz_u32_t has_match_f1 = first_needle_folded == haystack_folded_runes[1];
+        sz_u32_t has_match_f2 = first_needle_folded == haystack_folded_runes[2];
+        sz_u32_t has_match_s1 = second_needle_folded == haystack_folded_runes[1];
+        sz_u32_t has_match_s2 = second_needle_folded == haystack_folded_runes[2];
+        sz_u32_t has_match_s3 = second_needle_folded == haystack_folded_runes[3];
+
+        // Branchless match detection: each product is 0 or 1
+        sz_u32_t match_at_01 = has_match_f0 * has_match_s1;
+        sz_u32_t match_at_12 = has_match_f1 * has_match_s2;
+        sz_u32_t match_at_23 = has_match_f2 * has_match_s3;
+        sz_u32_t has_match = match_at_01 + match_at_12 + match_at_23;
+
+        if (has_match) {
+            // Only `match_at_01` spans sources; others are within current source
+            sz_size_t back_offset = match_at_01 * (sz_size_t)haystack_last_rune_length;
+            *match_length = (sz_size_t)haystack_rune_length + back_offset;
+            return haystack - back_offset;
+        }
+
+        haystack_folded_runes[0] = haystack_folded_runes[folded_count];
+        haystack_last_rune_length = haystack_rune_length;
+        haystack += haystack_rune_length;
+    }
+
+    *match_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+/**
+ *  @brief  Hash-free case-insensitive search for needles that fold to exactly 3 runes.
+ *          Examples: 'abc', 'ABC', 'aß' (folds to 'ass'), 'ﬁa' (folds to 'fia').
+ *
+ *  Single-pass sliding window of 3 folded runes over the haystack's folded stream.
+ *  Handles expansions (ß→ss) by buffering and tracking source boundaries.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_3folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_rune_t third_needle_folded,
+    sz_size_t *match_length) {
+
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+
+    // Each haystack rune may fold in up to 3 runes, but we also keep an extra 2 slots
+    // for the last folded rune from the previous iteration step, and the one before that
+    sz_rune_t haystack_rune;
+    sz_rune_length_t haystack_rune_length, haystack_last_rune_length = sz_utf8_invalid_k,
+                                           haystack_preceding_rune_length = sz_utf8_invalid_k;
+
+    // Initialize historical slots with sentinels that can never match their respective needle positions
+    // This prevents false matches on first iterations when history is not yet populated
+    sz_rune_t haystack_folded_runes[5] = {~first_needle_folded, ~second_needle_folded, 0, 0, 0};
+    while (haystack < haystack_end) {
+        sz_rune_parse(haystack, &haystack_rune, &haystack_rune_length);
+
+        // Export into the last 3 rune entries of the 5-element array,
+        // keeping the first two positions with historical data untouched
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 2);
+
+        // Perform branchless equality check via arithmetic
+        sz_u32_t has_match_f0 = first_needle_folded == haystack_folded_runes[0];
+        sz_u32_t has_match_f1 = first_needle_folded == haystack_folded_runes[1];
+        sz_u32_t has_match_f2 = first_needle_folded == haystack_folded_runes[2];
+        sz_u32_t has_match_s1 = second_needle_folded == haystack_folded_runes[1];
+        sz_u32_t has_match_s2 = second_needle_folded == haystack_folded_runes[2];
+        sz_u32_t has_match_s3 = second_needle_folded == haystack_folded_runes[3];
+        sz_u32_t has_match_t2 = third_needle_folded == haystack_folded_runes[2];
+        sz_u32_t has_match_t3 = third_needle_folded == haystack_folded_runes[3];
+        sz_u32_t has_match_t4 = third_needle_folded == haystack_folded_runes[4];
+
+        // Branchless match detection: each product is 0 or 1
+        sz_u32_t match_at_012 = has_match_f0 * has_match_s1 * has_match_t2;
+        sz_u32_t match_at_123 = has_match_f1 * has_match_s2 * has_match_t3;
+        sz_u32_t match_at_234 = has_match_f2 * has_match_s3 * has_match_t4;
+        sz_u32_t has_match = match_at_012 + match_at_123 + match_at_234;
+
+        if (has_match) {
+            // Compute back offset based on which position matched:
+            // - `match_at_012`: need preceding + last
+            // - `match_at_123`: need last
+            // - `match_at_234`: stay at current
+            sz_size_t back_for_last = (match_at_012 + match_at_123) * (sz_size_t)haystack_last_rune_length;
+            sz_size_t back_for_preceding = match_at_012 * (sz_size_t)haystack_preceding_rune_length;
+            sz_size_t back_offset = back_for_last + back_for_preceding;
+            *match_length = (sz_size_t)haystack_rune_length + back_offset;
+            return haystack - back_offset;
+        }
+
+        // Historical context update here is a bit trickier than in previous spaces
+        if (folded_count >= 2) {
+            haystack_folded_runes[0] = haystack_folded_runes[folded_count];
+            haystack_folded_runes[1] = haystack_folded_runes[folded_count + 1];
+            haystack_preceding_rune_length = sz_utf8_invalid_k;
+            haystack_last_rune_length = haystack_rune_length;
+        }
+        else {
+            sz_assert_(folded_count == 1);
+            haystack_folded_runes[0] = haystack_folded_runes[1];
+            haystack_folded_runes[1] = haystack_folded_runes[2];
+            haystack_preceding_rune_length = haystack_last_rune_length;
+            haystack_last_rune_length = haystack_rune_length;
+        }
+
+        haystack += haystack_rune_length;
+    }
+
+    *match_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+/**
  *  @brief  Rabin-Karp style case-insensitive UTF-8 substring search using a ring buffer.
  *          Uses a rolling hash over casefolded runes with O(1) updates per position.
  *          Ring buffer of 32 runes handles the prefix; longer needles verify tail separately.
@@ -1111,6 +1294,35 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         }
         *match_length = 0;
         return SZ_NULL_CHAR;
+    }
+
+    // For short needles (up to 12 bytes which can fold to at most ~6 runes), try hash-free search.
+    // We fold the needle first and dispatch based on the folded rune count.
+    // This avoids ring buffer setup, hash multiplier computation, and rolling hash updates.
+    if (needle_length <= 12) {
+        sz_rune_t folded[4]; // 4th slot accessed before loop exit
+        sz_size_t folded_count = 0;
+        sz_utf8_folded_iter_t iter;
+        sz_utf8_folded_iter_init_(&iter, needle, needle_length);
+        sz_rune_t rune;
+        while (folded_count < 4 && sz_utf8_folded_iter_next_(&iter, &rune)) folded[folded_count++] = rune;
+
+        // Dispatch based on folded rune count
+        switch (folded_count) {
+        case 1:
+            return sz_utf8_case_insensitive_find_1folded_serial_( //
+                haystack, haystack_length,                        //
+                folded[0], match_length);
+        case 2:
+            return sz_utf8_case_insensitive_find_2folded_serial_( //
+                haystack, haystack_length,                        //
+                folded[0], folded[1], match_length);
+        case 3:
+            return sz_utf8_case_insensitive_find_3folded_serial_( //
+                haystack, haystack_length,                        //
+                folded[0], folded[1], folded[2], match_length);
+        default: break; // 4+ folded runes: fall through to Rabin-Karp
+        }
     }
 
     sz_size_t const ring_capacity = 32;
@@ -4748,18 +4960,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // 3. Fall back to serial if no path meets its threshold
 
     // Priority 1: ASCII path (broadest haystack compatibility, handles all byte values)
-    if (analysis.ascii.length >= 3)
+    if (analysis.ascii.length >= 1)
         return sz_utf8_case_insensitive_find_ascii_ice_(haystack, haystack_length, needle, needle_length,
                                                         needle + analysis.ascii.start, analysis.ascii.length,
                                                         matched_length);
 
     // Priority 2: Latin1 path (includes Latin-1 Supplement: ß, accented letters, etc.)
-    if (analysis.latin1.length >= 4)
+    if (analysis.latin1.length >= 2) // Smallest non-ASCII Latin1 codepoint is 2 bytes
         return sz_utf8_case_insensitive_find_latin1_ice_(haystack, haystack_length, needle, needle_length,
                                                          &analysis.latin1, matched_length);
 
     // Priority 3: Vietnamese path (includes Latin1 + Latin Extended Additional)
-    if (analysis.vietnamese.length >= 6)
+    if (analysis.vietnamese.length >= 3) // One Vietnamese codepoints are 3 bytes in size
         return sz_utf8_case_insensitive_find_vietnamese_ice_(haystack, haystack_length, needle, needle_length,
                                                              &analysis.vietnamese, matched_length);
 
@@ -4773,13 +4985,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     if (analysis.armenian.length > best_script_len) best_script_len = analysis.armenian.length;
 
     // Select among script-specific paths based on longest window
-    if (analysis.cyrillic.length == best_script_len && analysis.cyrillic.length >= 4)
+    if (analysis.cyrillic.length == best_script_len && analysis.cyrillic.length >= 2)
         return sz_utf8_case_insensitive_find_cyrillic_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.cyrillic, matched_length);
-    if (analysis.greek.length == best_script_len && analysis.greek.length >= 4)
+    if (analysis.greek.length == best_script_len && analysis.greek.length >= 2)
         return sz_utf8_case_insensitive_find_greek_ice_(haystack, haystack_length, needle, needle_length,
                                                         &analysis.greek, matched_length);
-    if (analysis.armenian.length == best_script_len && analysis.armenian.length >= 4)
+    if (analysis.armenian.length == best_script_len && analysis.armenian.length >= 2)
         return sz_utf8_case_insensitive_find_armenian_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.armenian, matched_length);
 
