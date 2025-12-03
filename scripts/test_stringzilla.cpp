@@ -406,7 +406,7 @@ void test_utf8_equivalence(                                 //
     sz_utf8_find_boundary_t newline_simd,                   //
     sz_utf8_find_boundary_t whitespace_base,                //
     sz_utf8_find_boundary_t whitespace_simd,                //
-    std::size_t min_text_lentgh = 4000, std::size_t min_iterations = 10000) {
+    std::size_t min_text_length = 4000, std::size_t min_iterations = 10000) {
 
     auto check = [&](std::string const &text) {
         sz_cptr_t data = text.data();
@@ -504,7 +504,7 @@ void test_utf8_equivalence(                                 //
         std::string text;
 
         // Build up a random string of at least `min_text_length` bytes
-        while (text.size() < min_text_lentgh) {
+        while (text.size() < min_text_length) {
             std::size_t random_content_index = content_dist(rng);
             if (random_content_index < utf8_content_count) { text.append(utf8_content[random_content_index]); }
             else { text.append(special_chars[random_content_index - utf8_content_count]); }
@@ -670,7 +670,7 @@ void test_utf8_case_fold_equivalence(                             //
  *  implementations, and reports any codepoints that produce different results.
  */
 void test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("Testing case folding for all Unicode codepoints...\n");
+    std::printf("  - testing case folding for all Unicode codepoints...\n");
 
     // Generate text with all valid Unicode codepoints
     std::vector<char> all_codepoints;
@@ -686,7 +686,7 @@ void test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_t fold_base, sz_utf8_c
         codepoints_list.push_back(cp);
     }
 
-    std::printf("Generated %zu codepoints (%zu bytes)\n", codepoints_list.size(), all_codepoints.size());
+    std::printf("    generated %zu codepoints (%zu bytes)\n", codepoints_list.size(), all_codepoints.size());
 
     // Allocate output buffers (4x for worst-case expansion like ΐ → ι + 2 combining marks)
     std::vector<char> output_base(all_codepoints.size() * 4);
@@ -700,12 +700,12 @@ void test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_t fold_base, sz_utf8_c
     bool all_match = (len_base == len_simd) && (std::memcmp(output_base.data(), output_simd.data(), len_base) == 0);
 
     if (all_match) {
-        std::printf("All %zu codepoints fold identically!\n", codepoints_list.size());
+        std::printf("    all %zu codepoints fold identically!\n", codepoints_list.size());
         return;
     }
 
     // Find and report specific failing codepoints
-    std::printf("Mismatch detected! Scanning for failing codepoints...\n");
+    std::printf("    mismatch detected! scanning for failing codepoints...\n");
     std::size_t fail_count = 0;
     std::size_t src_offset = 0;
 
@@ -786,7 +786,7 @@ static constexpr std::size_t utf8_case_fold_scripts_count =
  *  adding one entry to the utf8_case_fold_scripts[] array.
  */
 void test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("Testing case folding boundaries for all scripts...\n");
+    std::printf("  - testing case folding boundaries for all scripts...\n");
 
     auto check = [&](char const *desc, std::string const &input) {
         std::vector<char> out_base(input.size() * 3 + 64);
@@ -858,7 +858,7 @@ void test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_t fold_base, sz_utf
         }
     }
 
-    std::printf("All script boundary tests passed! (%zu scripts tested)\n", utf8_case_fold_scripts_count);
+    std::printf("    all script boundary tests passed! (%zu scripts tested)\n", utf8_case_fold_scripts_count);
 }
 
 /**
@@ -872,7 +872,7 @@ void test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_t fold_base, sz_utf
  *  - valid_length edge cases
  */
 void test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("Testing case folding mixed scenarios...\n");
+    std::printf("  - testing case folding mixed scenarios...\n");
 
     auto check = [&](char const *desc, std::string const &input) {
         std::vector<char> out_base(input.size() * 3 + 64);
@@ -1010,7 +1010,7 @@ void test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_t fold_base, sz_utf8_
         check("All byte lengths mixed", input);
     }
 
-    std::printf("All mixed scenario tests passed!\n");
+    std::printf("    all mixed scenario tests passed!\n");
 }
 
 /**
@@ -1024,7 +1024,7 @@ using sz_utf8_ci_find_t = sz_cptr_t (*)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
  *  Covers ASCII, Latin1 (accented characters), Cyrillic, Eszett (ß↔SS), mixed scripts, and edge cases.
  */
 void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd) {
-    std::printf("Testing case-insensitive find equivalence...\n");
+    std::printf("  - testing case-insensitive find equivalence...\n");
 
     struct test_case {
         char const *haystack;
@@ -1299,7 +1299,7 @@ void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_
         ++passed;
     }
 
-    std::printf("  Passed %zu/%zu basic equivalence tests\n", passed, num_cases);
+    std::printf("    passed %zu/%zu basic equivalence tests\n", passed, num_cases);
 }
 
 /**
@@ -1309,7 +1309,7 @@ void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_
  *  at positions 60-68 to catch off-by-one errors in the vectorized code.
  */
 void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd) {
-    std::printf("Testing case-insensitive find at chunk boundaries...\n");
+    std::printf("  - testing case-insensitive find at chunk boundaries...\n");
 
     // Test ASCII needle at various positions
     for (std::size_t pos = 56; pos <= 72; ++pos) {
@@ -1455,7 +1455,7 @@ void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t
         assert(base_len == simd_len && "Vietnamese boundary length mismatch");
     }
 
-    std::printf("  All boundary tests passed (positions 56-72 x 6 scripts)\n");
+    std::printf("    all boundary tests passed (positions 56-72 x 6 scripts)\n");
 }
 
 /**
@@ -1465,7 +1465,7 @@ void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t
  *  Both backends must agree on search results - no case conversion needed in test.
  */
 void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd, std::size_t iterations) {
-    std::printf("Testing case-insensitive find with fuzzing (%zu iterations)...\n", iterations);
+    std::printf("  - testing case-insensitive find with fuzzing (%zu iterations)...\n", iterations);
 
     auto &rng = global_random_generator();
 
@@ -1574,7 +1574,7 @@ void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_
         }
     }
 
-    std::printf("  Fuzz test passed (%zu iterations, %zu failures)\n", iterations, failures);
+    std::printf("    fuzz test passed (%zu iterations, %zu failures)\n", iterations, failures);
     assert(failures == 0 && "Fuzz test had failures");
 }
 
@@ -1757,10 +1757,9 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
  *  @brief  Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
  *
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
- *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
+ *  regions are tested. Covers various chunk sizes, overlapping regions, and both forward and backward traversals.
  */
-void test_memory_utilities( //
-    std::size_t experiments = 1024ull * 1024ull, std::size_t max_l2_size = 1024ull * 1024ull) {
+void test_memory_utilities(std::size_t max_l2_size = 1024ull * 1024ull) {
 
     // We will be mirroring the operations on both standard and StringZilla strings.
     std::string text_stl(max_l2_size, '-');
@@ -1840,29 +1839,6 @@ void test_memory_utilities( //
         dashed_length += fill_length + 1;
         reverse_offset += fill_length;
     }
-
-    sz_unused_(experiments);
-
-#if 0 // TODO:
-
-    // We are going to randomly select the "source" and "target" slices of the strings.
-    // For `memcpy` and `memset` the offsets should have uniform distribution,
-    // while the length should decay with an exponential distribution.
-    // For `memmove` the offset should be uniform, but the "shift" and "length" should
-    // be exponential. The exponential distributions should be functions of the cache line width.
-    // https://en.cppreference.com/w/cpp/numeric/random/exponential_distribution
-    std::string dataset(max_l2_size, '-');
-    auto &gen = global_random_generator();
-    uniform_u8_distribution_t alphabet_distribution('a', 'z');
-    std::uniform_int_distribution<std::size_t> length_distribution(1, max_l2_size);
-    std::exponential_distribution<double> shift_distribution(1.0 / SZ_CACHE_LINE_WIDTH);
-
-    // Move the contents of both strings around, validating overall
-    // equivalency after every random iteration.
-    for (std::size_t experiment = 0; experiment < experiments; experiment++) {
-        std::generate(dataset, dataset + size, [&]() { return alphabet_distribution(gen); });
-    }
-#endif
 }
 
 /**
@@ -1870,7 +1846,7 @@ void test_memory_utilities( //
  *          in AVX2/AVX512 implementations. This specifically tests the bidirectional
  *          traversal optimization used for huge buffers.
  */
-static void test_large_memory_utilities() {
+void test_large_memory_utilities() {
     // Test sizes that trigger the "huge buffer" path (> 1MB)
     std::vector<std::size_t> test_sizes = {
         1024ull * 1024ull + 1,       // Just over 1MB
@@ -3974,56 +3950,86 @@ int main(int argc, char const **argv) {
     std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
 #endif
 
-    // Basic utilities
+    std::printf("\n=== Basic Utilities ===\n");
+    std::printf("- test_arithmetical_utilities...\n");
     test_arithmetical_utilities();
+    std::printf("- test_sequence_struct...\n");
     test_sequence_struct();
+    std::printf("- test_memory_allocator_struct...\n");
     test_memory_allocator_struct();
+    std::printf("- test_byteset_struct...\n");
     test_byteset_struct();
+    std::printf("- test_equivalence...\n");
     test_equivalence();
 
-    // Sequences of strings
+    std::printf("\n=== Sequence Algorithms ===\n");
+    std::printf("- test_sorting_algorithms...\n");
     test_sorting_algorithms();
+    std::printf("- test_intersecting_algorithms...\n");
     test_intersecting_algorithms();
-    test_stl_containers();
 
-    // Core APIs
+    std::printf("\n=== Core APIs ===\n");
+    std::printf("- test_ascii_utilities<sz::string>...\n");
     test_ascii_utilities<sz::string>();
+    std::printf("- test_ascii_utilities<sz::string_view>...\n");
     test_ascii_utilities<sz::string_view>();
+    std::printf("- test_memory_utilities...\n");
     test_memory_utilities();
+    std::printf("- test_large_memory_utilities...\n");
     test_large_memory_utilities();
+    std::printf("- test_replacements...\n");
     test_replacements();
 
-// Compatibility with STL
+    std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
+    std::printf("- test_stl_compatibility_for_reads<std::string_view>...\n");
     test_stl_compatibility_for_reads<std::string_view>();
 #endif
+    std::printf("- test_stl_compatibility_for_reads<std::string>...\n");
     test_stl_compatibility_for_reads<std::string>();
+    std::printf("- test_stl_compatibility_for_reads<sz::string_view>...\n");
     test_stl_compatibility_for_reads<sz::string_view>();
+    std::printf("- test_stl_compatibility_for_reads<sz::string>...\n");
     test_stl_compatibility_for_reads<sz::string>();
+    std::printf("- test_stl_compatibility_for_updates<std::string>...\n");
+    test_stl_compatibility_for_updates<std::string>();
+    std::printf("- test_stl_compatibility_for_updates<sz::string>...\n");
+    test_stl_compatibility_for_updates<sz::string>();
+    std::printf("- test_stl_conversions...\n");
+    test_stl_conversions();
+    std::printf("- test_stl_containers...\n");
+    test_stl_containers();
 
-    test_stl_compatibility_for_updates<std::string>(); // Make sure the test itself is reasonable
-    test_stl_compatibility_for_updates<sz::string>();  // The fact that this compiles is already a miracle :)
-
-    // Cover the non-STL interfaces
+    std::printf("\n=== StringZilla Extensions ===\n");
+    std::printf("- test_non_stl_extensions_for_reads<sz::string_view>...\n");
     test_non_stl_extensions_for_reads<sz::string_view>();
+    std::printf("- test_non_stl_extensions_for_reads<sz::string>...\n");
     test_non_stl_extensions_for_reads<sz::string>();
+    std::printf("- test_non_stl_extensions_for_updates...\n");
     test_non_stl_extensions_for_updates();
 
-    // The string class implementation
+    std::printf("\n=== String Class Implementation ===\n");
+    std::printf("- test_constructors...\n");
     test_constructors();
+    std::printf("- test_memory_stability_for_length(1024)...\n");
     test_memory_stability_for_length(1024);
+    std::printf("- test_memory_stability_for_length(14)...\n");
     test_memory_stability_for_length(14);
+    std::printf("- test_updates...\n");
     test_updates();
 
-    // Advanced search operations
-    test_stl_conversions();
+    std::printf("\n=== Search and Comparison ===\n");
+    std::printf("- test_comparisons...\n");
     test_comparisons();
+    std::printf("- test_search...\n");
     test_search();
+    std::printf("- test_utf8...\n");
     test_utf8();
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
+    std::printf("- test_search_with_misaligned_repetitions...\n");
     test_search_with_misaligned_repetitions();
 #endif
 
-    std::printf("All tests passed... Unbelievable!\n");
+    std::printf("\nAll tests passed!\n");
     return 0;
 }
