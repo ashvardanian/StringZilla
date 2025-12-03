@@ -756,6 +756,8 @@ static utf8_script_test_t const utf8_case_fold_scripts[] = {
     // 2-byte scripts
     {"Latin-1", "\xC3\x84", "\xC3\xA4", 2, false},         // Ä → ä
     {"Latin-1-Eszett", "\xC3\x9F", "ss", 2, true},         // ß → ss (expands!)
+    {"Latin-1-Mult", "\xC3\x97", "\xC3\x97", 2, false},    // × (no fold, must stay ×)
+    {"Latin-1-Div", "\xC3\xB7", "\xC3\xB7", 2, false},     // ÷ (no fold, must stay ÷)
     {"Cyrillic", "\xD0\x90", "\xD0\xB0", 2, false},        // А → а
     {"Greek", "\xCE\x91", "\xCE\xB1", 2, false},           // Α → α
     {"Armenian", "\xD5\x80", "\xD5\xB0", 2, false},        // Ա → ա
@@ -1093,6 +1095,27 @@ void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_
         {"Fu\xC3\x9F"
          "ball spielen",
          "FUSSBALL", "Eszett mid-word"}, // Fußball
+
+        // Multiplication × (C3 97) and Division ÷ (C3 B7) signs - must NOT be folded to each other
+        {"2\xC3\x97"
+         "3=6",
+         "\xC3\x97", "Find multiplication sign"}, // 2×3=6, find ×
+        {"6\xC3\xB7"
+         "2=3",
+         "\xC3\xB7", "Find division sign"}, // 6÷2=3, find ÷
+        {"2\xC3\x97"
+         "3=6",
+         "\xC3\xB7", "Mult not equal to div (not found)"}, // × ≠ ÷
+        {"6\xC3\xB7"
+         "2=3",
+         "\xC3\x97", "Div not equal to mult (not found)"},             // ÷ ≠ ×
+        {"\xC3\x97\xC3\xB7", "\xC3\x97", "Mult in mult-div sequence"}, // ×÷, find ×
+        {"\xC3\x97\xC3\xB7", "\xC3\xB7", "Div in mult-div sequence"},  // ×÷, find ÷
+        {"A\xC3\x97"
+         "B",
+         "a\xC3\x97"
+         "b",
+         "Mult with case-insensitive ASCII"}, // A×B vs a×b
 
         // Not found cases
         {"Hello World", "xyz", "Not found ASCII"},
@@ -3168,6 +3191,13 @@ void test_utf8() {
         // German Eszett: "straße" (7 bytes) vs "STRASSE" (7 bytes) should be equal
         let_assert(auto r = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7), r == sz_equal_k);
         let_assert(auto r = sz_utf8_case_insensitive_order("STRASSE", 7, "straße", 7), r == sz_equal_k);
+
+        // Multiplication × (C3 97) and Division ÷ (C3 B7) must NOT be treated as case pairs
+        let_assert(auto r = sz_utf8_case_insensitive_order("×", 2, "×", 2), r == sz_equal_k); // × == ×
+        let_assert(auto r = sz_utf8_case_insensitive_order("÷", 2, "÷", 2), r == sz_equal_k); // ÷ == ÷
+        let_assert(auto r = sz_utf8_case_insensitive_order("×", 2, "÷", 2), r != sz_equal_k); // × ≠ ÷
+        let_assert(auto r = sz_utf8_case_insensitive_order("a×b", 4, "A×B", 4),
+                   r == sz_equal_k); // a×b == A×B
 
         // Empty strings
         let_assert(auto r = sz_utf8_case_insensitive_order("", 0, "", 0), r == sz_equal_k);

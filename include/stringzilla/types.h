@@ -992,172 +992,6 @@ typedef union sz_u512_vec_t {
 
 #pragma endregion
 
-#pragma region UTF8
-
-/**
- *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer.
- *  @param[in] utf8 Pointer to the beginning of a valid UTF-8 encoded string.
- *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
- *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
- *  @note This function does not perform any bounds checking on the input string.
- */
-SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
-    sz_u8_t lead = *u8s++;
-
-    // Branchless UTF-8 length detection using arithmetic.
-    // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
-    // CLZ-based approach was also considered but has complications with ASCII handling.
-    sz_rune_length_t len = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
-
-    // Extract rune bits - switch compiles to efficient jump table.
-    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation needed.
-    sz_rune_t rune;
-    switch (len) {
-    // Single-byte rune (0xxxxxxx)
-    case 1: rune = lead; break;
-    // Two-byte rune (110xxxxx 10xxxxxx)
-    case 2: rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
-    // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-    case 3: rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
-    // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-    default: rune = (lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU); break;
-    }
-
-    *runes = rune;
-    *runes_lengths = len;
-}
-
-/**
- *  @brief  Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
- *  @param[in] utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
- *  @param[out] rune Output parameter to store the extracted UTF-32 codepoint.
- *  @param[out] rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
- *  @note This function does not perform any bounds checking on the input string.
- */
-SZ_PUBLIC void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8_end;
-
-    // Scan backwards to find the lead byte (not a continuation byte 10xxxxxx)
-    sz_rune_length_t len = 1;
-    for (--u8s; (*u8s & 0xC0) == 0x80 && len < 4; --u8s, ++len) {}
-
-    // Now u8s points to the lead byte, len is the sequence length
-    sz_rune_parse((sz_cptr_t)u8s, rune, rune_length);
-    sz_assert_(*rune_length == len && "Inconsistent rune length detected in sz_rune_rparse.");
-}
-
-/**
- *  @brief  Validates if a UTF-8 string contains only valid UTF-8 sequences.
- *  @param  text Pointer to the UTF-8 string to validate.
- *  @param  length Length of the string in bytes.
- *  @return sz_true_k if the string contains only valid UTF-8, sz_false_k otherwise.
- */
-SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_u8_t const *end_u8 = text_u8 + length;
-
-    while (text_u8 < end_u8) {
-        sz_u8_t byte1 = *text_u8;
-
-        // 1-byte sequence (0x00-0x7F)
-        if (byte1 <= 0x7F) { text_u8 += 1; }
-
-        // 2-byte sequence (0xC2-0xDF)
-        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
-            if (text_u8 + 1 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
-            text_u8 += 2;
-        }
-
-        // 3-byte sequence (0xE0-0xEF)
-        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
-            if (text_u8 + 2 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong encodings and surrogates
-            if (byte1 == 0xE0 && byte2 < 0xA0) return sz_false_k;  // Overlong
-            if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
-
-            text_u8 += 3;
-        }
-
-        // 4-byte sequence (0xF0-0xF4)
-        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
-            if (text_u8 + 3 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            sz_u8_t byte4 = text_u8[3];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80 || (byte4 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong and out-of-range
-            if (byte1 == 0xF0 && byte2 < 0x90) return sz_false_k;  // Overlong
-            if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
-
-            text_u8 += 4;
-        }
-
-        // Invalid lead byte
-        else { return sz_false_k; }
-    }
-
-    return sz_true_k;
-}
-
-/**
- *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
- *  @param[in] rune The UTF-32 codepoint to encode.
- *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
- *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
- */
-SZ_PUBLIC sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
-    if (rune <= 0x7F) {
-        utf8s[0] = (sz_u8_t)rune;
-        return sz_utf8_rune_1byte_k;
-    }
-    else if (rune <= 0x7FF) {
-        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
-        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_2bytes_k;
-    }
-    else if (rune <= 0xFFFF) {
-        // Reject surrogate codepoints
-        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k;
-        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
-        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
-        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_3bytes_k;
-    }
-    else if (rune <= 0x10FFFF) {
-        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
-        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
-        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
-        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_4bytes_k;
-    }
-    return sz_utf8_invalid_k;
-}
-
-/**
- *  @brief Exports a UTF8 string into a UTF32 buffer.
- *  @warning The result is undefined id the UTF8 string is corrupted.
- *  @return The length in the number of codepoints.
- */
-SZ_PUBLIC sz_size_t sz_runes_parse(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
-    sz_cptr_t const end = utf8 + utf8_length;
-    sz_size_t count = 0;
-    sz_rune_length_t rune_length;
-    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse(utf8, utf32, &rune_length);
-    return count;
-}
-
-#pragma endregion
-
 #pragma region String Sequences API
 
 /** @brief Signature of `sz_sequence_t::get_start` used to get the start of a member string at a given index. */
@@ -1602,6 +1436,172 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     return *result;
 #endif
 }
+
+#pragma region UTF8
+
+/**
+ *  @brief Validates if a UTF-8 string contains only valid UTF-8 sequences.
+ *  @param[in] text Pointer to the UTF-8 string to validate.
+ *  @param[in] length Length of the string in bytes.
+ *  @return sz_true_k if the string contains only valid UTF-8, sz_false_k otherwise.
+ */
+SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+
+    while (text_u8 < end_u8) {
+        sz_u8_t byte1 = *text_u8;
+
+        // 1-byte sequence (0x00-0x7F)
+        if (byte1 <= 0x7F) { text_u8 += 1; }
+
+        // 2-byte sequence (0xC2-0xDF)
+        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
+            if (text_u8 + 1 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
+            text_u8 += 2;
+        }
+
+        // 3-byte sequence (0xE0-0xEF)
+        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
+            if (text_u8 + 2 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            sz_u8_t byte3 = text_u8[2];
+            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return sz_false_k;
+
+            // Check for overlong encodings and surrogates
+            if (byte1 == 0xE0 && byte2 < 0xA0) return sz_false_k;  // Overlong
+            if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
+
+            text_u8 += 3;
+        }
+
+        // 4-byte sequence (0xF0-0xF4)
+        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
+            if (text_u8 + 3 >= end_u8) return sz_false_k;
+            sz_u8_t byte2 = text_u8[1];
+            sz_u8_t byte3 = text_u8[2];
+            sz_u8_t byte4 = text_u8[3];
+            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80 || (byte4 & 0xC0) != 0x80) return sz_false_k;
+
+            // Check for overlong and out-of-range
+            if (byte1 == 0xF0 && byte2 < 0x90) return sz_false_k;  // Overlong
+            if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
+
+            text_u8 += 4;
+        }
+
+        // Invalid lead byte
+        else { return sz_false_k; }
+    }
+
+    return sz_true_k;
+}
+
+/**
+ *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer.
+ *  @param[in] utf8 Pointer to the beginning of a valid UTF-8 encoded string.
+ *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
+ *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
+ *  @note This function does not perform any bounds checking on the input string.
+ */
+SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
+    sz_u8_t lead = *u8s++;
+
+    // Branchless UTF-8 length detection using arithmetic.
+    // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
+    // CLZ-based approach was also considered but has complications with ASCII handling.
+    sz_rune_length_t len = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
+
+    // Extract rune bits - switch compiles to efficient jump table.
+    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation needed.
+    sz_rune_t rune;
+    switch (len) {
+    // Single-byte rune (0xxxxxxx)
+    case 1: rune = lead; break;
+    // Two-byte rune (110xxxxx 10xxxxxx)
+    case 2: rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
+    // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
+    case 3: rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
+    // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+    default: rune = (lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU); break;
+    }
+
+    *runes = rune;
+    *runes_lengths = len;
+}
+
+/**
+ *  @brief Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
+ *  @param[in] utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
+ *  @param[out] rune Output parameter to store the extracted UTF-32 codepoint.
+ *  @param[out] rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
+ *  @note This function does not perform any bounds checking on the input string.
+ */
+SZ_INTERNAL void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8_end;
+
+    // Scan backwards to find the lead byte (not a continuation byte 10xxxxxx)
+    int len = 1;
+    for (--u8s; (*u8s & 0xC0) == 0x80 && len < 4; --u8s, ++len) {}
+
+    // Now u8s points to the lead byte, len is the sequence length
+    sz_rune_parse((sz_cptr_t)u8s, rune, rune_length);
+    sz_assert_(*rune_length == (sz_rune_length_t)len && "Inconsistent rune length detected in sz_rune_rparse.");
+}
+
+/**
+ *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
+ *  @param[in] rune The UTF-32 codepoint to encode.
+ *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
+ *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
+ */
+SZ_INTERNAL sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
+    if (rune <= 0x7F) {
+        utf8s[0] = (sz_u8_t)rune;
+        return sz_utf8_rune_1byte_k;
+    }
+    else if (rune <= 0x7FF) {
+        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
+        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_2bytes_k;
+    }
+    else if (rune <= 0xFFFF) {
+        // Reject surrogate codepoints
+        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k;
+        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_3bytes_k;
+    }
+    else if (rune <= 0x10FFFF) {
+        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_4bytes_k;
+    }
+    return sz_utf8_invalid_k;
+}
+
+/**
+ *  @brief Exports a UTF8 string into a UTF32 buffer.
+ *  @warning The result is undefined id the UTF8 string is corrupted.
+ *  @return The length in the number of codepoints.
+ */
+SZ_PUBLIC sz_size_t sz_runes_parse(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
+    sz_cptr_t const end = utf8 + utf8_length;
+    sz_size_t count = 0;
+    sz_rune_length_t rune_length;
+    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse(utf8, utf32, &rune_length);
+    return count;
+}
+
+#pragma endregion
 
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
