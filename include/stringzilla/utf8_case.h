@@ -2845,7 +2845,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_2byte_( //
 }
 
 /**
- *  @brief  Short ASCII (up to 8 bytes) case-insensitive search using AVX-512.
+ *  @brief  Short ASCII (up to 16 bytes) case-insensitive search using AVX-512.
  *
  *  Loads just 1 register worth of haystack data, folds it, and uses the Raita
  *  3-probe heuristic with mask shifting. Step is (64 - needle_length + 1) to
@@ -2854,22 +2854,23 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_2byte_( //
  *  @param[in] haystack Pointer to the haystack string.
  *  @param[in] haystack_length Length of the haystack in bytes.
  *  @param[in] needle Pointer to the needle string.
- *  @param[in] needle_length Length of the needle (1-8 bytes).
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
  *  @param[out] matched_length Set to needle_length if match found.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_upto8byte_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
 
     // Pre-fold entire needle
-    __mmask64 const needle_mask = sz_u64_mask_until_(needle_length);
-    sz_u512_vec_t needle_vec;
-    needle_vec.zmm = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(needle_mask, needle));
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm =
+        _mm512_castsi512_si128(sz_ascii_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
 
-    // Store folded needle for anomaly detection and verification
-    char needle_folded[64];
-    _mm512_mask_storeu_epi8(needle_folded, needle_mask, needle_vec.zmm);
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
 
     // Pick 3 probe positions using Raita heuristic
     sz_size_t offset_first, offset_mid, offset_last;
@@ -2895,12 +2896,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_upto8byte_( //
         sz_u64_t candidates =
             (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
 
-        // Verify each candidate with full needle comparison
+        // Verify each candidate with full needle comparison (XOR + PTEST)
         while (candidates) {
             int const idx = sz_u64_ctz(candidates);
-            sz_u512_vec_t candidate_vec;
-            candidate_vec.zmm = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(needle_mask, haystack + idx));
-            if (_mm512_mask_cmpeq_epi8_mask(needle_mask, candidate_vec.zmm, needle_vec.zmm) == needle_mask) {
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_ascii_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
                 *matched_length = needle_length;
                 return haystack + idx;
             }
@@ -2922,9 +2924,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ascii_ice_upto8byte_( //
 
         while (candidates) {
             int const idx = sz_u64_ctz(candidates);
-            sz_u512_vec_t candidate_vec;
-            candidate_vec.zmm = sz_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(needle_mask, haystack + idx));
-            if (_mm512_mask_cmpeq_epi8_mask(needle_mask, candidate_vec.zmm, needle_vec.zmm) == needle_mask) {
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_ascii_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
                 *matched_length = needle_length;
                 return haystack + idx;
             }
@@ -3652,6 +3655,98 @@ SZ_INTERNAL sz_needle_analysis_t sz_utf8_analyze_needle_(sz_cptr_t needle, sz_si
 }
 
 /**
+ *  @brief  Short Latin1 (up to 16 bytes) case-insensitive search using AVX-512.
+ *
+ *  Handles needles containing Latin1 extended characters (C2/C3 lead bytes).
+ *  Uses single ZMM load per iteration with Raita 3-probe heuristic.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle string.
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
+ *  @param[out] matched_length Set to needle_length if match found.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_latin1_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                          //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+
+    // Pre-fold entire needle using Latin1 folder (fits in XMM)
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm =
+        _mm512_castsi512_si128(sz_latin1_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
+
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
+
+    // Pick 3 probe positions using Raita heuristic
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle_folded, needle_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast probe bytes
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded[offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded[offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded[offset_last]);
+
+    sz_size_t const step = 64 - needle_length + 1;
+    __mmask64 const valid_mask = sz_u64_mask_until_(step);
+
+    // Main loop - single load, 3-probe filter, verify candidates
+    for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
+        haystack_vec.zmm = sz_latin1_fold_zmm_(_mm512_loadu_si512(haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+
+        // Verify each candidate with full needle comparison (XOR + PTEST)
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_latin1_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    // Tail
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
+        __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        haystack_vec.zmm = sz_latin1_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_latin1_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    return SZ_NULL_CHAR;
+}
+
+/**
  *  @brief  Latin-1 case-insensitive substring search using AVX-512.
  *
  *  Strategy: Use 3-point Raita filter on folded needle bytes, load haystack at probe offsets,
@@ -3949,6 +4044,98 @@ SZ_INTERNAL __m512i sz_cyrillic_fold_zmm_(__m512i source) {
     result = _mm512_mask_mov_epi8(result, is_lead, d0_vec);
 
     return result;
+}
+
+/**
+ *  @brief  Short Cyrillic (up to 16 bytes) case-insensitive search using AVX-512.
+ *
+ *  Handles needles containing Cyrillic characters (D0/D1 lead bytes).
+ *  Uses single ZMM load per iteration with Raita 3-probe heuristic.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle string.
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
+ *  @param[out] matched_length Set to needle_length if match found.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_cyrillic_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+
+    // Pre-fold entire needle using Cyrillic folder (fits in XMM)
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm = _mm512_castsi512_si128(
+        sz_cyrillic_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
+
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
+
+    // Pick 3 probe positions using Raita heuristic
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle_folded, needle_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast probe bytes
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded[offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded[offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded[offset_last]);
+
+    sz_size_t const step = 64 - needle_length + 1;
+    __mmask64 const valid_mask = sz_u64_mask_until_(step);
+
+    // Main loop - single load, 3-probe filter, verify candidates
+    for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
+        haystack_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_loadu_si512(haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+
+        // Verify each candidate with full needle comparison (XOR + PTEST)
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_cyrillic_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    // Tail
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
+        __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        haystack_vec.zmm = sz_cyrillic_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_cyrillic_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -4300,6 +4487,98 @@ SZ_INTERNAL __m512i sz_armenian_fold_zmm_(__m512i source) {
 }
 
 /**
+ *  @brief  Short Armenian (up to 16 bytes) case-insensitive search using AVX-512.
+ *
+ *  Handles needles containing Armenian characters (D4/D5/D6 lead bytes).
+ *  Uses single ZMM load per iteration with Raita 3-probe heuristic.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle string.
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
+ *  @param[out] matched_length Set to needle_length if match found.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_armenian_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                            //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+
+    // Pre-fold entire needle using Armenian folder (fits in XMM)
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm = _mm512_castsi512_si128(
+        sz_armenian_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
+
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
+
+    // Pick 3 probe positions using Raita heuristic
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle_folded, needle_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast probe bytes
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded[offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded[offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded[offset_last]);
+
+    sz_size_t const step = 64 - needle_length + 1;
+    __mmask64 const valid_mask = sz_u64_mask_until_(step);
+
+    // Main loop - single load, 3-probe filter, verify candidates
+    for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
+        haystack_vec.zmm = sz_armenian_fold_zmm_(_mm512_loadu_si512(haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+
+        // Verify each candidate with full needle comparison (XOR + PTEST)
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_armenian_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    // Tail
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
+        __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        haystack_vec.zmm = sz_armenian_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_armenian_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    return SZ_NULL_CHAR;
+}
+
+/**
  *  @brief  Armenian case-insensitive substring search using AVX-512.
  *
  *  Strategy: Use 3-point Raita filter on folded needle bytes, load haystack at probe offsets,
@@ -4613,6 +4892,98 @@ SZ_INTERNAL __m512i sz_greek_fold_zmm_(__m512i source) {
     result = _mm512_mask_mov_epi8(result, is_ce_upper_lead, ce_vec);
 
     return result;
+}
+
+/**
+ *  @brief  Short Greek (up to 16 bytes) case-insensitive search using AVX-512.
+ *
+ *  Handles needles containing Greek characters (CE/CF lead bytes).
+ *  Uses single ZMM load per iteration with Raita 3-probe heuristic.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle string.
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
+ *  @param[out] matched_length Set to needle_length if match found.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_greek_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+
+    // Pre-fold entire needle using Greek folder (fits in XMM)
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm =
+        _mm512_castsi512_si128(sz_greek_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
+
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
+
+    // Pick 3 probe positions using Raita heuristic
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle_folded, needle_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast probe bytes
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded[offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded[offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded[offset_last]);
+
+    sz_size_t const step = 64 - needle_length + 1;
+    __mmask64 const valid_mask = sz_u64_mask_until_(step);
+
+    // Main loop - single load, 3-probe filter, verify candidates
+    for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
+        haystack_vec.zmm = sz_greek_fold_zmm_(_mm512_loadu_si512(haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+
+        // Verify each candidate with full needle comparison (XOR + PTEST)
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_greek_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    // Tail
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
+        __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        haystack_vec.zmm = sz_greek_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_greek_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -4931,6 +5302,98 @@ SZ_INTERNAL __m512i sz_vietnamese_fold_zmm_(__m512i source) {
 }
 
 /**
+ *  @brief  Short Vietnamese (up to 16 bytes) case-insensitive search using AVX-512.
+ *
+ *  Handles needles containing Vietnamese characters (E1 B8-BB lead bytes).
+ *  Uses single ZMM load per iteration with Raita 3-probe heuristic.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the needle string.
+ *  @param[in] needle_length Length of the needle (1-16 bytes).
+ *  @param[out] matched_length Set to needle_length if match found.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_vietnamese_ice_upto16byte_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                              //
+    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+
+    // Pre-fold entire needle using Vietnamese folder (fits in XMM)
+    __mmask16 const needle_mask = sz_u16_mask_until_(needle_length);
+    sz_u128_vec_t needle_vec;
+    needle_vec.xmm = _mm512_castsi512_si128(
+        sz_vietnamese_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, needle))));
+
+    // Store folded needle for anomaly detection
+    char needle_folded[16];
+    _mm_storeu_si128((__m128i *)needle_folded, needle_vec.xmm);
+
+    // Pick 3 probe positions using Raita heuristic
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle_folded, needle_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast probe bytes
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded[offset_first]);
+    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded[offset_mid]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded[offset_last]);
+
+    sz_size_t const step = 64 - needle_length + 1;
+    __mmask64 const valid_mask = sz_u64_mask_until_(step);
+
+    // Main loop - single load, 3-probe filter, verify candidates
+    for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
+        haystack_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_loadu_si512(haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+
+        // Verify each candidate with full needle comparison (XOR + PTEST)
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_vietnamese_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    // Tail
+    if (haystack_length >= needle_length) {
+        __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
+        __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
+        haystack_vec.zmm = sz_vietnamese_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack));
+
+        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
+        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        sz_u64_t candidates =
+            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+
+        while (candidates) {
+            int const idx = sz_u64_ctz(candidates);
+            __m128i candidate_xmm = _mm512_castsi512_si128(
+                sz_vietnamese_fold_zmm_(_mm512_castsi128_si512(_mm_maskz_loadu_epi8(needle_mask, haystack + idx))));
+            __m128i diff = _mm_xor_si128(candidate_xmm, needle_vec.xmm);
+            if (_mm_testz_si128(diff, diff)) {
+                *matched_length = needle_length;
+                return haystack + idx;
+            }
+            candidates &= candidates - 1;
+        }
+    }
+
+    return SZ_NULL_CHAR;
+}
+
+/**
  *  @brief  Vietnamese/Latin Extended Additional case-insensitive substring search using AVX-512.
  *
  *  Strategy: Use 3-point Raita filter on folded needle bytes, load haystack at probe offsets,
@@ -5177,9 +5640,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
                                                                   (sz_u8_t)needle[1], matched_length);
     }
 
-    // Fast-path for short ASCII needle (3-8 bytes): use Raita 3-probe with mask shifting.
+    // Fast-path for short ASCII needle (3-16 bytes): use Raita 3-probe with mask shifting.
     // All bytes must be ASCII and safe (not s, i, or f which participate in multi-char foldings).
-    if (needle_length >= 3 && needle_length <= 8) {
+    if (needle_length >= 3 && needle_length <= 16) {
         sz_bool_t all_safe_ascii = sz_true_k;
         for (sz_size_t i = 0; i < needle_length && all_safe_ascii; i++) {
             sz_u8_t c = (sz_u8_t)needle[i];
@@ -5187,8 +5650,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
             if (c >= 0x80 || lower == 's' || lower == 'i' || lower == 'f') all_safe_ascii = sz_false_k;
         }
         if (all_safe_ascii)
-            return sz_utf8_case_insensitive_find_ascii_ice_upto8byte_(haystack, haystack_length, needle, needle_length,
-                                                                      matched_length);
+            return sz_utf8_case_insensitive_find_ascii_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
+                                                                       matched_length);
     }
 
     // Single-pass needle analysis: finds best safe windows for all 6 script paths
@@ -5201,20 +5664,35 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // 3. Fall back to serial if no path meets its threshold
 
     // Priority 1: ASCII path (broadest haystack compatibility, handles all byte values)
-    if (analysis.ascii.length >= 1)
+    if (analysis.ascii.length >= 1) {
+        // Use upto16 variant if entire needle is safe ASCII and ≤16 bytes
+        if (analysis.ascii.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_ascii_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
+                                                                       matched_length);
         return sz_utf8_case_insensitive_find_ascii_ice_(haystack, haystack_length, needle, needle_length,
                                                         needle + analysis.ascii.start, analysis.ascii.length,
                                                         matched_length);
+    }
 
     // Priority 2: Latin1 path (includes Latin-1 Supplement: ß, accented letters, etc.)
-    if (analysis.latin1.length >= 2) // Smallest non-ASCII Latin1 codepoint is 2 bytes
+    if (analysis.latin1.length >= 2) { // Smallest non-ASCII Latin1 codepoint is 2 bytes
+        // Use upto16 variant if entire needle is safe Latin1 and ≤16 bytes
+        if (analysis.latin1.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_latin1_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                        needle_length, matched_length);
         return sz_utf8_case_insensitive_find_latin1_ice_(haystack, haystack_length, needle, needle_length,
                                                          &analysis.latin1, matched_length);
+    }
 
     // Priority 3: Vietnamese path (includes Latin1 + Latin Extended Additional)
-    if (analysis.vietnamese.length >= 3) // One Vietnamese codepoints are 3 bytes in size
+    if (analysis.vietnamese.length >= 3) { // One Vietnamese codepoints are 3 bytes in size
+        // Use upto16 variant if entire needle is safe Vietnamese and ≤16 bytes
+        if (analysis.vietnamese.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_vietnamese_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                            needle_length, matched_length);
         return sz_utf8_case_insensitive_find_vietnamese_ice_(haystack, haystack_length, needle, needle_length,
                                                              &analysis.vietnamese, matched_length);
+    }
 
     // Priority 4: Script-specific paths - select longest among Cyrillic/Greek/Armenian
     // These only handle their specific script + ASCII, so less versatile for mixed-script haystacks
@@ -5226,15 +5704,30 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     if (analysis.armenian.length > best_script_len) best_script_len = analysis.armenian.length;
 
     // Select among script-specific paths based on longest window
-    if (analysis.cyrillic.length == best_script_len && analysis.cyrillic.length >= 2)
+    if (analysis.cyrillic.length == best_script_len && analysis.cyrillic.length >= 2) {
+        // Use upto16 variant if entire needle is safe Cyrillic and ≤16 bytes
+        if (analysis.cyrillic.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_cyrillic_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                          needle_length, matched_length);
         return sz_utf8_case_insensitive_find_cyrillic_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.cyrillic, matched_length);
-    if (analysis.greek.length == best_script_len && analysis.greek.length >= 2)
+    }
+    if (analysis.greek.length == best_script_len && analysis.greek.length >= 2) {
+        // Use upto16 variant if entire needle is safe Greek and ≤16 bytes
+        if (analysis.greek.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_greek_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
+                                                                       matched_length);
         return sz_utf8_case_insensitive_find_greek_ice_(haystack, haystack_length, needle, needle_length,
                                                         &analysis.greek, matched_length);
-    if (analysis.armenian.length == best_script_len && analysis.armenian.length >= 2)
+    }
+    if (analysis.armenian.length == best_script_len && analysis.armenian.length >= 2) {
+        // Use upto16 variant if entire needle is safe Armenian and ≤16 bytes
+        if (analysis.armenian.length == needle_length && needle_length <= 16)
+            return sz_utf8_case_insensitive_find_armenian_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                          needle_length, matched_length);
         return sz_utf8_case_insensitive_find_armenian_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.armenian, matched_length);
+    }
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);
