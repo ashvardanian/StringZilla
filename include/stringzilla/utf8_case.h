@@ -8,6 +8,7 @@
  *  - `sz_utf8_case_fold` - Unicode case folding for codepoints
  *  - `sz_utf8_case_insensitive_find` - case-insensitive substring search in UTF-8 strings
  *  - `sz_utf8_case_insensitive_order` - case-insensitive lexicographical comparison of UTF-8 strings
+ *  - `sz_utf8_case_agnostic` - check if a string contains only case-agnostic (caseless) codepoints
  *
  *  It's important to remember that UTF-8 is just one of many possible Unicode encodings.
  *  Unicode is a versioned standard and we implement its locale-independent specification v17.
@@ -203,6 +204,53 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
 SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                         sz_size_t b_length);
 
+/**
+ *  @brief  Check if a UTF-8 string contains only case-agnostic (caseless) codepoints.
+ *
+ *  Case-agnostic codepoints are those that don't participate in Unicode case folding:
+ *  - They fold to themselves (no case transformation needed)
+ *  - They are not targets of any case folding from other codepoints
+ *
+ *  This includes: CJK ideographs, Hangul, digits, punctuation, most symbols,
+ *  Hebrew, Arabic, Thai, Hindi (Devanagari), and many other scripts without case distinctions.
+ *
+ *  @section utf8_case_agnostic_usage Use Case
+ *
+ *  This function enables an important optimization: if both haystack and needle are fully
+ *  case-agnostic, then `sz_find()` can be used directly instead of the slower
+ *  `sz_utf8_case_insensitive_find()`. This is particularly valuable for:
+ *
+ *  - CJK text (Chinese, Japanese, Korean) - always caseless
+ *  - Numeric data and punctuation-heavy content
+ *  - Middle Eastern scripts (Arabic, Hebrew, Persian)
+ *  - South/Southeast Asian scripts (Thai, Hindi, Vietnamese without Latin)
+ *
+ *  @param[in] str UTF-8 string to check.
+ *  @param[in] length Number of bytes in the string.
+ *  @return sz_true_k if all codepoints are case-agnostic, sz_false_k otherwise.
+ *
+ *  @example Optimization pattern:
+ *  @code
+ *      sz_cptr_t haystack = "价格：¥1234";  // Chinese + punctuation + digits
+ *      sz_cptr_t needle = "¥1234";
+ *
+ *      if (sz_utf8_case_agnostic(haystack, haystack_len) &&
+ *          sz_utf8_case_agnostic(needle, needle_len)) {
+ *          // Fast path: use binary search
+ *          result = sz_find(haystack, haystack_len, needle, needle_len);
+ *      } else {
+ *          // Slow path: full case-insensitive search
+ *          result = sz_utf8_case_insensitive_find(haystack, haystack_len,
+ *                                                  needle, needle_len, &match_len);
+ *      }
+ *  @endcode
+ *
+ *  @note This function is conservative: it returns sz_false_k for any codepoint that
+ *        participates in case folding, even if the specific instance wouldn't change.
+ *        For example, lowercase 'a' returns false because it's a case-folding target.
+ */
+SZ_DYNAMIC sz_bool_t sz_utf8_case_agnostic(sz_cptr_t str, sz_size_t length);
+
 #pragma endregion
 
 #pragma region Platform-Specific Backends
@@ -221,6 +269,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
+/** @copydoc sz_utf8_case_agnostic */
+SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length);
+
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
@@ -234,6 +285,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_ice( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
+/** @copydoc sz_utf8_case_agnostic */
+SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length);
+
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
@@ -246,6 +300,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
 /** @copydoc sz_utf8_case_insensitive_order */
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_utf8_case_agnostic */
+SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_neon(sz_cptr_t str, sz_size_t length);
 
 #pragma endregion
 
@@ -996,26 +1053,79 @@ SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
     }
 }
 
-/**
- *  @brief  Checks if a UTF-8 string contains only caseless codepoints.
- *
- *  Caseless codepoints are those that:
- *  1. Fold to themselves (no case transformation)
- *  2. Are not targets of any case folding from other codepoints
- *
- *  This includes: CJK ideographs, Hangul, digits, punctuation, most symbols,
- *  Hebrew, Arabic, Thai, and many other scripts without case distinctions.
- *
- *  If a string is fully caseless, `sz_find` can be used instead of case-insensitive search.
- */
-SZ_INTERNAL sz_bool_t sz_utf8_is_fully_caseless_(sz_cptr_t str, sz_size_t len) {
+SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
+
+    // Check if this rune participates in case folding
+    sz_rune_t folded[3];
+    sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
+
+    // If it expands or changes, it's not caseless
+    if (folded_count != 1 || folded[0] != rune) return sz_false_k;
+
+    // Check if this rune is a lowercase target of some uppercase letter.
+    // Lowercase letters that don't change when folded still participate in case
+    // because uppercase versions fold TO them. We must mark entire bicameral
+    // script ranges as "not caseless" to enable proper case-insensitive matching.
+    //
+    // Bicameral scripts organized by UTF-8 lead byte for efficient checking:
+    //
+    // 1-byte sequences with upper and lower case (U+0000-007F): 00-7F
+    if (rune >= 0x0041 && rune <= 0x005A) return sz_false_k; // Basic Latin (A-Z)
+    if (rune >= 0x0061 && rune <= 0x007A) return sz_false_k; // Basic Latin (a-z)
+    //
+    // 2-byte sequences (U+0080-07FF): C2-DF lead bytes
+    if (rune >= 0x00C0 && rune <= 0x00FF) return sz_false_k; // Latin-1 Supplement (À-ÿ)
+    if (rune >= 0x0100 && rune <= 0x024F) return sz_false_k; // Latin Extended-A/B
+    if (rune >= 0x0250 && rune <= 0x02AF) return sz_false_k; // IPA Extensions
+    if (rune >= 0x0370 && rune <= 0x03FF) return sz_false_k; // Greek and Coptic
+    if (rune >= 0x0400 && rune <= 0x04FF) return sz_false_k; // Cyrillic
+    if (rune >= 0x0500 && rune <= 0x052F) return sz_false_k; // Cyrillic Supplement
+    if (rune >= 0x0531 && rune <= 0x0587) return sz_false_k; // Armenian (uppercase + lowercase + ligature)
+    //
+    // 3-byte sequences (U+0800-FFFF): E0-EF lead bytes
+    if (rune >= 0x10A0 && rune <= 0x10FF) return sz_false_k; // Georgian (Asomtavruli + Mkhedruli)
+    if (rune >= 0x13A0 && rune <= 0x13FD) return sz_false_k; // Cherokee (folds to uppercase!)
+    if (rune >= 0x1C80 && rune <= 0x1C8F) return sz_false_k; // Cyrillic Extended-C
+    if (rune >= 0x1C90 && rune <= 0x1CBF) return sz_false_k; // Georgian Extended (Mtavruli)
+    if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_false_k; // Latin Extended Additional
+    if (rune >= 0x1F00 && rune <= 0x1FFF) return sz_false_k; // Greek Extended
+    if (rune >= 0x2C00 && rune <= 0x2C5F) return sz_false_k; // Glagolitic
+    if (rune >= 0x2C60 && rune <= 0x2C7F) return sz_false_k; // Latin Extended-C
+    if (rune >= 0x2C80 && rune <= 0x2CFF) return sz_false_k; // Coptic
+    if (rune >= 0x2D00 && rune <= 0x2D2F) return sz_false_k; // Georgian Supplement (Nuskhuri)
+    if (rune >= 0x2DE0 && rune <= 0x2DFF) return sz_false_k; // Cyrillic Extended-A
+    if (rune >= 0xA640 && rune <= 0xA69F) return sz_false_k; // Cyrillic Extended-B
+    if (rune >= 0xA720 && rune <= 0xA7FF) return sz_false_k; // Latin Extended-D
+    if (rune >= 0xAB30 && rune <= 0xAB6F) return sz_false_k; // Latin Extended-E
+    if (rune >= 0xAB70 && rune <= 0xABBF) return sz_false_k; // Cherokee Supplement (lowercase)
+    if (rune >= 0xFB00 && rune <= 0xFB06) return sz_false_k; // Alphabetic Presentation (ligatures)
+    if (rune >= 0xFB13 && rune <= 0xFB17) return sz_false_k; // Armenian ligatures
+    if (rune >= 0xFF21 && rune <= 0xFF5A) return sz_false_k; // Fullwidth Latin
+    //
+    // 4-byte sequences (U+10000-10FFFF): F0-F4 lead bytes
+    if (rune >= 0x10400 && rune <= 0x1044F) return sz_false_k; // Deseret
+    if (rune >= 0x104B0 && rune <= 0x104FF) return sz_false_k; // Osage
+    if (rune >= 0x10570 && rune <= 0x105BF) return sz_false_k; // Vithkuqi
+    if (rune >= 0x10780 && rune <= 0x107BF) return sz_false_k; // Latin Extended-F
+    if (rune >= 0x10C80 && rune <= 0x10CFF) return sz_false_k; // Old Hungarian
+    if (rune >= 0x118A0 && rune <= 0x118FF) return sz_false_k; // Warang Citi
+    if (rune >= 0x16E40 && rune <= 0x16E9F) return sz_false_k; // Medefaidrin
+    if (rune >= 0x1DF00 && rune <= 0x1DFFF) return sz_false_k; // Latin Extended-G
+    if (rune >= 0x1E000 && rune <= 0x1E02F) return sz_false_k; // Glagolitic Supplement
+    if (rune >= 0x1E030 && rune <= 0x1E08F) return sz_false_k; // Cyrillic Extended-D
+    if (rune >= 0x1E900 && rune <= 0x1E95F) return sz_false_k; // Adlam
+
+    return sz_true_k;
+}
+
+SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *ptr = (sz_u8_t const *)str;
-    sz_u8_t const *end = ptr + len;
+    sz_u8_t const *end = ptr + length;
 
     while (ptr < end) {
         sz_u8_t lead = *ptr;
 
-        // ASCII: only digits, punctuation, and control chars are caseless
+        // ASCII fast path: only digits, punctuation, and control chars are caseless
         // A-Z (0x41-0x5A) and a-z (0x61-0x7A) participate in case folding
         if (lead < 0x80) {
             if ((lead >= 'A' && lead <= 'Z') || (lead >= 'a' && lead <= 'z')) return sz_false_k;
@@ -1027,63 +1137,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_is_fully_caseless_(sz_cptr_t str, sz_size_t len) {
         sz_rune_t rune;
         sz_rune_length_t rune_len;
         sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_len);
+        if (sz_rune_is_case_agnostic_(rune) == sz_false_k) return sz_false_k;
         ptr += rune_len;
-
-        // Check if this rune participates in case folding
-        sz_rune_t folded[4];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
-
-        // If it expands or changes, it's not caseless
-        if (folded_count != 1 || folded[0] != rune) return sz_false_k;
-
-        // Check if this rune is a lowercase target of some uppercase letter.
-        // Lowercase letters that don't change when folded still participate in case
-        // because uppercase versions fold TO them. We must mark entire bicameral
-        // script ranges as "not caseless" to enable proper case-insensitive matching.
-        //
-        // Bicameral scripts organized by UTF-8 lead byte for efficient checking:
-        //
-        // 2-byte sequences (U+0080-07FF): C2-DF lead bytes
-        if (rune >= 0x00C0 && rune <= 0x00FF) return sz_false_k; // Latin-1 Supplement (À-ÿ)
-        if (rune >= 0x0100 && rune <= 0x024F) return sz_false_k; // Latin Extended-A/B
-        if (rune >= 0x0250 && rune <= 0x02AF) return sz_false_k; // IPA Extensions
-        if (rune >= 0x0370 && rune <= 0x03FF) return sz_false_k; // Greek and Coptic
-        if (rune >= 0x0400 && rune <= 0x04FF) return sz_false_k; // Cyrillic
-        if (rune >= 0x0500 && rune <= 0x052F) return sz_false_k; // Cyrillic Supplement
-        if (rune >= 0x0531 && rune <= 0x0587) return sz_false_k; // Armenian (uppercase + lowercase + ligature)
-        //
-        // 3-byte sequences (U+0800-FFFF): E0-EF lead bytes
-        if (rune >= 0x10A0 && rune <= 0x10FF) return sz_false_k; // Georgian (Asomtavruli + Mkhedruli)
-        if (rune >= 0x13A0 && rune <= 0x13FD) return sz_false_k; // Cherokee (folds to uppercase!)
-        if (rune >= 0x1C80 && rune <= 0x1C8F) return sz_false_k; // Cyrillic Extended-C
-        if (rune >= 0x1C90 && rune <= 0x1CBF) return sz_false_k; // Georgian Extended (Mtavruli)
-        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_false_k; // Latin Extended Additional
-        if (rune >= 0x1F00 && rune <= 0x1FFF) return sz_false_k; // Greek Extended
-        if (rune >= 0x2C00 && rune <= 0x2C5F) return sz_false_k; // Glagolitic
-        if (rune >= 0x2C60 && rune <= 0x2C7F) return sz_false_k; // Latin Extended-C
-        if (rune >= 0x2C80 && rune <= 0x2CFF) return sz_false_k; // Coptic
-        if (rune >= 0x2D00 && rune <= 0x2D2F) return sz_false_k; // Georgian Supplement (Nuskhuri)
-        if (rune >= 0x2DE0 && rune <= 0x2DFF) return sz_false_k; // Cyrillic Extended-A
-        if (rune >= 0xA640 && rune <= 0xA69F) return sz_false_k; // Cyrillic Extended-B
-        if (rune >= 0xA720 && rune <= 0xA7FF) return sz_false_k; // Latin Extended-D
-        if (rune >= 0xAB30 && rune <= 0xAB6F) return sz_false_k; // Latin Extended-E
-        if (rune >= 0xAB70 && rune <= 0xABBF) return sz_false_k; // Cherokee Supplement (lowercase)
-        if (rune >= 0xFB00 && rune <= 0xFB06) return sz_false_k; // Alphabetic Presentation (ligatures)
-        if (rune >= 0xFB13 && rune <= 0xFB17) return sz_false_k; // Armenian ligatures
-        if (rune >= 0xFF21 && rune <= 0xFF5A) return sz_false_k; // Fullwidth Latin
-        //
-        // 4-byte sequences (U+10000-10FFFF): F0-F4 lead bytes
-        if (rune >= 0x10400 && rune <= 0x1044F) return sz_false_k; // Deseret
-        if (rune >= 0x104B0 && rune <= 0x104FF) return sz_false_k; // Osage
-        if (rune >= 0x10570 && rune <= 0x105BF) return sz_false_k; // Vithkuqi
-        if (rune >= 0x10780 && rune <= 0x107BF) return sz_false_k; // Latin Extended-F
-        if (rune >= 0x10C80 && rune <= 0x10CFF) return sz_false_k; // Old Hungarian
-        if (rune >= 0x118A0 && rune <= 0x118FF) return sz_false_k; // Warang Citi
-        if (rune >= 0x16E40 && rune <= 0x16E9F) return sz_false_k; // Medefaidrin
-        if (rune >= 0x1DF00 && rune <= 0x1DFFF) return sz_false_k; // Latin Extended-G
-        if (rune >= 0x1E000 && rune <= 0x1E02F) return sz_false_k; // Glagolitic Supplement
-        if (rune >= 0x1E030 && rune <= 0x1E08F) return sz_false_k; // Cyrillic Extended-D
-        if (rune >= 0x1E900 && rune <= 0x1E95F) return sz_false_k; // Adlam
     }
 
     return sz_true_k;
@@ -1286,7 +1341,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         return haystack;
     }
 
-    if (sz_utf8_is_fully_caseless_(needle, needle_length)) {
+    if (sz_utf8_case_agnostic_serial(needle, needle_length)) {
         sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
@@ -5555,6 +5610,29 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
 
+    // Handle the obvious edge cases first
+    if (needle_length == 0) {
+        *matched_length = 0;
+        return haystack;
+    }
+
+    // If the needle is enterily made of case-less characters - perform direct substring search
+    if (sz_utf8_case_agnostic_ice(needle, needle_length)) {
+        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
+        if (result) *matched_length = needle_length;
+        return result;
+    }
+
+    // It is possible for the haystack to container less bytes than the needle,
+    // but still contain the needle due to multi-byte character folding, so this approach wouldn't
+    // work:
+    //
+    // if (haystack_length < needle_length) { return SZ_NULL_CHAR; }
+    //
+    {
+        // TODO: Think of a better mechanism, or maybe perform it inside of individual kernels
+    }
+
     // There is a way to perform case-insensitive substring search faster than case-folding both strings
     // and calling a standard substring search algorithm on them. Case-folding bicameral scripts is typically
     // a multi-step procedure:
@@ -5575,159 +5653,138 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // substing search in `expolore_unicode_case.ipynb`. The shared idea is to find a slice of a needle that contains
     // only characters that have identical width in all of the scripts that case-fold into it.
     //
-    // Here are some examples of fast paths:
+    // Here are all of our fast paths implemented:
     //
-    // 1. Safe ASCII sequences.
+    // FP1. Safe ASCII sequences.
     //    The ASCII letters [bcdegmopqruvxz] don't ever appear in some multi-byte case-folds.
     //    We can safely match chunks of such letters without case folding. Moreover, even when encountering
     //    other letters like [afhijklnstwy], we may be able to match them safely depending on the surrounding
     //    context in the needle.
-    // 2. Safe Latin extensions of mixed 1-byte and 2-byte letters.
-    // 3. Safe Cyrillic sequences.
-    // 4. Safe Armenian sequences.
-    // 5. Safe Georgian sequences.
-    // 6. Safe Vietnamese sequences.
+    // FP2. Safe Latin extensions of mixed 1-byte and 2-byte letters.
+    //    FP2.1. Needles up to 16 bytes.
+    //    FP2.2. Longer needles.
+    // FP3. Safe Cyrillic sequences.
+    //    FP3.1. Needles up to 16 bytes.
+    //    FP3.2. Longer needles.
+    // FP4. Safe Armenian sequences.
+    //    FP4.1. Needles up to 16 bytes.
+    //    FP4.2. Longer needles.
+    // FP5. Safe Georgian sequences.
+    //    FP5.1. Needles up to 16 bytes.
+    //    FP5.2. Longer needles.
+    // FP6. Safe Vietnamese sequences.
+    //    FP6.1. Needles up to 16 bytes.
+    //    FP6.2. Longer needles.
     //
-    // Assuming, unpacking the characters in non-ASCII sequences can be costly, only the first variant uses Raita
-    // heuristic like the `sz_find_skylake` - matching the first, last, and middle point of the safe ASCII slice,
-    // simultaneously loading haystack parts at different offsets into 3 different ZMM registers. If those parts match,
-    // the part in-between start and end of the safe region is matched via a AVX-512 as well. The head and tail outside
-    // of the safe zone are unpacked serially via `sz_rune_parse` and its reverse-order variant - `sz_rune_rparse`.
-    //
-    // In other variants, we only load one ZMM register of a haystack at a time. We unpack and case-fold in a
-    // language-specific fashion, checking which haystack character can match which of the 3 different characters from
-    // the needle (start, middle, end of the safe zone).
-    //
-    // If none of those work out - fall back to the serial implementation.
-
-    // Handle edge cases first
-    if (needle_length == 0) {
-        *matched_length = 0;
-        return haystack;
-    }
-    if (haystack_length < needle_length) { return SZ_NULL_CHAR; }
-
-    // Fast-path: if needle is fully caseless (CJK, Hangul, digits, symbols, etc.),
-    // use direct sz_find since case folding won't affect the match
-    if (sz_utf8_is_fully_caseless_(needle, needle_length)) {
-        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
-        if (result) {
-            *matched_length = needle_length;
-            return result;
+    // As one can see, there is a Small-Needle-Optimization (SNO) for each script-specific backend that operates
+    // on the selected "safe slice" of the needle. But what we can do even better with early dispatch for small needles
+    // that match our citerea.
+    if (needle_length <= 16) {
+        __mmask16 const load_mask = sz_u16_mask_until_(needle_length);
+        sz_u128_vec_t needle_vec;
+        needle_vec.xmm = _mm_maskz_loadu_epi8(load_mask, needle);
+        // Check if all needle bytes are safe ASCII
+        sz_bool_t all_safe_ascii = sz_utf8_case_insensitive_find_ice_can_use_ascii_zmm_(needle_vec.xmm);
+        if (all_safe_ascii) {
+            if (needle_length == 1)
+                return sz_utf8_case_insensitive_find_ascii_ice_1byte_(haystack, haystack_length, (sz_u8_t)needle[0],
+                                                                      matched_length);
+            else if (needle_length == 2)
+                return sz_utf8_case_insensitive_find_ascii_ice_2byte_(haystack, haystack_length, (sz_u8_t)needle[0],
+                                                                      (sz_u8_t)needle[1], matched_length);
+            else
+                return sz_utf8_case_insensitive_find_ascii_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                           needle_length, matched_length);
         }
-        *matched_length = 0;
-        return SZ_NULL_CHAR;
-    }
 
-    // Fast-path for single-byte ASCII needle: use dedicated SIMD search.
-    // Single ASCII bytes are always "safe" - no multi-byte sequences fold to a single ASCII byte.
-    // For longer needles, we must use full analysis to handle "contextually safe" characters
-    // (e.g., "ss" can match ß, "fi" can match ﬁ ligature).
-    if (needle_length == 1 && (sz_u8_t)needle[0] < 0x80) {
-        return sz_utf8_case_insensitive_find_ascii_ice_1byte_(haystack, haystack_length, (sz_u8_t)needle[0],
-                                                              matched_length);
-    }
+        // Check if all needle bytes are Latin-1
+        sz_bool_t all_latin1 = sz_utf8_case_insensitive_find_ice_can_use_latin1_zmm_(needle_vec.xmm);
+        if (all_latin1)
+            return sz_utf8_case_insensitive_find_latin1_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                        needle_length, matched_length);
 
-    // Fast-path for two-byte ASCII needle: use mask-interleaving SIMD search.
-    // Both bytes must be ASCII and safe (not 's', 'S', 'i', 'I', 'f', 'F' which can form
-    // multi-char foldings like ß→ss, İ→i, ﬁ→fi).
-    if (needle_length == 2 && (sz_u8_t)needle[0] < 0x80 && (sz_u8_t)needle[1] < 0x80) {
-        sz_u8_t const c0 = (sz_u8_t)needle[0] | 0x20;
-        sz_u8_t const c1 = (sz_u8_t)needle[1] | 0x20;
-        // Check both bytes are safe (not s, i, or f which participate in multi-char foldings)
-        if (c0 != 's' && c0 != 'i' && c0 != 'f' && c1 != 's' && c1 != 'i' && c1 != 'f')
-            return sz_utf8_case_insensitive_find_ascii_ice_2byte_(haystack, haystack_length, (sz_u8_t)needle[0],
-                                                                  (sz_u8_t)needle[1], matched_length);
-    }
+        // Check if all needle bytes are Cyrillic
+        sz_bool_t all_cyrillic = sz_utf8_case_insensitive_find_ice_can_use_cyrillic_zmm_(needle_vec.xmm);
+        if (all_cyrillic)
+            return sz_utf8_case_insensitive_find_cyrillic_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                          needle_length, matched_length);
 
-    // Fast-path for short ASCII needle (3-16 bytes): use Raita 3-probe with mask shifting.
-    // All bytes must be ASCII and safe (not s, i, or f which participate in multi-char foldings).
-    if (needle_length >= 3 && needle_length <= 16) {
-        sz_bool_t all_safe_ascii = sz_true_k;
-        for (sz_size_t i = 0; i < needle_length && all_safe_ascii; i++) {
-            sz_u8_t c = (sz_u8_t)needle[i];
-            sz_u8_t lower = c | 0x20;
-            if (c >= 0x80 || lower == 's' || lower == 'i' || lower == 'f') all_safe_ascii = sz_false_k;
-        }
-        if (all_safe_ascii)
-            return sz_utf8_case_insensitive_find_ascii_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
+        // Check if all needle bytes are Greek
+        sz_bool_t all_greek = sz_utf8_case_insensitive_find_ice_can_use_greek_zmm_(needle_vec.xmm);
+        if (all_greek)
+            return sz_utf8_case_insensitive_find_greek_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
                                                                        matched_length);
+
+        // Check if all needle bytes are Armenian
+        sz_bool_t all_armenian = sz_utf8_case_insensitive_find_ice_can_use_armenian_zmm_(needle_vec.xmm);
+        if (all_armenian)
+            return sz_utf8_case_insensitive_find_armenian_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                          needle_length, matched_length);
+
+        // Check if all needle bytes are Vietnamese
+        sz_bool_t all_vietnamese = sz_utf8_case_insensitive_find_ice_can_use_vietnamese_zmm_(needle_vec.xmm);
+        if (all_vietnamese)
+            return sz_utf8_case_insensitive_find_vietnamese_ice_upto16byte_(haystack, haystack_length, needle,
+                                                                            needle_length, matched_length);
+
+        // Fallthrough to full analysis for mixed-script small needles
     }
 
-    // Single-pass needle analysis: finds best safe windows for all 6 script paths
+    // Assuming, the number of specialized kernels for different mixed needle variants,
+    // here's the heuristic we use to pick the best one:
+    //
+    // 1. Count all "contextually safe" ASCII symbols (L_a) in the input string using SIMD.
+    // 1.1. If all of the symbols are safe ASCII symbols (L_a == L) - use fast ASCII case-insensitive search.
+    // 2. Count all Latin-1 characters (L_l) in the needle using SIMD.
+    // 2.1. If all of the needle characters belong to one of those classes (L == L_a + L_l), run the Latin-1 backend.
+    // 3. Count all Cyrillic characters (L_c) in the needle using SIMD.
+    // 3.1. If all of the needle characters belong to one of those classes (L == L_a + L_c), run the Cyrillic backend.
+    // 4. Count all Greek characters (L_g) in the needle using SIMD.
+    // 4.1. If all of the needle characters belong to one of those classes (L == L_a + L_g), run the Greek backend.
+    // 5. Count all Armenian characters (L_h) in the needle using SIMD.
+    // 5.1. If all of the needle characters belong to one of those classes (L == L_a + L_h), run the Armenian backend.
+    // 6. Count all Vietnamese characters (L_v) in the needle using SIMD.
+    // 6.1. If all of the needle characters belong to one of those classes (L == L_a + L_v), run the Vietnamese backend.
+    // 7. Otherwise, perform full 6-script analysis and build windows for all detected scripts.
+    //    and pick the best continuous window for searching.
+    //
+    // Single-pass needle analysis: finds best safe windows for all 6 script paths.
     sz_needle_analysis_t analysis = sz_utf8_analyze_needle_(needle, needle_length);
 
-    // Path selection strategy:
-    // 1. Prefer ASCII/Latin1/Vietnamese when they meet thresholds - they have broader haystack compatibility
-    //    (can handle Latin1 characters like ß, accented letters, etc.)
-    // 2. For script-specific paths (Cyrillic, Greek, Armenian), select the longest one
-    // 3. Fall back to serial if no path meets its threshold
+    // Assuming all of the kernels have roughly similar throughput - pick the path matching the longest
+    // script-specific safe window in the needle.
+    sz_size_t longest_safe_window = 0;
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.ascii.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.latin1.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.cyrillic.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.greek.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.armenian.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.vietnamese.length);
 
-    // Priority 1: ASCII path (broadest haystack compatibility, handles all byte values)
-    if (analysis.ascii.length >= 1) {
-        // Use upto16 variant if entire needle is safe ASCII and ≤16 bytes
-        if (analysis.ascii.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_ascii_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
-                                                                       matched_length);
+    if (longest_safe_window == analysis.ascii.length)
         return sz_utf8_case_insensitive_find_ascii_ice_(haystack, haystack_length, needle, needle_length,
                                                         needle + analysis.ascii.start, analysis.ascii.length,
                                                         matched_length);
-    }
 
-    // Priority 2: Latin1 path (includes Latin-1 Supplement: ß, accented letters, etc.)
-    if (analysis.latin1.length >= 2) { // Smallest non-ASCII Latin1 codepoint is 2 bytes
-        // Use upto16 variant if entire needle is safe Latin1 and ≤16 bytes
-        if (analysis.latin1.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_latin1_ice_upto16byte_(haystack, haystack_length, needle,
-                                                                        needle_length, matched_length);
+    else if (longest_safe_window == analysis.latin1.length)
         return sz_utf8_case_insensitive_find_latin1_ice_(haystack, haystack_length, needle, needle_length,
                                                          &analysis.latin1, matched_length);
-    }
 
-    // Priority 3: Vietnamese path (includes Latin1 + Latin Extended Additional)
-    if (analysis.vietnamese.length >= 3) { // One Vietnamese codepoints are 3 bytes in size
-        // Use upto16 variant if entire needle is safe Vietnamese and ≤16 bytes
-        if (analysis.vietnamese.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_vietnamese_ice_upto16byte_(haystack, haystack_length, needle,
-                                                                            needle_length, matched_length);
-        return sz_utf8_case_insensitive_find_vietnamese_ice_(haystack, haystack_length, needle, needle_length,
-                                                             &analysis.vietnamese, matched_length);
-    }
-
-    // Priority 4: Script-specific paths - select longest among Cyrillic/Greek/Armenian
-    // These only handle their specific script + ASCII, so less versatile for mixed-script haystacks
-    // Note: Windows without actual script chars have length=0 (set during analysis), so the length
-    // check is sufficient - no need for separate has_script scanning loops.
-    sz_size_t best_script_len = 0;
-    if (analysis.cyrillic.length > best_script_len) best_script_len = analysis.cyrillic.length;
-    if (analysis.greek.length > best_script_len) best_script_len = analysis.greek.length;
-    if (analysis.armenian.length > best_script_len) best_script_len = analysis.armenian.length;
-
-    // Select among script-specific paths based on longest window
-    if (analysis.cyrillic.length == best_script_len && analysis.cyrillic.length >= 2) {
-        // Use upto16 variant if entire needle is safe Cyrillic and ≤16 bytes
-        if (analysis.cyrillic.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_cyrillic_ice_upto16byte_(haystack, haystack_length, needle,
-                                                                          needle_length, matched_length);
+    else if (longest_safe_window == analysis.cyrillic.length)
         return sz_utf8_case_insensitive_find_cyrillic_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.cyrillic, matched_length);
-    }
-    if (analysis.greek.length == best_script_len && analysis.greek.length >= 2) {
-        // Use upto16 variant if entire needle is safe Greek and ≤16 bytes
-        if (analysis.greek.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_greek_ice_upto16byte_(haystack, haystack_length, needle, needle_length,
-                                                                       matched_length);
+
+    else if (longest_safe_window == analysis.greek.length)
         return sz_utf8_case_insensitive_find_greek_ice_(haystack, haystack_length, needle, needle_length,
                                                         &analysis.greek, matched_length);
-    }
-    if (analysis.armenian.length == best_script_len && analysis.armenian.length >= 2) {
-        // Use upto16 variant if entire needle is safe Armenian and ≤16 bytes
-        if (analysis.armenian.length == needle_length && needle_length <= 16)
-            return sz_utf8_case_insensitive_find_armenian_ice_upto16byte_(haystack, haystack_length, needle,
-                                                                          needle_length, matched_length);
+
+    else if (longest_safe_window == analysis.armenian.length)
         return sz_utf8_case_insensitive_find_armenian_ice_(haystack, haystack_length, needle, needle_length,
                                                            &analysis.armenian, matched_length);
-    }
+
+    else if (longest_safe_window == analysis.vietnamese.length)
+        return sz_utf8_case_insensitive_find_vietnamese_ice_(haystack, haystack_length, needle, needle_length,
+                                                             &analysis.vietnamese, matched_length);
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);
