@@ -196,7 +196,7 @@
  *      void lookup(uint8_t const lut[sz_at_least_(256)]);
  *  @endcode
  */
-#if defined(__cplusplus)
+#if defined(__cplusplus) || defined(_MSC_VER)
 #define sz_at_least_(n)
 #else
 #define sz_at_least_(n) static n
