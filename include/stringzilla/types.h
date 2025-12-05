@@ -153,23 +153,30 @@
  *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
  *  - `SZ_EXTERNAL` is used for third-party libraries that are linked dynamically.
  */
+
+#if defined(__cplusplus)
+#define SZ_C_INLINE inline
+#else
+#define SZ_C_INLINE inline static
+#endif
+
 #if SZ_DYNAMIC_DISPATCH
 #if defined(_WIN32) || defined(__CYGWIN__)
 #define SZ_DYNAMIC __declspec(dllexport)
 #define SZ_EXTERNAL __declspec(dllimport)
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
+#define SZ_PUBLIC SZ_C_INLINE
+#define SZ_INTERNAL SZ_C_INLINE
 #else
 #define SZ_DYNAMIC extern __attribute__((visibility("default")))
 #define SZ_EXTERNAL extern
-#define SZ_PUBLIC __attribute__((unused)) inline static
-#define SZ_INTERNAL __attribute__((always_inline)) inline static
+#define SZ_PUBLIC __attribute__((unused)) SZ_C_INLINE
+#define SZ_INTERNAL __attribute__((always_inline)) SZ_C_INLINE
 #endif // _WIN32 || __CYGWIN__
 #else
-#define SZ_DYNAMIC inline static
+#define SZ_DYNAMIC SZ_C_INLINE
 #define SZ_EXTERNAL extern
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
+#define SZ_PUBLIC SZ_C_INLINE
+#define SZ_INTERNAL SZ_C_INLINE
 #endif // SZ_DYNAMIC_DISPATCH
 
 /**
