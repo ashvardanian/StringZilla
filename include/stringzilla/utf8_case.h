@@ -1712,9 +1712,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
         __mmask64 is_non_ascii = _mm512_movepi8_mask(source_vec.zmm);
 
         // Compute all lead byte masks once per iteration using pre-computed constants
-        __mmask64 is_cont = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xc0_vec), x80_vec);
-        __mmask64 is_three_byte_lead = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xf0_vec), xe0_vec);
-        __mmask64 is_four_byte_lead = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xf8_vec), xf0_vec);
+        __mmask64 is_cont_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xc0_vec), x80_vec);
+        __mmask64 is_three_byte_lead_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xf0_vec), xe0_vec);
+        __mmask64 is_four_byte_lead_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, xf8_vec), xf0_vec);
 
         // Check that all loaded characters are ASCII
         if (is_non_ascii == 0) {
@@ -1727,9 +1727,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
         // This is common for CJK, Hindi (Devanagari), Thai, etc.
         // Check if all non-ASCII bytes are 3-byte leads or continuations
         {
-            __mmask64 is_valid_pure_3byte = is_three_byte_lead | is_cont;
+            __mmask64 is_valid_pure_3byte_mask = is_three_byte_lead_mask | is_cont_mask;
             // Quick check: if all bits match, we have pure 3-byte content
-            if ((is_valid_pure_3byte & load_mask) == (is_non_ascii & load_mask) && !is_four_byte_lead) {
+            if ((is_valid_pure_3byte_mask & load_mask) == (is_non_ascii & load_mask) && !is_four_byte_lead_mask) {
                 // Check for problematic leads that have case folding:
                 //   - E1: Georgian, Greek Extended, Latin Extended Additional
                 //   - E2: Glagolitic (B0-B1), Coptic (B2-B3), Letterlike (84 = Kelvin/Angstrom)
@@ -1738,35 +1738,37 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 // EA is mostly safe (Hangul B0-BF) but some second bytes have folding:
                 //   - 0x99-0x9F: Cyrillic Ext-B, Latin Ext-D (A640-A7FF)
                 //   - 0xAD-0xAE: Cherokee Supplement (AB70-ABBF)
-                __mmask64 is_e1 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
-                __mmask64 is_ef = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+                __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+                __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
                 // For E2, only allow 80-83 (General Punctuation quotes) through - many other E2 ranges have folding
                 // (84 Letterlike, 93 Enclosed Alphanumerics, B0-B3 Glagolitic/Coptic, etc.)
-                __mmask64 is_e2 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
-                __mmask64 e2_seconds = is_e2 << 1;
+                __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+                __mmask64 is_after_e2_mask = is_e2_mask << 1;
                 // E2 folding needed if second byte is NOT in 80-83 range
-                __mmask64 is_e2_folding =
-                    e2_seconds & ~_mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
-                                                       _mm512_set1_epi8(0x04), _MM_CMPINT_LT); // NOT 80-83
+                __mmask64 is_e2_folding_mask =
+                    is_after_e2_mask &
+                    ~_mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                          _mm512_set1_epi8(0x04), _MM_CMPINT_LT); // NOT 80-83
                 // For EA, check if second byte is in problematic ranges
-                __mmask64 is_ea = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
-                __mmask64 ea_seconds = is_ea << 1;
+                __mmask64 is_ea_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
+                __mmask64 is_after_ea_mask = is_ea_mask << 1;
                 // EA 99-9F (second byte 0x99-0x9F) or EA AD-AE (second byte 0xAD-0xAE)
-                __mmask64 is_ea_folding =
-                    ea_seconds & (_mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x99)),
-                                                       _mm512_set1_epi8(0x07), _MM_CMPINT_LT) | // 0x99-0x9F
-                                  _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
-                                                       _mm512_set1_epi8(0x02), _MM_CMPINT_LT)); // 0xAD-0xAE
-                if (!(is_e1 | is_e2_folding | is_ea_folding | is_ef)) {
+                __mmask64 is_ea_folding_mask =
+                    is_after_ea_mask &
+                    (_mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x99)),
+                                          _mm512_set1_epi8(0x07), _MM_CMPINT_LT) | // 0x99-0x9F
+                     _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
+                                          _mm512_set1_epi8(0x02), _MM_CMPINT_LT)); // 0xAD-0xAE
+                if (!(is_e1_mask | is_e2_folding_mask | is_ea_folding_mask | is_ef_mask)) {
                     // Safe 3-byte content (E0, E3-E9, EB-EE) - no 3-byte case folding needed
                     // But ASCII mixed in still needs folding! Use sz_ice_fold_ascii_in_prefix_.
                     // Just need to avoid splitting a 3-byte sequence at the end.
                     sz_size_t copy_len = chunk_size;
                     if (copy_len < 64) {
                         // Check if last 1-2 bytes are an incomplete sequence
-                        __mmask64 leads_in_chunk = is_three_byte_lead & load_mask;
-                        if (leads_in_chunk) {
-                            int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk);
+                        __mmask64 leads_in_chunk_mask = is_three_byte_lead_mask & load_mask;
+                        if (leads_in_chunk_mask) {
+                            int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_mask);
                             if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
                         }
                     }
@@ -1803,9 +1805,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             __m512i folded = sz_ice_fold_ascii_(source_vec.zmm, is_upper_ascii | is_latin1_upper, prefix_mask);
 
             // ß (C3 9F) → ss: replace both bytes with 's'
-            __mmask64 is_eszett =
+            __mmask64 is_eszett_mask =
                 _mm512_mask_cmpeq_epi8_mask(latin1_second_bytes, source_vec.zmm, _mm512_set1_epi8((char)0x9F));
-            folded = _mm512_mask_set1_epi8(folded, is_eszett | (is_eszett >> 1), 's');
+            folded = _mm512_mask_set1_epi8(folded, is_eszett_mask | (is_eszett_mask >> 1), 's');
 
             _mm512_mask_storeu_epi8(target, prefix_mask, folded);
             target += latin1_length, source += latin1_length, source_length -= latin1_length;
@@ -1823,25 +1825,26 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
         // EXCLUDED from fast path: Cyrillic Extended-A (0x0460-04FF) which starts at D1 A0.
         // These use +1 folding for even codepoints and must go through the general 2-byte path.
         {
-            __mmask64 is_d0 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
-            __mmask64 is_d1 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
-            __mmask64 is_cyrillic_lead = is_d0 | is_d1;
-            __mmask64 is_cyrillic_second = is_cyrillic_lead << 1;
+            __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
+            __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
+            __mmask64 is_cyrillic_lead_mask = is_d0_mask | is_d1_mask;
+            __mmask64 is_cyrillic_second_mask = is_cyrillic_lead_mask << 1;
 
             // Exclude Cyrillic Extended-A: D1 with second byte >= 0xA0 (U+0460+)
             // These have +1 folding rules, not the basic Cyrillic patterns
-            __mmask64 is_d1_extended = (is_d1 << 1) & _mm512_cmp_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0),
-                                                                           _MM_CMPINT_NLT); // >= 0xA0
+            __mmask64 is_d1_extended_mask =
+                (is_d1_mask << 1) & _mm512_cmp_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0),
+                                                         _MM_CMPINT_NLT); // >= 0xA0
 
             // Check for pure basic Cyrillic + ASCII mix (no extended)
-            __mmask64 is_valid_cyrillic_mix = ~is_non_ascii | is_cyrillic_lead | is_cyrillic_second;
-            is_valid_cyrillic_mix &= ~is_d1_extended; // Stop at Cyrillic Extended
-            sz_size_t cyrillic_length = sz_ice_first_invalid_(is_valid_cyrillic_mix, load_mask, chunk_size);
-            cyrillic_length -= cyrillic_length && ((is_cyrillic_lead >> (cyrillic_length - 1)) & 1);
+            __mmask64 is_valid_cyrillic_mix_mask = ~is_non_ascii | is_cyrillic_lead_mask | is_cyrillic_second_mask;
+            is_valid_cyrillic_mix_mask &= ~is_d1_extended_mask; // Stop at Cyrillic Extended
+            sz_size_t cyrillic_length = sz_ice_first_invalid_(is_valid_cyrillic_mix_mask, load_mask, chunk_size);
+            cyrillic_length -= cyrillic_length && ((is_cyrillic_lead_mask >> (cyrillic_length - 1)) & 1);
 
             if (cyrillic_length >= 2) {
                 __mmask64 prefix_mask = sz_u64_mask_until_(cyrillic_length);
-                __mmask64 d0_seconds = (is_d0 << 1) & prefix_mask;
+                __mmask64 is_after_d0_mask = (is_d0_mask << 1) & prefix_mask;
 
                 // Start with source, apply ASCII folding
                 __m512i folded = sz_ice_fold_ascii_in_prefix_(source_vec.zmm, prefix_mask);
@@ -1850,26 +1853,26 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 // Range 0x80-0x8F (Ѐ-Џ): second byte += 0x10, lead becomes D1
                 // Range 0x90-0x9F (А-П): second byte += 0x20, lead stays D0
                 // Range 0xA0-0xAF (Р-Я): second byte -= 0x20, lead becomes D1
-                __mmask64 is_d0_upper1 =
-                    _mm512_mask_cmp_epu8_mask(d0_seconds, source_vec.zmm, _mm512_set1_epi8((char)0x90), _MM_CMPINT_LT);
-                __mmask64 is_d0_upper2 =
-                    _mm512_mask_cmp_epu8_mask(d0_seconds, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x90)),
-                                              _mm512_set1_epi8(0x10), _MM_CMPINT_LT);
-                __mmask64 is_d0_upper3 =
-                    _mm512_mask_cmp_epu8_mask(d0_seconds, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
-                                              _mm512_set1_epi8(0x10), _MM_CMPINT_LT);
+                __mmask64 is_d0_upper1_mask = _mm512_mask_cmp_epu8_mask(is_after_d0_mask, source_vec.zmm,
+                                                                        _mm512_set1_epi8((char)0x90), _MM_CMPINT_LT);
+                __mmask64 is_d0_upper2_mask = _mm512_mask_cmp_epu8_mask(
+                    is_after_d0_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x90)),
+                    _mm512_set1_epi8(0x10), _MM_CMPINT_LT);
+                __mmask64 is_d0_upper3_mask = _mm512_mask_cmp_epu8_mask(
+                    is_after_d0_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                    _mm512_set1_epi8(0x10), _MM_CMPINT_LT);
 
                 // Apply transformations
                 // Ѐ-Џ (0x80-0x8F): +0x10 to second byte
-                folded = _mm512_mask_add_epi8(folded, is_d0_upper1, folded, _mm512_set1_epi8(0x10));
+                folded = _mm512_mask_add_epi8(folded, is_d0_upper1_mask, folded, _mm512_set1_epi8(0x10));
                 // А-П (0x90-0x9F): +0x20 to second byte
-                folded = _mm512_mask_add_epi8(folded, is_d0_upper2, folded, _mm512_set1_epi8(0x20));
+                folded = _mm512_mask_add_epi8(folded, is_d0_upper2_mask, folded, _mm512_set1_epi8(0x20));
                 // Р-Я (0xA0-0xAF): -0x20 to second byte (wraps to 0x80-0x8F)
-                folded = _mm512_mask_sub_epi8(folded, is_d0_upper3, folded, _mm512_set1_epi8(0x20));
+                folded = _mm512_mask_sub_epi8(folded, is_d0_upper3_mask, folded, _mm512_set1_epi8(0x20));
 
                 // Fix lead bytes: Ѐ-Џ and Р-Я need D0→D1
-                __mmask64 needs_d1 = ((is_d0_upper1 | is_d0_upper3) >> 1) & (is_d0 & prefix_mask);
-                folded = _mm512_mask_mov_epi8(folded, needs_d1, _mm512_set1_epi8((char)0xD1));
+                __mmask64 needs_d1_mask = ((is_d0_upper1_mask | is_d0_upper3_mask) >> 1) & (is_d0_mask & prefix_mask);
+                folded = _mm512_mask_mov_epi8(folded, needs_d1_mask, _mm512_set1_epi8((char)0xD1));
 
                 _mm512_mask_storeu_epi8(target, prefix_mask, folded);
                 target += cyrillic_length, source += cyrillic_length, source_length -= cyrillic_length;
@@ -2148,21 +2151,21 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                                    _mm512_cmp_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
                                                         _mm512_set1_epi8(0x02), _MM_CMPINT_LT)); // 0xAD-0xAE
             __mmask64 has_complex =
-                (is_two_byte_lead | is_four_byte_lead | is_e1_lead | is_e2_lead | is_ea_complex | is_ef_lead) &
+                (is_two_byte_lead | is_four_byte_lead_mask | is_e1_lead | is_e2_lead | is_ea_complex | is_ef_lead) &
                 load_mask;
 
             // Fast path: No complex bytes - just fold ASCII A-Z and copy everything else
             if (!has_complex) {
                 // All bytes are ASCII or safe 3-byte (E0, E3-E9, EB-EE range)
                 // Accept: ASCII, safe 3-byte leads (E0, E3-E9, EB-EE), continuations
-                __mmask64 is_valid = ~is_non_ascii | is_three_byte_lead | is_cont;
+                __mmask64 is_valid = ~is_non_ascii | is_three_byte_lead_mask | is_cont_mask;
                 sz_size_t valid_length = sz_ice_first_invalid_(is_valid, load_mask, chunk_size);
 
                 // Don't split a 3-byte sequence at chunk boundary.
                 // Note: `>= 1` is an optimization, not redundant! When valid_length == 0, the mask
                 // operations below are no-ops, but skipping them saves ~5% throughput on mixed content.
                 if (valid_length >= 1) {
-                    __mmask64 all_leads = is_three_byte_lead & sz_u64_mask_until_(valid_length);
+                    __mmask64 all_leads = is_three_byte_lead_mask & sz_u64_mask_until_(valid_length);
                     __mmask64 safe_mask = valid_length >= 3 ? sz_u64_mask_until_(valid_length - 2) : 0;
                     __mmask64 unsafe = all_leads & ~safe_mask;
                     if (unsafe) valid_length = sz_u64_ctz(unsafe);
@@ -2237,10 +2240,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     __mmask64 is_safe_ea = is_ea_lead & ~(is_ea_complex >> 1);
                     __mmask64 is_c2_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC2));
                     __mmask64 is_valid_georgian_mix =
-                        ~is_non_ascii | is_georgian_e1 | is_e2_lead | is_cont | is_safe_ea | is_c2_lead;
+                        ~is_non_ascii | is_georgian_e1 | is_e2_lead | is_cont_mask | is_safe_ea | is_c2_lead;
                     // Exclude other 2-byte leads (C3-DF may need folding), 4-byte, EF
                     __mmask64 is_foldable_2byte = is_two_byte_lead & ~is_c2_lead;
-                    is_valid_georgian_mix &= ~(is_foldable_2byte | is_four_byte_lead | is_ef_lead);
+                    is_valid_georgian_mix &= ~(is_foldable_2byte | is_four_byte_lead_mask | is_ef_lead);
                     sz_size_t georgian_length = sz_ice_first_invalid_(is_valid_georgian_mix, load_mask, chunk_size);
 
                     // Don't split multi-byte sequences (2-byte C2, 3-byte E1/E2/EA).
@@ -2248,7 +2251,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     if (georgian_length >= 1) {
                         __mmask64 prefix = sz_u64_mask_until_(georgian_length);
                         // Check for incomplete 3-byte sequences (leads in last 2 positions)
-                        __mmask64 leads3_in_prefix = is_three_byte_lead & prefix;
+                        __mmask64 leads3_in_prefix = is_three_byte_lead_mask & prefix;
                         __mmask64 safe3_mask = georgian_length >= 3 ? sz_u64_mask_until_(georgian_length - 2) : 0;
                         __mmask64 unsafe3 = leads3_in_prefix & ~safe3_mask;
                         // Check for incomplete 2-byte sequences (leads in last position)
@@ -2331,14 +2334,14 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 if (!non_latin_ext_e1 && is_latin_ext_e1 && !is_special_third) {
                     // Pure Latin Extended Additional content
                     // Accept ASCII + Latin Ext Add E1 + continuations
-                    __mmask64 is_valid_latin_ext = ~is_non_ascii | is_latin_ext_e1 | is_cont;
-                    is_valid_latin_ext &= ~(is_four_byte_lead | is_ef_lead);
+                    __mmask64 is_valid_latin_ext = ~is_non_ascii | is_latin_ext_e1 | is_cont_mask;
+                    is_valid_latin_ext &= ~(is_four_byte_lead_mask | is_ef_lead);
                     sz_size_t latin_ext_length = sz_ice_first_invalid_(is_valid_latin_ext, load_mask, chunk_size);
 
                     // Don't split 3-byte sequences
                     if (latin_ext_length >= 1) {
                         __mmask64 prefix = sz_u64_mask_until_(latin_ext_length);
-                        __mmask64 leads_in_prefix = is_three_byte_lead & prefix;
+                        __mmask64 leads_in_prefix = is_three_byte_lead_mask & prefix;
                         __mmask64 safe_mask = latin_ext_length >= 3 ? sz_u64_mask_until_(latin_ext_length - 2) : 0;
                         __mmask64 unsafe = leads_in_prefix & ~safe_mask;
                         if (unsafe) latin_ext_length = sz_u64_ctz(unsafe);
@@ -2375,15 +2378,15 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             // But plain EA (Hangul) is safe
             __mmask64 is_ea_lead_complex = is_ea_complex >> 1; // Shift back to lead position
             __mmask64 is_safe_three_byte_lead =
-                is_three_byte_lead & ~is_e1_lead & ~is_e2_lead & ~is_ea_lead_complex & ~is_ef_lead;
-            __mmask64 is_valid_mixed = ~is_non_ascii | is_safe_three_byte_lead | is_cont;
-            is_valid_mixed &= ~is_four_byte_lead;
+                is_three_byte_lead_mask & ~is_e1_lead & ~is_e2_lead & ~is_ea_lead_complex & ~is_ef_lead;
+            __mmask64 is_valid_mixed = ~is_non_ascii | is_safe_three_byte_lead | is_cont_mask;
+            is_valid_mixed &= ~is_four_byte_lead_mask;
             sz_size_t three_byte_length = sz_ice_first_invalid_(is_valid_mixed, load_mask, chunk_size);
 
             // Don't split a 3-byte sequence: find first incomplete lead and truncate there.
             // Note: `>= 1` is an optimization - skips mask ops when nothing valid.
             if (three_byte_length >= 1) {
-                __mmask64 all_leads = is_three_byte_lead & sz_u64_mask_until_(three_byte_length);
+                __mmask64 all_leads = is_three_byte_lead_mask & sz_u64_mask_until_(three_byte_length);
                 __mmask64 safe_leads_mask = three_byte_length >= 3 ? sz_u64_mask_until_(three_byte_length - 2) : 0;
                 __mmask64 unsafe_leads = all_leads & ~safe_leads_mask;
                 if (unsafe_leads) three_byte_length = sz_u64_ctz(unsafe_leads);
@@ -2392,7 +2395,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             // Need at least 2 bytes
             if (three_byte_length >= 2) {
                 __mmask64 prefix_mask_3 = sz_u64_mask_until_(three_byte_length);
-                __mmask64 three_byte_leads_in_prefix = is_three_byte_lead & prefix_mask_3;
+                __mmask64 three_byte_leads_in_prefix = is_three_byte_lead_mask & prefix_mask_3;
 
                 // Check for problematic lead bytes in this prefix
                 __mmask64 problematic_leads = (is_e1_lead | is_ef_lead) & three_byte_leads_in_prefix;
@@ -2446,7 +2449,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                         }
                         three_byte_length = first_special;
                         prefix_mask_3 = sz_u64_mask_until_(three_byte_length);
-                        three_byte_leads_in_prefix = is_three_byte_lead & prefix_mask_3;
+                        three_byte_leads_in_prefix = is_three_byte_lead_mask & prefix_mask_3;
                         is_ef_lead &= prefix_mask_3;
                         is_e1_in_prefix = is_e1_lead & three_byte_leads_in_prefix;
                     }
@@ -2584,13 +2587,13 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 
         // 4. Handle 4-byte sequences (emoji, rare scripts): detect lead bytes (11110xxx = F0-F7)
         {
-            __mmask64 is_valid_four_byte_only = is_four_byte_lead | is_cont;
+            __mmask64 is_valid_four_byte_only = is_four_byte_lead_mask | is_cont_mask;
             sz_size_t four_byte_length = sz_ice_first_invalid_(is_valid_four_byte_only, load_mask, chunk_size);
 
             // Don't split a 4-byte sequence: find first incomplete lead and truncate there.
             // Note: `>= 1` is an optimization - skips mask ops when nothing valid.
             if (four_byte_length >= 1) {
-                __mmask64 all_leads = is_four_byte_lead & sz_u64_mask_until_(four_byte_length);
+                __mmask64 all_leads = is_four_byte_lead_mask & sz_u64_mask_until_(four_byte_length);
                 __mmask64 safe_leads_mask = four_byte_length >= 4 ? sz_u64_mask_until_(four_byte_length - 3) : 0;
                 __mmask64 unsafe_leads = all_leads & ~safe_leads_mask;
                 if (unsafe_leads) four_byte_length = sz_u64_ctz(unsafe_leads);
@@ -2603,7 +2606,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 __mmask64 is_emoji_lead =
                     _mm512_cmp_epu8_mask(second_bytes, _mm512_set1_epi8((char)0x9F), _MM_CMPINT_GE);
                 __mmask64 prefix_mask_4 = sz_u64_mask_until_(four_byte_length);
-                __mmask64 four_byte_leads_in_prefix = is_four_byte_lead & prefix_mask_4;
+                __mmask64 four_byte_leads_in_prefix = is_four_byte_lead_mask & prefix_mask_4;
 
                 // All 4-byte leads are emoji (second byte >= 0x9F) - no case folding needed
                 if ((four_byte_leads_in_prefix & ~is_emoji_lead) == 0) {
@@ -3897,35 +3900,35 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_safe_latin1ab_fold_zmm_(__
     __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
     __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
     __m512i const x_97_zmm = _mm512_set1_epi8((char)0x97);
-    __m512i const s_zmm = _mm512_set1_epi8('s');
+    __m512i const x_73_zmm = _mm512_set1_epi8('s');
     __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
     __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80);
     __m512i const x_1f_zmm = _mm512_set1_epi8(0x1F);
-    __m512i const a_upper_zmm = _mm512_set1_epi8('A');
-    __m512i const range26_zmm = _mm512_set1_epi8(26);
+    __m512i const x_41_zmm = _mm512_set1_epi8('A');
+    __m512i const x_1a_zmm = _mm512_set1_epi8(26);
 
     // Detect C3 lead bytes → second byte positions
-    __mmask64 c3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c3_zmm);
-    __mmask64 second_mask = c3_mask << 1;
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c3_zmm);
+    __mmask64 is_after_c3_mask = is_c3_mask << 1;
 
     // Detect eszett (C3 9F) and fold both bytes to 's'
-    __mmask64 x9f_mask = _mm512_mask_cmpeq_epi8_mask(second_mask, text_zmm, x_9f_zmm);
-    __mmask64 eszett_mask = x9f_mask | (x9f_mask >> 1); // both C3 and 9F positions
-    __m512i result_zmm = _mm512_mask_mov_epi8(text_zmm, eszett_mask, s_zmm);
+    __mmask64 is_9f_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_9f_zmm);
+    __mmask64 is_eszett_mask = is_9f_mask | (is_9f_mask >> 1); // both C3 and 9F positions
+    __m512i result_zmm = _mm512_mask_mov_epi8(text_zmm, is_eszett_mask, x_73_zmm);
 
     // Fold Latin-1 uppercase (C3 80-9E) → add 0x20 to second byte
     // Range check: (byte - 0x80) < 0x1F means byte in [0x80, 0x9E]
     // Exclude eszett (0x9F, already handled) and multiplication sign (0x97, no case variant)
-    __mmask64 x97_mask = _mm512_mask_cmpeq_epi8_mask(second_mask, text_zmm, x_97_zmm);
-    __mmask64 latin1_upper_mask = _mm512_mask_cmplt_epu8_mask(second_mask & ~x9f_mask & ~x97_mask,
-                                                              _mm512_sub_epi8(result_zmm, x_80_zmm), x_1f_zmm);
+    __mmask64 is_97_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_97_zmm);
+    __mmask64 is_latin1_upper_mask = _mm512_mask_cmplt_epu8_mask(is_after_c3_mask & ~is_9f_mask & ~is_97_mask,
+                                                                 _mm512_sub_epi8(result_zmm, x_80_zmm), x_1f_zmm);
 
     // Fold ASCII uppercase (A-Z) → add 0x20
-    __mmask64 ascii_upper_mask =
-        _mm512_mask_cmplt_epu8_mask(~eszett_mask, _mm512_sub_epi8(result_zmm, a_upper_zmm), range26_zmm);
+    __mmask64 is_ascii_upper_mask =
+        _mm512_mask_cmplt_epu8_mask(~is_eszett_mask, _mm512_sub_epi8(result_zmm, x_41_zmm), x_1a_zmm);
 
     // Apply folding (+0x20) to uppercase positions
-    return _mm512_mask_add_epi8(result_zmm, latin1_upper_mask | ascii_upper_mask, result_zmm, x_20_zmm);
+    return _mm512_mask_add_epi8(result_zmm, is_latin1_upper_mask | is_ascii_upper_mask, result_zmm, x_20_zmm);
 }
 
 /**
@@ -4344,50 +4347,50 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_latin1_ice_(sz_cptr_t haysta
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_safe_cyrillic_fold_zmm_(__m512i source) {
-    __m512i const d0_vec = _mm512_set1_epi8((char)0xD0);
-    __m512i const d1_vec = _mm512_set1_epi8((char)0xD1);
-    __m512i const xb0_vec = _mm512_set1_epi8((char)0xB0);
-    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i const x20_vec = _mm512_set1_epi8(0x20);
-    __m512i const x10_vec = _mm512_set1_epi8(0x10);
-    __m512i const a_upper_vec = _mm512_set1_epi8('A');
-    __m512i const range_26_vec = _mm512_set1_epi8(26);
+    __m512i const x_d0_zmm = _mm512_set1_epi8((char)0xD0);
+    __m512i const x_d1_zmm = _mm512_set1_epi8((char)0xD1);
+    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0);
+    __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80);
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
+    __m512i const x_10_zmm = _mm512_set1_epi8(0x10);
+    __m512i const x_41_zmm = _mm512_set1_epi8('A');
+    __m512i const x_1a_zmm = _mm512_set1_epi8(26);
 
     // Step 1: Detect D0/D1 lead bytes
-    __mmask64 is_d0 = _mm512_cmpeq_epi8_mask(source, d0_vec);
-    __mmask64 is_d1 = _mm512_cmpeq_epi8_mask(source, d1_vec);
-    __mmask64 is_lead = is_d0 | is_d1;
+    __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source, x_d0_zmm);
+    __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source, x_d1_zmm);
+    __mmask64 is_lead_mask = is_d0_mask | is_d1_mask;
 
     // Step 2: Detect positions after D0 and after D1
-    __mmask64 is_after_d0 = is_d0 << 1;
-    __mmask64 is_after_d1 = is_d1 << 1;
+    __mmask64 is_after_d0_mask = is_d0_mask << 1;
+    __mmask64 is_after_d1_mask = is_d1_mask << 1;
 
     // Step 3: Fold Cyrillic lowercase after D0 (second bytes B0-BF → subtract 0x20)
     // Range check: (byte - 0xB0) < 0x10 means byte in [0xB0, 0xBF]
-    __mmask64 is_cyrillic_d0_lower =
-        _mm512_mask_cmplt_epu8_mask(is_after_d0, _mm512_sub_epi8(source, xb0_vec), x10_vec);
+    __mmask64 is_cyrillic_d0_lower_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_d0_mask, _mm512_sub_epi8(source, x_b0_zmm), x_10_zmm);
 
     // Step 4: Fold Cyrillic lowercase after D1 (second bytes 80-8F → add 0x20)
     // Range check: (byte - 0x80) < 0x10 means byte in [0x80, 0x8F]
-    __mmask64 is_cyrillic_d1_lower =
-        _mm512_mask_cmplt_epu8_mask(is_after_d1, _mm512_sub_epi8(source, x80_vec), x10_vec);
+    __mmask64 is_cyrillic_d1_lower_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_d1_mask, _mm512_sub_epi8(source, x_80_zmm), x_10_zmm);
 
     // Step 5: Fold ASCII uppercase (A-Z) → add 0x20
-    __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+    __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
 
     // Step 6: Apply Cyrillic D0 lowercase folding (subtract 0x20)
-    __m512i result = _mm512_mask_sub_epi8(source, is_cyrillic_d0_lower, source, x20_vec);
+    __m512i result_zmm = _mm512_mask_sub_epi8(source, is_cyrillic_d0_lower_mask, source, x_20_zmm);
 
     // Step 7: Apply Cyrillic D1 lowercase folding (add 0x20)
-    result = _mm512_mask_add_epi8(result, is_cyrillic_d1_lower, result, x20_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_cyrillic_d1_lower_mask, result_zmm, x_20_zmm);
 
     // Step 8: Apply ASCII folding (add 0x20)
-    result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
 
     // Step 9: Normalize lead bytes D0/D1 → D0
-    result = _mm512_mask_mov_epi8(result, is_lead, d0_vec);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_lead_mask, x_d0_zmm);
 
-    return result;
+    return result_zmm;
 }
 
 /**
@@ -4710,110 +4713,111 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_can_use_greek_zmm_(__m12
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_greek_fold_zmm_(__m512i source) {
-    __m512i const ce_vec = _mm512_set1_epi8((char)0xCE);
-    __m512i const cf_vec = _mm512_set1_epi8((char)0xCF);
-    __m512i const x91_vec = _mm512_set1_epi8((char)0x91);
-    __m512i const x19_vec = _mm512_set1_epi8(0x19); // Range: 91-A9 is 25 values
-    __m512i const x20_vec = _mm512_set1_epi8(0x20);
-    __m512i const x82_vec = _mm512_set1_epi8((char)0x82);
-    __m512i const x83_vec = _mm512_set1_epi8((char)0x83);
-    __m512i const xa0_vec = _mm512_set1_epi8((char)0xA0);
-    __m512i const a_upper_vec = _mm512_set1_epi8('A');
-    __m512i const range_26_vec = _mm512_set1_epi8(26);
+    __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
+    __m512i const x_cf_zmm = _mm512_set1_epi8((char)0xCF);
+    __m512i const x_91_zmm = _mm512_set1_epi8((char)0x91);
+    __m512i const x_19_zmm = _mm512_set1_epi8(0x19); // Range: 91-A9 is 25 values
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
+    __m512i const x_82_zmm = _mm512_set1_epi8((char)0x82);
+    __m512i const x_83_zmm = _mm512_set1_epi8((char)0x83);
+    __m512i const x_a0_zmm = _mm512_set1_epi8((char)0xA0);
+    __m512i const x_41_zmm = _mm512_set1_epi8('A');
+    __m512i const x_1a_zmm = _mm512_set1_epi8(26);
 
     // Tonos letter constants
-    __m512i const x86_vec = _mm512_set1_epi8((char)0x86);
-    __m512i const x88_vec = _mm512_set1_epi8((char)0x88);
-    __m512i const x8c_vec = _mm512_set1_epi8((char)0x8C);
-    __m512i const x8e_vec = _mm512_set1_epi8((char)0x8E);
-    __m512i const x25_vec = _mm512_set1_epi8(0x25);
-    __m512i const x26_vec = _mm512_set1_epi8(0x26);
-    __m512i const x01_vec = _mm512_set1_epi8(0x01);
-    __m512i const x03_vec = _mm512_set1_epi8(0x03);
-    __m512i const x02_vec = _mm512_set1_epi8(0x02);
+    __m512i const x_86_zmm = _mm512_set1_epi8((char)0x86);
+    __m512i const x_88_zmm = _mm512_set1_epi8((char)0x88);
+    __m512i const x_8c_zmm = _mm512_set1_epi8((char)0x8C);
+    __m512i const x_8e_zmm = _mm512_set1_epi8((char)0x8E);
+    __m512i const x_25_zmm = _mm512_set1_epi8(0x25);
+    __m512i const x_26_zmm = _mm512_set1_epi8(0x26);
+    __m512i const x_01_zmm = _mm512_set1_epi8(0x01);
+    __m512i const x_03_zmm = _mm512_set1_epi8(0x03);
+    __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
 
     // Step 1: Detect CE/CF lead bytes
-    __mmask64 is_ce = _mm512_cmpeq_epi8_mask(source, ce_vec);
-    __mmask64 is_cf = _mm512_cmpeq_epi8_mask(source, cf_vec);
-    (void)is_cf; // Used only for final sigma detection below
+    __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(source, x_ce_zmm);
+    __mmask64 is_cf_mask = _mm512_cmpeq_epi8_mask(source, x_cf_zmm);
+    (void)is_cf_mask; // Used only for final sigma detection below
 
     // Step 2: Detect positions after CE and after CF
-    __mmask64 is_after_ce = is_ce << 1;
-    __mmask64 is_after_cf = is_cf << 1;
+    __mmask64 is_after_ce_mask = is_ce_mask << 1;
+    __mmask64 is_after_cf_mask = is_cf_mask << 1;
 
     // Step 3: Greek uppercase after CE (91-A9)
     // Range check: (byte - 0x91) < 0x19 means byte in [0x91, 0xA9]
-    __mmask64 is_greek_ce_upper = _mm512_mask_cmplt_epu8_mask(is_after_ce, _mm512_sub_epi8(source, x91_vec), x19_vec);
+    __mmask64 is_ce_upper_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_ce_mask, _mm512_sub_epi8(source, x_91_zmm), x_19_zmm);
 
     // Step 4: Handle CE/CF boundary crossing for uppercase A0-A9:
     // CE A0 (Π, U+03A0) → CF 80 (π, U+03C0)
     // CE A1 (Ρ, U+03A1) → CF 81 (ρ, U+03C1)
     // etc. For these, we SUBTRACT 0x20 from second byte and change lead CE → CF
-    __mmask64 is_will_wrap = _mm512_mask_cmpge_epu8_mask(is_greek_ce_upper, source, xa0_vec);
+    __mmask64 is_wrap_mask = _mm512_mask_cmpge_epu8_mask(is_ce_upper_mask, source, x_a0_zmm);
     // Non-wrapping: 91-9F, we ADD 0x20 (e.g., CE 91 → CE B1)
-    __mmask64 is_no_wrap = is_greek_ce_upper & ~is_will_wrap;
+    __mmask64 is_no_wrap_mask = is_ce_upper_mask & ~is_wrap_mask;
 
     // Step 5: Final sigma normalization: CF 82 → CF 83
-    __mmask64 is_final_sigma = _mm512_mask_cmpeq_epi8_mask(is_after_cf, source, x82_vec);
+    __mmask64 is_final_sigma_mask = _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, source, x_82_zmm);
 
     // Step 6: Fold ASCII uppercase (A-Z) → add 0x20
-    __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+    __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
 
     // Step 7: Detect Greek uppercase tonos letters after CE:
     // CE 86 (Ά) → CE AC (ά): add 0x26 to second byte
     // CE 88-8A (Έ,Ή,Ί) → CE AD-AF (έ,ή,ί): add 0x25 to second byte
     // CE 8C (Ό) → CF 8C (ό): change lead CE→CF, second byte unchanged
     // CE 8E-8F (Ύ,Ώ) → CF 8D-8E (ύ,ώ): change lead CE→CF, subtract 1 from second byte
-    __mmask64 is_alpha_tonos = _mm512_mask_cmpeq_epi8_mask(is_after_ce, source, x86_vec);
-    __mmask64 is_epsilon_eta_iota_tonos =
-        _mm512_mask_cmplt_epu8_mask(is_after_ce, _mm512_sub_epi8(source, x88_vec), x03_vec);
-    __mmask64 is_omicron_tonos = _mm512_mask_cmpeq_epi8_mask(is_after_ce, source, x8c_vec);
-    __mmask64 is_upsilon_omega_tonos =
-        _mm512_mask_cmplt_epu8_mask(is_after_ce, _mm512_sub_epi8(source, x8e_vec), x02_vec);
+    __mmask64 is_alpha_tonos_mask = _mm512_mask_cmpeq_epi8_mask(is_after_ce_mask, source, x_86_zmm);
+    __mmask64 is_ehi_tonos_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_ce_mask, _mm512_sub_epi8(source, x_88_zmm), x_03_zmm);
+    __mmask64 is_omicron_tonos_mask = _mm512_mask_cmpeq_epi8_mask(is_after_ce_mask, source, x_8c_zmm);
+    __mmask64 is_uw_tonos_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_ce_mask, _mm512_sub_epi8(source, x_8e_zmm), x_02_zmm);
 
     // Step 8a: Apply Greek uppercase folding for non-wrapping range (91-9F): ADD 0x20
-    __m512i result = _mm512_mask_add_epi8(source, is_no_wrap, source, x20_vec);
+    __m512i result_zmm = _mm512_mask_add_epi8(source, is_no_wrap_mask, source, x_20_zmm);
 
     // Step 8b: Apply Greek uppercase folding for wrapping range (A0-A9): SUBTRACT 0x20
-    result = _mm512_mask_sub_epi8(result, is_will_wrap, source, x20_vec);
+    result_zmm = _mm512_mask_sub_epi8(result_zmm, is_wrap_mask, source, x_20_zmm);
 
     // Step 9: For positions that wrap, change lead byte CE → CF (shift by 1 position)
-    __mmask64 is_lead_wrap = is_will_wrap >> 1;
-    result = _mm512_mask_mov_epi8(result, is_lead_wrap, cf_vec);
+    __mmask64 is_wrap_lead_mask = is_wrap_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_wrap_lead_mask, x_cf_zmm);
 
     // Step 10: Normalize final sigma (CF 82 → CF 83)
-    result = _mm512_mask_mov_epi8(result, is_final_sigma, x83_vec);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_final_sigma_mask, x_83_zmm);
 
     // Step 11: Apply ASCII folding (add 0x20)
-    result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
 
     // Step 12: Keep CE lead bytes for non-wrapping uppercase (91-9F range)
-    // We only touch CE lead bytes that had uppercase folding applied (shift by 1 from is_no_wrap)
-    __mmask64 is_ce_upper_lead = is_no_wrap >> 1;
-    result = _mm512_mask_mov_epi8(result, is_ce_upper_lead, ce_vec);
+    // We only touch CE lead bytes that had uppercase folding applied (shift by 1 from is_no_wrap_mask)
+    __mmask64 is_ce_upper_lead_mask = is_no_wrap_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_ce_upper_lead_mask, x_ce_zmm);
 
     // Step 13: Apply tonos folding
     // 13a: Ά (CE 86) → ά (CE AC): add 0x26 to second byte, keep CE lead
-    result = _mm512_mask_add_epi8(result, is_alpha_tonos, source, x26_vec);
-    __mmask64 is_alpha_tonos_lead = is_alpha_tonos >> 1;
-    result = _mm512_mask_mov_epi8(result, is_alpha_tonos_lead, ce_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_alpha_tonos_mask, source, x_26_zmm);
+    __mmask64 is_alpha_tonos_lead_mask = is_alpha_tonos_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_alpha_tonos_lead_mask, x_ce_zmm);
 
     // 13b: Έ,Ή,Ί (CE 88-8A) → έ,ή,ί (CE AD-AF): add 0x25 to second byte, keep CE lead
-    result = _mm512_mask_add_epi8(result, is_epsilon_eta_iota_tonos, source, x25_vec);
-    __mmask64 is_epsilon_eta_iota_tonos_lead = is_epsilon_eta_iota_tonos >> 1;
-    result = _mm512_mask_mov_epi8(result, is_epsilon_eta_iota_tonos_lead, ce_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_ehi_tonos_mask, source, x_25_zmm);
+    __mmask64 is_ehi_tonos_lead_mask = is_ehi_tonos_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_ehi_tonos_lead_mask, x_ce_zmm);
 
     // 13c: Ό (CE 8C) → ό (CF 8C): change lead CE→CF, second byte unchanged
-    __mmask64 is_omicron_tonos_lead = is_omicron_tonos >> 1;
-    result = _mm512_mask_mov_epi8(result, is_omicron_tonos_lead, cf_vec);
+    __mmask64 is_omicron_tonos_lead_mask = is_omicron_tonos_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_omicron_tonos_lead_mask, x_cf_zmm);
     // Second byte 8C stays the same - no change needed
 
     // 13d: Ύ,Ώ (CE 8E-8F) → ύ,ώ (CF 8D-8E): change lead CE→CF, subtract 1 from second byte
-    result = _mm512_mask_sub_epi8(result, is_upsilon_omega_tonos, source, x01_vec);
-    __mmask64 is_upsilon_omega_tonos_lead = is_upsilon_omega_tonos >> 1;
-    result = _mm512_mask_mov_epi8(result, is_upsilon_omega_tonos_lead, cf_vec);
+    result_zmm = _mm512_mask_sub_epi8(result_zmm, is_uw_tonos_mask, source, x_01_zmm);
+    __mmask64 is_uw_tonos_lead_mask = is_uw_tonos_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_uw_tonos_lead_mask, x_cf_zmm);
 
-    return result;
+    return result_zmm;
 }
 
 /**
@@ -5116,80 +5120,80 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_can_use_armenian_zmm_(__
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_armenian_fold_zmm_(__m512i source) {
-    __m512i const d4_vec = _mm512_set1_epi8((char)0xD4);
-    __m512i const d5_vec = _mm512_set1_epi8((char)0xD5);
-    __m512i const d6_vec = _mm512_set1_epi8((char)0xD6);
-    __m512i const xb1_vec = _mm512_set1_epi8((char)0xB1);
-    __m512i const x0f_vec = _mm512_set1_epi8(0x0F);
-    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i const x30_vec = _mm512_set1_epi8(0x30);
-    __m512i const a_upper_vec = _mm512_set1_epi8('A');
-    __m512i const range_26_vec = _mm512_set1_epi8(26);
+    __m512i const x_d4_zmm = _mm512_set1_epi8((char)0xD4);
+    __m512i const x_d5_zmm = _mm512_set1_epi8((char)0xD5);
+    __m512i const x_d6_zmm = _mm512_set1_epi8((char)0xD6);
+    __m512i const x_b1_zmm = _mm512_set1_epi8((char)0xB1);
+    __m512i const x_0f_zmm = _mm512_set1_epi8(0x0F);
+    __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80);
+    __m512i const x_30_zmm = _mm512_set1_epi8(0x30);
+    __m512i const x_41_zmm = _mm512_set1_epi8('A');
+    __m512i const x_1a_zmm = _mm512_set1_epi8(26);
 
     // Step 1: Detect D4/D5/D6 lead bytes
-    __mmask64 is_d4 = _mm512_cmpeq_epi8_mask(source, d4_vec);
-    __mmask64 is_d5 = _mm512_cmpeq_epi8_mask(source, d5_vec);
-    __mmask64 is_d6 = _mm512_cmpeq_epi8_mask(source, d6_vec);
+    __mmask64 is_d4_mask = _mm512_cmpeq_epi8_mask(source, x_d4_zmm);
+    __mmask64 is_d5_mask = _mm512_cmpeq_epi8_mask(source, x_d5_zmm);
+    __mmask64 is_d6_mask = _mm512_cmpeq_epi8_mask(source, x_d6_zmm);
 
     // Step 2: Detect positions after D4 and after D5
-    __mmask64 is_after_d4 = is_d4 << 1;
-    __mmask64 is_after_d5 = is_d5 << 1;
+    __mmask64 is_after_d4_mask = is_d4_mask << 1;
+    __mmask64 is_after_d5_mask = is_d5_mask << 1;
 
     // Step 3: Armenian uppercase after D4 (B1-BF → fold to D5 A1-AF)
     // Range check: (byte - 0xB1) < 0x0F means byte in [0xB1, 0xBF]
     // Unicode: U+0531-U+053F (D4 B1-BF) → U+0561-U+056F (D5 A1-AF)
     // Mapping: lead D4→D5, continuation subtract 0x10 (B1→A1, etc.)
-    __mmask64 is_armenian_d4_upper =
-        _mm512_mask_cmplt_epu8_mask(is_after_d4, _mm512_sub_epi8(source, xb1_vec), x0f_vec);
+    __mmask64 is_d4_upper_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_d4_mask, _mm512_sub_epi8(source, x_b1_zmm), x_0f_zmm);
 
     // Step 4: Armenian uppercase after D5 (80-96 → fold to D5 B0-BF or D6 80-86)
     // Unicode: U+0540-U+0556 (D5 80-96) → U+0570-U+0586 (D5 B0-BF, D6 80-86)
     // Mapping: continuation add 0x30, lead stays D5 for 80-8F, changes to D6 for 90-96
     // Range check: (byte - 0x80) < 0x17 means byte in [0x80, 0x96]
-    __m512i const x17_vec = _mm512_set1_epi8(0x17);
-    __m512i const x10_vec = _mm512_set1_epi8(0x10);
-    __mmask64 is_armenian_d5_upper =
-        _mm512_mask_cmplt_epu8_mask(is_after_d5, _mm512_sub_epi8(source, x80_vec), x17_vec);
+    __m512i const x_17_zmm = _mm512_set1_epi8(0x17);
+    __m512i const x_10_zmm = _mm512_set1_epi8(0x10);
+    __mmask64 is_d5_upper_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_d5_mask, _mm512_sub_epi8(source, x_80_zmm), x_17_zmm);
 
     // Step 5: Detect which D5 uppercase chars will wrap to D6 (byte >= 0x90)
     // D5 90-96 + 0x30 = D5 C0-C6, which is invalid → wrap to D6 80-86 (subtract 0x40)
-    __m512i const x90_vec = _mm512_set1_epi8((char)0x90);
-    __mmask64 is_d5_will_wrap = _mm512_mask_cmpge_epu8_mask(is_armenian_d5_upper, source, x90_vec);
+    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);
+    __mmask64 is_d5_wrap_mask = _mm512_mask_cmpge_epu8_mask(is_d5_upper_mask, source, x_90_zmm);
 
     // Step 6: Fold ASCII uppercase (A-Z) → add 0x20
-    __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+    __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
 
     // Step 7: Apply Armenian D4 folding (subtract 0x10 from continuation, later change lead)
-    __m512i result = _mm512_mask_sub_epi8(source, is_armenian_d4_upper, source, x10_vec);
+    __m512i result_zmm = _mm512_mask_sub_epi8(source, is_d4_upper_mask, source, x_10_zmm);
 
     // Step 8: Apply Armenian D5 folding (add 0x30 to continuation)
-    result = _mm512_mask_add_epi8(result, is_armenian_d5_upper, result, x30_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_d5_upper_mask, result_zmm, x_30_zmm);
 
     // Step 9: Fix wrapped D5 bytes (subtract 0x40 to bring C0-C6 down to 80-86)
-    __m512i const x40_vec = _mm512_set1_epi8(0x40);
-    result = _mm512_mask_sub_epi8(result, is_d5_will_wrap, result, x40_vec);
+    __m512i const x_40_zmm = _mm512_set1_epi8(0x40);
+    result_zmm = _mm512_mask_sub_epi8(result_zmm, is_d5_wrap_mask, result_zmm, x_40_zmm);
 
     // Step 10: For D4 uppercase, change lead byte D4 → D5
-    __mmask64 is_lead_d4_to_d5 = is_armenian_d4_upper >> 1;
-    result = _mm512_mask_mov_epi8(result, is_lead_d4_to_d5, d5_vec);
+    __mmask64 is_d4_to_d5_mask = is_d4_upper_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_d4_to_d5_mask, x_d5_zmm);
 
     // Step 11: For D5 wrapping uppercase (90-96), change lead byte D5 → D6
-    __mmask64 is_lead_d5_to_d6 = is_d5_will_wrap >> 1;
-    result = _mm512_mask_mov_epi8(result, is_lead_d5_to_d6, d6_vec);
+    __mmask64 is_d5_to_d6_mask = is_d5_wrap_mask >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_d5_to_d6_mask, x_d6_zmm);
 
     // Step 12: Apply ASCII folding (add 0x20)
-    __m512i const x20_vec = _mm512_set1_epi8(0x20);
-    result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
 
     // Step 13: Preserve lead bytes that didn't change
     // D5 lead bytes should stay D5 (original D5 not wrapping + converted from D4)
     // D6 lead bytes should stay D6 (original D6 + converted from D5 wrapping)
-    __mmask64 is_keep_d5 = (is_d5 & ~is_lead_d5_to_d6) | is_lead_d4_to_d5;
-    __mmask64 is_keep_d6 = is_d6 | is_lead_d5_to_d6;
-    result = _mm512_mask_mov_epi8(result, is_keep_d5, d5_vec);
-    result = _mm512_mask_mov_epi8(result, is_keep_d6, d6_vec);
+    __mmask64 is_d5_keep_mask = (is_d5_mask & ~is_d5_to_d6_mask) | is_d4_to_d5_mask;
+    __mmask64 is_d6_keep_mask = is_d6_mask | is_d5_to_d6_mask;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_d5_keep_mask, x_d5_zmm);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_d6_keep_mask, x_d6_zmm);
 
-    return result;
+    return result_zmm;
 }
 
 /**
@@ -5495,55 +5499,57 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_can_use_vietnamese_zmm_(
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_vietnamese_fold_zmm_(__m512i source) {
-    __m512i const e1_vec = _mm512_set1_epi8((char)0xE1);
-    __m512i const xb8_vec = _mm512_set1_epi8((char)0xB8);
-    __m512i const x04_vec = _mm512_set1_epi8(0x04);
-    __m512i const x01_vec = _mm512_set1_epi8(0x01);
-    __m512i const c3_vec = _mm512_set1_epi8((char)0xC3);
-    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i const x1f_vec = _mm512_set1_epi8(0x1F);
-    __m512i const x20_vec = _mm512_set1_epi8(0x20);
-    __m512i const a_upper_vec = _mm512_set1_epi8('A');
-    __m512i const range_26_vec = _mm512_set1_epi8(26);
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_b8_zmm = _mm512_set1_epi8((char)0xB8);
+    __m512i const x_04_zmm = _mm512_set1_epi8(0x04);
+    __m512i const x_01_zmm = _mm512_set1_epi8(0x01);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+    __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80);
+    __m512i const x_1f_zmm = _mm512_set1_epi8(0x1F);
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
+    __m512i const x_41_zmm = _mm512_set1_epi8('A');
+    __m512i const x_1a_zmm = _mm512_set1_epi8(26);
 
     // Step 1: Detect E1 lead bytes (3-byte sequence start)
-    __mmask64 is_e1 = _mm512_cmpeq_epi8_mask(source, e1_vec);
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source, x_e1_zmm);
 
     // Step 2: Detect positions after E1 (second byte position)
-    __mmask64 is_after_e1 = is_e1 << 1;
+    __mmask64 is_after_e1_mask = is_e1_mask << 1;
 
     // Step 3: Check if second byte is B8-BB (Latin Extended Additional)
     // Range check: (byte - 0xB8) < 0x04 means byte in [0xB8, 0xBB]
-    __mmask64 is_ext_second = _mm512_mask_cmplt_epu8_mask(is_after_e1, _mm512_sub_epi8(source, xb8_vec), x04_vec);
+    __mmask64 is_ext_second_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_e1_mask, _mm512_sub_epi8(source, x_b8_zmm), x_04_zmm);
 
     // Step 4: Detect third byte positions after valid E1 Bx sequences
-    __mmask64 is_ext_third = is_ext_second << 1;
+    __mmask64 is_ext_third_mask = is_ext_second_mask << 1;
 
     // Step 5: Parity-based folding - if third byte is even, add 1 (uppercase → lowercase)
     // Even check: (byte & 0x01) == 0
-    __mmask64 is_even = ~_mm512_test_epi8_mask(source, x01_vec);
-    __mmask64 is_vietnamese_upper = is_ext_third & is_even;
+    __mmask64 is_even_mask = ~_mm512_test_epi8_mask(source, x_01_zmm);
+    __mmask64 is_vietnamese_upper_mask = is_ext_third_mask & is_even_mask;
 
     // Step 6: Detect C3 lead bytes for Latin-1 folding
-    __mmask64 is_c3 = _mm512_cmpeq_epi8_mask(source, c3_vec);
-    __mmask64 is_after_c3 = is_c3 << 1;
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(source, x_c3_zmm);
+    __mmask64 is_after_c3_mask = is_c3_mask << 1;
 
     // Step 7: Latin-1 uppercase after C3 (80-9E → add 0x20)
-    __mmask64 is_latin1_upper = _mm512_mask_cmplt_epu8_mask(is_after_c3, _mm512_sub_epi8(source, x80_vec), x1f_vec);
+    __mmask64 is_latin1_upper_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(source, x_80_zmm), x_1f_zmm);
 
     // Step 8: Fold ASCII uppercase (A-Z) → add 0x20
-    __mmask64 is_ascii_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, a_upper_vec), range_26_vec);
+    __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
 
     // Step 9: Apply Vietnamese folding (+1 to third bytes)
-    __m512i result = _mm512_mask_add_epi8(source, is_vietnamese_upper, source, x01_vec);
+    __m512i result_zmm = _mm512_mask_add_epi8(source, is_vietnamese_upper_mask, source, x_01_zmm);
 
     // Step 10: Apply Latin-1 folding (+0x20 to second bytes)
-    result = _mm512_mask_add_epi8(result, is_latin1_upper, result, x20_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_latin1_upper_mask, result_zmm, x_20_zmm);
 
     // Step 11: Apply ASCII folding (+0x20)
-    result = _mm512_mask_add_epi8(result, is_ascii_upper, result, x20_vec);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
 
-    return result;
+    return result_zmm;
 }
 
 /**
