@@ -1022,6 +1022,14 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_ru
         sz_rune_parse(it->ptr, &rune, &rune_length);
 
         it->ptr += rune_length;
+        // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
+        // The fold function will overwrite positions it uses; unused positions keep the sentinel.
+        // This follows the same pattern as sz_utf8_case_insensitive_find_2folded_serial_ and
+        // sz_utf8_case_insensitive_find_3folded_serial_.
+        it->pending[0] = 0xFFFFFFFFu;
+        it->pending[1] = 0xFFFFFFFEu;
+        it->pending[2] = 0xFFFFFFFDu;
+        it->pending[3] = 0xFFFFFFFCu;
         it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
         it->pending_idx = 0;
     }
@@ -1212,6 +1220,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
     while (haystack < haystack_end) {
         sz_rune_parse(haystack, &haystack_rune, &haystack_rune_length);
 
+        // Pre-fill positions [2] and [3] with sentinels before folding.
+        // The fold will overwrite positions it uses; unused positions keep the sentinel.
+        // This branchlessly prevents stale data from causing false matches.
+        sz_rune_t sentinel = ~second_needle_folded;
+        haystack_folded_runes[2] = sentinel;
+        haystack_folded_runes[3] = sentinel;
         // Export into the last 3 rune entries of the 4-element array,
         // keeping the first position with historical data untouched
         sz_size_t folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 1);
@@ -1272,6 +1286,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_3folded_serial_( //
     while (haystack < haystack_end) {
         sz_rune_parse(haystack, &haystack_rune, &haystack_rune_length);
 
+        // Pre-fill positions [3] and [4] with sentinels before folding.
+        // The fold will overwrite positions it uses; unused positions keep the sentinel.
+        // This branchlessly prevents stale data from causing false matches.
+        sz_rune_t sentinel = ~third_needle_folded;
+        haystack_folded_runes[3] = sentinel;
+        haystack_folded_runes[4] = sentinel;
         // Export into the last 3 rune entries of the 5-element array,
         // keeping the first two positions with historical data untouched
         sz_size_t folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 2);
