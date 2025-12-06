@@ -39,6 +39,7 @@ int log_environment() {
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
     std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
+    print_test_environment();
 
 #if SZ_USE_CUDA
     cudaError_t cuda_error = cudaFree(0); // Force context initialization

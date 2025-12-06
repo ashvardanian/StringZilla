@@ -13,6 +13,16 @@
     "editor.insertSpaces": true,
     "editor.tabSize": 2
   },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4
+  },
   "[typescript]": {
     "editor.defaultFormatter": "vscode.typescript-language-features",
     "editor.insertSpaces": true,
@@ -261,24 +271,10 @@
   "editor.detectIndentation": false,
   "editor.formatOnSave": true,
   "editor.insertSpaces": true,
-  "editor.rulers": [120],
+  "editor.rulers": [
+    120
+  ],
   "editor.tabSize": 4,
-  // Rust analyzer memory optimizations
-  "rust-analyzer.checkOnSave.enable": true,
-  "rust-analyzer.checkOnSave.allTargets": false,
-  "rust-analyzer.cargo.allFeatures": false,
-  "rust-analyzer.cargo.buildScripts.enable": false,
-  "rust-analyzer.procMacro.enable": false,
-  "rust-analyzer.diagnostics.enable": true,
-  "rust-analyzer.diagnostics.experimental.enable": false,
-  "rust-analyzer.completion.autoimport.enable": false,
-  "rust-analyzer.lens.enable": false,
-  "rust-analyzer.inlayHints.enable": false,
-  "rust-analyzer.hover.actions.enable": false,
-  "rust-analyzer.assist.emitMustUse": false,
-  "rust-analyzer.cachePriming.enable": false,
-  "rust-analyzer.files.watcher": "client",
-  "rust-analyzer.updates.channel": "stable",
   "files.associations": {
     "__availability": "cpp",
     "__bit_reference": "cpp",
@@ -395,6 +391,7 @@
     "types.h": "c",
     "unordered_map": "cpp",
     "unordered_set": "cpp",
+    "utf8_unpack.h": "c",
     "utility": "cpp",
     "variant": "cpp",
     "vector": "cpp",
@@ -414,5 +411,22 @@
     "xtr1common": "cpp",
     "xtree": "cpp",
     "xutility": "cpp"
-  }
+  },
+  "notebook.formatOnSave.enabled": true,
+  "rust-analyzer.assist.emitMustUse": false,
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cargo.allFeatures": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.checkOnSave.allTargets": false,
+  // Rust analyzer memory optimizations
+  "rust-analyzer.checkOnSave.enable": true,
+  "rust-analyzer.completion.autoimport.enable": false,
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.diagnostics.experimental.enable": false,
+  "rust-analyzer.files.watcher": "client",
+  "rust-analyzer.hover.actions.enable": false,
+  "rust-analyzer.inlayHints.enable": false,
+  "rust-analyzer.lens.enable": false,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.updates.channel": "stable"
 }

@@ -41,9 +41,13 @@ int main(int argc, char const **argv) {
     if (auto code = szs::scripts::log_environment(); code != 0) return code;
 
     try {
+        std::printf("- test_rolling_hashers_equivalence...\n");
         szs::scripts::test_rolling_hashers_equivalence();
+        std::printf("- test_rolling_hasher...\n");
         szs::scripts::test_rolling_hasher();
+        std::printf("- test_similarity_scores_equivalence...\n");
         szs::scripts::test_similarity_scores_equivalence();
+        std::printf("- test_similarity_scores_memory_usage...\n");
         szs::scripts::test_similarity_scores_memory_usage();
     }
     catch (std::exception const &e) {
@@ -51,6 +55,6 @@ int main(int argc, char const **argv) {
         return 1;
     }
 
-    std::printf("All tests passed... Unbelievable!\n");
+    std::printf("\nAll tests passed!\n");
     return 0;
 }

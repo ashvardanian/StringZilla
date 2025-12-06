@@ -54,18 +54,12 @@ __Who is this for?__
 
 ## Performance
 
-<table style="width: 100%; text-align: center; table-layout: fixed;">
-  <colgroup>
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-  </colgroup>
+<table>
   <tr>
-    <th align="center">C</th>
-    <th align="center">C++</th>
-    <th align="center">Python</th>
-    <th align="center">StringZilla</th>
+    <th align="center" width="25%">C</th>
+    <th align="center" width="25%">C++</th>
+    <th align="center" width="25%">Python</th>
+    <th align="center" width="25%">StringZilla</th>
   </tr>
   <!-- Substrings, normal order -->
   <tr>
@@ -170,12 +164,12 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>std::uniform_int_distribution</code><br/>
+      <code>uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
     <td align="center">
-      <code>join(random.choices(...))</code><br/>
+      <code>join(random.choices(x))</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>13.3</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>5.9</b> MB/s
     </td>
@@ -328,10 +322,15 @@ Consider contributing if you need a feature that's not yet implemented.
 | Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| SHA-256 Checksums              |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
 | Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
+| One-Shot & Streaming Hashes    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Cryptographic Hashes           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
+| Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+|                                |          |       |       |        |       |       |       |       |
+| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Case-Insensitive UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ⚪    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
@@ -427,6 +426,16 @@ x: Strs = text.split_byteset(separator='chars', maxsplit=sys.maxsize, keepsepara
 x: Strs = text.rsplit_byteset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
 ```
 
+StringZilla also provides string trimming functions and random string generation:
+
+```py
+x: str = text.lstrip('chars')  # Strip leading characters
+x: str = text.rstrip('chars')  # Strip trailing characters
+x: str = text.strip('chars')   # Strip both ends
+x: bytes = sz.random(length=100, seed=42, alphabet='ACGT')  # Random string generation
+sz.fill_random(buffer, seed=42, alphabet=None)  # Fill mutable buffer with random bytes
+```
+
 You can also transform the string using Look-Up Tables (LUTs), mapping it to a different character set.
 This would result in a copy - `str` for `str` inputs and `bytes` for other types.
 
@@ -520,7 +529,7 @@ If all the chunks are located in consecutive memory regions, the memory overhead
 ```python
 lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
-lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
+lines_shuffled: Strs = lines.shuffled(seed=42) # or shuffle all lines and shard with slices
 lines_sorted: Strs = lines.sorted() # returns a new Strs in sorted order
 order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
@@ -820,7 +829,8 @@ sz_sha256_state_digest(&sha_state, digest);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
-sz_sequence_argsort(&array, &your_config);
+sz_sorted_idx_t order[your_count];
+sz_sequence_argsort(&array, NULL, order); // NULL allocator uses default
 ```
 
 <details>
@@ -857,12 +867,12 @@ The `sz_find_byteset` maps to `strspn` and `strcspn`, while `sz_rfind_byteset` h
         <td><code>sz_find_byte(haystack, haystack_length, needle)</code></td>
     </tr>
     <tr>
-        <td><code>strcspn(haystack, needles)</code></td>
-        <td><code>sz_rfind_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strcspn(haystack, reject)</code></td>
+        <td><code>sz_find_byteset(haystack, haystack_length, reject_bitset)</code></td>
     </tr>
     <tr>
-        <td><code>strspn(haystack, needles)</code></td>
-        <td><code>sz_find_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strspn(haystack, accept)</code></td>
+        <td><code>sz_find_byte_not_from(haystack, haystack_length, accept, accept_length)</code></td>
     </tr>
     <tr>
         <td><code>memmem(haystack, haystack_length, needle, needle_length)</code>, <code>strstr</code></td>

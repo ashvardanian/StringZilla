@@ -66,6 +66,9 @@ typedef struct sz_implementations_t {
 
     sz_utf8_case_fold_t utf8_case_fold;
     sz_utf8_case_insensitive_find_t utf8_case_insensitive_find;
+
+    sz_utf8_word_find_boundary_t utf8_word_find_boundary;
+    sz_utf8_word_rfind_boundary_t utf8_word_rfind_boundary;
     sz_utf8_case_insensitive_order_t utf8_case_insensitive_order;
 
     sz_sequence_argsort_t sequence_argsort;
@@ -117,6 +120,9 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
     impl->utf8_case_fold = sz_utf8_case_fold_serial;
     impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_serial;
+
+    impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_serial;
+    impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_serial;
     impl->utf8_case_insensitive_order = sz_utf8_case_insensitive_order_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
@@ -520,6 +526,14 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
     sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
     return sz_dispatch_table.utf8_case_insensitive_find(haystack, haystack_length, needle, needle_length,
                                                         matched_length);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
+    return sz_dispatch_table.utf8_word_find_boundary(text, length, boundary_width);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
+    return sz_dispatch_table.utf8_word_rfind_boundary(text, length, boundary_width);
 }
 
 SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order( //
