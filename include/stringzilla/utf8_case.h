@@ -6516,8 +6516,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_zmm_(__m51
     __mmask64 is_after_c3_mask = is_c3_mask << 1;
 
     // Step 7: Latin-1 uppercase after C3 (80-9E → add 0x20)
+    // EXCEPTION: C3 97 (Multiplication sign) should not fold to C3 B7 (Division sign)
+    __m512i const x_97_zmm = _mm512_set1_epi8((char)0x97);
     __mmask64 is_latin1_upper_mask =
         _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(source, x_80_zmm), x_1f_zmm);
+    __mmask64 is_97_mask = _mm512_cmpeq_epi8_mask(source, x_97_zmm);
+    is_latin1_upper_mask &= ~is_97_mask;
 
     // Step 8: Fold ASCII uppercase (A-Z) → add 0x20
     __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
