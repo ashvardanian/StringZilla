@@ -4412,20 +4412,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
     sz_size_t const step = 64 - needle_length + 1;
     __mmask64 const valid_mask = sz_u64_mask_until_(step);
 
-    // Ligature detection: EF is lead byte for ﬀﬁﬂﬃﬄﬅﬆ (3-byte→2-byte folding breaks SIMD)
-    __m512i const ef_vec = _mm512_set1_epi8((char)0xEF);
-
     // Main loop - single load, 3-probe filter, verify candidates
     for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
         __m512i const raw_chunk = _mm512_loadu_si512(haystack);
-
-        // Check for ligature lead bytes - if present, use lightweight chunk search
-        if (_mm512_cmpeq_epi8_mask(raw_chunk, ef_vec)) {
-            sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack, step + needle_length - 1, needle,
-                                                                    needle_length, matched_length);
-            if (result) return result;
-            continue;
-        }
 
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_chunk);
 
@@ -4466,14 +4455,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
     if (haystack_length >= needle_length) {
         __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
         __m512i const raw_tail = _mm512_maskz_loadu_epi8(load_mask, haystack);
-
-        // Check for ligature lead bytes in tail
-        if (_mm512_mask_cmpeq_epi8_mask(load_mask, raw_tail, ef_vec)) {
-            sz_cptr_t result =
-                sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length, matched_length);
-            if (result) return result;
-            return SZ_NULL_CHAR;
-        }
 
         __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_tail);
@@ -4595,9 +4576,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
     probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probe_mid]);
     probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded_bytes[probe_last]);
 
-    // Ligature detection: EF is lead byte for ﬀﬁﬂﬃﬄﬅﬆ (3-byte→2-byte folding breaks SIMD)
-    __m512i const ef_vec = _mm512_set1_epi8((char)0xEF);
-
     // Main loop - step by 62 bytes to handle 2-byte chars at boundaries plus 1-byte lookback
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
     for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
@@ -4605,16 +4583,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
         __m512i const raw_first = _mm512_loadu_si512(haystack + safe_offset + load_first);
         __m512i const raw_mid = _mm512_loadu_si512(haystack + safe_offset + load_mid);
         __m512i const raw_last = _mm512_loadu_si512(haystack + safe_offset + load_last);
-
-        // Check for ligature lead bytes in ANY of the 3 chunks - if present, use lightweight search
-        __mmask64 has_ef = _mm512_cmpeq_epi8_mask(raw_first, ef_vec) | _mm512_cmpeq_epi8_mask(raw_mid, ef_vec) |
-                           _mm512_cmpeq_epi8_mask(raw_last, ef_vec);
-        if (has_ef) {
-            sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack, 62 + needle_length - 1, needle,
-                                                                    needle_length, matched_length);
-            if (result) return result;
-            continue;
-        }
 
         // Fold and compare
         haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_first);
@@ -4676,17 +4644,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
         __m512i raw_first = _mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first);
         __m512i raw_mid = _mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid);
         __m512i raw_last = _mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last);
-
-        // Check for ligature lead bytes in tail - if present, use lightweight search
-        __mmask64 has_ef_tail = _mm512_mask_cmpeq_epi8_mask(tail_mask_first, raw_first, ef_vec) |
-                                _mm512_mask_cmpeq_epi8_mask(tail_mask_mid, raw_mid, ef_vec) |
-                                _mm512_mask_cmpeq_epi8_mask(tail_mask_last, raw_last, ef_vec);
-        if (has_ef_tail) {
-            sz_cptr_t result =
-                sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length, matched_length);
-            if (result) return result;
-            return SZ_NULL_CHAR;
-        }
 
         // Fold chunks
         haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_first);
