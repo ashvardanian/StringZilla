@@ -3148,11 +3148,24 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
 
         // Latin-1 Supplement (C2/C3 lead bytes) - all are safe
-        // Latin-1 Supplement (C2/C3 lead bytes) - all are safe
         if (lead == 0xC2 || lead == 0xC3) {
             safety |= sz_utf8_case_rune_safe_latin1ab_k;
             safety |= sz_utf8_case_rune_safe_vietnamese_k; // Vietnamese includes Latin1
         }
+
+        // Latin Extended-A (C4/C5 lead bytes) - parity-based +1 folding
+        if (lead == 0xC4 || lead == 0xC5) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
+
+        // Latin Extended-B (C6/C7/C8 lead bytes) - includes +1 folding and cross-block mappings
+        // C6: U+0180-U+01BF - 16 chars with +1 folding, 20 chars with cross-block to C7/C9/CA
+        // C7: U+01C0-U+01FF - includes lowercase target ǝ (C7 9D) and +1 folding pairs
+        // C8: U+0200-U+023F - continuation of Latin Extended-B
+        if (lead == 0xC6 || lead == 0xC7 || lead == 0xC8) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
+
+        // IPA Extensions (C9/CA lead bytes) - lowercase targets for C6 cross-block mappings
+        // C9: U+0250-U+02AF - includes ɓ (C9 93), ə (C9 99), ɔ (C9 94), etc.
+        // CA: U+02B0-U+02FF - includes ʃ (CA 83), ʊ (CA 8A), ʒ (CA 92), etc.
+        if (lead == 0xC9 || lead == 0xCA) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
 
         // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
@@ -4015,11 +4028,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(__m512i
     __m512i const x_c4_zmm = _mm512_set1_epi8((char)0xC4);
     __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
 
-    // Constants for Latin Extended-B (C6-C9 lead bytes)
+    // Constants for Latin Extended-B (C6-C9 lead bytes) and IPA Extensions (CA)
     __m512i const x_c6_zmm = _mm512_set1_epi8((char)0xC6);
     __m512i const x_c7_zmm = _mm512_set1_epi8((char)0xC7);
     __m512i const x_c8_zmm = _mm512_set1_epi8((char)0xC8);
     __m512i const x_c9_zmm = _mm512_set1_epi8((char)0xC9);
+    __m512i const x_ca_zmm = _mm512_set1_epi8((char)0xCA);
 
     __m512i result_zmm = text_zmm;
 
@@ -4084,12 +4098,11 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(__m512i
     __mmask64 is_c5_odd_upper_mask = (is_c5_odd_range1_mask | is_c5_odd_range2_mask) & is_odd_byte_mask;
     __mmask64 is_c5_even_upper_mask = is_c5_even_range_mask & is_even_byte_mask;
 
-    // ==== 5. Handle Latin Extended-B (C6-C9) with parity-based +1 folding ====
-    __mmask64 is_c6_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c6_zmm);
+    // ==== 5. Handle Latin Extended-B (C7-C9) with parity-based +1 folding ====
+    // Note: C6 range (U+0180-U+01BF) has irregular case mappings, not simple +1 pattern
     __mmask64 is_c7_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c7_zmm);
     __mmask64 is_c8_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c8_zmm);
     __mmask64 is_c9_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c9_zmm);
-    __mmask64 is_after_c6_mask = is_c6_mask << 1;
     __mmask64 is_after_c7_mask = is_c7_mask << 1;
     __mmask64 is_after_c8_mask = is_c8_mask << 1;
     __mmask64 is_after_c9_mask = is_c9_mask << 1;
@@ -4122,6 +4135,63 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(__m512i
                                                   _mm512_set1_epi8(0x09)); // 86-8E
     __mmask64 is_c9_even_upper_mask = is_c9_even_range_mask & is_even_byte_mask;
 
+    // ==== 5b. Handle Latin Extended-B C6 range (U+0180-U+01BF) ====
+    // C6 has 16 chars with +1 folding (scattered bytes) and 20 chars with cross-block mappings
+    __mmask64 is_c6_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c6_zmm);
+    __mmask64 is_after_c6_mask = is_c6_mask << 1;
+
+    // C6 +1 pattern: EVEN uppercase second bytes: 82, 84, 98, A0, A2, A4, AC, B8, BC
+    // These uppercase letters fold to +1 (lowercase immediately follows in Unicode)
+    __mmask64 is_c6_even_upper_mask =
+        is_after_c6_mask & (_mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x82)) | // Ƃ→ƃ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x84)) | // Ƅ→ƅ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x98)) | // Ƙ→ƙ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA0)) | // Ơ→ơ (Vietnamese)
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA2)) | // Ƣ→ƣ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA4)) | // Ƥ→ƥ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xAC)) | // Ƭ→ƭ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB8)) | // Ƹ→ƹ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xBC))); // Ƽ→ƽ
+
+    // C6 +1 pattern: ODD uppercase second bytes: 87, 8B, 91, A7, AF, B3, B5
+    __mmask64 is_c6_odd_upper_mask =
+        is_after_c6_mask & (_mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x87)) | // Ƈ→ƈ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x8B)) | // Ƌ→ƌ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x91)) | // Ƒ→ƒ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA7)) | // Ƨ→ƨ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xAF)) | // Ư→ư (Vietnamese)
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB3)) | // Ƴ→ƴ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB5))); // Ƶ→ƶ
+
+    // C6 cross-block mappings: these change lead byte from C6 to C7/C9/CA
+    // C6→C9: 81, 86, 89, 8A, 8F, 90, 93, 94, 96, 97, 9C, 9D, 9F (13 chars)
+    __mmask64 is_c6_to_c9_mask =
+        is_after_c6_mask & (_mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x81)) | // Ɓ→ɓ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x86)) | // Ɔ→ɔ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x89)) | // Ɖ→ɖ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x8A)) | // Ɗ→ɗ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x8F)) | // Ə→ə
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x90)) | // Ɛ→ɛ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x93)) | // Ɠ→ɠ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x94)) | // Ɣ→ɣ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x96)) | // Ɩ→ɩ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x97)) | // Ɨ→ɨ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x9C)) | // Ɯ→ɯ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x9D)) | // Ɲ→ɲ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x9F))); // Ɵ→ɵ
+
+    // C6→CA: A6, A9, AE, B1, B2, B7 (6 chars)
+    __mmask64 is_c6_to_ca_mask =
+        is_after_c6_mask & (_mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA6)) | // Ʀ→ʀ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xA9)) | // Ʃ→ʃ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xAE)) | // Ʈ→ʈ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB1)) | // Ʊ→ʊ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB2)) | // Ʋ→ʋ
+                            _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB7))); // Ʒ→ʒ
+
+    // C6→C7: 8E (1 char: Ǝ→ǝ)
+    __mmask64 is_c6_to_c7_mask = is_after_c6_mask & _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x8E));
+
     // ==== 6. Handle ASCII uppercase (A-Z) → add 0x20 ====
     __mmask64 is_ascii_upper_mask =
         _mm512_mask_cmplt_epu8_mask(~is_eszett_mask, _mm512_sub_epi8(text_zmm, x_41_zmm), x_1a_zmm);
@@ -4131,12 +4201,49 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(__m512i
     __mmask64 add_20_mask = is_latin1_upper_mask | is_ascii_upper_mask;
     result_zmm = _mm512_mask_add_epi8(result_zmm, add_20_mask, result_zmm, x_20_zmm);
 
-    // +1 for Latin Extended-A/B parity-based uppercase
+    // +1 for Latin Extended-A/B parity-based uppercase (including C6 +1 patterns)
     __mmask64 add_1_mask = is_c4_even_upper_mask | is_c4_odd_upper_mask | //
                            is_c5_even_upper_mask | is_c5_odd_upper_mask | //
+                           is_c6_even_upper_mask | is_c6_odd_upper_mask | // C6 +1 patterns
                            is_c7_odd_upper_mask | is_c7_even_upper_mask | //
                            is_c8_even_upper_mask | is_c9_even_upper_mask;
     result_zmm = _mm512_mask_add_epi8(result_zmm, add_1_mask, result_zmm, x_01_zmm);
+
+    // ==== C6 cross-block transformations (lead byte C6 → C7/C9/CA) ====
+    // Get lead byte positions from second byte masks (shift right by 1)
+    __mmask64 is_c6_to_c9_lead_mask = is_c6_to_c9_mask >> 1;
+    __mmask64 is_c6_to_ca_lead_mask = is_c6_to_ca_mask >> 1;
+    __mmask64 is_c6_to_c7_lead_mask = is_c6_to_c7_mask >> 1;
+
+    // Replace lead bytes: C6 → C9/CA/C7
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_c6_to_c9_lead_mask, x_c9_zmm);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_c6_to_ca_lead_mask, x_ca_zmm);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_c6_to_c7_lead_mask, x_c7_zmm);
+
+    // Transform second bytes for cross-block mappings using vpermb lookup table
+    // Table maps second bytes 0x80-0xBF (indices 0-63) to their lowercase equivalents
+    __m512i const c6_crossblock_table = _mm512_set_epi8(
+        // Indices 63-48 (second bytes 0xBF-0xB0): mostly identity except B7→92, B2→8B, B1→8A
+        (char)0xBF, (char)0xBE, (char)0xBD, (char)0xBC, (char)0xBB, (char)0xBA, (char)0xB9, (char)0xB8, (char)0x92,
+        (char)0xB6, (char)0xB5, (char)0xB4, (char)0xB3, (char)0x8B, (char)0x8A, (char)0xB0,
+        // Indices 47-32 (second bytes 0xAF-0xA0): A6→80, A9→83, AE→88
+        (char)0xAF, (char)0x88, (char)0xAD, (char)0xAC, (char)0xAB, (char)0xAA, (char)0x83, (char)0xA8, (char)0xA7,
+        (char)0x80, (char)0xA5, (char)0xA4, (char)0xA3, (char)0xA2, (char)0xA1, (char)0xA0,
+        // Indices 31-16 (second bytes 0x9F-0x90): 9F→B5, 9D→B2, 9C→AF, 97→A8, 96→A9, 94→A3, 93→A0, 90→9B
+        (char)0xB5, (char)0x9E, (char)0xB2, (char)0xAF, (char)0x9B, (char)0x9A, (char)0x99, (char)0x98, (char)0xA8,
+        (char)0xA9, (char)0x95, (char)0xA3, (char)0xA0, (char)0x92, (char)0x91, (char)0x9B,
+        // Indices 15-0 (second bytes 0x8F-0x80): 8F→99, 8E→9D, 8A→97, 89→96, 86→94, 81→93
+        (char)0x99, (char)0x9D, (char)0x8D, (char)0x8C, (char)0x8B, (char)0x97, (char)0x96, (char)0x88, (char)0x87,
+        (char)0x94, (char)0x85, (char)0x84, (char)0x83, (char)0x82, (char)0x93, (char)0x80);
+
+    // Build indices: second_byte & 0x3F maps 0x80-0xBF to 0-63
+    __m512i const x_3f_zmm = _mm512_set1_epi8(0x3F);
+    __m512i indices_zmm = _mm512_and_si512(text_zmm, x_3f_zmm);
+    __m512i transformed_second_zmm = _mm512_permutexvar_epi8(indices_zmm, c6_crossblock_table);
+
+    // Apply transformed second bytes to all cross-block positions
+    __mmask64 all_crossblock_second_mask = is_c6_to_c9_mask | is_c6_to_ca_mask | is_c6_to_c7_mask;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, all_crossblock_second_mask, transformed_second_zmm);
 
     return result_zmm;
 }
@@ -4156,6 +4263,19 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_latin1ab_allowed_(__m128
     // 1. Check against any 3-byte and 4-byte UTF-8 sequences (bytes >= 0xE0)
     __m128i const x_e0_xmm = _mm_set1_epi8((char)0xE0);
     if (_mm_movepi8_mask(_mm_cmpgt_epi8(needle_xmm, x_e0_xmm))) return sz_false_k;
+
+    // 1.5 Check for invalid 2-byte sequences (lead bytes C0, C1, CB, CC, CD, CE, CF)
+    // Valid Latin1AB leads are C2-CA.
+    // We need to check if any byte is >= 0xC0 AND NOT in [0xC2, 0xCA].
+    sz_u128_vec_t v;
+    v.xmm = needle_xmm;
+    for (size_t i = 0; i < needle_length; ++i) {
+        sz_u8_t c = v.u8s[i];
+        // If it looks like a lead byte (or just high byte > 0xC0 since we excluded E0+)
+        if (c >= 0xC0) {
+            if (c < 0xC2 || c > 0xCA) return sz_false_k;
+        }
+    }
 
     // 2. Extract first and last bytes for boundary checks
     sz_u128_vec_t lower_vec;
@@ -4312,8 +4432,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & valid_mask;
 
         // Verify each candidate: compare safe slice, then verify head/tail
         while (match_positions) {
@@ -4360,8 +4481,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & tail_valid;
 
         while (match_positions) {
             int const match_idx = sz_u64_ctz(match_positions);
@@ -4801,8 +4923,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & valid_mask;
 
         // Verify each candidate: compare safe slice, then verify head/tail
         while (match_positions) {
@@ -4840,8 +4963,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & tail_valid;
 
         while (match_positions) {
             int const match_idx = sz_u64_ctz(match_positions);
@@ -5301,8 +5425,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & valid_mask;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & valid_mask;
 
         // Verify each candidate: compare safe slice, then verify head/tail
         while (match_positions) {
@@ -5340,8 +5465,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
         sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-        sz_u64_t match_positions =
-            (first_matches >> offset_first) & (mid_matches >> offset_mid) & (last_matches >> offset_last) & tail_valid;
+        sz_u64_t match_positions = (first_matches >> (safe_offset + offset_first)) &
+                                   (mid_matches >> (safe_offset + offset_mid)) &
+                                   (last_matches >> (safe_offset + offset_last)) & tail_valid;
 
         while (match_positions) {
             int const match_idx = sz_u64_ctz(match_positions);
@@ -6542,7 +6668,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     //    FP3.2. Longer needles.
     // FP4. Safe Armenian sequences.
     //    FP4.1. Needles up to 16 bytes.
-    //    FP4.2. Longer needles.
+    // FP4.2. Longer needles.
     // FP5. Safe Georgian sequences.
     //    FP5.1. Needles up to 16 bytes.
     //    FP5.2. Longer needles.
@@ -6554,7 +6680,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // on the selected "safe slice" of the needle. But what we can do even better with early dispatch for small needles
     // that match our citerea.
     if (needle_length <= 16) {
-        // If all characters end up blonging to the same safe-path the "safe window" will cover the entire string.
+        // If all characters end up belonging to the same safe-path the "safe window" will cover the entire string.
         sz_utf8_case_safe_window_t_ default_window;
         sz_utf8_case_safe_window_init_(&default_window, needle_length);
 
@@ -6645,14 +6771,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     if (longest_safe_window == 0)
         return sz_utf8_case_insensitive_find_serial( //
             haystack, haystack_length, needle, needle_length, matched_length);
-
-    if (longest_safe_window == analysis.ascii.length)
-        return sz_utf8_case_insensitive_find_ice_ascii_( //
-            haystack, haystack_length, needle, needle_length, &analysis.ascii, matched_length);
-
-    else if (longest_safe_window == analysis.latin1ab.length)
-        return sz_utf8_case_insensitive_find_ice_latin1ab_( //
-            haystack, haystack_length, needle, needle_length, &analysis.latin1ab, matched_length);
 
     else if (longest_safe_window == analysis.cyrillic.length)
         return sz_utf8_case_insensitive_find_ice_cyrillic_( //

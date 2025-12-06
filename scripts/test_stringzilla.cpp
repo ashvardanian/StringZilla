@@ -1137,6 +1137,48 @@ void test_utf8_ci_find_equivalence(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_
         // Mixed Vietnamese + ASCII
         {"Hello \xE1\xBB\x86 World", "\xE1\xBB\x87", "Vietnamese Ệ vs ệ in ASCII"},
 
+        // Latin Extended-B C6 range tests (U+0180-U+01BF)
+        // +1 folding patterns (16 chars that stay within C6)
+        {"\xC6\x82\xC6\x84", "\xC6\x83\xC6\x85", "C6 +1: Ƃ Ƅ to ƃ ƅ"},
+        {"\xC6\x83\xC6\x85", "\xC6\x82\xC6\x84", "C6 +1: ƃ ƅ to Ƃ Ƅ"},
+        // Vietnamese Horn letters - important for Vietnamese text
+        {"\xC6\xA0\xC6\xAF", "\xC6\xA1\xC6\xB0", "C6 Vietnamese: Ơ Ư to ơ ư"},
+        {"\xC6\xA1\xC6\xB0", "\xC6\xA0\xC6\xAF", "C6 Vietnamese: ơ ư to Ơ Ư"},
+        {"Vi\xC6\xA1t Nam", "VI\xC6\xA0T NAM", "C6 Vietnamese: Việt Nam mixed"},
+        // More +1 patterns
+        {"\xC6\x87\xC6\x8B\xC6\x91", "\xC6\x88\xC6\x8C\xC6\x92", "C6 +1 odd: Ƈ Ƌ Ƒ to ƈ ƌ ƒ"},
+        {"\xC6\xA7\xC6\xB3\xC6\xB5", "\xC6\xA8\xC6\xB4\xC6\xB6", "C6 +1 odd: Ƨ Ƴ Ƶ to ƨ ƴ ƶ"},
+        {"\xC6\x98\xC6\xAC\xC6\xB8\xC6\xBC", "\xC6\x99\xC6\xAD\xC6\xB9\xC6\xBD", "C6 +1 even: Ƙ Ƭ Ƹ Ƽ to ƙ ƭ ƹ ƽ"},
+
+        // C6 cross-block mappings (C6→C9) - West African/Azerbaijani languages
+        {"\xC6\x81", "\xC9\x93", "C6→C9: Ɓ to ɓ (Hausa/Fula)"},
+        {"\xC9\x93", "\xC6\x81", "C6→C9: ɓ to Ɓ (reverse)"},
+        {"\xC6\x86", "\xC9\x94", "C6→C9: Ɔ to ɔ (Akan/Ewe)"},
+        {"\xC6\x8F", "\xC9\x99", "C6→C9: Ə to ə (Azerbaijani schwa)"},
+        {"\xC9\x99", "\xC6\x8F", "C6→C9: ə to Ə (Azerbaijani reverse)"},
+        {"Az\xC9\x99rbaycan", "AZ\xC6\x8FRBAYCAN", "C6 Azerbaijani: Azərbaycan mixed"},
+        {"\xC6\x89\xC6\x8A", "\xC9\x96\xC9\x97", "C6→C9: Ɖ Ɗ to ɖ ɗ (Ewe/Hausa)"},
+        {"\xC6\x90\xC6\x93\xC6\x94", "\xC9\x9B\xC9\xA0\xC9\xA3", "C6→C9: Ɛ Ɠ Ɣ to ɛ ɠ ɣ (African)"},
+        {"\xC6\x96\xC6\x97", "\xC9\xA9\xC9\xA8", "C6→C9: Ɩ Ɨ to ɩ ɨ"},
+        {"\xC6\x9C\xC6\x9D\xC6\x9F", "\xC9\xAF\xC9\xB2\xC9\xB5", "C6→C9: Ɯ Ɲ Ɵ to ɯ ɲ ɵ"},
+
+        // C6 cross-block mappings (C6→CA) - IPA/African
+        {"\xC6\xA6", "\xCA\x80", "C6→CA: Ʀ to ʀ (Old Norse/IPA)"},
+        {"\xCA\x80", "\xC6\xA6", "C6→CA: ʀ to Ʀ (reverse)"},
+        {"\xC6\xA9", "\xCA\x83", "C6→CA: Ʃ to ʃ (African/IPA)"},
+        {"\xC6\xAE\xC6\xB1\xC6\xB2", "\xCA\x88\xCA\x8A\xCA\x8B", "C6→CA: Ʈ Ʊ Ʋ to ʈ ʊ ʋ"},
+        {"\xC6\xB7", "\xCA\x92", "C6→CA: Ʒ to ʒ (Skolt Sami/IPA)"},
+        {"\xCA\x92", "\xC6\xB7", "C6→CA: ʒ to Ʒ (reverse)"},
+
+        // C6 cross-block mapping (C6→C7) - just one character
+        {"\xC6\x8E", "\xC7\x9D", "C6→C7: Ǝ to ǝ (Pan-Nigerian)"},
+        {"\xC7\x9D", "\xC6\x8E", "C6→C7: ǝ to Ǝ (reverse)"},
+
+        // C6 mixed with ASCII
+        {"Hello \xC6\x8F World", "\xC9\x99", "C6 schwa in ASCII: Ə vs ə"},
+        {"Test \xC6\xA0\xC6\xAF text", "TEST \xC6\xA1\xC6\xB0 TEXT", "C6 Vietnamese in ASCII context"},
+        {"Word\xC6\x81word", "WORD\xC9\x93WORD", "C6→C9 in ASCII sandwich"},
+
         // Georgian path tests (E1 82/83 for Asomtavruli/Mkhedruli, E1 B2 for Mtavruli, E2 B4 for lowercase)
         // Uppercase Asomtavruli Ⴀ (E1 82 A0) -> lowercase ⴀ (E2 B4 80)
         // Mkhedruli ა (E1 83 90) is already lowercase, Mtavruli Ა (E1 B2 90) is uppercase
