@@ -34,6 +34,7 @@
  *  @endcode
  */
 #pragma once
+#include <cstdio>     // `std::printf`, `std::fflush`
 #include <cstdlib>    // `std::getenv`, `std::strtoul`
 #include <fstream>    // `std::ifstream`
 #include <iostream>   // `std::cout`, `std::endl`
@@ -142,6 +143,7 @@ inline void print_test_environment() noexcept {
     std::printf("- Test seed: %u%s\n", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
     double multiplier = get_iterations_multiplier();
     if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
+    std::fflush(stdout); // Ensure output is visible even on crash
 }
 
 /**

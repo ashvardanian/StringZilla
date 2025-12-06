@@ -4414,9 +4414,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
 
     // Main loop - single load, 3-probe filter, verify candidates
     for (; haystack_length >= 64; haystack += step, haystack_length -= step) {
-        __m512i const raw_chunk = _mm512_loadu_si512(haystack);
-
-        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_chunk);
+        haystack_vec.zmm = _mm512_loadu_si512(haystack);
+        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_vec.zmm);
 
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
@@ -4454,10 +4453,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
     // Tail
     if (haystack_length >= needle_length) {
         __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
-        __m512i const raw_tail = _mm512_maskz_loadu_epi8(load_mask, haystack);
+        haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack);
 
         __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
-        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_tail);
+        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_vec.zmm);
 
         sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
@@ -4580,14 +4579,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
     sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
     for (; haystack_length >= needle_length + 64; haystack += 62, haystack_length -= 62) {
         // Load raw haystack chunks at adjusted offsets
-        __m512i const raw_first = _mm512_loadu_si512(haystack + safe_offset + load_first);
-        __m512i const raw_mid = _mm512_loadu_si512(haystack + safe_offset + load_mid);
-        __m512i const raw_last = _mm512_loadu_si512(haystack + safe_offset + load_last);
+        haystack_first_vec.zmm = _mm512_loadu_si512(haystack + safe_offset + load_first);
+        haystack_mid_vec.zmm = _mm512_loadu_si512(haystack + safe_offset + load_mid);
+        haystack_last_vec.zmm = _mm512_loadu_si512(haystack + safe_offset + load_last);
 
         // Fold and compare
-        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_first);
-        haystack_mid_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_mid);
-        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_last);
+        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_first_vec.zmm);
+        haystack_mid_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_mid_vec.zmm);
+        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_last_vec.zmm);
 
         // 3-point Raita filter: find positions where all 3 probes match
         // Shift masks by prefix to align probe byte position
@@ -4641,14 +4640,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
         __mmask64 tail_mask_last = sz_u64_mask_until_(need_last < avail_last ? need_last : avail_last);
 
         // Load raw tail chunks
-        __m512i raw_first = _mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first);
-        __m512i raw_mid = _mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid);
-        __m512i raw_last = _mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last);
+        haystack_first_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_first, haystack + safe_offset + load_first);
+        haystack_mid_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_mid, haystack + safe_offset + load_mid);
+        haystack_last_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_last, haystack + safe_offset + load_last);
 
-        // Fold chunks
-        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_first);
-        haystack_mid_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_mid);
-        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(raw_last);
+        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_first_vec.zmm);
+        haystack_mid_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_mid_vec.zmm);
+        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(haystack_last_vec.zmm);
 
         __mmask64 match_first =
             _mm512_cmpeq_epi8_mask(haystack_first_vec.zmm, probe_first_vec.zmm) >> window->prefix_first;
@@ -4732,6 +4730,13 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
     __mmask64 is_cyrillic_d1_lower_mask =
         _mm512_mask_cmplt_epu8_mask(is_after_d1_mask, _mm512_sub_epi8(source, x_80_zmm), x_10_zmm);
 
+    // Step 4b: Fold Cyrillic extended lowercase after D1 (second bytes 90-9F → subtract 0x10)
+    // This handles 'small io' ё (D1 91) → Ё (D0 81), є (D1 94) → Є (D0 84), etc.
+    // Range check: (byte - 0x90) < 0x10
+    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);
+    __mmask64 is_cyrillic_d1_ext_mask =
+        _mm512_mask_cmplt_epu8_mask(is_after_d1_mask, _mm512_sub_epi8(source, x_90_zmm), x_10_zmm);
+
     // Step 5: Fold ASCII uppercase (A-Z) → add 0x20
     __mmask64 is_ascii_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_41_zmm), x_1a_zmm);
 
@@ -4740,6 +4745,9 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
 
     // Step 7: Apply Cyrillic D1 lowercase folding (add 0x20)
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_cyrillic_d1_lower_mask, result_zmm, x_20_zmm);
+
+    // Step 7b: Apply Cyrillic D1 extended folding (subtract 0x10)
+    result_zmm = _mm512_mask_sub_epi8(result_zmm, is_cyrillic_d1_ext_mask, result_zmm, x_10_zmm);
 
     // Step 8: Apply ASCII folding (add 0x20)
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
@@ -5472,7 +5480,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
     if (haystack_length >= needle_length) {
         __mmask64 const load_mask = sz_u64_mask_until_(haystack_length);
         __mmask64 const tail_valid = sz_u64_mask_until_(haystack_length - needle_length + 1);
-        
+
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack);
 
         // Fall-back to serial code for Polytonic Greek characters, obsolete in modern texts
@@ -5677,8 +5685,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
                                 _mm512_mask_cmpeq_epi8_mask(tail_mask_mid, haystack_mid_vec.zmm, x_e1_zmm) |
                                 _mm512_mask_cmpeq_epi8_mask(tail_mask_last, haystack_last_vec.zmm, x_e1_zmm);
         if (has_e1_mask) {
-            sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length,
-                                                                    matched_length);
+            sz_cptr_t result =
+                sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length, matched_length);
             if (result) return result;
             return SZ_NULL_CHAR;
         }
@@ -6664,23 +6672,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         if (result) *matched_length = needle_length;
         return result;
     }
-
-    // Ligature handling: If the needle contains ligature bytes (EF AC xx or EF AD xx range),
-    // we must fall back to serial because ligatures like ﬁ (EF AC 81) expand to "fi" (2 bytes)
-    // during case-folding. SIMD can't match 3-byte ligature against 2-byte expansion.
-    // This is rare in practice but must be correct.
-    for (sz_size_t i = 0; i + 2 < needle_length; ++i) {
-        if ((sz_u8_t)needle[i] == 0xEF && ((sz_u8_t)needle[i + 1] == 0xAC || (sz_u8_t)needle[i + 1] == 0xAD)) {
-            return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
-                                                        matched_length);
-        }
-    }
-    // Handle needle ending with EF or EF AC (partial ligature sequence)
-    if (needle_length >= 1 && (sz_u8_t)needle[needle_length - 1] == 0xEF)
-        return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);
-    if (needle_length >= 2 && (sz_u8_t)needle[needle_length - 2] == 0xEF &&
-        ((sz_u8_t)needle[needle_length - 1] == 0xAC || (sz_u8_t)needle[needle_length - 1] == 0xAD))
-        return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);
 
     // There is a way to perform case-insensitive substring search faster than case-folding both strings
     // and calling a standard substring search algorithm on them. Case-folding bicameral scripts is typically

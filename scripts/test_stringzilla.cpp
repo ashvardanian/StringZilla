@@ -615,6 +615,13 @@ void test_utf8_case_fold_equivalence(                             //
         "\xD0\x9F",                                         // П (U+041F)
         "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2", // ПРИВЕТ
         "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", // привет
+        // Cyrillic Special
+        "\xD0\x81", // Ё
+        "\xD1\x91", // ё
+        "\xD0\x84", // Є
+        "\xD1\x94", // є
+        "\xD0\x87", // Ї
+        "\xD1\x97", // ї
         // Greek (2-byte UTF-8 starting with CE-CF)
         "\xCE\x91",                                         // Α (U+0391)
         "\xCE\xA9",                                         // Ω (U+03A9)
