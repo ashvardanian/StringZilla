@@ -47,6 +47,7 @@
 #define STRINGZILLA_UTF8_CASE_H_
 
 #include "types.h"
+#include "find.h" // `sz_find`
 
 #ifdef __cplusplus
 extern "C" {
@@ -3071,15 +3072,37 @@ typedef struct {
     sz_u8_t prefix_last;   ///< UTF-8 prefix for last probe (0-3)
 } sz_utf8_case_safe_window_t_;
 
-void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *window, sz_size_t needle_length) {
+SZ_INTERNAL void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *window, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
     window->start = 0;
     window->length = needle_length;
-    window->probe_first = 0;
-    window->probe_mid = needle_length / 2;
-    window->probe_last = needle_length - 1;
-    window->prefix_first = 0;
-    window->prefix_mid = 0;
-    window->prefix_last = 0;
+
+    // Use the generic anomaly detector to pick 3 probe positions
+    sz_size_t probe_first, probe_mid, probe_last;
+    sz_locate_needle_anomalies_(needle, needle_length, &probe_first, &probe_mid, &probe_last);
+
+    // The prefix is the distance from the probe position back to the start of the UTF-8 character
+    sz_u8_t prefix_first = 0, prefix_mid = 0, prefix_last = 0;
+    sz_size_t start;
+
+    start = probe_first;
+    while (start > 0 && (((sz_u8_t)needle[start] & 0xC0) == 0x80)) { start--; }
+    prefix_first = (sz_u8_t)(probe_first - start);
+
+    start = probe_mid;
+    while (start > 0 && (((sz_u8_t)needle[start] & 0xC0) == 0x80)) { start--; }
+    prefix_mid = (sz_u8_t)(probe_mid - start);
+
+    start = probe_last;
+    while (start > 0 && (((sz_u8_t)needle[start] & 0xC0) == 0x80)) { start--; }
+    prefix_last = (sz_u8_t)(probe_last - start);
+
+    window->probe_first = probe_first;
+    window->probe_mid = probe_mid;
+    window->probe_last = probe_last;
+    window->prefix_first = prefix_first;
+    window->prefix_mid = prefix_mid;
+    window->prefix_last = prefix_last;
 }
 
 /**
