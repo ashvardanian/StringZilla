@@ -87,17 +87,18 @@ inline void write_file(std::string path, std::string content) noexcept(false) {
 inline std::mt19937::result_type global_random_seed() noexcept {
     static std::mt19937::result_type seed = []() {
         char const *seed_env = std::getenv("SZ_TESTS_SEED");
-        if (seed_env && seed_env[0] != '\0') {
-            auto parsed = static_cast<std::mt19937::result_type>(std::strtoul(seed_env, nullptr, 10));
-            std::printf("SZ_TESTS_SEED=%u (from environment)\n", static_cast<unsigned>(parsed));
-            return parsed;
-        }
+        if (seed_env && seed_env[0] != '\0')
+            return static_cast<std::mt19937::result_type>(std::strtoul(seed_env, nullptr, 10));
         std::random_device seed_source;
-        auto generated = static_cast<std::mt19937::result_type>(seed_source());
-        std::printf("SZ_TESTS_SEED=%u (randomly generated)\n", static_cast<unsigned>(generated));
-        return generated;
+        return static_cast<std::mt19937::result_type>(seed_source());
     }();
     return seed;
+}
+
+/// @brief Returns true if the seed was set via environment variable.
+inline bool global_random_seed_from_env() noexcept {
+    char const *seed_env = std::getenv("SZ_TESTS_SEED");
+    return seed_env && seed_env[0] != '\0';
 }
 
 /**
@@ -122,14 +123,25 @@ inline double get_iterations_multiplier() noexcept {
         char const *env = std::getenv("SZ_TESTS_MULTIPLIER");
         if (env && env[0] != '\0') {
             double parsed = std::strtod(env, nullptr);
-            if (parsed > 0.0) {
-                std::printf("SZ_TESTS_MULTIPLIER=%.2f (from environment)\n", parsed);
-                return parsed;
-            }
+            if (parsed > 0.0) return parsed;
         }
         return 1.0;
     }();
     return multiplier;
+}
+
+/**
+ *  @brief  Prints test environment configuration (seed and multiplier).
+ *
+ *  Call this at the start of main() to display test configuration alongside
+ *  other environment info. Format matches capability flags style.
+ */
+inline void print_test_environment() noexcept {
+    auto seed = global_random_seed();
+    bool from_env = global_random_seed_from_env();
+    std::printf("- Test seed: %u%s\n", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
+    double multiplier = get_iterations_multiplier();
+    if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
 }
 
 /**
