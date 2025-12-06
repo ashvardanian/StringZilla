@@ -1643,6 +1643,74 @@ SZ_INTERNAL sz_size_t sz_ice_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mas
     return invalid_mask ? (sz_size_t)sz_u64_ctz(invalid_mask) : chunk_size;
 }
 
+#if SZ_DEBUG
+
+/**
+ *  @brief  Verifies the SIMD result against the serial implementation.
+ *          If they differ, dumps diagnostic info and crashes to help debugging.
+ */
+SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
+    sz_cptr_t result, sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
+    char const *file, int line) {
+
+    sz_size_t serial_matched_length;
+    sz_cptr_t expected =
+        sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, &serial_matched_length);
+
+    if (result == expected) return;
+
+#if !SZ_AVOID_LIBC
+    // Assumes <stdio.h> and <stdlib.h> are included by the user/test suite
+    fprintf(stderr, "--------------------------------------------------------\n");
+    fprintf(stderr, "SIMD Mismatch at %s:%d\n", file, line);
+    fprintf(stderr, "Haystack Length: %zu, Needle Length: %zu\n", haystack_length, needle_length);
+    fprintf(stderr, "Expected: %p, Found: %p\n", (void *)expected, (void *)result);
+
+    if (expected) fprintf(stderr, "Expected Offset: %zu\n", (size_t)(expected - haystack));
+    else
+        fprintf(stderr, "Expected: NULL (Not Found)\n");
+
+    if (result) fprintf(stderr, "Found Offset: %zu\n", (size_t)(result - haystack));
+    else
+        fprintf(stderr, "Found: NULL (Not Found)\n");
+
+    // Print Needle (First 64 bytes)
+    fprintf(stderr, "Needle (Hex): ");
+    for (size_t i = 0; i < needle_length && i < 64; ++i) fprintf(stderr, "%02X ", (unsigned char)needle[i]);
+    if (needle_length > 64) fprintf(stderr, "...");
+    fprintf(stderr, "\n");
+
+    // Print Haystack Context (if match found or missed)
+    size_t context_padding = 16;
+    sz_cptr_t focus = expected ? expected : (result ? result : haystack);
+    sz_cptr_t start = (focus - haystack > (sz_ssize_t)context_padding) ? focus - context_padding : haystack;
+    sz_cptr_t end = (focus + needle_length + context_padding < haystack + haystack_length)
+                        ? focus + needle_length + context_padding
+                        : haystack + haystack_length;
+
+    fprintf(stderr, "Haystack Context (Hex): ");
+    for (sz_cptr_t p = start; p < end; ++p) {
+        if (p == expected) fprintf(stderr, "[EXP] ");
+        if (p == result) fprintf(stderr, "[ACT] ");
+        fprintf(stderr, "%02X ", (unsigned char)*p);
+    }
+    fprintf(stderr, "\n");
+    fprintf(stderr, "--------------------------------------------------------\n");
+    abort();
+#else
+    // Force crash without LibC
+    *((volatile int *)0) = 0;
+#endif
+}
+
+#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length)       \
+    sz_utf8_case_insensitive_find_verify_and_crash_(result, haystack, haystack_length, needle, needle_length, \
+                                                    __FILE__, __LINE__)
+
+#else
+#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length)
+#endif
+
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
@@ -3397,7 +3465,14 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
         // Track which scripts this character belongs to (for window validity)
         if (lead == 0xC2 || lead == 0xC3) has_latin1ab = sz_true_k;
-        if (lead == 0xD0 || lead == 0xD1) has_cyrillic = sz_true_k;
+        if (lead == 0xD0) has_cyrillic = sz_true_k;
+        if (lead == 0xD1) {
+            // Exclude D1 A0-BF (Historical Cyrillic) which SIMD kernel doesn't fold correctly
+            if (rune_bytes >= 2 && ptr[1] >= 0xA0) { /* skip */
+            }
+            else
+                has_cyrillic = sz_true_k;
+        }
         if (lead == 0xCE || lead == 0xCF) has_greek = sz_true_k;
         if (lead == 0xD4 || lead == 0xD5 || lead == 0xD6) has_armenian = sz_true_k;
         if (lead == 0xE1 && rune_bytes >= 2 && (ptr[1] >= 0xB8 && ptr[1] <= 0xBB)) has_vietnamese = sz_true_k;
@@ -3580,7 +3655,9 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_ascii_allowed_( //
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                    //
-    sz_u8_t needle_byte, sz_size_t *matched_length) {
+    sz_cptr_t needle, sz_size_t *matched_length) {
+
+    sz_u8_t const needle_byte = (sz_u8_t)needle[0];
 
     sz_u8_t const needle_lower = needle_byte | 0x20;
 
@@ -3589,6 +3666,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
         char const needle_char = (char)needle_byte;
         sz_cptr_t result = sz_find_byte_skylake(haystack, haystack_length, &needle_char);
         if (result) *matched_length = 1;
+        sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, 1);
         return result;
     }
 
@@ -3603,7 +3681,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
         if (matches) {
             int const match_idx = sz_u64_ctz(matches);
             *matched_length = 1;
-            return haystack + match_idx;
+            sz_cptr_t result = haystack + match_idx;
+            sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, 1);
+            return result;
         }
     }
 
@@ -3616,10 +3696,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
         if (matches) {
             int const match_idx = sz_u64_ctz(matches);
             *matched_length = 1;
-            return haystack + match_idx;
+            sz_cptr_t result = haystack + match_idx;
+            sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, 1);
+            return result;
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, 1);
     return SZ_NULL_CHAR;
 }
 
@@ -3638,10 +3721,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_2byte_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                    //
-    sz_u8_t needle_first, sz_u8_t needle_second, sz_size_t *matched_length) {
+    sz_cptr_t needle, sz_size_t *matched_length) {
 
     // Fold needle bytes to lowercase (same transform as sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_)
+    sz_u8_t const needle_first = (sz_u8_t)needle[0];
     sz_u8_t const first_lower = (needle_first >= 'A' && needle_first <= 'Z') ? (needle_first | 0x20) : needle_first;
+    sz_u8_t const needle_second = (sz_u8_t)needle[1];
     sz_u8_t const second_lower =
         (needle_second >= 'A' && needle_second <= 'Z') ? (needle_second | 0x20) : needle_second;
 
@@ -3660,7 +3745,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_2byte_( //
         if (matches) {
             int const match_idx = sz_u64_ctz(matches);
             *matched_length = 2;
-            return haystack + match_idx;
+            sz_cptr_t result = haystack + match_idx;
+            sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, 2);
+            return result;
         }
     }
 
@@ -3676,10 +3763,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_2byte_( //
         if (matches) {
             int const match_idx = sz_u64_ctz(matches);
             *matched_length = 2;
-            return haystack + match_idx;
+            sz_cptr_t result = haystack + match_idx;
+            sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, 2);
+            return result;
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, 2);
     return SZ_NULL_CHAR;
 }
 
@@ -3776,6 +3866,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -3817,6 +3908,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -3824,6 +3916,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -3862,9 +3955,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
 
     // Redirect to up-to-16-byte kernel if applicable
     sz_size_t safe_length = window->length;
-    if (safe_length <= 16)
-        return sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
+    if (safe_length <= 16) {
+        sz_cptr_t result = sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
             haystack, haystack_length, needle, needle_length, window, matched_length);
+        sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+        return result;
+    }
 
     // Clamp to single ZMM register
     if (safe_length > 64) safe_length = 64;
@@ -3929,6 +4025,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -3968,6 +4065,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -4443,6 +4541,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -4483,6 +4582,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -4490,6 +4590,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -4535,9 +4636,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
     sz_size_t safe_length = window->length;
 
     // Redirect to up-to-16-byte kernel if applicable
-    if (safe_length <= 16)
-        return sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
+    if (safe_length <= 16) {
+        sz_cptr_t result = sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
             haystack, haystack_length, needle, needle_length, window, matched_length);
+        sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+        return result;
+    }
 
     // Clamp safe slice to single ZMM register, ensuring we don't clip a 2-byte character
     if (safe_length > 64) {
@@ -4617,6 +4721,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -4671,6 +4776,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -4678,6 +4784,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -4714,7 +4821,6 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
     // Step 1: Detect D0/D1 lead bytes
     __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source, x_d0_zmm);
     __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source, x_d1_zmm);
-    __mmask64 is_lead_mask = is_d0_mask | is_d1_mask;
 
     // Step 2: Detect positions after D0 and after D1
     __mmask64 is_after_d0_mask = is_d0_mask << 1;
@@ -4753,7 +4859,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_ascii_upper_mask, result_zmm, x_20_zmm);
 
     // Step 9: Normalize lead bytes D0/D1 → D0
-    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_lead_mask, x_d0_zmm);
+    // Only applied if we actually folded a D1 sequence.
+    // For D1 80-8F and D1 90-9F, we folded the second byte to A0-AF or 80-8F.
+    // We must also change D1 -> D0 to match the target (Basic Cyrillic).
+    // For D1 A0-BF (Historical), we did NOT fold, so we must leave D1 as is to avoid collisions.
+    __mmask64 folded_d1_leads = (is_cyrillic_d1_lower_mask | is_cyrillic_d1_ext_mask) >> 1;
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, folded_d1_leads, x_d0_zmm);
 
     return result_zmm;
 }
@@ -4779,6 +4890,24 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(__m128
     __mmask16 invalid_lead_mask = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_d0_xmm);
 
     if (other_script_mask | invalid_lead_mask) return sz_false_k;
+
+    // Reject D1 lead bytes followed by A0-BF (Historical Cyrillic)
+    // The SIMD kernel forces D1 -> D0, which causes collisions for D1 A0-BF range
+    // e.g., Ѡ (U+0460, D1 A0) -> Р (U+0420, D0 A0)
+    __m128i const x_d1_xmm = _mm_set1_epi8((char)0xD1);
+    __m128i const x_a0_xmm = _mm_set1_epi8((char)0xA0);
+    __mmask16 is_d1_mask = _mm_cmpeq_epi8_mask(needle_xmm, x_d1_xmm);
+
+    // Shift right to check the byte AFTER D1 (accounting for boundary)
+    // Note: If D1 is the last byte, shifted value doesn't matter as we can't complete the char anyway,
+    // but the loop/logic handles bounds. Safe check here protects the collision.
+    __m128i next_xmm = _mm_bsrli_si128(needle_xmm, 1);
+    __mmask16 next_is_high_mask = _mm_cmpge_epu8_mask(next_xmm, x_a0_xmm);
+
+    // Use pair_mask to ignore the last byte if it's D1 (incomplete sequence)
+    __mmask16 pair_mask = sz_u16_mask_until_(needle_length - 1);
+
+    if ((is_d1_mask & next_is_high_mask & pair_mask) != 0) return sz_false_k;
 
     // Extract first and last bytes for boundary checks
     sz_u128_vec_t lower_vec;
@@ -4957,6 +5086,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -4990,9 +5120,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(sz_cptr_t hays
 
     // Redirect to up-to-16-byte kernel if applicable
     sz_size_t safe_length = window->length;
-    if (safe_length <= 16)
-        return sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
+    if (safe_length <= 16) {
+        sz_cptr_t result = sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
             haystack, haystack_length, needle, needle_length, window, matched_length);
+        sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+        return result;
+    }
 
     // Clamp safe slice to single ZMM register, ensuring we don't clip a 2-byte character
     sz_cptr_t safe_start = needle + window->start;
@@ -5071,6 +5204,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(sz_cptr_t hays
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -5437,7 +5571,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
         if (_mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_zmm)) {
             sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack, step + needle_length - 1, needle,
                                                                     needle_length, matched_length);
-            if (result) return result;
+            if (result) {
+                sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+                return result;
+            }
             continue;
         }
 
@@ -5469,6 +5606,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -5487,7 +5625,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
         if (_mm512_mask_cmpeq_epi8_mask(load_mask, haystack_vec.zmm, x_e1_zmm)) {
             sz_cptr_t result =
                 sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length, matched_length);
-            if (result) return result;
+            if (result) {
+                sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+                return result;
+            }
+            sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
             return SZ_NULL_CHAR;
         }
 
@@ -5525,6 +5667,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -5559,9 +5702,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
 
     // Redirect to up-to-16-byte kernel if applicable
     sz_size_t safe_length = window->length;
-    if (safe_length <= 16)
-        return sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
+    if (safe_length <= 16) {
+        sz_cptr_t res = sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
             haystack, haystack_length, needle, needle_length, window, matched_length);
+        sz_utf8_case_insensitive_find_verify_(res, haystack, haystack_length, needle, needle_length);
+        return res;
+    }
 
     // Clamp safe slice to single ZMM register, ensuring we don't clip a 2-byte character
     sz_cptr_t safe_start = needle + window->start;
@@ -5614,7 +5760,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
         if (has_e1_mask) {
             sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack, 62 + needle_length - 1, needle,
                                                                     needle_length, matched_length);
-            if (result) return result;
+            if (result) {
+                sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+                return result;
+            }
             continue;
         }
 
@@ -5652,6 +5801,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -5687,7 +5837,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
         if (has_e1_mask) {
             sz_cptr_t result =
                 sz_utf8_case_insensitive_find_chunk_(haystack, haystack_length, needle, needle_length, matched_length);
-            if (result) return result;
+            if (result) {
+                sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length);
+                return result;
+            }
+            sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
             return SZ_NULL_CHAR;
         }
 
@@ -5719,6 +5873,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -5726,6 +5881,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -5976,6 +6132,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6014,6 +6171,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6021,6 +6179,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -6054,9 +6213,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
 
     // Redirect to up-to-16-byte kernel if applicable
     sz_size_t safe_length = window->length;
-    if (safe_length <= 16)
-        return sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
+    if (safe_length <= 16) {
+        sz_cptr_t res = sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
             haystack, haystack_length, needle, needle_length, window, matched_length);
+        sz_utf8_case_insensitive_find_verify_(res, haystack, haystack_length, needle, needle_length);
+        return res;
+    }
 
     // Clamp safe slice to single ZMM register, ensuring we don't clip a 2-byte character
     sz_cptr_t safe_start = needle + window->start;
@@ -6131,6 +6293,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6182,6 +6345,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6189,6 +6353,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -6213,21 +6378,26 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
 SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(__m128i needle_xmm,
                                                                             sz_size_t needle_length) {
     // Vietnamese path handles ASCII + E1 lead bytes (with B8-BB second byte)
-    // Reject: C0-E0 (2-byte leads), E2-FF (other 3/4-byte leads)
-    // Allow: 00-BF (ASCII + continuations) and E1 (Vietnamese lead)
+    // Also handles Latin-1 Supplement (C2-C3 lead bytes)
+    // Reject: C0-C1 (invalid), C4-E0 (unsupported 2-byte), E2-FF (other 3/4-byte)
+    // Allow: 00-BF (ASCII + continuations), C2-C3 (Latin-1), E1 (Vietnamese)
 
     __m128i const x_c0_xmm = _mm_set1_epi8((char)0xC0);
+    __m128i const x_c2_xmm = _mm_set1_epi8((char)0xC2);
+    __m128i const x_c4_xmm = _mm_set1_epi8((char)0xC4);
     __m128i const x_e1_xmm = _mm_set1_epi8((char)0xE1);
     __m128i const x_e2_xmm = _mm_set1_epi8((char)0xE2);
     __m128i const x_b8_xmm = _mm_set1_epi8((char)0xB8);
     __m128i const x_04_xmm = _mm_set1_epi8(0x04);
 
-    // Check for 2-byte leads (C0-E0) which are not Vietnamese
-    __mmask16 is_2byte_lead = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_e1_xmm);
+    // Check for invalid 2-byte leads (C0-C1)
+    __mmask16 is_c0c1 = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_c2_xmm);
+    // Check for unsupported 2-byte leads (C4-E0) i.e. >= C4 AND < E1
+    __mmask16 is_c4e0 = _mm_cmpge_epu8_mask(needle_xmm, x_c4_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_e1_xmm);
     // Check for other 3/4-byte leads (E2-FF)
     __mmask16 is_other_3byte = _mm_cmpge_epu8_mask(needle_xmm, x_e2_xmm);
 
-    if (is_2byte_lead | is_other_3byte) return sz_false_k;
+    if (is_c0c1 | is_c4e0 | is_other_3byte) return sz_false_k;
 
     // After E1 lead byte, the second byte must be in [B8, BB] for Vietnamese
     // Otherwise it's a different script (e.g., Georgian uses E1 82-83)
@@ -6319,7 +6489,27 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_zmm_(__m51
     // Step 5: Parity-based folding - if third byte is even, add 1 (uppercase → lowercase)
     // Even check: (byte & 0x01) == 0
     __mmask64 is_even_mask = ~_mm512_test_epi8_mask(source, x_01_zmm);
-    __mmask64 is_vietnamese_upper_mask = is_ext_third_mask & is_even_mask;
+
+    // EXCEPTION: 1E96-1E9F (E1 BA 96-9F) are mostly lowercase already or anomalous.
+    // Don't apply parity folding here.
+    // Range check: (byte3 - 0x96) < 0x0A means byte3 in [0x96, 0x9F]
+    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
+    __m512i const x_96_zmm = _mm512_set1_epi8((char)0x96);
+    __m512i const x_0a_zmm = _mm512_set1_epi8(0x0A);
+
+    // Check if byte2 is BA
+    // Note: checks source at all positions, but we mask with prev_is_ba later which aligns it
+    __mmask64 is_byte2_ba = _mm512_cmpeq_epi8_mask(source, x_ba_zmm);
+    // Shift left to match byte 3 position
+    __mmask64 prev_is_ba = is_byte2_ba << 1;
+
+    // Check if byte3 is in [0x96, 0x9F]
+    __mmask64 is_byte3_in_range = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source, x_96_zmm), x_0a_zmm);
+
+    // Valid exception: Previous was BA AND Current in Exception Range
+    __mmask64 is_exception_1e9x = prev_is_ba & is_byte3_in_range;
+
+    __mmask64 is_vietnamese_upper_mask = is_ext_third_mask & is_even_mask & ~is_exception_1e9x;
 
     // Step 6: Detect C3 lead bytes for Latin-1 folding
     __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(source, x_c3_zmm);
@@ -6432,6 +6622,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_upto16byte_( 
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6470,6 +6661,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_upto16byte_( 
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6477,6 +6669,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_upto16byte_( 
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -6593,6 +6786,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(sz_cptr_t ha
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6644,6 +6838,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(sz_cptr_t ha
                                 : sz_true_k;
                 if (same_head && same_tail) {
                     *matched_length = needle_length;
+                    sz_utf8_case_insensitive_find_verify_(candidate, haystack, haystack_length, needle, needle_length);
                     return candidate;
                 }
             }
@@ -6651,6 +6846,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(sz_cptr_t ha
         }
     }
 
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
 
@@ -6734,10 +6930,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         if (all_safe_ascii) {
             if (needle_length == 1)
                 return sz_utf8_case_insensitive_find_ice_ascii_1byte_( //
-                    haystack, haystack_length, (sz_u8_t)needle[0], matched_length);
+                    haystack, haystack_length, needle, matched_length);
             else if (needle_length == 2)
                 return sz_utf8_case_insensitive_find_ice_ascii_2byte_( //
-                    haystack, haystack_length, (sz_u8_t)needle[0], (sz_u8_t)needle[1], matched_length);
+                    haystack, haystack_length, needle, matched_length);
             else
                 return sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
                     haystack, haystack_length, needle, needle_length, &default_window, matched_length);
