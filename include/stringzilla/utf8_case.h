@@ -2759,6 +2759,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
  *  can safely include this character in their safe window.
  */
 typedef enum {
+    sz_utf8_case_rune_safe_none_k = 0,
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII characters.
      *
@@ -3004,7 +3005,7 @@ typedef struct {
 
 void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *window, sz_size_t needle_length) {
     window->start = 0;
-    window->length = 0;
+    window->length = needle_length;
     window->probe_first = 0;
     window->probe_mid = needle_length / 2;
     window->probe_last = needle_length - 1;
@@ -3021,7 +3022,7 @@ void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *window, sz_size
  */
 typedef struct {
     sz_utf8_case_safe_window_t_ ascii;
-    sz_utf8_case_safe_window_t_ latin1;
+    sz_utf8_case_safe_window_t_ latin1ab;
     sz_utf8_case_safe_window_t_ cyrillic;
     sz_utf8_case_safe_window_t_ greek;
     sz_utf8_case_safe_window_t_ armenian;
@@ -3050,8 +3051,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
     sz_rune_t rune, sz_size_t rune_bytes,                                          //
     sz_rune_t prev_rune, sz_rune_t next_rune) {
 
-    sz_utf8_case_rune_safety_profile_t_ safety = {sz_false_k, sz_false_k, sz_false_k,
-                                                  sz_false_k, sz_false_k, sz_false_k};
+    int safety = sz_utf8_case_rune_safe_none_k;
 
     // Helper: lowercase ASCII
     sz_rune_t lower = (rune >= 'A' && rune <= 'Z') ? (rune + 0x20) : rune;
@@ -3126,15 +3126,19 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
         // ASCII is safe for ASCII/Latin1/Vietnamese paths IF it passes contextual checks
         // Key fix: Latin1 path uses same ASCII rules as ASCII path (fixes Eszett bug)
-        safety.ascii = ascii_safe;
-        safety.latin1 = ascii_safe;
-        safety.vietnamese = ascii_safe;
+        // ASCII is safe for ASCII/Latin1/Vietnamese paths IF it passes contextual checks
+        // Key fix: Latin1 path uses same ASCII rules as ASCII path (fixes Eszett bug)
+        if (ascii_safe) {
+            safety |= sz_utf8_case_rune_safe_ascii_k;
+            safety |= sz_utf8_case_rune_safe_latin1ab_k;
+            safety |= sz_utf8_case_rune_safe_vietnamese_k;
+        }
         // Script-specific paths (Cyrillic/Greek/Armenian) include ASCII unconditionally
         // because their fold functions handle ASCII (A-Z → a-z) correctly
-        safety.cyrillic = sz_true_k;
-        safety.greek = sz_true_k;
-        safety.armenian = sz_true_k;
-        return safety;
+        safety |= sz_utf8_case_rune_safe_cyrillic_k;
+        safety |= sz_utf8_case_rune_safe_greek_k;
+        safety |= sz_utf8_case_rune_safe_armenian_k;
+        return (sz_utf8_case_rune_safety_profile_t_)safety;
     }
 
     // 2-byte UTF-8 (U+0080 to U+07FF)
@@ -3144,16 +3148,17 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
 
         // Latin-1 Supplement (C2/C3 lead bytes) - all are safe
+        // Latin-1 Supplement (C2/C3 lead bytes) - all are safe
         if (lead == 0xC2 || lead == 0xC3) {
-            safety.latin1 = sz_true_k;
-            safety.vietnamese = sz_true_k; // Vietnamese includes Latin1
+            safety |= sz_utf8_case_rune_safe_latin1ab_k;
+            safety |= sz_utf8_case_rune_safe_vietnamese_k; // Vietnamese includes Latin1
         }
 
         // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
         // D1 80-9F: U+0440-U+045F (lowercase continuation)
         if ((lead == 0xD0 && second >= 0x80 && second <= 0xBF) || (lead == 0xD1 && second >= 0x80 && second <= 0x9F)) {
-            safety.cyrillic = sz_true_k;
+            safety |= sz_utf8_case_rune_safe_cyrillic_k;
         }
 
         // Greek - check exact ranges handled by sz_utf8_case_insensitive_find_ice_greek_fold_zmm_
@@ -3162,7 +3167,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         // CF 80-89: lowercase π-ω (includes final sigma at 82, sigma at 83)
         if ((lead == 0xCE && second >= 0x91 && second <= 0xA9) || (lead == 0xCE && second >= 0xB1 && second <= 0xBF) ||
             (lead == 0xCF && second >= 0x80 && second <= 0x89)) {
-            safety.greek = sz_true_k;
+            safety |= sz_utf8_case_rune_safe_greek_k;
         }
 
         // Armenian - check exact ranges handled by sz_utf8_case_insensitive_find_ice_armenian_fold_zmm_
@@ -3172,10 +3177,10 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         // D6 80-86: lowercase հ-ֆ
         if ((lead == 0xD4 && second >= 0xB1 && second <= 0xBF) || (lead == 0xD5 && second >= 0x80 && second <= 0x96) ||
             (lead == 0xD5 && second >= 0xA1 && second <= 0xBF) || (lead == 0xD6 && second >= 0x80 && second <= 0x86)) {
-            safety.armenian = sz_true_k;
+            safety |= sz_utf8_case_rune_safe_armenian_k;
         }
 
-        return safety;
+        return (sz_utf8_case_rune_safety_profile_t_)safety;
     }
 
     // 3-byte UTF-8 (U+0800 to U+FFFF)
@@ -3186,13 +3191,13 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         //   ẖ (1E96) → h + ̱, ẗ (1E97) → t + ̈, ẘ (1E98) → w + ̊
         //   ẙ (1E99) → y + ̊, ẚ (1E9A) → a + ʾ, ẛ (1E9B) → ſ (long s)
         //   1E9C-1E9F are also problematic or reserved
-        if (rune >= 0x1E00 && rune <= 0x1E95) { safety.vietnamese = sz_true_k; }
-        if (rune >= 0x1EA0 && rune <= 0x1EFF) { safety.vietnamese = sz_true_k; }
-        return safety;
+        if (rune >= 0x1E00 && rune <= 0x1E95) { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
+        if (rune >= 0x1EA0 && rune <= 0x1EFF) { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
+        return (sz_utf8_case_rune_safety_profile_t_)safety;
     }
 
     // 4-byte UTF-8 - currently no fast paths
-    return safety;
+    return (sz_utf8_case_rune_safety_profile_t_)safety;
 }
 
 /**
@@ -3305,7 +3310,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
     // Initialize all best windows to empty
     sz_script_window_init_(&result.ascii);
-    sz_script_window_init_(&result.latin1);
+    sz_script_window_init_(&result.latin1ab);
     sz_script_window_init_(&result.cyrillic);
     sz_script_window_init_(&result.greek);
     sz_script_window_init_(&result.armenian);
@@ -3314,9 +3319,9 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
     if (needle_length == 0) return result;
 
     // Current windows being built (one per script)
-    sz_utf8_case_safe_window_t_ curr_ascii, curr_latin1, curr_cyrillic, curr_greek, curr_armenian, curr_vietnamese;
+    sz_utf8_case_safe_window_t_ curr_ascii, curr_latin1ab, curr_cyrillic, curr_greek, curr_armenian, curr_vietnamese;
     sz_script_window_init_(&curr_ascii);
-    sz_script_window_init_(&curr_latin1);
+    sz_script_window_init_(&curr_latin1ab);
     sz_script_window_init_(&curr_cyrillic);
     sz_script_window_init_(&curr_greek);
     sz_script_window_init_(&curr_armenian);
@@ -3324,13 +3329,13 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
     // Codepoint counts tracked separately (not stored in final struct to save space)
     // curr_*_cp = count for current window being built, best_*_cp = count for best window found
-    sz_size_t curr_ascii_cp = 0, curr_latin1_cp = 0, curr_cyrillic_cp = 0;
+    sz_size_t curr_ascii_cp = 0, curr_latin1ab_cp = 0, curr_cyrillic_cp = 0;
     sz_size_t curr_greek_cp = 0, curr_armenian_cp = 0, curr_vietnamese_cp = 0;
-    sz_size_t best_ascii_cp = 0, best_latin1_cp = 0, best_cyrillic_cp = 0;
+    sz_size_t best_ascii_cp = 0, best_latin1ab_cp = 0, best_cyrillic_cp = 0;
     sz_size_t best_greek_cp = 0, best_armenian_cp = 0, best_vietnamese_cp = 0;
 
     // Track whether each non-ASCII path has seen its specific chars (for validity)
-    sz_bool_t has_latin1 = sz_false_k;     // C2/C3 2-byte chars
+    sz_bool_t has_latin1ab = sz_false_k;   // C2/C3 2-byte chars
     sz_bool_t has_cyrillic = sz_false_k;   // D0/D1 2-byte chars
     sz_bool_t has_greek = sz_false_k;      // CE/CF 2-byte chars
     sz_bool_t has_armenian = sz_false_k;   // D4/D5/D6 2-byte chars
@@ -3378,7 +3383,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         sz_size_t byte_offset = (sz_size_t)(ptr - (sz_u8_t const *)needle);
 
         // Track which scripts this character belongs to (for window validity)
-        if (lead == 0xC2 || lead == 0xC3) has_latin1 = sz_true_k;
+        if (lead == 0xC2 || lead == 0xC3) has_latin1ab = sz_true_k;
         if (lead == 0xD0 || lead == 0xD1) has_cyrillic = sz_true_k;
         if (lead == 0xCE || lead == 0xCF) has_greek = sz_true_k;
         if (lead == 0xD4 || lead == 0xD5 || lead == 0xD6) has_armenian = sz_true_k;
@@ -3391,7 +3396,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 // Helper macro to update window for a script
 #define sz_update_window_(script)                                                  \
     do {                                                                           \
-        if (safety.script) {                                                       \
+        if (safety & sz_utf8_case_rune_safe_##script##_k) {                        \
             /* Safe: extend current window */                                      \
             if (curr_##script##_cp == 0) { curr_##script.start = byte_offset; }    \
             curr_##script.length = byte_offset + rune_bytes - curr_##script.start; \
@@ -3409,7 +3414,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
     } while (0)
 
         sz_update_window_(ascii);
-        sz_update_window_(latin1);
+        sz_update_window_(latin1ab);
         sz_update_window_(cyrillic);
         sz_update_window_(greek);
         sz_update_window_(armenian);
@@ -3432,7 +3437,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
     } while (0)
 
     sz_finalize_window_(ascii);
-    sz_finalize_window_(latin1);
+    sz_finalize_window_(latin1ab);
     sz_finalize_window_(cyrillic);
     sz_finalize_window_(greek);
     sz_finalize_window_(armenian);
@@ -3442,7 +3447,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
     // Invalidate non-ASCII windows that contain no script-specific chars
     // A window is only valid if it contains at least one char from that script
-    if (!has_latin1) { result.latin1.length = 0; }
+    if (!has_latin1ab) { result.latin1ab.length = 0; }
     if (!has_cyrillic) { result.cyrillic.length = 0; }
     if (!has_greek) { result.greek.length = 0; }
     if (!has_armenian) { result.armenian.length = 0; }
@@ -3716,18 +3721,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
     sz_size_t const offset_last = window->probe_last;
 
     // Broadcast probe bytes
-    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec, haystack_vec;
+    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
     probe_first_vec.zmm = _mm512_set1_epi8(needle_safe_folded[offset_first]);
     probe_mid_vec.zmm = _mm512_set1_epi8(needle_safe_folded[offset_mid]);
     probe_last_vec.zmm = _mm512_set1_epi8(needle_safe_folded[offset_last]);
 
-    sz_size_t const step = 64 - safe_length + 1;
-    __mmask64 const valid_mask = sz_u64_mask_until_(step);
-
     // Main loop - single load per probe position, 3-probe filter, verify candidates
+    sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
     for (; haystack_length >= needle_length + 64; haystack += 64, haystack_length -= 64) {
         // Load haystack at each probe position offset by safe_offset
-        sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
         haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(
             _mm512_loadu_si512(haystack + safe_offset + offset_first));
         haystack_mid_vec.zmm =
@@ -3772,7 +3774,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_upto16byte_( //
     if (haystack_length >= needle_length) {
         __mmask64 tail_mask = sz_u64_mask_until_(haystack_length - needle_length + 1);
 
-        sz_u512_vec_t haystack_first_vec, haystack_mid_vec, haystack_last_vec;
         haystack_first_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(
             _mm512_maskz_loadu_epi8(tail_mask, haystack + safe_offset + offset_first));
         haystack_mid_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(
@@ -3966,10 +3967,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
 
 #pragma endregion // ASCII Case-Insensitive Find
 
-#pragma region Latin-1 Case-Insensitive Find
+#pragma region Latin-1AB Case-Insensitive Find
 
 /**
  *  @brief  Fold a ZMM register using Latin-1/A/B case folding rules.
+ *  @sa sz_utf8_case_rune_safe_latin1ab_k for rules.
  *
  *  Handles case folding for:
  *  - 26x ASCII uppercase (A-Z → a-z): add 0x20
@@ -4146,8 +4148,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_latin1ab_fold_zmm_(__m512i
  *  @param[in] needle_xmm XMM register containing the needle bytes.
  *  @return sz_true_k if all bytes are valid Latin-1 UTF-8.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_can_use_safe_latin1ab_zmm_(__m128i needle_xmm,
-                                                                                   sz_size_t needle_length) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_latin1ab_allowed_(__m128i needle_xmm, sz_size_t needle_length) {
 
     // Empty needle is trivially safe
     if (needle_length == 0) return sz_true_k;
@@ -4603,7 +4604,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_latin1ab_(sz_cptr_t hays
     return SZ_NULL_CHAR;
 }
 
-#pragma endregion // Latin-1 Case-Insensitive Find
+#pragma endregion // Latin-1AB Case-Insensitive Find
 
 #pragma region Cyrillic Case-Insensitive Find
 
@@ -4680,7 +4681,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
  *  @param[in] needle_xmm XMM register containing the needle bytes.
  *  @return sz_true_k if all bytes are valid for Cyrillic path.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(__m128i needle_xmm) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(__m128i needle_xmm, sz_size_t needle_length) {
     // Cyrillic path handles ASCII + D0/D1 lead bytes
     // Reject: D2-FF (other scripts), C0-CF (non-Cyrillic 2-byte leads)
     __m128i const x_d2_xmm = _mm_set1_epi8((char)0xD2);
@@ -4690,7 +4691,48 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(__m128
     __m128i const x_d0_xmm = _mm_set1_epi8((char)0xD0);
     __mmask16 invalid_lead_mask = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_d0_xmm);
 
-    return (other_script_mask | invalid_lead_mask) ? sz_false_k : sz_true_k;
+    if (other_script_mask | invalid_lead_mask) return sz_false_k;
+
+    // Extract first and last bytes for boundary checks
+    sz_u128_vec_t lower_vec;
+    lower_vec.xmm =
+        _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(needle_xmm)));
+    sz_u8_t first_byte = lower_vec.u8s[0];
+    sz_u8_t last_byte = lower_vec.u8s[needle_length - 1];
+
+    // Check first byte is not in {f, i, l, n, s, t}
+    if (first_byte == 'f' || first_byte == 'i' || first_byte == 'l' || //
+        first_byte == 'n' || first_byte == 's' || first_byte == 't') {
+        return sz_false_k;
+    }
+
+    // Check last byte is not in {a, f, h, i, j, s, t, w, y}
+    if (last_byte == 'a' || last_byte == 'f' || last_byte == 'h' || //
+        last_byte == 'i' || last_byte == 'j' || last_byte == 's' || //
+        last_byte == 't' || last_byte == 'w' || last_byte == 'y') {
+        return sz_false_k;
+    }
+
+    // Check for forbidden adjacent pairs: ff, fi, fl, ss, st
+    if (needle_length >= 2) {
+        __m128i next_xmm = _mm_bsrli_si128(lower_vec.xmm, 1);
+        __mmask16 const pair_mask = sz_u16_mask_until_(needle_length - 1);
+
+        __mmask16 is_f_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_f_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_i_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('i'));
+        __mmask16 next_is_l_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('l'));
+        __mmask16 bad_f_mask = is_f_mask & (next_is_f_mask | next_is_i_mask | next_is_l_mask) & pair_mask;
+
+        __mmask16 is_s_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_s_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_t_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('t'));
+        __mmask16 bad_s_mask = is_s_mask & (next_is_s_mask | next_is_t_mask) & pair_mask;
+
+        if (bad_f_mask | bad_s_mask) return sz_false_k;
+    }
+
+    return sz_true_k;
 }
 
 /**
@@ -5017,7 +5059,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(sz_cptr_t hays
  *  @param[in] needle_xmm XMM register containing the needle bytes.
  *  @return sz_true_k if all bytes are valid for Greek path.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_greek_allowed_(__m128i needle_xmm) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_greek_allowed_(__m128i needle_xmm, sz_size_t needle_length) {
     // Greek path handles ASCII + CE/CF lead bytes
     // Reject: D0-FF (other scripts), C0-CD (non-Greek 2-byte leads)
     __m128i const x_d0_xmm = _mm_set1_epi8((char)0xD0);
@@ -5027,7 +5069,48 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_greek_allowed_(__m128i n
     __m128i const x_ce_xmm = _mm_set1_epi8((char)0xCE);
     __mmask16 is_invalid_lead = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_ce_xmm);
 
-    return (other_script_mask | is_invalid_lead) ? sz_false_k : sz_true_k;
+    if (other_script_mask | is_invalid_lead) return sz_false_k;
+
+    // Extract first and last bytes for boundary checks
+    sz_u128_vec_t lower_vec;
+    lower_vec.xmm =
+        _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(needle_xmm)));
+    sz_u8_t first_byte = lower_vec.u8s[0];
+    sz_u8_t last_byte = lower_vec.u8s[needle_length - 1];
+
+    // Check first byte is not in {f, i, l, n, s, t}
+    if (first_byte == 'f' || first_byte == 'i' || first_byte == 'l' || //
+        first_byte == 'n' || first_byte == 's' || first_byte == 't') {
+        return sz_false_k;
+    }
+
+    // Check last byte is not in {a, f, h, i, j, s, t, w, y}
+    if (last_byte == 'a' || last_byte == 'f' || last_byte == 'h' || //
+        last_byte == 'i' || last_byte == 'j' || last_byte == 's' || //
+        last_byte == 't' || last_byte == 'w' || last_byte == 'y') {
+        return sz_false_k;
+    }
+
+    // Check for forbidden adjacent pairs: ff, fi, fl, ss, st
+    if (needle_length >= 2) {
+        __m128i next_xmm = _mm_bsrli_si128(lower_vec.xmm, 1);
+        __mmask16 const pair_mask = sz_u16_mask_until_(needle_length - 1);
+
+        __mmask16 is_f_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_f_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_i_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('i'));
+        __mmask16 next_is_l_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('l'));
+        __mmask16 bad_f_mask = is_f_mask & (next_is_f_mask | next_is_i_mask | next_is_l_mask) & pair_mask;
+
+        __mmask16 is_s_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_s_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_t_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('t'));
+        __mmask16 bad_s_mask = is_s_mask & (next_is_s_mask | next_is_t_mask) & pair_mask;
+
+        if (bad_f_mask | bad_s_mask) return sz_false_k;
+    }
+
+    return sz_true_k;
 }
 /**
  *  @brief  Fold a ZMM register using Greek case folding rules.
@@ -5289,7 +5372,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
 }
 
 /**
- *  @brief  Greek case-insensitive substring search using AVX-512.
+ *  @brief Greek case-insensitive substring search using AVX-512.
+ *  @sa sz_utf8_case_rune_safe_greek_k for rules.
  *
  *  Strategy: Use 3-point Raita filter on folded needle bytes, load haystack at probe offsets,
  *  fold and compare to find candidates, then verify full safe slice match.
@@ -5467,7 +5551,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
 #pragma region Armenian Case-Insensitive Find
 
 /**
- *  @brief  Check if XMM register contains only ASCII + Armenian (D4/D5/D6 lead bytes).
+ *  @brief Check if XMM register contains only ASCII + Armenian (D4/D5/D6 lead bytes).
+ *  @sa sz_utf8_case_rune_safe_armenian_k for rules.
  *
  *  Valid bytes: 00-7F (ASCII), 80-BF (continuation), D4-D6 (Armenian leads).
  *  Zero bytes (from masked load padding) are valid ASCII.
@@ -5475,7 +5560,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(sz_cptr_t haystac
  *  @param[in] needle_xmm XMM register containing the needle bytes.
  *  @return sz_true_k if all bytes are valid for Armenian path.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_armenian_allowed_(__m128i needle_xmm) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_armenian_allowed_(__m128i needle_xmm, sz_size_t needle_length) {
     // Armenian path handles ASCII + D4/D5/D6 lead bytes
     // Reject: D7-FF (other scripts), C0-D3 (non-Armenian 2-byte leads)
     __m128i const x_d7_xmm = _mm_set1_epi8((char)0xD7);
@@ -5485,10 +5570,52 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_armenian_allowed_(__m128
     __m128i const x_d4_xmm = _mm_set1_epi8((char)0xD4);
     __mmask16 is_invalid_lead = _mm_cmpge_epu8_mask(needle_xmm, x_c0_xmm) & _mm_cmplt_epu8_mask(needle_xmm, x_d4_xmm);
 
-    return (other_script_mask | is_invalid_lead) ? sz_false_k : sz_true_k;
+    if (other_script_mask | is_invalid_lead) return sz_false_k;
+
+    // Extract first and last bytes for boundary checks
+    sz_u128_vec_t lower_vec;
+    lower_vec.xmm =
+        _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(needle_xmm)));
+    sz_u8_t first_byte = lower_vec.u8s[0];
+    sz_u8_t last_byte = lower_vec.u8s[needle_length - 1];
+
+    // Check first byte is not in {f, i, l, n, s, t}
+    if (first_byte == 'f' || first_byte == 'i' || first_byte == 'l' || //
+        first_byte == 'n' || first_byte == 's' || first_byte == 't') {
+        return sz_false_k;
+    }
+
+    // Check last byte is not in {a, f, h, i, j, s, t, w, y}
+    if (last_byte == 'a' || last_byte == 'f' || last_byte == 'h' || //
+        last_byte == 'i' || last_byte == 'j' || last_byte == 's' || //
+        last_byte == 't' || last_byte == 'w' || last_byte == 'y') {
+        return sz_false_k;
+    }
+
+    // Check for forbidden adjacent pairs: ff, fi, fl, ss, st
+    if (needle_length >= 2) {
+        __m128i next_xmm = _mm_bsrli_si128(lower_vec.xmm, 1);
+        __mmask16 const pair_mask = sz_u16_mask_until_(needle_length - 1);
+
+        __mmask16 is_f_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_f_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_i_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('i'));
+        __mmask16 next_is_l_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('l'));
+        __mmask16 bad_f_mask = is_f_mask & (next_is_f_mask | next_is_i_mask | next_is_l_mask) & pair_mask;
+
+        __mmask16 is_s_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_s_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_t_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('t'));
+        __mmask16 bad_s_mask = is_s_mask & (next_is_s_mask | next_is_t_mask) & pair_mask;
+
+        if (bad_f_mask | bad_s_mask) return sz_false_k;
+    }
+
+    return sz_true_k;
 }
 /**
- *  @brief  Fold a ZMM register using Armenian case folding rules.
+ *  @brief Fold a ZMM register using Armenian case folding rules.
+ *  @sa sz_utf8_case_rune_safe_armenian_k for rules.
  *
  *  Armenian uppercase Ա-Ֆ (U+0531-U+0556): UTF-8 D4 B1-BF, D5 80-96
  *  Armenian lowercase ա-ֆ (U+0561-U+0586): UTF-8 D5 A1-BF, D6 80-86
@@ -5900,7 +6027,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(sz_cptr_t hays
  *  @param[in] needle_xmm XMM register containing the needle bytes.
  *  @return sz_true_k if all bytes are valid for Vietnamese path.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(__m128i needle_xmm) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(__m128i needle_xmm,
+                                                                            sz_size_t needle_length) {
     // Vietnamese path handles ASCII + E1 lead bytes (with B8-BB second byte)
     // Reject: C0-E0 (2-byte leads), E2-FF (other 3/4-byte leads)
     // Allow: 00-BF (ASCII + continuations) and E1 (Vietnamese lead)
@@ -5926,6 +6054,45 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(__m1
     __mmask16 is_valid_vietnamese_2nd = _mm_cmplt_epu8_mask(_mm_sub_epi8(needle_xmm, x_b8_xmm), x_04_xmm);
     // All positions after E1 must have valid Vietnamese second byte
     if (is_after_e1 & ~is_valid_vietnamese_2nd) return sz_false_k;
+
+    // Extract first and last bytes for boundary checks
+    sz_u128_vec_t lower_vec;
+    lower_vec.xmm =
+        _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(needle_xmm)));
+    sz_u8_t first_byte = lower_vec.u8s[0];
+    sz_u8_t last_byte = lower_vec.u8s[needle_length - 1];
+
+    // Check first byte is not in {f, i, l, n, s, t}
+    if (first_byte == 'f' || first_byte == 'i' || first_byte == 'l' || //
+        first_byte == 'n' || first_byte == 's' || first_byte == 't') {
+        return sz_false_k;
+    }
+
+    // Check last byte is not in {a, f, h, i, j, s, t, w, y}
+    if (last_byte == 'a' || last_byte == 'f' || last_byte == 'h' || //
+        last_byte == 'i' || last_byte == 'j' || last_byte == 's' || //
+        last_byte == 't' || last_byte == 'w' || last_byte == 'y') {
+        return sz_false_k;
+    }
+
+    // Check for forbidden adjacent pairs: ff, fi, fl, ss, st
+    if (needle_length >= 2) {
+        __m128i next_xmm = _mm_bsrli_si128(lower_vec.xmm, 1);
+        __mmask16 const pair_mask = sz_u16_mask_until_(needle_length - 1);
+
+        __mmask16 is_f_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_f_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('f'));
+        __mmask16 next_is_i_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('i'));
+        __mmask16 next_is_l_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('l'));
+        __mmask16 bad_f_mask = is_f_mask & (next_is_f_mask | next_is_i_mask | next_is_l_mask) & pair_mask;
+
+        __mmask16 is_s_mask = _mm_cmpeq_epi8_mask(lower_vec.xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_s_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('s'));
+        __mmask16 next_is_t_mask = _mm_cmpeq_epi8_mask(next_xmm, _mm_set1_epi8('t'));
+        __mmask16 bad_s_mask = is_s_mask & (next_is_s_mask | next_is_t_mask) & pair_mask;
+
+        if (bad_f_mask | bad_s_mask) return sz_false_k;
+    }
 
     return sz_true_k;
 }
@@ -6388,7 +6555,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // that match our citerea.
     if (needle_length <= 16) {
         // If all characters end up blonging to the same safe-path the "safe window" will cover the entire string.
-        sz_utf8_case_safe_windows_t_ default_window;
+        sz_utf8_case_safe_window_t_ default_window;
         sz_utf8_case_safe_window_init_(&default_window, needle_length);
 
         // A single masked load is enough for the entire needle
@@ -6410,32 +6577,32 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
                     haystack, haystack_length, needle, needle_length, &default_window, matched_length);
         }
 
-        // Check if all needle bytes are Latin-1
-        sz_bool_t all_latin1 = sz_utf8_case_insensitive_find_ice_latin1ab_allowed_(needle_vec.xmm);
-        if (all_latin1)
+        // Check if all needle bytes are Latin-1/A/B
+        sz_bool_t all_latin1ab = sz_utf8_case_insensitive_find_ice_latin1ab_allowed_(needle_vec.xmm, needle_length);
+        if (all_latin1ab)
             return sz_utf8_case_insensitive_find_ice_latin1ab_upto16byte_( //
                 haystack, haystack_length, needle, needle_length, &default_window, matched_length);
 
         // Check if all needle bytes are Cyrillic
-        sz_bool_t all_cyrillic = sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(needle_vec.xmm);
+        sz_bool_t all_cyrillic = sz_utf8_case_insensitive_find_ice_cyrillic_allowed_(needle_vec.xmm, needle_length);
         if (all_cyrillic)
             return sz_utf8_case_insensitive_find_ice_cyrillic_upto16byte_( //
                 haystack, haystack_length, needle, needle_length, &default_window, matched_length);
 
         // Check if all needle bytes are Greek
-        sz_bool_t all_greek = sz_utf8_case_insensitive_find_ice_greek_allowed_(needle_vec.xmm);
+        sz_bool_t all_greek = sz_utf8_case_insensitive_find_ice_greek_allowed_(needle_vec.xmm, needle_length);
         if (all_greek)
             return sz_utf8_case_insensitive_find_ice_greek_upto16byte_( //
                 haystack, haystack_length, needle, needle_length, &default_window, matched_length);
 
         // Check if all needle bytes are Armenian
-        sz_bool_t all_armenian = sz_utf8_case_insensitive_find_ice_armenian_allowed_(needle_vec.xmm);
+        sz_bool_t all_armenian = sz_utf8_case_insensitive_find_ice_armenian_allowed_(needle_vec.xmm, needle_length);
         if (all_armenian)
             return sz_utf8_case_insensitive_find_ice_armenian_upto16byte_( //
                 haystack, haystack_length, needle, needle_length, &default_window, matched_length);
 
         // Check if all needle bytes are Vietnamese
-        sz_bool_t all_vietnamese = sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(needle_vec.xmm);
+        sz_bool_t all_vietnamese = sz_utf8_case_insensitive_find_ice_vietnamese_allowed_(needle_vec.xmm, needle_length);
         if (all_vietnamese)
             return sz_utf8_case_insensitive_find_ice_vietnamese_upto16byte_( //
                 haystack, haystack_length, needle, needle_length, &default_window, matched_length);
@@ -6468,7 +6635,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     // script-specific safe window in the needle.
     sz_size_t longest_safe_window = 0;
     longest_safe_window = sz_max_of_two(longest_safe_window, analysis.ascii.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.latin1.length);
+    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.latin1ab.length);
     longest_safe_window = sz_max_of_two(longest_safe_window, analysis.cyrillic.length);
     longest_safe_window = sz_max_of_two(longest_safe_window, analysis.greek.length);
     longest_safe_window = sz_max_of_two(longest_safe_window, analysis.armenian.length);
@@ -6483,9 +6650,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         return sz_utf8_case_insensitive_find_ice_ascii_( //
             haystack, haystack_length, needle, needle_length, &analysis.ascii, matched_length);
 
-    else if (longest_safe_window == analysis.latin1.length)
+    else if (longest_safe_window == analysis.latin1ab.length)
         return sz_utf8_case_insensitive_find_ice_latin1ab_( //
-            haystack, haystack_length, needle, needle_length, &analysis.latin1, matched_length);
+            haystack, haystack_length, needle, needle_length, &analysis.latin1ab, matched_length);
 
     else if (longest_safe_window == analysis.cyrillic.length)
         return sz_utf8_case_insensitive_find_ice_cyrillic_( //
