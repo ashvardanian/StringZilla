@@ -75,13 +75,28 @@ except:  # noqa: E722
     # PyArrow is not installed, most tests will be skipped
     pyarrow_available = False
 
-# Reproducible test seeds for consistent CI runs (keep in sync with test_stringzillas.py)
+# Generate a random seed at module load time for this test run (keep in sync with test_stringzillas.py)
+# Use SystemRandom for true randomness independent of the seeded RNG state
+_random_seed_for_run = int.from_bytes(os.urandom(4), "little")
+
+# Reproducible test seeds for consistent CI runs
 SEED_VALUES = [
     42,  # Classic test seed
     0,  # Edge case: zero seed
     1,  # Minimal positive seed
     314159,  # Pi digits
+    _random_seed_for_run,  # Random seed for this run (logged at startup)
 ]
+
+# Override SEED_VALUES with environment variable if set (for reproducible CI fuzzing)
+_env_seed = os.environ.get("SZ_TESTS_SEED")
+if _env_seed:
+    try:
+        _parsed_seed = int(_env_seed)
+        SEED_VALUES = [_parsed_seed]
+        print(f"SZ_TESTS_SEED={_parsed_seed} (from environment, overriding default seeds)")
+    except ValueError:
+        pass  # Keep default SEED_VALUES if parsing fails
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -102,6 +117,9 @@ def log_test_environment():
     print(f"PyArrow available: {pyarrow_available}")
     if pyarrow_available:
         print(f"PyArrow version: {pa.__version__}")
+    print(f"Test seeds: {SEED_VALUES}")
+    if _random_seed_for_run in SEED_VALUES:
+        print(f"  (random seed for this run: {_random_seed_for_run})")
 
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")

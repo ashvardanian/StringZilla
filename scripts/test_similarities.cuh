@@ -537,10 +537,12 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
  *          as well as the similarity scoring functions for bioinformatics-like workloads
  *          on a synthetic @b randomly-generated set of strings from a given @p alphabet.
+ *
+ *  @note   The default iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  fuzzy_config_t config = {}, std::size_t iterations = 10,
+                                  fuzzy_config_t config = {}, std::size_t iterations = scale_iterations(100),
                                   simd_extra_args_ &&...simd_extra_args) {
 
     unified_vector<score_type_> results_base(config.batch_size), results_simd(config.batch_size);

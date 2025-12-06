@@ -2,8 +2,39 @@
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
  *  @file   test_stringzilla.hpp
  *  @author Ash Vardanian
+ *
+ *  @section Environment Variables
+ *
+ *  The test infrastructure supports the following environment variables for reproducible
+ *  stress testing and fuzzing:
+ *
+ *  - `SZ_TESTS_SEED` : Seed for the random number generator. If not set, a random seed is
+ *    generated using `std::random_device`. The actual seed used is always
+ *    printed at startup for reproducibility.
+ *  - `SZ_TESTS_MULTIPLIER` : Multiplier for stress-test iteration counts. Defaults to 1.0.
+ *    Each test has its own baseline iteration count tuned for its
+ *    operation complexity. This multiplier scales all baselines
+ *    proportionally (e.g., 0.1 for quick smoke tests, 10 for
+ *    thorough CI fuzzing).
+ *
+ *  @section Example Usage
+ *
+ *  @code{.sh}
+ *  # Run with a specific seed for reproducibility
+ *  SZ_TESTS_SEED=42 ./build_release/stringzilla_test_cpp20
+ *
+ *  # Quick smoke test (10% of normal iterations)
+ *  SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
+ *
+ *  # Thorough CI stress test (10x normal iterations)
+ *  SZ_TESTS_MULTIPLIER=10 ./build_release/stringzilla_test_cpp20
+ *
+ *  # Combine both for CI fuzzing
+ *  SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 ./build_release/stringzilla_test_cpp20
+ *  @endcode
  */
 #pragma once
+#include <cstdlib>    // `std::getenv`, `std::strtoul`
 #include <fstream>    // `std::ifstream`
 #include <iostream>   // `std::cout`, `std::endl`
 #include <random>     // `std::random_device`
@@ -47,10 +78,74 @@ inline void write_file(std::string path, std::string content) noexcept(false) {
     stream.close();
 }
 
+/**
+ *  @brief  Returns the seed used for the global random number generator.
+ *
+ *  If `SZ_TESTS_SEED` is set, returns its value. Otherwise, generates a random seed
+ *  using `std::random_device`. The seed is cached after the first call.
+ */
+inline std::mt19937::result_type global_random_seed() noexcept {
+    static std::mt19937::result_type seed = []() {
+        char const *seed_env = std::getenv("SZ_TESTS_SEED");
+        if (seed_env && seed_env[0] != '\0') {
+            auto parsed = static_cast<std::mt19937::result_type>(std::strtoul(seed_env, nullptr, 10));
+            std::printf("SZ_TESTS_SEED=%u (from environment)\n", static_cast<unsigned>(parsed));
+            return parsed;
+        }
+        std::random_device seed_source;
+        auto generated = static_cast<std::mt19937::result_type>(seed_source());
+        std::printf("SZ_TESTS_SEED=%u (randomly generated)\n", static_cast<unsigned>(generated));
+        return generated;
+    }();
+    return seed;
+}
+
+/**
+ *  @brief  Returns a reference to the global random number generator.
+ *
+ *  The generator is seeded once using `global_random_seed()`, which respects the
+ *  `SZ_TESTS_SEED` environment variable for reproducible testing.
+ */
 inline std::mt19937 &global_random_generator() noexcept {
-    static std::random_device seed_source; // Too expensive to construct every time
-    static std::mt19937 generator(seed_source());
+    static std::mt19937 generator(global_random_seed());
     return generator;
+}
+
+/**
+ *  @brief  Returns the multiplier for stress-test iteration counts.
+ *
+ *  Reads from the `SZ_TESTS_MULTIPLIER` environment variable. Defaults to 1.0.
+ *  Use values < 1.0 for quick smoke tests, > 1.0 for thorough stress testing in CI.
+ */
+inline double get_iterations_multiplier() noexcept {
+    static double multiplier = []() {
+        char const *env = std::getenv("SZ_TESTS_MULTIPLIER");
+        if (env && env[0] != '\0') {
+            double parsed = std::strtod(env, nullptr);
+            if (parsed > 0.0) {
+                std::printf("SZ_TESTS_MULTIPLIER=%.2f (from environment)\n", parsed);
+                return parsed;
+            }
+        }
+        return 1.0;
+    }();
+    return multiplier;
+}
+
+/**
+ *  @brief  Scales a baseline iteration count by the global multiplier.
+ *
+ *  Use this to wrap hardcoded iteration counts in stress tests, e.g.:
+ *  @code{.cpp}
+ *  for (std::size_t i = 0; i < scale_iterations(1000); ++i) { ... }
+ *  @endcode
+ *
+ *  @param baseline The default number of iterations for this test.
+ *  @return The scaled iteration count, guaranteed to be at least 1.
+ */
+inline std::size_t scale_iterations(std::size_t baseline) noexcept {
+    double scaled = baseline * get_iterations_multiplier();
+    return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
 }
 
 template <typename string_type_, typename other_string_type_>

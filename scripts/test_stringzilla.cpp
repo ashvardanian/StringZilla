@@ -406,7 +406,7 @@ void test_utf8_equivalence(                                 //
     sz_utf8_find_boundary_t newline_simd,                   //
     sz_utf8_find_boundary_t whitespace_base,                //
     sz_utf8_find_boundary_t whitespace_simd,                //
-    std::size_t min_text_length = 4000, std::size_t min_iterations = 10000) {
+    std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
 
     auto check = [&](std::string const &text) {
         sz_cptr_t data = text.data();
@@ -1505,8 +1505,11 @@ void test_utf8_ci_find_boundaries(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t
  *
  *  Generates random haystacks and needles from script-specific character pools.
  *  Both backends must agree on search results - no case conversion needed in test.
+ *
+ *  @note   The default iteration count (3000) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
-void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd, std::size_t iterations) {
+void test_utf8_ci_find_fuzz(sz_utf8_ci_find_t find_base, sz_utf8_ci_find_t find_simd,
+                            std::size_t iterations = scale_iterations(3000)) {
     std::printf("  - testing case-insensitive find with fuzzing (%zu iterations)...\n", iterations);
 
     auto &rng = global_random_generator();
@@ -1710,7 +1713,7 @@ void test_equivalence() {
     // Case-insensitive find tests
     test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
     test_utf8_ci_find_boundaries(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
-    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, 3000);
+    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
@@ -2689,9 +2692,10 @@ void assert_balanced_memory(callback_type callback) {
 
 /**
  *  @brief  Checks for memory leaks in the string class using the `accounting_allocator`.
+ *
+ *  @note   The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
-void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
-    std::size_t iterations = 4;
+void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t iterations = scale_iterations(100)) {
 
     assert(accounting_allocator::counter_ref() == 0);
     using string = sz::basic_string<char, accounting_allocator>;

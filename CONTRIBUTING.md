@@ -180,6 +180,36 @@ build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neo
 
 Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
+The C++ and Python test suites support environment variables for reproducible stress testing and CI fuzzing:
+
+| Variable              | Description                                         | Default |
+| :-------------------- | :-------------------------------------------------- | ------: |
+| `SZ_TESTS_SEED`       | Seed for the random number generator                |  Random |
+| `SZ_TESTS_MULTIPLIER` | Scales all baseline iteration counts proportionally |     1.0 |
+
+Each test has its own baseline iteration count tuned for its operation complexity.
+The multiplier scales all baselines proportionally - use `0.1` for quick smoke tests or `10` for thorough stress testing.
+
+```bash
+# Run with a specific seed for reproducibility
+SZ_TESTS_SEED=42 build_debug/stringzilla_test_cpp20
+
+# Quick smoke test (10% of normal iterations)
+SZ_TESTS_MULTIPLIER=0.1 build_debug/stringzilla_test_cpp20
+
+# Thorough CI stress test (10x normal iterations)
+SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
+
+# Combine both for CI fuzzing
+SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 build_debug/stringzilla_test_cpp20
+
+# Python tests also respect SZ_TESTS_SEED
+SZ_TESTS_SEED=42 pytest scripts/test_stringzilla.py -v
+```
+
+When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
+This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
+
 To use CppCheck for static analysis make sure to export the compilation commands.
 Overall, CppCheck and Clang-Tidy are extremely noisy and not suitable for CI, but may be useful for local development.
 
