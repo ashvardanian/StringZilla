@@ -3494,93 +3494,172 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
     sz_rune_t rune, sz_size_t rune_bytes,                                          //
     sz_rune_t prev_rune, sz_rune_t next_rune) {
 
-    int safety = sz_utf8_case_rune_safe_none_k;
+    // Bitmasks for profiles that share identical ASCII rules
+    sz_utf8_case_rune_safety_profile_t_ const strict_ascii_group =
+        (sz_utf8_case_rune_safety_profile_t_)(sz_utf8_case_rune_safe_ascii_k | sz_utf8_case_rune_safe_cyrillic_k |
+                                              sz_utf8_case_rune_safe_greek_k | sz_utf8_case_rune_safe_armenian_k);
+
+    sz_utf8_case_rune_safety_profile_t_ const central_viet_group =
+        (sz_utf8_case_rune_safety_profile_t_)(sz_utf8_case_rune_safe_central_europe_k |
+                                              sz_utf8_case_rune_safe_vietnamese_k);
+
+    sz_utf8_case_rune_safety_profile_t_ const western_group =
+        (sz_utf8_case_rune_safety_profile_t_)(sz_utf8_case_rune_safe_western_europe_k);
+
+    sz_utf8_case_rune_safety_profile_t_ safety = sz_utf8_case_rune_safe_none_k;
 
     // Helper: lowercase ASCII
     sz_rune_t lower = (rune >= 'A' && rune <= 'Z') ? (rune + 0x20) : rune;
     sz_rune_t lower_prev = (prev_rune >= 'A' && prev_rune <= 'Z') ? (prev_rune + 0x20) : prev_rune;
     sz_rune_t lower_next = (next_rune >= 'A' && next_rune <= 'Z') ? (next_rune + 0x20) : next_rune;
 
-    // Helper: is neighbor ASCII? (explicit conversion for C++ compatibility)
-    sz_bool_t prev_ascii = (prev_rune == 0 || prev_rune < 0x80) ? sz_true_k : sz_false_k;
-    sz_bool_t next_ascii = (next_rune == 0 || next_rune < 0x80) ? sz_true_k : sz_false_k;
+    // Helper: is neighbor ASCII letter? (explicit conversion for C++ compatibility)
+    // Note: prev_rune/next_rune == 0 means boundary (start/end of needle)
+    sz_bool_t prev_ascii = (prev_rune != 0 && prev_rune < 0x80) ? sz_true_k : sz_false_k;
+    sz_bool_t next_ascii = (next_rune != 0 && next_rune < 0x80) ? sz_true_k : sz_false_k;
+    sz_bool_t at_start = (prev_rune == 0) ? sz_true_k : sz_false_k;
+    sz_bool_t at_end = (next_rune == 0) ? sz_true_k : sz_false_k;
 
     // ASCII character (1-byte UTF-8)
     if (rune < 0x80) {
-        sz_bool_t ascii_safe = sz_false_k;
-
-        // Letters need contextual checks
         if (lower >= 'a' && lower <= 'z') {
             switch (lower) {
-                // clang-format off
-            // Unconditionally safe: no Unicode chars fold to sequences containing these
-            case 'b': case 'c': case 'd': case 'e': case 'g': case 'k':
+
+            // Unconditionally safe for all profiles.
+            // No Unicode chars fold to sequences containing these,
+            // and they don't participate in dangerous ligatures.
+            // clang-format off
+            case 'b': case 'c': case 'd': case 'e': case 'g':
             case 'm': case 'o': case 'p': case 'q': case 'r': case 'u':
             case 'v': case 'x': case 'z':
-                ascii_safe = sz_true_k;
-                break;
                 // clang-format on
+                safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
 
-            // Safe if next is ASCII (could be followed by combining chars)
+            // 'k':
+            // - Strict: UNSAFE. Kelvin sign 'K' (U+212A) folds to 'k'.
+            // - Western/Central/Viet: SAFE. Kelvin sign detected in haystack.
+            case 'k': safety |= central_viet_group | western_group; break;
+
+            // 'a':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE).
+            //   Avoids: 'ẚ' (U+1E9A) → "aʾ".
+            // - Western: SAFE. Expansion detected in haystack.
             case 'a':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'h':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331).
+            //   Avoids: 'ẖ' (U+1E96) → "ẖ".
+            // - Western: SAFE. Expansion detected in haystack.
             case 'h':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'j':
+            // - All: Contextual. Can't be last; can't precede '̌' (U+030C).
+            //   Avoids: 'ǰ' (U+01F0) → "ǰ".
+            //   Western profile does NOT detect this in haystack scan.
             case 'j':
+                if (at_end == sz_false_k && next_ascii)
+                    safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+
+            // 'w':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
+            //   Avoids: 'ẘ' (U+1E98) → "ẘ".
+            // - Western: SAFE. Expansion detected in haystack.
             case 'w':
-            case 'y': ascii_safe = next_ascii; break;
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
 
-            // 'n': ʼn folds to "ʼn" (CA BC + n), unsafe if preceded by non-ASCII
-            case 'n': ascii_safe = prev_ascii; break;
+            // 'y':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
+            //   Avoids: 'ẙ' (U+1E99) → "ẙ".
+            // - Western: SAFE. Expansion detected in haystack.
+            case 'y':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
 
-            // 'i': İ folds to "i̇", fi ligature exists
+            // 'n':
+            // - All: Contextual. Can't be first; can't follow 'ʼ' (U+02BC).
+            //   Avoids: 'ŉ' (U+0149) → "ʼn".
+            //   Western profile does NOT detect this in haystack scan.
+            case 'n':
+                if (at_start == sz_false_k && prev_ascii)
+                    safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+
+            // 'i':
+            // - All: Contextual. Can't be first or last; can't follow 'f';
+            //   can't precede '̇' (U+0307).
+            //   Avoids: 'İ' (U+0130) → "i̇", and "fi" ligatures.
+            //   Western profile does NOT detect Turkish 'İ' expansion.
             case 'i':
-                ascii_safe = (next_ascii && (prev_rune == 0 || lower_prev != 'f')) ? sz_true_k : sz_false_k;
+                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 'f')
+                    safety |= strict_ascii_group | central_viet_group | western_group;
                 break;
 
-            // 'l': fl ligature exists
-            case 'l': ascii_safe = (prev_rune == 0 || lower_prev != 'f') ? sz_true_k : sz_false_k; break;
+            // 'l':
+            // - Strict/Central/Viet: Contextual. Can't be first; can't follow 'f'.
+            //   Avoids: "fl" ligatures.
+            // - Western: SAFE. Ligatures detected in haystack.
+            case 'l':
+                if (at_start == sz_false_k && lower_prev != 'f') safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
 
-            // 't': ẗ has combining diaeresis, st ligature exists
+            // 't':
+            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
+            //   can't precede '̈' (U+0308).
+            //   Avoids: "st" ligatures and 'ẗ' (U+1E97) → "ẗ".
+            // - Western: SAFE. Ligatures/expansion detected in haystack.
             case 't':
-                ascii_safe = (next_ascii && (prev_rune == 0 || lower_prev != 's')) ? sz_true_k : sz_false_k;
+                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 's')
+                    safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
                 break;
 
-            // 'f': ff/fi/fl ligatures exist
+            // 'f':
+            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 'f';
+            //   can't precede 'f', 'i', 'l'.
+            //   Avoids: "ff", "fi", "fl", "ffi", "ffl" ligatures.
+            // - Western: SAFE. Ligatures detected in haystack.
             case 'f':
-                ascii_safe = (prev_ascii && next_ascii && lower_prev != 'f' && lower_next != 'f' && lower_next != 'i' &&
-                              lower_next != 'l')
-                                 ? sz_true_k
-                                 : sz_false_k;
+                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 'f' &&
+                    lower_next != 'f' && lower_next != 'i' && lower_next != 'l')
+                    safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
                 break;
 
-            // 's': ß/ẞ fold to "ss", ﬅ folds to "st"
+            // 's':
+            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
+            //   can't precede 's', 't'.
+            //   Avoids: "ss" (Eszett) and "st" ligatures.
+            // - Western: SAFE. Eszett/ligatures detected in haystack.
             case 's':
-                ascii_safe = (prev_ascii && next_ascii && lower_prev != 's' && lower_next != 's' && lower_next != 't')
-                                 ? sz_true_k
-                                 : sz_false_k;
+                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
+                    lower_next != 's' && lower_next != 't')
+                    safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
                 break;
 
-            default: ascii_safe = sz_true_k; break;
+            default:
+                // Should not happen for a-z
+                safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
             }
         }
         else {
-            // Non-letters (digits, punctuation, whitespace) - always safe
-            ascii_safe = sz_true_k;
+            // Non-letters (digits, punctuation, whitespace) - always safe for all profiles
+            safety |= strict_ascii_group | central_viet_group | western_group;
         }
 
-        // ASCII is safe for ASCII/Latin1/Vietnamese paths IF it passes contextual checks
-        // Key fix: Latin1 path uses same ASCII rules as ASCII path (fixes Eszett bug)
-        // ASCII is safe for ASCII/Latin1/Vietnamese paths IF it passes contextual checks
-        // Key fix: Latin1 path uses same ASCII rules as ASCII path (fixes Eszett bug)
-        if (ascii_safe) {
-            safety |= sz_utf8_case_rune_safe_ascii_k;
-            safety |= sz_utf8_case_rune_safe_latin1ab_k;
-            safety |= sz_utf8_case_rune_safe_vietnamese_k;
-        }
-        // Script-specific paths (Cyrillic/Greek/Armenian) include ASCII unconditionally
-        // because their fold functions handle ASCII (A-Z → a-z) correctly
-        safety |= sz_utf8_case_rune_safe_cyrillic_k;
-        safety |= sz_utf8_case_rune_safe_greek_k;
-        safety |= sz_utf8_case_rune_safe_armenian_k;
         return (sz_utf8_case_rune_safety_profile_t_)safety;
     }
 
@@ -3590,25 +3669,24 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         sz_u8_t lead = (rune >> 6) | 0xC0;     // Reconstruct lead byte
         sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
 
-        // Latin-1 Supplement (C2/C3 lead bytes) - all are safe
+        // Latin-1 Supplement (C2/C3 lead bytes)
+        // EXCLUDE: 'å' (U+00E5, C3 A5) - Angstrom sign (U+212B) also folds to 'å'
         if (lead == 0xC2 || lead == 0xC3) {
-            safety |= sz_utf8_case_rune_safe_latin1ab_k;
-            safety |= sz_utf8_case_rune_safe_vietnamese_k; // Vietnamese includes Latin1
+            if (rune == 0x00E5) {
+                // 'å' excluded from all Latin profiles due to Angstrom ambiguity
+            }
+            else if (rune == 0x00DF) {
+                // 'ß' excluded from Central Europe and Vietnamese, allowed in Western Europe
+                safety |= western_group;
+            }
+            else { safety |= western_group | central_viet_group; }
         }
 
-        // Latin Extended-A (C4/C5 lead bytes) - parity-based +1 folding
-        if (lead == 0xC4 || lead == 0xC5) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
+        // Latin Extended-A (C4/C5 lead bytes) - for central_europe and vietnamese
+        if (lead == 0xC4 || lead == 0xC5) { safety |= central_viet_group; }
 
-        // Latin Extended-B (C6/C7/C8 lead bytes) - includes +1 folding and cross-block mappings
-        // C6: U+0180-U+01BF - 16 chars with +1 folding, 20 chars with cross-block to C7/C9/CA
-        // C7: U+01C0-U+01FF - includes lowercase target ǝ (C7 9D) and +1 folding pairs
-        // C8: U+0200-U+023F - continuation of Latin Extended-B
-        if (lead == 0xC6 || lead == 0xC7 || lead == 0xC8) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
-
-        // IPA Extensions (C9/CA lead bytes) - lowercase targets for C6 cross-block mappings
-        // C9: U+0250-U+02AF - includes ɓ (C9 93), ə (C9 99), ɔ (C9 94), etc.
-        // CA: U+02B0-U+02FF - includes ʃ (CA 83), ʊ (CA 8A), ʒ (CA 92), etc.
-        if (lead == 0xC9 || lead == 0xCA) { safety |= sz_utf8_case_rune_safe_latin1ab_k; }
+        // Latin Extended-B (C6 lead byte) - for vietnamese (supports ơ/ư)
+        if (lead == 0xC6) { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
 
         // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
@@ -3618,22 +3696,103 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         }
 
         // Greek - check exact ranges handled by sz_utf8_case_insensitive_find_ice_greek_fold_zmm_
-        // CE 91-A9: uppercase Α-Ω (without accents)
-        // CE B1-BF: lowercase α-ο
-        // CF 80-89: lowercase π-ω (includes final sigma at 82, sigma at 83)
-        if ((lead == 0xCE && second >= 0x91 && second <= 0xA9) || (lead == 0xCE && second >= 0xB1 && second <= 0xBF) ||
-            (lead == 0xCF && second >= 0x80 && second <= 0x89)) {
-            safety |= sz_utf8_case_rune_safe_greek_k;
+        // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
+        //   - EXCLUDE CE 90: 'ΐ' (U+0390) expands to 3 codepoints
+        // CE 91-A9: basic uppercase Α-Ω
+        // CE AA-AB: dialytika uppercase Ϊ-Ϋ
+        // CE AC-AF: accented lowercase ά-ί
+        //   - EXCLUDE CE B0: 'ΰ' (U+03B0) expands to 3 codepoints
+        // CE B1-BF: basic lowercase α-ο
+        // CF 80-89: basic lowercase π-ω (includes final sigma at 82, sigma at 83)
+        // CF 8A-8E: accented/dialytika lowercase ϊ-ώ
+        if (lead == 0xCE) {
+            // Accented uppercase (with gaps) - exclude 87, 8B, 8D, 90
+            if ((second >= 0x86 && second <= 0x8F) && second != 0x87 && second != 0x8B && second != 0x8D &&
+                second != 0x90) {
+                safety |= sz_utf8_case_rune_safe_greek_k;
+            }
+            // Basic uppercase Α-Ω
+            if (second >= 0x91 && second <= 0xA9) { safety |= sz_utf8_case_rune_safe_greek_k; }
+            // Dialytika uppercase Ϊ-Ϋ
+            if (second >= 0xAA && second <= 0xAB) { safety |= sz_utf8_case_rune_safe_greek_k; }
+            // Accented lowercase ά-ί
+            if (second >= 0xAC && second <= 0xAF) { safety |= sz_utf8_case_rune_safe_greek_k; }
+            // Basic lowercase α-ο - exclude B0 (ΰ expands)
+            if (second >= 0xB1 && second <= 0xBF) { safety |= sz_utf8_case_rune_safe_greek_k; }
+        }
+        if (lead == 0xCF) {
+            // Basic lowercase π-ω
+            if (second >= 0x80 && second <= 0x89) { safety |= sz_utf8_case_rune_safe_greek_k; }
+            // Accented/dialytika lowercase ϊ-ώ
+            if (second >= 0x8A && second <= 0x8E) { safety |= sz_utf8_case_rune_safe_greek_k; }
         }
 
-        // Armenian - check exact ranges handled by sz_utf8_case_insensitive_find_ice_armenian_fold_zmm_
-        // D4 B1-BF: uppercase Ա-Ձ
-        // D5 80-96: uppercase Ղ-Ֆ
-        // D5 A1-BF: lowercase ա-կ
-        // D6 80-86: lowercase հ-ֆ
-        if ((lead == 0xD4 && second >= 0xB1 && second <= 0xBF) || (lead == 0xD5 && second >= 0x80 && second <= 0x96) ||
-            (lead == 0xD5 && second >= 0xA1 && second <= 0xBF) || (lead == 0xD6 && second >= 0x80 && second <= 0x86)) {
-            safety |= sz_utf8_case_rune_safe_armenian_k;
+        // Armenian - check exact ranges with contextual constraints for ligatures
+        // D4 B1-BF: uppercase Ա-Ի (U+0531-U+053F)
+        // D5 80-96: uppercase Լ-Ֆ (U+0540-U+0556)
+        // D5 A1-BF: lowercase ա-տ (U+0561-U+057F)
+        // D6 80-86: lowercase ր-ֆ (U+0580-U+0586)
+        //
+        // Ligature constraints (from spec):
+        // - 'ե' (U+0565): can't be first; can't follow 'մ'; can't precede 'ւ'
+        // - 'ւ' (U+0582): can't be last; can't follow 'ե'
+        // - 'մ' (U+0574): can't be last; can't precede 'ն', 'ե', 'ի', 'խ'
+        // - 'ն' (U+0576): can't be first; can't follow 'մ', 'վ'
+        // - 'ի' (U+056B): can't be first; can't follow 'մ'
+        // - 'վ' (U+057E): can't be first; can't precede 'ն'
+        // - 'խ' (U+056D): can't be first; can't follow 'մ'
+        {
+            sz_bool_t is_armenian_range = sz_false_k;
+            sz_bool_t armenian_safe = sz_true_k;
+
+            if ((lead == 0xD4 && second >= 0xB1 && second <= 0xBF) ||
+                (lead == 0xD5 && second >= 0x80 && second <= 0x96) ||
+                (lead == 0xD5 && second >= 0xA1 && second <= 0xBF) ||
+                (lead == 0xD6 && second >= 0x80 && second <= 0x86)) {
+                is_armenian_range = sz_true_k;
+
+                // Helper: get lowercase Armenian codepoint for neighbor checks
+                sz_rune_t lower_prev_arm = prev_rune;
+                sz_rune_t lower_next_arm = next_rune;
+                if (prev_rune >= 0x0531 && prev_rune <= 0x0556) lower_prev_arm = prev_rune + 0x30;
+                if (next_rune >= 0x0531 && next_rune <= 0x0556) lower_next_arm = next_rune + 0x30;
+
+                // Check ligature constraints
+                switch (rune) {
+                case 0x0565: // U+0565 ech - can't be first; can't follow U+0574 men; can't precede U+0582 yiwn
+                case 0x0535: // U+0535 Ech uppercase
+                    if (at_start || lower_prev_arm == 0x0574 || lower_next_arm == 0x0582) armenian_safe = sz_false_k;
+                    break;
+                case 0x0582: // U+0582 yiwn - can't be last; can't follow U+0565 ech
+                    if (at_end || lower_prev_arm == 0x0565) armenian_safe = sz_false_k;
+                    break;
+                case 0x0574: // U+0574 men - can't be last; can't precede U+0576, U+0565, U+056B, U+056D
+                case 0x0544: // U+0544 Men uppercase
+                    if (at_end || lower_next_arm == 0x0576 || lower_next_arm == 0x0565 || lower_next_arm == 0x056B ||
+                        lower_next_arm == 0x056D)
+                        armenian_safe = sz_false_k;
+                    break;
+                case 0x0576: // U+0576 now - can't be first; can't follow U+0574 men, U+057E vew
+                case 0x0546: // U+0546 Now uppercase
+                    if (at_start || lower_prev_arm == 0x0574 || lower_prev_arm == 0x057E) armenian_safe = sz_false_k;
+                    break;
+                case 0x056B: // U+056B ini - can't be first; can't follow U+0574 men
+                case 0x053B: // U+053B Ini uppercase
+                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
+                    break;
+                case 0x057E: // U+057E vew - can't be last; can't precede U+0576 now
+                case 0x054E: // U+054E Vew uppercase
+                    if (at_end || lower_next_arm == 0x0576) armenian_safe = sz_false_k;
+                    break;
+                case 0x056D: // U+056D xeh - can't be first; can't follow U+0574 men
+                case 0x053D: // U+053D Xeh uppercase
+                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
+                    break;
+                default: break;
+                }
+            }
+
+            if (is_armenian_range && armenian_safe) { safety |= sz_utf8_case_rune_safe_armenian_k; }
         }
 
         return (sz_utf8_case_rune_safety_profile_t_)safety;
@@ -3641,14 +3800,20 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
     // 3-byte UTF-8 (U+0800 to U+FFFF)
     if (rune_bytes == 3) {
+        sz_u8_t lead = (rune >> 12) | 0xE0;
+        sz_u8_t second = ((rune >> 6) & 0x3F) | 0x80;
+        sz_u8_t third = (rune & 0x3F) | 0x80;
+
         // Vietnamese/Latin Extended Additional (E1 B8-BB range)
-        // U+1E00-U+1EFF maps to E1 B8 00 - E1 BB BF
-        // EXCLUDE U+1E96-U+1E9F: these expand to base letter + combining diacritics
-        //   ẖ (1E96) → h + ̱, ẗ (1E97) → t + ̈, ẘ (1E98) → w + ̊
-        //   ẙ (1E99) → y + ̊, ẚ (1E9A) → a + ʾ, ẛ (1E9B) → ſ (long s)
-        //   1E9C-1E9F are also problematic or reserved
-        if (rune >= 0x1E00 && rune <= 0x1E95) { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
-        if (rune >= 0x1EA0 && rune <= 0x1EFF) { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
+        // U+1E00-U+1EFF maps to E1 B8 80 - E1 BB BF
+        if (lead == 0xE1 && (second >= 0xB8 && second <= 0xBB)) {
+            // Need detailed check for exclusions in U+1E96-U+1E9F
+            // 1E96-1E9F: E1 BA 96 - E1 BA 9F
+            if (second == 0xBA && third >= 0x96 && third <= 0x9F) {
+                // EXCLUDED: expansions or irregulars
+            }
+            else { safety |= sz_utf8_case_rune_safe_vietnamese_k; }
+        }
         return (sz_utf8_case_rune_safety_profile_t_)safety;
     }
 
