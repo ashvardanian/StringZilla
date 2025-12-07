@@ -3340,13 +3340,18 @@ typedef enum {
      *    Include precomposed Latin letters with additional diacritics (e.g. Ạ/ạ, Ả/ả, Ấ/ấ).
      *
      *  UTF-8 byte ranges handled:
-     *  - 00-7F: ASCII
-     *  - C2/C3: Latin-1 Supplement
-     *  - C4-C5: Latin Extended-A
-     *  - E1 B8 80 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95)
-     *  - E1 BA A0 - E1 BB BF: Latin Extended Additional (U+1EA0-U+1EFF)
+     *  - 00-7F: ASCII, e.g. 'a' (U+0061, 61)
+     *  - C2/C3: Latin-1 Supplement, e.g. 'â' (U+00E2, C3 A2)
+     *  - C4-C5: Latin Extended-A, e.g. 'đ' (U+0111, C4 91)
+     *  - C6: Latin Extended-B (for ơ, ư), e.g. 'ơ' (U+01A1, C6 A1)
+     *  - E1 B8 80 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95), e.g. 'Ḁ' (U+1E00, E1 B8 80)
+     *  - E1 BA A0 - E1 BB BF: Latin Extended Additional (U+1EA0-U+1EFF), e.g. 'ạ' (U+1EA1, E1 BA A1)
      *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare, while the lowercase 'k' is common in Vietnamese (e.g. "kem", "kéo").
+     *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
+     *
+     *  We inherit most contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -3366,8 +3371,6 @@ typedef enum {
      *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
      *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
-     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
      *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
      *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
