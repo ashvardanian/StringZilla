@@ -2822,7 +2822,16 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
 #pragma region Character Safety Profiles
 
 /**
- *  @brief  Safety profile for a single character across all script paths.
+ *  @brief Safety profile for a single character across all script paths.
+ *
+ *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly folding
+ *  than the proper `sz_utf8_case_fold`, but without losing any possible matches. That's typically achieved
+ *  finding parts of the needle, that never appear in any multi-byte expansions of complex characters, so
+ *  we don't need to shuffle data withing a CPU register - just swap some byte sequences with others.
+ *
+ *  Assuming the complexity of Unicode, the number of such rules to take care of is quite significant, so
+ *  it's hard to achieve matching speeds beyond 500 MB/s for arbitrary needles. Hoever, if separate them
+ *  by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
  *
  *  Returned by sz_utf8_case_rune_safety_profile_() to indicate which fast paths
  *  can safely include this character in their safe window.
@@ -2830,226 +2839,565 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
 typedef enum {
     sz_utf8_case_rune_safe_none_k = 0,
     /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII characters.
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII characters, mostly for English text,
+     *          exclusive to single-byte characters without case-folding "collisions" and ambiguities.
      *
      *  If all of the following @b needle-constraints are satisfied, our case-insensitive UTF-8 substring search
      *  becomes no more than a trivial case-insensitive ASCII substring search, where the only @b haystack-folding
      *  operation to be applied is mapping A-Z to a-z:
      *
-     *  'a' (0x61) - can't be last; can't precede 'ʾ' (0xCA 0xBE)
-     *        to avoid: 'ẚ'→"aʾ"
-     *  'f' (0x66) - can't be first or last; can't follow 'f' (0x66); can't precede 'f' (0x66), 'i' (0x69), 'l' (0x6C)
-     *        to avoid: 'ﬀ'→"ff", 'ﬁ'→"fi", 'ﬂ'→"fl"
-     *  'h' (0x68) - can't be last; can't precede '̱' (0xCC 0xB1)
-     *        to avoid: 'ẖ'→"ẖ"
-     *  'i' (0x69) - can't be first or last; can't follow 'f' (0x66); can't precede '̇' (0xCC 0x87)
-     *        to avoid: 'İ'→"i̇", 'ﬁ'→"fi", 'ﬃ'→"ffi"
-     *  'j' (0x6A) - can't be last; can't precede '̌' (0xCC 0x8C)
-     *        to avoid: 'ǰ'→"ǰ"
-     *  'l' (0x6C) - can't be first; can't follow 'f' (0x66)
-     *        to avoid: 'ﬂ'→"fl", 'ﬄ'→"ffl"
-     *  'n' (0x6E) - can't be first; can't follow 'ʼ' (0xCA 0xBC)
-     *        to avoid: 'ŉ'→"ʼn"
-     *  's' (0x73) - can't be first or last; can't follow 's' (0x73); can't precede 's' (0x73), 't' (0x74)
-     *        to avoid: 'ß'→"ss", 'ẞ'→"ss", 'ﬅ'→"st"
-     *  't' (0x74) - can't be first or last; can't follow 's' (0x73); can't precede '̈' (0xCC 0x88)
-     *        to avoid: 'ẗ'→"ẗ", 'ﬅ'→"st", 'ﬆ'→"st"
-     *  'w' (0x77) - can't be last; can't precede '̊' (0xCC 0x8A)
-     *        to avoid: 'ẘ'→"ẘ"
-     *  'y' (0x79) - can't be last; can't precede '̊' (0xCC 0x8A)
-     *        to avoid: 'ẙ'→"ẙ"
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
      *
-     *  Safe ASCII letters (no constraints): b, c, d, e, g, k, m, o, p, q, r, u, v, x, z.
-     *  These can appear anywhere in a needle without special handling. We also don't need to check
-     *  for 'ʾ', '̌', '̊', 'ʼ' and other non-ASCII sequences, as this function will reject the needle
-     *  containing any non ASCII bytes. For more complex cases we revert to the Latin-1 kernels that
-     *  can handle multi-character expansions-on-folding, such as 'ß'→"ss" - if they don't change the
-     *  byte-width of the sequence.
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
      */
     sz_utf8_case_rune_safe_ascii_k = 1 << 0,
+
     /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII + Latin-1/A/B Supplements.
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 Supplements designed mostly
+     *          for Western European languages (like French, German, Spanish, & Portuguese) with a mixture of
+     *          single-byte and double-byte UTF-8 character sequences.
+     *
      *  @sa sz_utf8_case_rune_safe_ascii_k for a simpler variant.
      *
-     *  Unlike the ASCII fast path, these kernels a fold a much wider range of characters
-     *  - 26x original ASCII uppercase letters: 'A'→'a', 'Z'→'z'
-     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese: 'À'→'à', 'Ñ'→'ñ', 'Ü'→'ü'
-     *  - 63x Latin-A extension uppercase letters for Polish, Czech, Hungarian, & Turkish, like: 'Ą', 'Ł', 'Č', 'Ő', 'Ű'
-     *  - 103x Latin-B extension uppercase letters for Croatian, Romanian, African langs, like: 'Ș', 'Ț', 'Ǆ'
-     *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width: 'ß'→"ss"
-     *  - 1x special case of folding from Latin-1 to Greek, preserving byte-width: 'µ'→'μ'
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
+     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
+     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
+     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
+     *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *  - 1x special case of cross-script folding from Latin-1 to Greek, preserving byte-width:
+     *    - 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
      *
-     *  This covers many of the popular languages used across Europe and requires a few clarifications.
-     *  It doesn't, however, cover 3-byte UTF-8 sequences from the Latin Extended Additional block (Vietnamese, Welsh),
-     *  Latin-C and -D blocks for historical and specialized scripts. Assuming we fold German Eszett 'ß' into
-     *  two 's' characters and that the Turkish dotted 'İ' (U+0130) expands into a 3-byte sequence, let's clarify the
-     *  constraints that the needle must satisfy to use this fast path.
+     *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
+     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_safe_ascii_k`, but not all!
      *
-     *  We inherit all contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
+     *  Assuming how common 'ß' (U+00DF, C3 9F) and "ss" are in German text, we allow 's' (U+0073, 73) in this
+     *  safety profile. The main issue there is handling the uppercase 'ẞ' (U+1E9E, E1 BA 9E) that also folds
+     *  into "ss" (73 73), but is outside of Latin-1. In UTF-8 it is a 3-byte sequence, so it resizes into a
+     *  2-byte sequence when folded. Luckily for us, it's almost never used in practice: introduced to Unicode
+     *  in 2008 and officially adopted into German orthography in 2017. When processing the haystack, we check
+     *  if 'ẞ' (U+1E9E, E1 BA 9E) appears, and if so, we revert to serial processing for that tiny block of text.
      *
-     *  'a' (0x61) - can't be last; can't precede 'ʾ' (0xCA 0xBE)
-     *        to avoid: 'ẚ'→"aʾ"
-     *  'f' (0x66) - can't be first or last; can't follow 'f' (0x66); can't precede 'f' (0x66), 'i' (0x69), 'l' (0x6C)
-     *        to avoid: 'ﬀ'→"ff", 'ﬁ'→"fi", 'ﬂ'→"fl"
-     *  'h' (0x68) - can't be last; can't precede '̱' (0xCC 0xB1)
-     *        to avoid: 'ẖ'→"ẖ"
-     *  'i' (0x69) - can't be first or last; can't follow 'f' (0x66); can't precede '̇' (0xCC 0x87)
-     *        to avoid: 'İ'→"i̇", 'ﬁ'→"fi", 'ﬃ'→"ffi"
-     *  'j' (0x6A) - can't be last; can't precede '̌' (0xCC 0x8C)
-     *        to avoid: 'ǰ'→"ǰ"
-     *  'l' (0x6C) - can't be first; can't follow 'f' (0x66)
-     *        to avoid: 'ﬂ'→"fl", 'ﬄ'→"ffl"
-     *  'n' (0x6E) - can't be first; can't follow 'ʼ' (0xCA 0xBC)
-     *        to avoid: 'ŉ'→"ʼn"
-     *  's' (0x73) - can't be first or last; can't follow 's' (0x73); can't precede 's' (0x73), 't' (0x74)
-     *        to avoid: 'ß'→"ss", 'ẞ'→"ss", 'ﬅ'→"st"
-     *  't' (0x74) - can't be first or last; can't follow 's' (0x73); can't precede '̈' (0xCC 0x88)
-     *        to avoid: 'ẗ'→"ẗ", 'ﬅ'→"st", 'ﬆ'→"st"
-     *  'w' (0x77) - can't be last; can't precede '̊' (0xCC 0x8A)
-     *        to avoid: 'ẘ'→"ẘ"
-     *  'y' (0x79) - can't be last; can't precede '̊' (0xCC 0x8A)
-     *        to avoid: 'ẙ'→"ẙ"
+     *  Another place where 's' (U+0073, 73) appears are ligatures 'ﬅ' (U+FB05, EF AC 85) and 'ﬆ' (U+FB06, EF AC 86)
+     *  that both fold into "st" (73 74). They also result in serial fallback when detected in the haystack.
+     *  If we detect all of those ligatures from 'ﬀ' (U+FB00, EF AC 80) to 'ﬆ' (U+FB06, EF AC 86), we can safely
+     *  allow both 'f' (U+0066, 66) and 'l' (U+006C, 6C).
      *
-     *  We also add one more limitation for a special 2-byte character that is an irregular folding target of codepoints
-     *  of different length:
+     *  There is one more 3-byte problematic range to consider - from (E1 BA 96) to (E1 BA 9A), which includes:
+     *  'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1), 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88),
+     *  'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A), 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A),
+     *  'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE). If we correctly detect that range in the haystack,  we can safely
+     *  allow 'h' (U+0068, 68), 't' (U+0074, 74), 'w' (U+0077, 77), 'y' (U+0079, 79), and 'a' (U+0061, 61) in needles!
      *
-     *  'å' (U+00E5) - is the folding target of both 'Å' in Latin-1 and 'Å' Kelvin sign (U+212B, 3B→2B)
-     *        so needle cannot contain 'å' to avoid ambiguity. That said, there are other 2-byte characters that are a
-     *        folding target for multiple codepoints, that we properly allow and handle - the Croatian and Serbian
-     *        digraphs: Ǆ & ǅ → ǆ (U+01C6), Ǉ & ǈ → ǉ (U+01C9), Ǌ & ǋ → ǌ (U+01CC), and Ǳ & ǲ → ǳ (U+01F3).
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is obviously common
+     *  in German and English. In French, Spanish, and Portuguese - less so. So we add one more check
+     *  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
+     *
+     *  So we inherit the following limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
+     *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87).
+     *    It's the Turkish dotted capital I that expands into a 3-byte sequence when folded. It typically appears
+     *    at the start of words, like: İstanbul (the city), İngilizce (English language).
+     *
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C)
+     *    to avoid: 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C).
+     *    It's the "J with Caron", used in phonetic transcripts and romanization of Iranian, Armenian, Georgian.
+     *
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC)
+     *    to avoid: 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E).
+     *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
+     *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
+     *
+     *  We also add one more limitation for a special 2-byte character that is an irregular folding target of
+     *  codepoints of different length:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *
+     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
+     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_latin1ab_k = 1 << 1,
+    sz_utf8_case_rune_safe_western_europe_k = 1 << 1,
+
     /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic.
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin-A Supplements designed
+     *          mostly for Central European languages (like Polish, Czech, & Hungarian) and Turkish with a mixture of
+     *          single-byte, double-byte, and rare triple-byte UTF-8 character sequences.
+     *
+     *  @sa sz_utf8_case_rune_safe_ascii_k for a simpler variant.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
+     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
+     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
+     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
+     *  - 63x Latin-A extension uppercase letters for Polish, Czech, Hungarian, & Turkish, like:
+     *    - 'Ą' (U+0104, C4 84) → 'ą' (U+0105, C4 85),
+     *    - 'Ł' (U+0141, C5 81) → 'ł' (U+0142, C5 82),
+     *    - 'Č' (U+010C, C4 8C) → 'č' (U+010D, C4 8D)
+     *
+     *  This doesn't cover Latin-B extensions (like Baltic, Romanian, & Vietnamese letters), and is not optimal
+     *  for Western European languages, assuming the lack of "ss" handling for German Eszett 'ß' (U+00DF, C3 9F).
+     *  There is, however, a huge overlap between the Central European, Western European, and Turkic scripts:
+     *
+     *  - Czech has the highest overlap - nearly half of Czech words with Latin-A characters (like Č, Ř, Š, Ž)
+     *    also contain Latin-1 characters (Á, É, Í, Ó, Ú, Ý). Examples: sčítání, dalšími, řízení, systémů.
+     *  - Polish has minimal word-level overlap because Polish only uses Ó/ó from Latin-1, and most Polish-specific
+     *    letters (Ą, Ę, Ł, Ń, Ś, Ź, Ż) are in Latin-A. Example: mieszkańców (has both ń and ó).
+     *  - Turkish has moderate overlap from Ç, Ö, Ü (Latin-1) mixing with Ğ, İ, Ş (Latin-A).
+     *    Examples: içeriği, öğrencilerden, dönüşüm.
+     *
+     *  All those languages are not always related linguisticallly:
+     *
+     *  - Czech and Polish are Slavic languages, that use Latin script with háčeks since 15th century.
+     *  - Hungarian is a Uralic language, that adopted Latin script in 11th century.
+     *  - Turkish is a Turkic (Altaic) language, that switched from Arabic to Latin script in 1928.
+     *    Atatürk's 1928 alphabet reform:
+     *    - borrowed Ç, Ö, Ü from French and German subsets of Latin-1 Supplement (C3 lead byte).
+     *    - introduced Ğ, İ, Ş, which ended up in the Latin Extended-A (C4/C5 lead byte).
+     *
+     *  But due to overlapping character sets, they can all benefit from the same fast path.
+     *
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is very common in Turkish,
+     *  Czech, Polish. So we add one more check  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
+     *  again - revert to serial.
+     *
+     *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning throhg the
+     *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
+     *  frequenlty encounter in Turkish text.
+     *
+     *  We inherit most contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *
+     *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_case_rune_safe_western_europe_k`:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *
+     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
+     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_central_europe_k = 1 << 2,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic designed mostly
+     *          for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
+     *          (like Serbian, Bulgarian, & Macedonian) with a mixture of single-byte and double-byte UTF-8
+     *          character sequences.
+     *
      *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
      *
-     *  These kernels fold:
-     *  - 26x ASCII uppercase letters: 'A'→'a', 'Z'→'z'
-     *  - 32x Basic Cyrillic uppercase letters: 'А'→'а' (U+0410→U+0430), 'Я'→'я' (U+042F→U+044F)
-     *  - 16x Cyrillic extensions: 'Ё'→'ё' (U+0401→U+0451), etc. in U+0400-U+040F and U+0450-U+045F
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 32x Basic Cyrillic uppercase letters:
+     *    - 'А' (U+0410, D0 90) → 'а' (U+0430, D0 B0) through 'П' (U+041F, D0 9F) → 'п' (U+043F, D0 BF)
+     *    - 'Р' (U+0420, D0 A0) → 'р' (U+0440, D1 80) through 'Я' (U+042F, D0 AF) → 'я' (U+044F, D1 8F)
+     *  - 16x Cyrillic extensions for non-Russian Slavic languages:
+     *    - 'Ѐ' (U+0400, D0 80) → 'ѐ' (U+0450, D1 90) - Cyrillic E with grave (Macedonian, Serbian)
+     *    - 'Ё' (U+0401, D0 81) → 'ё' (U+0451, D1 91) - Cyrillic IO (Russian, Belarusian)
+     *    - 'Ђ' (U+0402, D0 82) → 'ђ' (U+0452, D1 92) - Cyrillic DJE (Serbian)
+     *    - 'Ѓ' (U+0403, D0 83) → 'ѓ' (U+0453, D1 93) - Cyrillic GJE (Macedonian)
+     *    - 'Є' (U+0404, D0 84) → 'є' (U+0454, D1 94) - Cyrillic Ukrainian IE (Ukrainian)
+     *    - 'Ѕ' (U+0405, D0 85) → 'ѕ' (U+0455, D1 95) - Cyrillic DZE (Macedonian)
+     *    - 'І' (U+0406, D0 86) → 'і' (U+0456, D1 96) - Cyrillic Byelorussian-Ukrainian I (Ukrainian, Belarusian)
+     *    - 'Ї' (U+0407, D0 87) → 'ї' (U+0457, D1 97) - Cyrillic YI (Ukrainian)
+     *    - 'Ј' (U+0408, D0 88) → 'ј' (U+0458, D1 98) - Cyrillic JE (Serbian, Macedonian)
+     *    - 'Љ' (U+0409, D0 89) → 'љ' (U+0459, D1 99) - Cyrillic LJE (Serbian, Macedonian)
+     *    - 'Њ' (U+040A, D0 8A) → 'њ' (U+045A, D1 9A) - Cyrillic NJE (Serbian, Macedonian)
+     *    - 'Ћ' (U+040B, D0 8B) → 'ћ' (U+045B, D1 9B) - Cyrillic TSHE (Serbian)
+     *    - 'Ќ' (U+040C, D0 8C) → 'ќ' (U+045C, D1 9C) - Cyrillic KJE (Macedonian)
+     *    - 'Ѝ' (U+040D, D0 8D) → 'ѝ' (U+045D, D1 9D) - Cyrillic I with grave (Bulgarian, Macedonian)
+     *    - 'Ў' (U+040E, D0 8E) → 'ў' (U+045E, D1 9E) - Cyrillic short U (Belarusian)
+     *    - 'Џ' (U+040F, D0 8F) → 'џ' (U+045F, D1 9F) - Cyrillic DZHE (Serbian, Macedonian)
      *
-     *  UTF-8 byte ranges handled:
-     *  - D0 80-BF: U+0400-U+043F (Cyrillic uppercase and first half of lowercase)
-     *  - D1 80-9F: U+0440-U+045F (second half of Cyrillic lowercase)
+     *  UTF-8 byte patterns for Basic Cyrillic (D0/D1 lead bytes):
+     *  - D0 80-8F: Extensions uppercase 'Ѐ'-'Џ' (U+0400-U+040F) → fold to D1 90-9F
+     *  - D0 90-9F: Basic uppercase 'А'-'П' (U+0410-U+041F) → fold to D0 B0-BF (same lead byte)
+     *  - D0 A0-AF: Basic uppercase 'Р'-'Я' (U+0420-U+042F) → fold to D1 80-8F (cross lead byte)
+     *  - D0 B0-BF: Basic lowercase 'а'-'п' (U+0430-U+043F)
+     *  - D1 80-8F: Basic lowercase 'р'-'я' (U+0440-U+044F)
+     *  - D1 90-9F: Extensions lowercase 'ѐ'-'џ' (U+0450-U+045F)
+     *
+     *  This doesn't cover Extended Cyrillic characters like Ukrainian 'Ґ' (U+0490, D2 90) → 'ґ' (U+0491, D2 91)
+     *  which uses the D2 lead byte and would require detection and serial fallback.
      *
      *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *
-     *  'f' (0x66) - can't be first or last; can't follow/precede 'f'; can't precede 'i', 'l'
-     *        to avoid: 'ﬀ'→"ff", 'ﬁ'→"fi", 'ﬂ'→"fl"
-     *  's' (0x73) - can't be first or last; can't follow/precede 's'; can't precede 't'
-     *        to avoid: 'ß'→"ss", 'ẞ'→"ss", 'ﬅ'→"st"
-     *  ... (other ASCII constraints as in sz_utf8_case_rune_safe_ascii_k)
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *     can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *     - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *     can't precede '̇' (U+0307, CC 87) to avoid:
+     *     - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *     - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *     - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *     - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *     can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *     - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *     - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *     can't precede '̈' (U+0308, CC 88) to avoid:
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
      *
-     *  This is necessary because mixed-script documents (Cyrillic + Latin) may contain
-     *  Latin ligatures like 'ﬁ', 'ﬂ', 'ﬀ', 'ﬅ' that the Cyrillic fold function doesn't handle.
+     *  These ASCII constraints are necessary because mixed-script documents (Cyrillic + Latin) may contain
+     *  Latin ligatures, German Eszett, or Turkish İ that the Cyrillic fold function doesn't handle.
      *
-     *  Unlike Latin-1, Cyrillic has:
-     *  - No multi-character expansions (all Cyrillic case folding is 1:1)
-     *  - No cross-script ambiguity (no other-script characters fold to basic Cyrillic)
-     *
-     *  Excluded (needle cannot contain):
-     *  - Extended Cyrillic (U+0460+): D1 A0+ and beyond
-     *  - Other 2-byte scripts: Latin supplements (C2/C3), Greek (CE/CF), Armenian (D4/D5/D6)
-     *  - Any 3-byte or 4-byte UTF-8 sequences (E0+ lead bytes)
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_cyrillic_k = 1 << 2,
+    sz_utf8_case_rune_safe_cyrillic_k = 1 << 3,
+
     /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Greek.
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Greek designed mostly
+     *          for Modern Greek (Demotic) text with a mixture of single-byte and double-byte UTF-8
+     *          character sequences.
+     *
+     *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 24x Basic Greek uppercase letters (monotonic, without diacritics):
+     *    - 'Α' (U+0391, CE 91) → 'α' (U+03B1, CE B1) through 'Ο' (U+039F, CE 9F) → 'ο' (U+03BF, CE BF)
+     *    - 'Π' (U+03A0, CE A0) → 'π' (U+03C0, CF 80) through 'Ω' (U+03A9, CE A9) → 'ω' (U+03C9, CF 89)
+     *  - 1x Final sigma to regular sigma:
+     *    - 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
+     *  - 7x Greek accented uppercase letters (tonos only, modern orthography):
+     *    - 'Ά' (U+0386, CE 86) → 'ά' (U+03AC, CE AC)
+     *    - 'Έ' (U+0388, CE 88) → 'έ' (U+03AD, CE AD)
+     *    - 'Ή' (U+0389, CE 89) → 'ή' (U+03AE, CE AE)
+     *    - 'Ί' (U+038A, CE 8A) → 'ί' (U+03AF, CE AF)
+     *    - 'Ό' (U+038C, CE 8C) → 'ό' (U+03CC, CF 8C)
+     *    - 'Ύ' (U+038E, CE 8E) → 'ύ' (U+03CD, CF 8D)
+     *    - 'Ώ' (U+038F, CE 8F) → 'ώ' (U+03CE, CF 8E)
+     *  - 2x Greek uppercase letters with dialytika:
+     *    - 'Ϊ' (U+03AA, CE AA) → 'ϊ' (U+03CA, CF 8A)
+     *    - 'Ϋ' (U+03AB, CE AB) → 'ϋ' (U+03CB, CF 8B)
+     *
+     *  UTF-8 byte patterns for Basic Greek (CE/CF lead bytes):
+     *  - CE 86-8F: Accented uppercase 'Ά'-'Ώ' (with gaps) → CE AC-AF or CF 8C-8E
+     *  - CE 91-9F: Basic uppercase 'Α'-'Ο' (U+0391-U+039F) → CE B1-BF (same lead byte)
+     *  - CE A0-A9: Basic uppercase 'Π'-'Ω' (U+03A0-U+03A9) → CF 80-89 (cross lead byte)
+     *  - CE AA-AB: Dialytika uppercase 'Ϊ'-'Ϋ' (U+03AA-U+03AB) → CF 8A-8B (cross lead byte)
+     *  - CE AC-AF: Accented lowercase 'ά'-'ί' (U+03AC-U+03AF)
+     *  - CE B1-BF: Basic lowercase 'α'-'ο' (U+03B1-U+03BF)
+     *  - CF 80-89: Basic lowercase 'π'-'ω' (U+03C0-U+03C9), includes 'ς' (CF 82) and 'σ' (CF 83)
+     *  - CF 8A-8E: Accented/dialytika lowercase 'ϊ'-'ώ' (U+03CA-U+03CE)
+     *
+     *  Greek symbol variants that fold to basic letters (detected in haystack, serial fallback):
+     *  - 'ϐ' (U+03D0, CF 90) → 'β' (U+03B2, CE B2) - Greek Beta Symbol
+     *  - 'ϑ' (U+03D1, CF 91) → 'θ' (U+03B8, CE B8) - Greek Theta Symbol
+     *  - 'ϕ' (U+03D5, CF 95) → 'φ' (U+03C6, CF 86) - Greek Phi Symbol
+     *  - 'ϖ' (U+03D6, CF 96) → 'π' (U+03C0, CF 80) - Greek Pi Symbol
+     *  - 'ϰ' (U+03F0, CF B0) → 'κ' (U+03BA, CE BA) - Greek Kappa Symbol
+     *  - 'ϱ' (U+03F1, CF B1) → 'ρ' (U+03C1, CF 81) - Greek Rho Symbol
+     *  - 'ϵ' (U+03F5, CF B5) → 'ε' (U+03B5, CE B5) - Greek Lunate Epsilon Symbol
+     *
+     *  Excluded from the needle (require serial fallback when detected in haystack):
+     *
+     *  - 'ΐ' (U+0390, CE 90) → "ΐ" (CE B9 CC 88 CC 81) - iota with dialytika and tonos
+     *    EXPANDS to 'ι' (U+03B9) + '̈' (U+0308) + '́' (U+0301) - 3 codepoints!
+     *  - 'ΰ' (U+03B0, CE B0) → "ΰ" (CF 85 CC 88 CC 81) - upsilon with dialytika and tonos
+     *    EXPANDS to 'υ' (U+03C5) + '̈' (U+0308) + '́' (U+0301) - 3 codepoints!
+     *  - Greek Extended / Polytonic (U+1F00-U+1FFF, E1 BC-BF lead bytes):
+     *    Ancient Greek with breathing marks, accents, and iota subscript. Many expand to multiple
+     *    codepoints, e.g., 'ᾈ' (U+1F88) → "ἀι" (U+1F00 + U+03B9), 'ᾳ' (U+1FB3) → "αι" (U+03B1 + U+03B9).
+     *    Polytonic Greek is used primarily in academic, religious, and historical texts.
+     *
+     *  Note on the Micro Sign 'µ' (U+00B5, C2 B5):
+     *  The Latin-1 micro sign folds TO Greek mu 'μ' (U+03BC, CE BC). This is handled by the Latin-1
+     *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
+     *  only handles characters that originate in the Greek block.
+     *
+     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *
+     *  These ASCII constraints are necessary because mixed-script documents (Greek + Latin) are common
+     *  in scientific notation, brand names, and modern Greek text with English loanwords.
+     *
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_greek_k = 1 << 4,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
      *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
      *
      *  These kernels fold:
-     *  - 26x ASCII uppercase letters: 'A'→'a', 'Z'→'z'
-     *  - 24x Basic Greek uppercase letters: 'Α'→'α' (U+0391→U+03B1), 'Ω'→'ω' (U+03A9→U+03C9)
-     *  - Special: ς (U+03C2, final sigma) → σ (U+03C3), Σ (U+03A3) → σ
+     *  - 26x ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 38x Armenian uppercase letters: '
+     *    - 'Ա' (U+0531, D4 B1) → 'ա' (U+0561, D5 A1)
+     *    - 'Ֆ' (U+0556, D5 96) → 'ֆ' (U+0586, D6 86)
      *
      *  UTF-8 byte ranges handled:
-     *  - CE 91-A9: uppercase Α-Ω (U+0391-U+03A9, without accents)
-     *  - CE B1-BF: lowercase α-ο (U+03B1-U+03BF)
-     *  - CF 80-89: lowercase π-ω (U+03C0-U+03C9, includes final sigma ς at CF 82, sigma σ at CF 83)
+     *  - D4 B1-BF: uppercase 'Ա' (U+0531) through 'Ձ' (U+053F)
+     *  - D5 80-96: uppercase 'Ղ' (U+0540) through 'Ֆ' (U+0556)
+     *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
+     *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
      *
      *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`
-     *  because mixed-script documents may contain Latin ligatures.
+     *  because mixed-script documents (e.g. dictionaries) may contain Latin ligatures,
+     *  and add more rules specific to Armenian due to several ligatures:
      *
-     *  Unlike Latin-1, Basic Greek has:
-     *  - No multi-character expansions (sigma variants fold to σ, not expand)
-     *  - No cross-script folding targets (µ micro sign folds TO Greek μ, handled by Latin-1 path)
+     *  - 'և' (U+0587, Ech-Yiwn) → "եւ" ('ե' + 'ւ') - very common
+     *  - 'ﬓ' (U+FB13, Men-Now) → "մն" ('մ' + 'ն') - quite rare
+     *  - 'ﬔ' (U+FB14, Men-Ech) → "մե" ('մ' + 'ե') - quite rare
+     *  - 'ﬕ' (U+FB15, Men-Ini) → "մի" ('մ' + 'ի') - quite rare
+     *  - 'ﬖ' (U+FB16, Vew-Now) → "վն" ('վ' + 'ն') - quite rare
+     *  - 'ﬗ' (U+FB17, Men-Xeh) → "մխ" ('մ' + 'խ') - quite rare
      *
-     *  Excluded (needle cannot contain):
-     *  - Greek Extended (U+1F00-U+1FFF, 3-byte E1 BC-BF): polytonic Greek with complex expansions
-     *  - Greek with diacritics: ΐ (U+0390) → ι+̈+́, ΰ (U+03B0) → υ+̈+́ (multi-codepoint expansions)
-     *  - Other 2-byte scripts: Latin (C2/C3), Cyrillic (D0/D1), Armenian (D4/D5/D6)
-     *  - Any 3-byte or 4-byte UTF-8 sequences (E0+ lead bytes)
+     *  Specific constraints by character:
+     *
+     *  - 'ե' (U+0565, D5 A5) - can't be first; can't follow 'մ' (U+0574, D5 B4);
+     *     can't precede 'ւ' (U+0582, D6 82) to avoid:
+     *     - 'և' (U+0587, D6 87) → "եւ" (ech + yiwn)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (men + ech)
+     *  - 'ւ' (U+0582, D6 82) - can't be last; can't follow 'ե' (U+0565, D5 A5) to avoid:
+     *     - 'և' (U+0587, D6 87) → "եւ"
+     *  - 'մ' (U+0574, D5 B4) - can't be last; can't precede 'ն' (U+0576, D5 B6), 'ե' (U+0565, D5 A5),
+     *     'ի' (U+056B, D5 AB), 'խ' (U+056D, D5 AD) to avoid:
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (men + now)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (men + ech)
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (men + ini)
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (men + xeh)
+     *  - 'ն' (U+0576, D5 B6) - can't be first; can't follow 'մ' (U+0574, D5 B4), 'վ' (U+057E, D5 BE) to avoid:
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն"
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն"
+     *  - 'ի' (U+056B, D5 AB) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի"
+     *  - 'վ' (U+057E, D5 BE) - can't be first; can't precede 'ն' (U+0576, D5 B6) to avoid:
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն"
+     *  - 'խ' (U+056D, D5 AD) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ"
+     *
+     *  This means that Armenian needles containing these specific bigrams (եւ, մն, մե, մի, վն, մխ)
+     *  cannot use the fast path because finding them separately might miss the precomposed ligatures
+     *  present in the haystack.
      */
-    sz_utf8_case_rune_safe_greek_k = 1 << 3,
+    sz_utf8_case_rune_safe_armenian_k = 1 << 5,
+
     /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
-     *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
-     *
-     *  These kernels fold:
-     *  - 26x ASCII uppercase letters: 'A'→'a', 'Z'→'z'
-     *  - 38x Armenian uppercase letters: 'Ա'→'ա' (U+0531→U+0561), 'Ֆ'→'ֆ' (U+0556→U+0586)
-     *    Case folding uses +48 offset.
-     *
-     *  UTF-8 byte ranges handled:
-     *  - D4 B1-BF: uppercase Ա-Ձ (U+0531-U+053F)
-     *  - D5 80-96: uppercase Ղ-Ֆ (U+0540-U+0556)
-     *  - D5 A1-BF: lowercase delays- delays (U+0561-U+057F)
-     *  - D6 80-86: lowercase delays-ֆ (U+0580-U+0586)
-     *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`
-     *  because mixed-script documents may contain Latin ligatures.
-     *
-     *  Specifically excluded:
-     *  - և (U+0587, D6 87): Armenian ligature that expands to եdelays (U+0565 + U+0582), 2B→4B
-     *  - Armenian ligatures FB13-FB17 (3-byte): ﬓ→մdelays, ﬔ→մech, etc. (each expands to 2 letters)
-     *
-     *  Unlike Latin-1, Basic Armenian has:
-     *  - One problematic ligature (U+0587) which is excluded by byte range
-     *  - No cross-script folding issues (Armenian letters are unique)
-     *
-     *  Excluded (needle cannot contain):
-     *  - Armenian ligature և (U+0587, D6 87)
-     *  - Armenian ligatures in Alphabetic Presentation Forms (U+FB13-FB17, 3-byte)
-     *  - Other 2-byte scripts: Latin (C2/C3), Cyrillic (D0/D1), Greek (CE/CF)
-     *  - Any 3-byte or 4-byte UTF-8 sequences (E0+ lead bytes)
-     */
-    sz_utf8_case_rune_safe_armenian_k = 1 << 4,
-    /**
-     *  @brief Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin Extended Additional.
-     *  @sa sz_utf8_case_rune_safe_latin1ab_k for the inherited Latin rules.
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin Extended Additional.
+     *  @sa sz_utf8_case_rune_safe_central_europe_k for the inherited Latin rules.
      *
      *  These kernels extend Latin-1/A/B with Vietnamese characters:
-     *  - Everything from `sz_utf8_case_rune_safe_latin1ab_k` (ASCII + Latin-1/A/B)
-     *  - 166x Latin Extended Additional letters (U+1E00-U+1E95, U+1EA0-U+1EFF) for Vietnamese
-     *    Includes: Ạ/ạ, Ả/ả, Ấ/ấ, Ầ/ầ, Ẩ/ẩ, Ẫ/ẫ, Ậ/ậ, etc.
+     *  - Everything from `sz_utf8_case_rune_safe_central_europe_k` (ASCII + Latin-1/A)
+     *  - 166x Latin Extended Additional letters (U+1E00-U+1E95, U+1EA0-U+1EFF) for Vietnamese.
+     *    Include precomposed Latin letters with additional diacritics (e.g. Ạ/ạ, Ả/ả, Ấ/ấ).
      *
      *  UTF-8 byte ranges handled:
      *  - 00-7F: ASCII
      *  - C2/C3: Latin-1 Supplement
-     *  - C4-C7: Latin Extended-A/B (subset)
-     *  - E1 B8 00 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95)
+     *  - C4-C5: Latin Extended-A
+     *  - E1 B8 80 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95)
      *  - E1 BA A0 - E1 BB BF: Latin Extended Additional (U+1EA0-U+1EFF)
      *
-     *  We inherit ALL contextual limitations from `sz_utf8_case_rune_safe_latin1ab_k`:
-     *  - ASCII ligature constraints (ff, fi, fl, ss, st)
-     *  - 'å' exclusion (Ångström U+212B folds to it)
-     *  - 'ß'→"ss" byte-width preservation
+     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *
-     *  Specifically excluded from Latin Extended Additional:
-     *  - U+1E96-U+1E9F: characters that expand to base + combining diacritics:
-     *      ẖ (1E96) → h + ̱ (combining macron below)
-     *      ẗ (1E97) → t + ̈ (combining diaeresis)
-     *      ẘ (1E98) → w + ̊ (combining ring above)
-     *      ẙ (1E99) → y + ̊ (combining ring above)
-     *      ẚ (1E9A) → a + ʾ (modifier letter right half ring)
-     *      ẛ (1E9B) → ſ (long s, maps to different character)
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẛ' (U+1E9B, E1 BA 9B) → "ṡ" (U+1E61, E1 B9 A1) [Latin Extended Additional]
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
      *
-     *  Excluded (needle cannot contain):
-     *  - U+1E96-U+1E9F (multi-codepoint expansions)
-     *  - Other 3-byte scripts: Greek Extended, CJK, etc.
-     *  - Any 4-byte UTF-8 sequences (F0+ lead bytes)
+     *  We also inherit one more limitation from the Latin-1 profile:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *
+     *  This means, that all other ASCII and Latin-1/A/Ext-Add characters are "safe" to use with this kernel.
      */
-    sz_utf8_case_rune_safe_vietnamese_k = 1 << 5,
+    sz_utf8_case_rune_safe_vietnamese_k = 1 << 6,
 } sz_utf8_case_rune_safety_profile_t_;
 
 /**
@@ -3060,16 +3408,16 @@ typedef enum {
  *  After analysis, only the best window is returned in sz_utf8_case_safe_windows_t_.
  */
 typedef struct {
-    sz_size_t start;  ///< Start offset of window within needle (in bytes)
-    sz_size_t length; ///< Length of window in bytes
+    sz_size_t start;  // Start offset of window within needle (in bytes)
+    sz_size_t length; // Length of window in bytes
 
     // Probe positions for 3-point Raita filter (last byte of first/mid/last codepoints)
-    sz_size_t probe_first; ///< Byte offset of first probe (relative to window start)
-    sz_size_t probe_mid;   ///< Byte offset of mid probe (relative to window start)
-    sz_size_t probe_last;  ///< Byte offset of last probe (relative to window start)
-    sz_u8_t prefix_first;  ///< UTF-8 prefix for first probe (0-3)
-    sz_u8_t prefix_mid;    ///< UTF-8 prefix for mid probe (0-3)
-    sz_u8_t prefix_last;   ///< UTF-8 prefix for last probe (0-3)
+    sz_size_t probe_first; // Byte offset of first probe (relative to window start)
+    sz_size_t probe_mid;   // Byte offset of mid probe (relative to window start)
+    sz_size_t probe_last;  // Byte offset of last probe (relative to window start)
+    sz_u8_t prefix_first;  // UTF-8 prefix for first probe (0-3)
+    sz_u8_t prefix_mid;    // UTF-8 prefix for mid probe (0-3)
+    sz_u8_t prefix_last;   // UTF-8 prefix for last probe (0-3)
 } sz_utf8_case_safe_window_t_;
 
 SZ_INTERNAL void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *window, sz_cptr_t needle,
@@ -3113,7 +3461,8 @@ SZ_INTERNAL void sz_utf8_case_safe_window_init_(sz_utf8_case_safe_window_t_ *win
  */
 typedef struct {
     sz_utf8_case_safe_window_t_ ascii;
-    sz_utf8_case_safe_window_t_ latin1ab;
+    sz_utf8_case_safe_window_t_ western_europe;
+    sz_utf8_case_safe_window_t_ central_europe;
     sz_utf8_case_safe_window_t_ cyrillic;
     sz_utf8_case_safe_window_t_ greek;
     sz_utf8_case_safe_window_t_ armenian;
