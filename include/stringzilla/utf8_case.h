@@ -3096,12 +3096,8 @@ typedef enum {
      *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
      *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
      *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
@@ -3161,8 +3157,10 @@ typedef enum {
      *  That sign is extremely rare in Western European languages, while the lowercase 'k' is obviously common
      *  in German and English. In French, Spanish, and Portuguese - less so. So we add one more check
      *  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
+     *  Similarly, we check for "ſ" (Latin Small Letter Long S, U+017F, C5 BF) which folds to 's' (U+0073, 73).
+     *  It's archaic in modern languages but theoretically possible in historical texts.
      *
-     *  So we inherit the following limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  So we allow both 's' and 'k' and inherit only the following limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
      *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87).
@@ -3233,7 +3231,7 @@ typedef enum {
      *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
      *  That sign is extremely rare in Western European languages, while the lowercase 'k' is very common in Turkish,
      *  Czech, Polish. So we add one more check  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
-     *  again - revert to serial.
+     *  again - revert to serial. Same logic applies to "ſ" (Latin Small Letter Long S, U+017F, C5 BF) folding to 's'.
      *
      *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning throhg the
      *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
@@ -3360,10 +3358,11 @@ typedef enum {
      *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
      *     - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
-     *     can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *     - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *     - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *     can't precede '̈' (U+0308, CC 88) to avoid:
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
      *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
      *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
@@ -3446,7 +3445,7 @@ typedef enum {
      *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
      *  only handles characters that originate in the Greek block.
      *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -3473,10 +3472,11 @@ typedef enum {
      *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
      *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
      *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
      *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
@@ -3514,9 +3514,51 @@ typedef enum {
      *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
      *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
      *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`
-     *  because mixed-script documents (e.g. dictionaries) may contain Latin ligatures,
-     *  and add more rules specific to Armenian due to several ligatures:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *
+     *  We also add rules specific to Armenian ligatures:
      *
      *  - 'և' (U+0587, Ech-Yiwn) → "եւ" ('ե' + 'ւ') - very common
      *  - 'ﬓ' (U+FB13, Men-Now) → "մն" ('մ' + 'ն') - quite rare
