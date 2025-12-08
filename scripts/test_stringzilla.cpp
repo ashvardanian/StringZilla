@@ -1332,6 +1332,36 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
         {"\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "xyz", "Not found in Cyrillic"},
         {"Hello World", "\xD0\x9F\xD1\x80\xD0\xB8", "Cyrillic needle not in ASCII"},
 
+        // Regression test: SIMD returned NULL when serial found match
+        // Needle contains: ǰ (Latin Extended-B), ẞ (capital sharp S expands to "ss"), Turkish ı, emoji
+        // Safe window is "Ithe" at bytes 31-34 which folds to "ithe"
+        // Bug triggered by specific prefix content with Armenian, Greek, CJK, ligatures
+        {"\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82"
+         "\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC\x85\x57\x6F\x72\x6C\x64"
+         "\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81"
+         "\x84\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4"
+         "\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF\x8C\xCF"
+         "\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21"
+         "\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0"
+         "\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F"
+         "\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3"
+         "\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85\xD0\x91\xC5\xBF"
+         "\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91"
+         "\x4D\x52\xE1\xBA\xA1\x4A\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F"
+         "\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3"
+         "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A"
+         "\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91\x66\x67\x6F\x41\xC3\x85"
+         "\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA"
+         "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF"
+         "\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F\xCE\x92"
+         "\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA"
+         "\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59\xEF\xAC\x86\x59\x56\x2E\x33\xC3"
+         "\xA9\x7A\x4C\x4C",
+         "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80"
+         "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49"
+         "\x74\x68\x65",
+         "Regression: complex needle with expansion chars in mixed-script haystack"},
+
         // Edge cases
         {"", "", "Both empty"},
         {"Hello", "", "Empty needle"},
@@ -1351,7 +1381,8 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
 
         // Method 1 & 2: Case-insensitive find (serial vs SIMD)
         sz_utf8_case_insensitive_needle_metadata_t serial_metadata = {}, simd_metadata = {};
-        sz_cptr_t serial_match = find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_metadata, &serial_matched_len);
+        sz_cptr_t serial_match =
+            find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_metadata, &serial_matched_len);
         sz_cptr_t simd_match = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_metadata, &simd_matched_len);
 
         // Method 3: Fold haystack + fold needle + regular sz_find (independent oracle)
@@ -1700,7 +1731,8 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
                 std::fprintf(stderr, "  SIMD: offset=%zu, len=%zu\n",
                              simd_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_offset, simd_matched_len);
                 std::fprintf(stderr, "  SIMD metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
-                             simd_metadata.kernel_id, simd_metadata.safe_window.offset, simd_metadata.safe_window.length);
+                             simd_metadata.kernel_id, simd_metadata.safe_window.offset,
+                             simd_metadata.safe_window.length);
                 std::fprintf(stderr, "  SIMD metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
                              simd_metadata.folded_slice_length, simd_metadata.probe_second, simd_metadata.probe_third);
                 std::fprintf(stderr, "  SIMD metadata folded_slice: ");
@@ -3574,7 +3606,7 @@ void test_utf8() {
         // So "İ" != "i".
         // "İ" matches "i\u0307".
         result = sz_utf8_case_insensitive_find(haystack, 9, "i\xcc\x87stanbul", 10, &metadata, &matched_len);
-        assert(result == haystack); 
+        assert(result == haystack);
 
         // German Maße -> MASSE
         haystack = "Maße";
@@ -3582,7 +3614,7 @@ void test_utf8() {
         result = sz_utf8_case_insensitive_find(haystack, 5, "MASSE", 5, &metadata, &matched_len);
         // "ß" folds to "ss". "SS" folds to "ss". Match!
         assert(result != SZ_NULL_CHAR);
-        assert(matched_len == 2); // Matched "ß" (2 bytes) against "SS" (2 chars)? No, matched_len is in haystack bytes. "ß" is 2 bytes.
+        assert(matched_len == 5); // Matched "Maße" (5 bytes) against "MASSE"
 
         // Weird combination: "ß" vs "ss"
         // Haystack "Fuss" (4 bytes), Needle "Fuß" (4 bytes)

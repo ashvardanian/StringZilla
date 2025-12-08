@@ -1277,8 +1277,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_chunk_( //
     sz_cptr_t needle, sz_size_t needle_length,              //
     sz_size_t *matched_length) {
     // Delegate to serial implementation which properly handles ligatures and expansions
-    return sz_utf8_case_insensitive_find_serial(haystack, chunk_length, needle, needle_length, SZ_NULL_CHAR,
-                                                matched_length);
+    return sz_utf8_case_insensitive_find_serial(haystack, chunk_length, needle, needle_length, 0, matched_length);
 }
 
 SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
@@ -1925,8 +1924,8 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
     sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, char const *file, int line) {
 
     sz_size_t serial_matched_length;
-    sz_cptr_t expected = sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
-                                                              SZ_NULL_CHAR, &serial_matched_length);
+    sz_cptr_t expected = sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, 0,
+                                                              &serial_matched_length);
 
     if (result == expected) return;
 
@@ -1984,7 +1983,14 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
     fprintf(stderr, "--------------------------------------------------------\n");
     abort();
 #else
-    sz_unused(needle_metadata);
+    sz_unused_(needle_metadata);
+    sz_unused_(haystack);
+    sz_unused_(haystack_length);
+    sz_unused_(needle);
+    sz_unused_(needle_length);
+    sz_unused_(result);
+    sz_unused_(file);
+    sz_unused_(line);
     // Force crash without LibC
     *((volatile int *)0) = 0;
 #endif
@@ -4150,11 +4156,13 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         sz_size_t runes_within; // Runes within this window
     } sz_script_range_t_;
 
-    // Map profiles to array indices: 0=ASCII, 1=Western, 2=Central, 3=Cyrillic, 4=Greek, 5=Armenian, 6=Vietnamese
-    sz_size_t const count_profiles = sz_utf8_case_rune_case_agnostic_k - sz_utf8_case_rune_safe_ascii_k;
-    sz_script_range_t_ best[count_profiles];
-    sz_script_range_t_ curr[count_profiles];
-    for (sz_size_t i = 0; i < count_profiles; ++i) {
+    // Use enum values directly as array indices for robustness against enum changes.
+    // Arrays are sized to sz_utf8_case_rune_case_agnostic_k (=8), indices 1-7 are used.
+    sz_script_range_t_ best[sz_utf8_case_rune_case_agnostic_k];
+    sz_script_range_t_ curr[sz_utf8_case_rune_case_agnostic_k];
+    sz_bool_t has_content[sz_utf8_case_rune_case_agnostic_k];
+
+    for (sz_size_t i = 0; i < sz_utf8_case_rune_case_agnostic_k; ++i) {
         best[i].start = 0;
         best[i].length = 0;
         best[i].runes_before = 0;
@@ -4163,11 +4171,9 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         curr[i].length = 0;
         curr[i].runes_before = 0;
         curr[i].runes_within = 0;
+        // ASCII always valid (index 1), others need proof of script content
+        has_content[i] = (i == sz_utf8_case_rune_safe_ascii_k) ? sz_true_k : sz_false_k;
     }
-
-    // Track script-specific content presence (ASCII always valid, others need proof)
-    sz_bool_t has_content[count_profiles] = {sz_true_k,  sz_false_k, sz_false_k, sz_false_k,
-                                             sz_false_k, sz_false_k, sz_false_k};
 
     sz_u8_t const *ptr = (sz_u8_t const *)needle;
     sz_u8_t const *end = ptr + needle_length;
@@ -4175,55 +4181,41 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
     sz_size_t total_runes = 0;
 
     while (ptr < end) {
-        // Decode current rune
-        sz_u8_t lead = *ptr;
-        sz_size_t rune_bytes = 1 + (lead >= 0xC0) + (lead >= 0xE0) + (lead >= 0xF0);
-        if (ptr + rune_bytes > end) rune_bytes = (sz_size_t)(end - ptr);
-
-        sz_rune_t rune = 0;
-        if (rune_bytes == 1) rune = lead;
-        else if (rune_bytes == 2)
-            rune = ((lead & 0x1F) << 6) | (ptr[1] & 0x3F);
-        else if (rune_bytes == 3)
-            rune = ((lead & 0x0F) << 12) | ((ptr[1] & 0x3F) << 6) | (ptr[2] & 0x3F);
-        else
-            rune = ((lead & 0x07) << 18) | ((ptr[1] & 0x3F) << 12) | ((ptr[2] & 0x3F) << 6) | (ptr[3] & 0x3F);
+        // Decode current rune using sz_rune_parse
+        sz_rune_t rune;
+        sz_rune_length_t rune_bytes;
+        sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_bytes);
+        if (ptr + rune_bytes > end) rune_bytes = (sz_rune_length_t)(end - ptr);
 
         // Decode next rune for context
         sz_rune_t next_rune = 0;
         if (ptr + rune_bytes < end) {
-            sz_u8_t const *next_ptr = ptr + rune_bytes;
-            sz_u8_t next_lead = *next_ptr;
-            sz_size_t next_bytes = 1 + (next_lead >= 0xC0) + (next_lead >= 0xE0) + (next_lead >= 0xF0);
-            if (next_ptr + next_bytes <= end) {
-                if (next_bytes == 1) next_rune = next_lead;
-                else if (next_bytes == 2)
-                    next_rune = ((next_lead & 0x1F) << 6) | (next_ptr[1] & 0x3F);
-                else if (next_bytes == 3)
-                    next_rune = ((next_lead & 0x0F) << 12) | ((next_ptr[1] & 0x3F) << 6) | (next_ptr[2] & 0x3F);
-            }
+            sz_rune_length_t next_bytes;
+            sz_rune_parse((sz_cptr_t)(ptr + rune_bytes), &next_rune, &next_bytes);
+            if (ptr + rune_bytes + next_bytes > end) next_rune = 0; // Incomplete sequence
         }
 
         sz_size_t byte_offset = (sz_size_t)(ptr - (sz_u8_t const *)needle);
+        sz_u8_t lead = *ptr;
 
-        // Identify script-specific content
+        // Identify script-specific content using enum indices directly
         if (rune_bytes == 2) {
-            if (lead >= 0xC2 && lead <= 0xC3) has_content[1] = sz_true_k; // Western
-            if (lead >= 0xC2 && lead <= 0xC5) has_content[2] = sz_true_k; // Central
-            if (lead >= 0xD0 && lead <= 0xD3) has_content[3] = sz_true_k; // Cyrillic
-            if (lead == 0xCE || lead == 0xCF) has_content[4] = sz_true_k; // Greek
-            if (lead >= 0xD4 && lead <= 0xD6) has_content[5] = sz_true_k; // Armenian
+            if (lead >= 0xC2 && lead <= 0xC3) has_content[sz_utf8_case_rune_safe_western_europe_k] = sz_true_k;
+            if (lead >= 0xC2 && lead <= 0xC5) has_content[sz_utf8_case_rune_safe_central_europe_k] = sz_true_k;
+            if (lead >= 0xD0 && lead <= 0xD3) has_content[sz_utf8_case_rune_safe_cyrillic_k] = sz_true_k;
+            if (lead == 0xCE || lead == 0xCF) has_content[sz_utf8_case_rune_safe_greek_k] = sz_true_k;
+            if (lead >= 0xD4 && lead <= 0xD6) has_content[sz_utf8_case_rune_safe_armenian_k] = sz_true_k;
         }
         else if (rune_bytes == 3) {
-            if (rune >= 0x1E00 && rune <= 0x1EFF) has_content[6] = sz_true_k; // Vietnamese
+            if (rune >= 0x1E00 && rune <= 0x1EFF) has_content[sz_utf8_case_rune_safe_vietnamese_k] = sz_true_k;
         }
 
-        // Get safety profile for this rune
+        // Get safety profile bitmask for this rune
         unsigned safety = sz_utf8_case_rune_safety_profiles_mask_(rune, rune_bytes, prev_rune, next_rune);
 
-        // Update all script windows
-        for (sz_size_t i = 0; i < count_profiles; i++) {
-            if (safety & (1 << i)) {
+        // Update all script windows - loop directly over enum range
+        for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
+            if (safety & (1u << i)) {
                 // Extend current window
                 if (curr[i].length == 0) {
                     curr[i].start = byte_offset;
@@ -4235,7 +4227,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
             }
             else {
                 // Window broken - check if it was the best
-                if (curr[i].length > best[i].length) best[i] = curr[i];
+                if (curr[i].length > best[i].length && has_content[i]) best[i] = curr[i];
                 curr[i].length = 0;
                 curr[i].runes_within = 0;
             }
@@ -4246,17 +4238,24 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         ptr += rune_bytes;
     }
 
-    // Finalize: check unclosed windows and populate result struct
-    sz_utf8_string_slice_t *windows[count_profiles] = {
-        &results.ascii, &results.western_europe, &results.central_europe, &results.cyrillic,
-        &results.greek, &results.armenian,       &results.vietnamese};
+    // Final check for unclosed windows
+    for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
+        if (curr[i].length > best[i].length && has_content[i]) best[i] = curr[i];
+    }
 
-    for (sz_size_t i = 0; i < count_profiles; i++) {
-        // Check potentially open window at the end
-        if (curr[i].length > best[i].length) best[i] = curr[i];
+    // Map enum indices to result struct fields
+    sz_utf8_string_slice_t *windows[sz_utf8_case_rune_case_agnostic_k];
+    windows[sz_utf8_case_rune_safe_ascii_k] = &results.ascii;
+    windows[sz_utf8_case_rune_safe_western_europe_k] = &results.western_europe;
+    windows[sz_utf8_case_rune_safe_central_europe_k] = &results.central_europe;
+    windows[sz_utf8_case_rune_safe_cyrillic_k] = &results.cyrillic;
+    windows[sz_utf8_case_rune_safe_greek_k] = &results.greek;
+    windows[sz_utf8_case_rune_safe_armenian_k] = &results.armenian;
+    windows[sz_utf8_case_rune_safe_vietnamese_k] = &results.vietnamese;
 
-        // Skip invalid scripts (no content) or empty windows
-        if ((i > 0 && !has_content[i]) || best[i].length == 0) continue;
+    for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
+        // Skip scripts with no content or empty windows
+        if (!has_content[i] || best[i].length == 0) continue;
 
         // Populate lightweight window metadata
         windows[i]->offset = best[i].start;
@@ -4264,7 +4263,6 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         windows[i]->runes_before = best[i].runes_before;
         windows[i]->runes_within = best[i].runes_within;
         windows[i]->runes_after = total_runes - best[i].runes_before - best[i].runes_within;
-        // Note: Case-folding and probe computation is deferred to kernel selection time
     }
 
     return results;
@@ -4289,8 +4287,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
  *  @return The length of the folded slice (0 if input is empty).
  */
 SZ_INTERNAL sz_size_t sz_utf8_case_fold_and_probe_( //
-    sz_cptr_t text, sz_size_t text_length,          //
-    sz_utf8_case_insensitive_needle_metadata_t *folded) {
+    sz_cptr_t text, sz_size_t text_length, sz_utf8_case_insensitive_needle_metadata_t *folded) {
 
     if (text_length == 0) {
         folded->folded_slice_length = 0;
@@ -4304,7 +4301,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_and_probe_( //
     sz_utf8_case_fold_upto_(                                          //
         text, text_length,                                            //
         (sz_ptr_t)folded->folded_slice, sizeof(folded->folded_slice), //
-        SZ_NULL_CHAR, SZ_NULL_CHAR,                                   //
+        0, 0,                                                         //
         &bytes_consumed, &bytes_exported);
 
     if (bytes_exported == 0) {
@@ -5006,7 +5003,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
                 haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 
         // Select the best window (prefer ASCII > Western > others for tie-breaking)
-        sz_utf8_string_slice_t const *best = SZ_NULL_CHAR;
+        sz_utf8_string_slice_t const *best = 0;
         if (analysis.ascii.length == longest)
             best = &analysis.ascii, needle_metadata->kernel_id = sz_utf8_case_rune_safe_ascii_k;
         else if (analysis.western_europe.length == longest)
