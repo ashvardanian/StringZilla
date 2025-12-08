@@ -1032,8 +1032,9 @@ void test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_t fold_base, sz_utf8_
  *  Georgian, Cherokee, Coptic, Glagolitic, ligatures, Eszett ↔ SS, multiplication/division signs,
  *  script transitions, and caseless scripts (CJK, Arabic, Hebrew, etc.).
  */
-void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd,
-                                   sz_utf8_case_fold_t case_fold = sz_utf8_case_fold_serial) {
+void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
+                                   sz_utf8_case_insensitive_find_t find_simd, sz_utf8_case_fold_t case_fold,
+                                   sz_utf8_count_t utf8_count) {
     std::printf("  - testing case-insensitive find equivalence...\n");
 
     // Buffers for folded strings (case folding can expand, e.g., ß→ss, so 4x is safe)
@@ -1344,30 +1345,48 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_base, sz
 
     for (std::size_t i = 0; i < num_cases; ++i) {
         test_case const &tc = cases[i];
-        sz_size_t base_len = 0, simd_len = 0;
+        sz_size_t serial_matched_len = 0, simd_matched_len = 0;
         sz_size_t h_len = std::strlen(tc.haystack);
         sz_size_t n_len = std::strlen(tc.needle);
 
         // Method 1 & 2: Case-insensitive find (serial vs SIMD)
-        sz_cptr_t base_result = find_base(tc.haystack, h_len, tc.needle, n_len, &base_len);
-        sz_cptr_t simd_result = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_len);
+        sz_cptr_t serial_match = find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_matched_len);
+        sz_cptr_t simd_match = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_matched_len);
 
         // Method 3: Fold haystack + fold needle + regular sz_find (independent oracle)
         sz_size_t folded_h_len = case_fold(tc.haystack, h_len, folded_haystack_buf.data());
         sz_size_t folded_n_len = case_fold(tc.needle, n_len, folded_needle_buf.data());
-        sz_cptr_t fold_find_result =
-            sz_find(folded_haystack_buf.data(), folded_h_len, folded_needle_buf.data(), folded_n_len);
+        sz_cptr_t oracle_match = (folded_n_len == 0) ? folded_haystack_buf.data()
+                                                     : sz_find(folded_haystack_buf.data(), folded_h_len,
+                                                               folded_needle_buf.data(), folded_n_len);
 
-        // Check position match between serial and SIMD (both NULL or same offset)
-        bool pos_match = (base_result == simd_result) ||
-                         (base_result && simd_result && (base_result - tc.haystack) == (simd_result - tc.haystack));
+        // Compute oracle char offset first (before we overwrite the buffer)
+        sz_size_t oracle_char_offset =
+            oracle_match ? utf8_count(folded_haystack_buf.data(), oracle_match - folded_haystack_buf.data())
+                         : SZ_SIZE_MAX;
 
-        // Check that fold+find agrees on match existence with case-insensitive find
-        bool base_found = (base_result != SZ_NULL_CHAR);
-        bool fold_found = (fold_find_result != SZ_NULL_CHAR);
-        bool fold_agrees = (base_found == fold_found);
+        // Convert match positions to normalized character offsets by folding the prefix up to the match
+        // and counting characters in the folded result. This accounts for length-changing folds like ß→ss.
+        auto compute_folded_char_offset = [&](sz_cptr_t match, sz_cptr_t haystack_start) -> sz_size_t {
+            if (!match) return SZ_SIZE_MAX;
+            sz_size_t prefix_byte_len = match - haystack_start;
+            sz_size_t folded_prefix_len = case_fold(haystack_start, prefix_byte_len, folded_haystack_buf.data());
+            return utf8_count(folded_haystack_buf.data(), folded_prefix_len);
+        };
 
-        if (!pos_match || base_len != simd_len || !fold_agrees) {
+        sz_size_t serial_folded_char_offset = compute_folded_char_offset(serial_match, tc.haystack);
+        sz_size_t simd_folded_char_offset = compute_folded_char_offset(simd_match, tc.haystack);
+
+        // Check implementations agree on normalized character position and length
+        bool implementations_agree = (serial_folded_char_offset == simd_folded_char_offset);
+        bool lengths_agree = (serial_matched_len == simd_matched_len);
+        // For oracle, we only check existence agreement because one-to-many folds (like ligatures "ﬁ"→"fi")
+        // can cause the case-insensitive search and fold+find to locate different matches in the haystack.
+        // For example, if haystack has both "ﬁ" and "fi", case-insensitive search finds whichever comes
+        // first in the original, while fold+find finds whichever comes first in the folded version.
+        bool oracle_agrees = (serial_match != SZ_NULL_CHAR) == (oracle_match != SZ_NULL_CHAR);
+
+        if (!implementations_agree || !lengths_agree || !oracle_agrees) {
             std::fprintf(stderr, "FAIL: %s\n", tc.description);
             std::fprintf(stderr, "  Haystack (%zu bytes): ", h_len);
             for (std::size_t j = 0; j < h_len && j < 50; ++j)
@@ -1376,13 +1395,18 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_base, sz
             for (std::size_t j = 0; j < n_len && j < 50; ++j)
                 std::fprintf(stderr, "%02X ", (unsigned char)tc.needle[j]);
             std::fprintf(stderr, "\n");
-            std::fprintf(stderr, "  Base: pos=%ld, len=%zu\n", base_result ? (long)(base_result - tc.haystack) : -1L,
-                         base_len);
-            std::fprintf(stderr, "  SIMD: pos=%ld, len=%zu\n", simd_result ? (long)(simd_result - tc.haystack) : -1L,
-                         simd_len);
-            std::fprintf(stderr, "  Fold+Find: %s (folded_h=%zu, folded_n=%zu)\n",
-                         fold_find_result ? "FOUND" : "NOT FOUND", folded_h_len, folded_n_len);
-            if (!fold_agrees) {
+            std::fprintf(stderr, "  Serial: folded_char_offset=%zu, len=%zu\n",
+                         serial_folded_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_folded_char_offset,
+                         serial_matched_len);
+            std::fprintf(stderr, "  SIMD: folded_char_offset=%zu, len=%zu\n",
+                         simd_folded_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_folded_char_offset,
+                         simd_matched_len);
+            std::fprintf(stderr, "  Oracle: char_offset=%zu (folded_h=%zu, folded_n=%zu)\n",
+                         oracle_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : oracle_char_offset, folded_h_len,
+                         folded_n_len);
+            if (!oracle_agrees) {
+                // Re-fold to show folded content
+                case_fold(tc.haystack, h_len, folded_haystack_buf.data());
                 std::fprintf(stderr, "  Folded haystack: ");
                 for (std::size_t j = 0; j < folded_h_len && j < 50; ++j)
                     std::fprintf(stderr, "%02X ", (unsigned char)folded_haystack_buf[j]);
@@ -1391,9 +1415,9 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_base, sz
                     std::fprintf(stderr, "%02X ", (unsigned char)folded_needle_buf[j]);
                 std::fprintf(stderr, "\n");
             }
-            assert(pos_match && "Position mismatch between serial and SIMD");
-            assert(base_len == simd_len && "Length mismatch between serial and SIMD");
-            assert(fold_agrees && "Fold+Find disagrees with case-insensitive find");
+            assert(implementations_agree && "Folded character offset mismatch between serial and SIMD");
+            assert(lengths_agree && "Length mismatch between serial and SIMD");
+            assert(oracle_agrees && "Oracle character offset disagrees with case-insensitive find");
         }
         ++passed;
     }
@@ -1413,14 +1437,14 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_base, sz
  *  slices as needles. Covers ASCII, Latin-1, Cyrillic, Greek, Armenian, Vietnamese, ligatures, and
  *  one-to-many folding cases like Eszett and Turkish dotted I.
  */
-void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd,
-                            sz_utf8_case_fold_t case_fold = sz_utf8_case_fold_serial,
-                            std::size_t iterations = scale_iterations(5000)) {
+void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8_case_insensitive_find_t find_simd,
+                            sz_utf8_case_fold_t case_fold, sz_utf8_case_agnostic_t agnostic_serial,
+                            sz_utf8_case_agnostic_t agnostic_simd, sz_utf8_find_nth_t utf8_find_nth,
+                            sz_utf8_count_t utf8_count, std::size_t iterations = scale_iterations(5000)) {
     std::printf("  - fuzz testing with random haystacks (%zu iterations)...\n", iterations);
 
-    // Buffers for folded strings (case folding can expand, e.g., ß→ss, so 4x is safe)
+    // Buffer for folded needle (case folding can expand, e.g., ß→ss, so 4x is safe)
     constexpr std::size_t max_folded_size = 8192;
-    std::vector<char> folded_haystack_buf(max_folded_size);
     std::vector<char> folded_needle_buf(max_folded_size);
 
     auto &rng = global_random_generator();
@@ -1548,8 +1572,12 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_base, sz_utf8_c
     std::uniform_int_distribution<std::size_t> haystack_len_dist(50, 200);
 
     std::size_t fuzz_passed = 0;
-    std::size_t const num_rounds = 20; // Generate new haystacks this many times
-    std::size_t const iters_per_round = iterations / num_rounds;
+
+    // Scale iterations proportionally, with reasonable bounds
+    std::size_t const max_iters_per_haystack = 500;
+    std::size_t const min_rounds = 5;
+    std::size_t const num_rounds = std::max(min_rounds, iterations / max_iters_per_haystack);
+    std::size_t const iters_per_round = (iterations + num_rounds - 1) / num_rounds; // Round up
 
     for (std::size_t round = 0; round < num_rounds; ++round) {
         // Build random haystack by concatenating pool entries
@@ -1557,90 +1585,112 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_base, sz_utf8_c
         std::string haystack;
         for (std::size_t i = 0; i < target_chars; ++i) { haystack += char_pool[pool_dist(rng)]; }
 
-        // Collect valid UTF-8 codepoint boundaries
-        std::vector<std::size_t> boundaries;
-        boundaries.push_back(0);
-        std::size_t pos = 0;
-        while (pos < haystack.size()) {
-            sz_u8_t lead = (sz_u8_t)haystack[pos];
-            sz_size_t len = 1;
-            if ((lead & 0xE0) == 0xC0) len = 2;
-            else if ((lead & 0xF0) == 0xE0)
-                len = 3;
-            else if ((lead & 0xF8) == 0xF0)
-                len = 4;
-            pos += len;
-            if (pos <= haystack.size()) boundaries.push_back(pos);
-        }
+        // Count actual characters in haystack (may differ from target due to multi-byte chars)
+        sz_size_t haystack_char_count = utf8_count(haystack.data(), haystack.size());
+        if (haystack_char_count < 2) continue;
 
-        if (boundaries.size() < 2) continue;
-
-        std::uniform_int_distribution<std::size_t> boundary_dist(0, boundaries.size() - 1);
+        std::uniform_int_distribution<sz_size_t> char_dist(0, haystack_char_count);
 
         for (std::size_t iter = 0; iter < iters_per_round; ++iter) {
-            // Pick random slice as needle (valid UTF-8 boundaries)
-            std::size_t start_idx = boundary_dist(rng);
-            std::size_t end_idx = boundary_dist(rng);
-            if (start_idx >= end_idx) {
-                // Swap or skip to ensure non-empty needle
-                if (start_idx == end_idx && start_idx + 1 < boundaries.size()) end_idx = start_idx + 1;
-                else if (start_idx > end_idx)
-                    std::swap(start_idx, end_idx);
+            // Pick random character range for needle
+            sz_size_t start_char = char_dist(rng);
+            sz_size_t end_char = char_dist(rng);
+            if (start_char > end_char) std::swap(start_char, end_char);
+            if (start_char == end_char) {
+                if (end_char < haystack_char_count) ++end_char;
+                else if (start_char > 0)
+                    --start_char;
                 else
                     continue;
             }
 
-            std::size_t needle_start = boundaries[start_idx];
-            std::size_t needle_end = boundaries[end_idx];
-            if (needle_end <= needle_start || needle_end > haystack.size()) continue;
+            // Find byte positions using sz_utf8_find_nth (no dynamic allocation)
+            sz_cptr_t needle_start_ptr =
+                (start_char == 0) ? haystack.data() : utf8_find_nth(haystack.data(), haystack.size(), start_char);
+            sz_cptr_t needle_end_ptr = (end_char == haystack_char_count)
+                                           ? haystack.data() + haystack.size()
+                                           : utf8_find_nth(haystack.data(), haystack.size(), end_char);
 
-            std::string needle = haystack.substr(needle_start, needle_end - needle_start);
-            if (needle.empty()) continue;
+            if (!needle_start_ptr || !needle_end_ptr || needle_end_ptr <= needle_start_ptr) continue;
 
-            // Method 1 & 2: Compare serial vs SIMD
-            sz_size_t base_len = 0, simd_len = 0;
-            sz_cptr_t base_result =
-                find_base(haystack.data(), haystack.size(), needle.data(), needle.size(), &base_len);
-            sz_cptr_t simd_result =
-                find_simd(haystack.data(), haystack.size(), needle.data(), needle.size(), &simd_len);
+            sz_size_t needle_byte_len = needle_end_ptr - needle_start_ptr;
+            sz_cptr_t needle_data = needle_start_ptr;
 
-            // Method 3: Fold haystack + fold needle + regular sz_find (independent oracle)
-            sz_size_t folded_h_len = case_fold(haystack.data(), haystack.size(), folded_haystack_buf.data());
-            sz_size_t folded_n_len = case_fold(needle.data(), needle.size(), folded_needle_buf.data());
-            sz_cptr_t fold_find_result =
-                sz_find(folded_haystack_buf.data(), folded_h_len, folded_needle_buf.data(), folded_n_len);
+            // Verify case-agnostic agreement between implementations
+            sz_bool_t serial_agnostic_h = agnostic_serial(haystack.data(), haystack.size());
+            sz_bool_t simd_agnostic_h = agnostic_simd(haystack.data(), haystack.size());
+            sz_bool_t serial_agnostic_n = agnostic_serial(needle_data, needle_byte_len);
+            sz_bool_t simd_agnostic_n = agnostic_simd(needle_data, needle_byte_len);
 
-            std::size_t base_pos = base_result ? (std::size_t)(base_result - haystack.data()) : SIZE_MAX;
-            std::size_t simd_pos = simd_result ? (std::size_t)(simd_result - haystack.data()) : SIZE_MAX;
-
-            // Check that fold+find agrees on match existence with case-insensitive find
-            bool base_found = (base_result != SZ_NULL_CHAR);
-            bool fold_found = (fold_find_result != SZ_NULL_CHAR);
-            bool fold_agrees = (base_found == fold_found);
-
-            if (base_pos != simd_pos || base_len != simd_len || !fold_agrees) {
-                std::fprintf(stderr, "FUZZ FAIL round=%zu iter=%zu\n", round, iter);
-                std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle.size());
-                std::fprintf(stderr, "  Needle bytes: ");
-                for (std::size_t j = 0; j < needle.size() && j < 50; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)needle[j]);
-                std::fprintf(stderr, "\n");
-                std::fprintf(stderr, "  Base: pos=%zu, len=%zu\n", base_pos, base_len);
-                std::fprintf(stderr, "  SIMD: pos=%zu, len=%zu\n", simd_pos, simd_len);
-                std::fprintf(stderr, "  Fold+Find: %s (folded_h=%zu, folded_n=%zu)\n",
-                             fold_find_result ? "FOUND" : "NOT FOUND", folded_h_len, folded_n_len);
-                if (!fold_agrees) {
-                    std::fprintf(stderr, "  Folded haystack (first 50): ");
-                    for (std::size_t j = 0; j < folded_h_len && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)folded_haystack_buf[j]);
-                    std::fprintf(stderr, "\n  Folded needle: ");
-                    for (std::size_t j = 0; j < folded_n_len && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)folded_needle_buf[j]);
+            if (serial_agnostic_h != simd_agnostic_h || serial_agnostic_n != simd_agnostic_n) {
+                std::fprintf(stderr, "CASE-AGNOSTIC MISMATCH round=%zu iter=%zu\n", round, iter);
+                if (serial_agnostic_h != simd_agnostic_h) {
+                    std::fprintf(stderr, "  Haystack: serial=%d, simd=%d (len=%zu)\n", serial_agnostic_h,
+                                 simd_agnostic_h, haystack.size());
+                    std::fprintf(stderr, "  Haystack bytes: ");
+                    for (std::size_t j = 0; j < haystack.size() && j < 50; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)haystack[j]);
+                    std::fprintf(stderr, "...\n");
+                }
+                if (serial_agnostic_n != simd_agnostic_n) {
+                    std::fprintf(stderr, "  Needle: serial=%d, simd=%d (len=%zu)\n", serial_agnostic_n, simd_agnostic_n,
+                                 needle_byte_len);
+                    std::fprintf(stderr, "  Needle bytes: ");
+                    for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
                     std::fprintf(stderr, "\n");
                 }
-                assert(base_pos == simd_pos && "Fuzz position mismatch");
-                assert(base_len == simd_len && "Fuzz length mismatch");
-                assert(fold_agrees && "Fold+Find disagrees with case-insensitive find");
+                assert(serial_agnostic_h == simd_agnostic_h && "Case-agnostic mismatch on haystack");
+                assert(serial_agnostic_n == simd_agnostic_n && "Case-agnostic mismatch on needle");
+            }
+
+            // If needle is case-agnostic, folded version must equal original
+            if (serial_agnostic_n) {
+                sz_size_t folded_len = case_fold(needle_data, needle_byte_len, folded_needle_buf.data());
+                if (folded_len != needle_byte_len ||
+                    std::memcmp(needle_data, folded_needle_buf.data(), needle_byte_len) != 0) {
+                    std::fprintf(stderr, "CASE-AGNOSTIC FOLD MISMATCH round=%zu iter=%zu\n", round, iter);
+                    std::fprintf(stderr, "  Needle (len=%zu): ", needle_byte_len);
+                    for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
+                    std::fprintf(stderr, "\n  Folded (len=%zu): ", folded_len);
+                    for (std::size_t j = 0; j < folded_len && j < 50; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)folded_needle_buf[j]);
+                    std::fprintf(stderr, "\n");
+                    assert(false && "Case-agnostic string changed when folded");
+                }
+            }
+
+            // Compare serial vs SIMD implementations
+            // Both operate on the same haystack, so we can compare pointers directly
+            sz_size_t serial_matched_len = 0, simd_matched_len = 0;
+            sz_cptr_t serial_match =
+                find_serial(haystack.data(), haystack.size(), needle_data, needle_byte_len, &serial_matched_len);
+            sz_cptr_t simd_match =
+                find_simd(haystack.data(), haystack.size(), needle_data, needle_byte_len, &simd_matched_len);
+
+            // Check implementations agree on position (pointer) and matched length
+            // Note: We don't use an oracle here because the needle is always a substring of the haystack,
+            // so existence is guaranteed. The oracle (fold+find) can also find different matches than
+            // case-insensitive search due to one-to-many folds like ligatures.
+            bool implementations_agree = (serial_match == simd_match);
+            bool lengths_agree = (serial_matched_len == simd_matched_len);
+
+            if (!implementations_agree || !lengths_agree) {
+                std::fprintf(stderr, "FUZZ FAIL round=%zu iter=%zu\n", round, iter);
+                std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_byte_len);
+                std::fprintf(stderr, "  Needle bytes: ");
+                for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
+                    std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
+                std::fprintf(stderr, "\n");
+                sz_size_t serial_offset = serial_match ? (sz_size_t)(serial_match - haystack.data()) : SZ_SIZE_MAX;
+                sz_size_t simd_offset = simd_match ? (sz_size_t)(simd_match - haystack.data()) : SZ_SIZE_MAX;
+                std::fprintf(stderr, "  Serial: offset=%zu, len=%zu\n",
+                             serial_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_offset, serial_matched_len);
+                std::fprintf(stderr, "  SIMD: offset=%zu, len=%zu\n",
+                             simd_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_offset, simd_matched_len);
+                assert(implementations_agree && "Fuzz byte offset mismatch");
+                assert(lengths_agree && "Fuzz length mismatch");
             }
             ++fuzz_passed;
         }
@@ -1736,8 +1786,11 @@ void test_equivalence() {
     test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
-    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice);
+    test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
+                                  sz_utf8_case_fold_serial, sz_utf8_count_serial);
+    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
+                           sz_utf8_case_fold_serial, sz_utf8_case_agnostic_serial, sz_utf8_case_agnostic_ice,
+                           sz_utf8_find_nth_serial, sz_utf8_count_serial);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //

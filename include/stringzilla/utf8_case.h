@@ -4371,6 +4371,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
     sz_size_t const folded_window_offset = window->offset;
     sz_size_t const folded_window_length = folded->folded_needle_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
+    sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
 
     // Needle tail parameters
     sz_cptr_t const needle_tail = needle + window->offset + window->length;
@@ -4608,6 +4609,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     sz_size_t const folded_window_offset = window->offset;
     sz_size_t const folded_window_length = folded->folded_needle_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
+    sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
 
     // Needle tail parameters
     sz_cptr_t const needle_tail = needle + window->offset + window->length;

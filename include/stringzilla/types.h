@@ -794,6 +794,9 @@ typedef sz_cptr_t (*sz_utf8_case_insensitive_find_t)(sz_cptr_t, sz_size_t, sz_cp
 /** @brief Signature of `sz_utf8_case_insensitive_order`. */
 typedef sz_ordering_t (*sz_utf8_case_insensitive_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
+/** @brief Signature of `sz_utf8_case_agnostic`. */
+typedef sz_bool_t (*sz_utf8_case_agnostic_t)(sz_cptr_t, sz_size_t);
+
 /** @brief Signature of `sz_utf8_word_find_boundary`. */
 typedef sz_cptr_t (*sz_utf8_word_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
