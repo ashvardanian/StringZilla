@@ -285,7 +285,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t h, sz_size_t h_length, sz_c
  *  Say the needle is "aXaYa", and we are comparing the first, second, and last character.
  *  If we use SIMD and compare many offsets at a time, comparing against "a" in every register is a waste.
  *
- *  Similarly, dealing with UTF8 inputs, we know that the lower bits of each character code carry more information.
+ *  Similarly, dealing with UTF-8 inputs, we know that the lower bits of each character code carry more information.
  *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
  *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
  *  bytes will carry absolutely no value and will be equal to 0x04.
@@ -315,7 +315,7 @@ SZ_INTERNAL void sz_locate_needle_anomalies_( //
 
     // TODO: Investigate alternative strategies for long needles.
     // On very long needles we have the luxury to choose!
-    // Often dealing with UTF8, we will likely benefit from shifting the first and second characters
+    // Often dealing with UTF-8, we will likely benefit from shifting the first and second characters
     // further to the right, to achieve not only uniqueness within the needle, but also avoid common
     // rune prefixes of 2-, 3-, and 4-byte codes.
     if (length > 8) {
@@ -330,7 +330,7 @@ SZ_INTERNAL void sz_locate_needle_anomalies_( //
         sz_u8_t const *start_u8 = (sz_u8_t const *)start;
         sz_size_t vibrant_first = *first, vibrant_second = *second, vibrant_third = *third;
 
-        // Let's begin with the seccond character, as the termination criteria there is more obvious
+        // Let's begin with the second character, as the termination criteria there is more obvious
         // and we may end up with more variants to check for the first candidate.
         while ((start_u8[vibrant_second] > 191 || start_u8[vibrant_second] == start_u8[vibrant_third]) &&
                (vibrant_second + 1 < vibrant_third))

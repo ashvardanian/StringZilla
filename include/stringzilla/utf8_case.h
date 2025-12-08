@@ -1063,6 +1063,161 @@ SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
 }
 
 /**
+ *  @brief  Forward case-insensitive verification of needle tail against haystack.
+ *
+ *  Walks forward through needle and haystack, comparing folded codepoints.
+ *  Used to verify the "tail" portion of a match (bytes after the safe window).
+ *
+ *  @param[in] needle_tail Pointer to needle tail (bytes after safe window)
+ *  @param[in] needle_tail_length Length of needle tail in bytes
+ *  @param[in] haystack_ptr Start of haystack region to verify (after window match)
+ *  @param[in] haystack_end End of haystack (boundary)
+ *  @param[out] match_length_out Haystack bytes consumed by this tail match
+ *  @return sz_true_k if tail matched, sz_false_k otherwise
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_verify_( //
+    sz_cptr_t needle_tail, sz_size_t needle_tail_length,      //
+    sz_cptr_t haystack_ptr, sz_cptr_t haystack_end,           //
+    sz_size_t *match_length_out) {
+
+    // Empty tail is trivially matched
+    if (needle_tail_length == 0) {
+        *match_length_out = 0;
+        return sz_true_k;
+    }
+
+    sz_utf8_folded_iter_t needle_iter, haystack_iter;
+    sz_utf8_folded_iter_init_(&needle_iter, needle_tail, needle_tail_length);
+    sz_utf8_folded_iter_init_(&haystack_iter, haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr));
+
+    sz_rune_t needle_rune = 0, haystack_rune = 0;
+    for (;;) {
+        sz_bool_t have_needle = sz_utf8_folded_iter_next_(&needle_iter, &needle_rune);
+
+        if (!have_needle) {
+            // Needle exhausted - success!
+            *match_length_out = (sz_size_t)(haystack_iter.ptr - haystack_ptr);
+            return sz_true_k;
+        }
+
+        sz_bool_t have_haystack = sz_utf8_folded_iter_next_(&haystack_iter, &haystack_rune);
+        if (!have_haystack) return sz_false_k;
+        if (needle_rune != haystack_rune) return sz_false_k;
+    }
+}
+
+/**
+ *  @brief  Reverse iterator state for streaming through folded UTF-8 runes backwards.
+ *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently in reverse order.
+ */
+typedef struct {
+    sz_cptr_t ptr;           // Current position (points to byte AFTER current sequence)
+    sz_cptr_t start;         // Start of string (stop when ptr reaches this)
+    sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions (in reverse order)
+    sz_size_t pending_count; // Number of pending folded runes
+    sz_size_t pending_idx;   // Current index into pending buffer
+} sz_utf8_folded_reverse_iter_t_;
+
+/** @brief Initialize a reverse folded rune iterator. Iterates from end towards start. */
+SZ_INTERNAL void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t_ *it, sz_cptr_t start, sz_cptr_t end) {
+    it->ptr = end;
+    it->start = start;
+    it->pending_count = 0;
+    it->pending_idx = 0;
+}
+
+/**
+ *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
+ *  When a codepoint folds to multiple runes (like ß→ss), returns them in reverse order (s, then s).
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t_ *it, sz_rune_t *out_rune) {
+    // Return pending runes if any (stored in reverse order, consumed in reverse)
+    if (it->pending_idx < it->pending_count) {
+        *out_rune = it->pending[it->pending_count - 1 - it->pending_idx];
+        it->pending_idx++;
+        return sz_true_k;
+    }
+
+    // Refill: find previous codepoint
+    if (it->ptr <= it->start) return sz_false_k;
+
+    // Walk backwards to find start of UTF-8 sequence
+    // Continuation bytes have form 10xxxxxx (0x80-0xBF)
+    it->ptr--;
+    while (it->ptr > it->start && (*(sz_u8_t const *)it->ptr & 0xC0) == 0x80) { it->ptr--; }
+
+    // ASCII fast-path
+    sz_u8_t lead = *(sz_u8_t const *)it->ptr;
+    if (lead < 0x80) {
+        *out_rune = sz_ascii_fold_(lead);
+        it->pending_count = 0;
+        it->pending_idx = 0;
+        return sz_true_k;
+    }
+
+    // Multi-byte UTF-8: decode and fold
+    sz_rune_t rune;
+    sz_rune_length_t rune_length;
+    sz_rune_parse(it->ptr, &rune, &rune_length);
+
+    // Store folded runes in pending buffer
+    it->pending[0] = 0xFFFFFFFFu;
+    it->pending[1] = 0xFFFFFFFEu;
+    it->pending[2] = 0xFFFFFFFDu;
+    it->pending[3] = 0xFFFFFFFCu;
+    it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
+    it->pending_idx = 1; // We'll return the last one now, then the rest in subsequent calls
+
+    // Return the LAST folded rune first (since we're going backwards)
+    *out_rune = it->pending[it->pending_count - 1];
+    return sz_true_k;
+}
+
+/**
+ *  @brief  Reverse case-insensitive verification of needle head against haystack.
+ *
+ *  Walks backwards through needle and haystack, comparing folded codepoints.
+ *  Used to verify the "head" portion of a match (bytes before the safe window).
+ *
+ *  @param[in] needle_start Pointer to start of needle
+ *  @param[in] needle_head_end Pointer to end of needle head (exclusive, where window starts)
+ *  @param[in] haystack_start Pointer to start of haystack
+ *  @param[in] haystack_head_end Pointer to where window was found in haystack
+ *  @param[out] match_length_out Haystack bytes consumed by this head match
+ *  @return sz_true_k if head matched, sz_false_k otherwise
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_rverify_( //
+    sz_cptr_t needle_start, sz_cptr_t needle_head_end,         //
+    sz_cptr_t haystack_start, sz_cptr_t haystack_head_end,     //
+    sz_size_t *match_length_out) {
+
+    // If needle head is empty, no haystack bytes needed
+    if (needle_head_end == needle_start) {
+        *match_length_out = 0;
+        return sz_true_k;
+    }
+
+    sz_utf8_folded_reverse_iter_t_ needle_iter, haystack_iter;
+    sz_utf8_folded_reverse_iter_init_(&needle_iter, needle_start, needle_head_end);
+    sz_utf8_folded_reverse_iter_init_(&haystack_iter, haystack_start, haystack_head_end);
+
+    sz_rune_t needle_rune = 0, haystack_rune = 0;
+    for (;;) {
+        sz_bool_t have_needle = sz_utf8_folded_reverse_iter_prev_(&needle_iter, &needle_rune);
+
+        if (!have_needle) {
+            // Needle exhausted - success!
+            *match_length_out = (sz_size_t)(haystack_head_end - haystack_iter.ptr);
+            return sz_true_k;
+        }
+
+        sz_bool_t have_haystack = sz_utf8_folded_reverse_iter_prev_(&haystack_iter, &haystack_rune);
+        if (!have_haystack) return sz_false_k;
+        if (needle_rune != haystack_rune) return sz_false_k;
+    }
+}
+
+/**
  *  @brief  Lightweight chunk search for case-insensitive matching.
  *
  *  Delegates to the serial implementation for proper ligature/expansion handling.
@@ -1640,7 +1795,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
             destination_ptr += sz_rune_export(folded_runes[i], destination_ptr);
     }
 
-    return (sz_size_t)(destination_ptr - destination);
+    return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
 }
 
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
@@ -3474,32 +3629,38 @@ typedef enum {
 } sz_utf8_case_rune_safety_profile_t_;
 
 /**
- *  @brief A safe window for a single script path with integrated probe info.
+ *  @brief Lightweight metadata for a safe window within a script path.
  *
- *  Unlike the case-sensitive "find" functions, picks 4 different probe positions instead of 3
- *  to reduce the number of false positives bit-mask matches in the loop - before switching to
- *  a slower substring equality comparison at the given path.
+ *  This struct only contains location and length information needed for kernel selection.
+ *  The actual case-folding and probe computation is deferred until after the best kernel
+ *  is chosen, using `sz_utf8_case_folded_window_t_`.
+ */
+typedef struct {
+    sz_size_t offset;       // Start offset in original needle (bytes)
+    sz_size_t length;       // Byte length in original needle
+    sz_size_t runes_before; // Codepoints before this window
+    sz_size_t runes_within; // Codepoints within this window
+    sz_size_t runes_after;  // Codepoints after this window
+} sz_utf8_case_safe_window_t_;
+
+/**
+ *  @brief Working state for a case-insensitive search kernel.
  *
- *  It also comes with its own buffer for storing the relevant case-folded part of the needle
- *  for comparison during the slow path verification. All of the probe positions are computed
- *  within that buffer.
+ *  Contains the case-folded needle content and optimal probe positions.
+ *  Created from a `sz_utf8_case_safe_window_t_` via `sz_utf8_case_locate_safe_anomalies_()`.
  *
- *  The first probe always points to the first byte of `folded_needle` and the last probe
- *  always points to the last byte of `folded_needle`, so they can be used directly.
- *  The second and third probe positions are determined dynamically to maximize variability.
+ *  The 4 probe positions are:
+ *    - first: implicit at `folded_needle[0]`
+ *    - second: `probe_second`
+ *    - third: `probe_third`
+ *    - last: implicit at `folded_needle[folded_needle_length - 1]`
  */
 typedef struct {
     sz_u8_t folded_needle[16];
     sz_size_t folded_needle_length;
-    sz_size_t start; // Start offset of window within the needle (in bytes)
-
-    sz_size_t runes_before; // Number of characters before this safe window in the needle
-    sz_size_t runes_within; // Number of characters within this safe window in the needle
-    sz_size_t runes_after;  // Number of characters after this safe window in the needle
-
-    sz_size_t probe_second; // Offset of the second probe within, can be [0;15]
-    sz_size_t probe_third;  // Offset of the third probe within, can be [0;15]
-} sz_utf8_case_safe_window_t_;
+    sz_size_t probe_second;
+    sz_size_t probe_third;
+} sz_utf8_case_folded_window_t_;
 
 /**
  *  @brief  Complete needle analysis result for all script paths.
@@ -3867,35 +4028,13 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 }
 
 /**
- *  @brief Initialize a window structure to empty state.
- */
-SZ_INTERNAL void sz_script_window_init_(sz_utf8_case_safe_window_t_ *window) {
-    window->start = 0;
-    window->length = 0;
-    window->probe_first = 0;
-    window->probe_mid = 0;
-    window->probe_last = 0;
-    window->prefix_first = 0;
-    window->prefix_mid = 0;
-    window->prefix_last = 0;
-}
-
-/**
- *  @brief Copy window from src to dst (excluding codepoint_count which is tracked separately).
- */
-SZ_INTERNAL void sz_script_window_copy_(sz_utf8_case_safe_window_t_ *dst, sz_utf8_case_safe_window_t_ const *src) {
-    dst->start = src->start;
-    dst->length = src->length;
-    dst->probe_first = src->probe_first;
-    dst->probe_mid = src->probe_mid;
-    dst->probe_last = src->probe_last;
-    dst->prefix_first = src->prefix_first;
-    dst->prefix_mid = src->prefix_mid;
-    dst->prefix_last = src->prefix_last;
-}
-
-/**
  *  @brief Find the longest safe window for each Unicode script group represented in the needle.
+ *
+ *  For each script, this function:
+ *  1. Finds the longest contiguous "safe" byte range in the original needle
+ *  2. Case-folds that range into the window's `folded_needle` buffer
+ *  3. Computes optimal probe positions within the folded content
+ *  4. Tracks rune counts before/within/after the window
  *
  *  @param needle Pointer to needle string (original, not folded)
  *  @param needle_length Length in bytes
@@ -3903,45 +4042,50 @@ SZ_INTERNAL void sz_script_window_copy_(sz_utf8_case_safe_window_t_ *dst, sz_utf
  */
 SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t needle, sz_size_t needle_length) {
     sz_utf8_case_safe_windows_t_ results;
-
-    // Use lightweight ranges for tracking during the loop to reduced register pressure/copying
-    typedef struct {
-        sz_size_t start;
-        sz_size_t length;
-    } sz_range_t;
-
-    // Map profiles to array indices for unified processing:
-    // 0: ASCII, 1: Western, 2: Central, 3: Cyrillic, 4: Greek, 5: Armenian, 6: Vietnamese
-    sz_range_t best_ranges[7];
-    sz_range_t curr_ranges[7];
-    for (sz_size_t i = 0; i < 7; i++) {
-        best_ranges[i].start = 0;
-        best_ranges[i].length = 0;
-        curr_ranges[i].start = 0;
-        curr_ranges[i].length = 0;
-    }
-
-    // Initialize results
-    sz_utf8_case_safe_window_t_ *windows[7] = {&results.ascii,     &results.western_europe, &results.central_europe,
-                                               &results.cyrillic,  &results.greek,          &results.armenian,
-                                               &results.vietnamese};
-    for (sz_size_t i = 0; i < 7; i++) sz_script_window_init_(windows[i]);
+    results.ascii = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.western_europe = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.central_europe = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.cyrillic = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.greek = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.armenian = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
+    results.vietnamese = (sz_utf8_case_safe_window_t_) {0, 0, 0, 0, 0};
     if (needle_length == 0) return results;
 
-    // Track script-specific content presence.
-    // ASCII (idx 0) is always valid. Others start invalid until specific chars are seen.
-    sz_bool_t has_script_content[7] = {sz_true_k,  sz_false_k, sz_false_k, sz_false_k,
-                                       sz_false_k, sz_false_k, sz_false_k};
+    // Lightweight range tracking with rune counts
+    typedef struct {
+        sz_size_t start;        // Byte offset in original needle
+        sz_size_t length;       // Byte length in original needle
+        sz_size_t runes_before; // Runes before this window started
+        sz_size_t runes_within; // Runes within this window
+    } sz_script_range_t_;
+
+    // Map profiles to array indices: 0=ASCII, 1=Western, 2=Central, 3=Cyrillic, 4=Greek, 5=Armenian, 6=Vietnamese
+    sz_script_range_t_ best[7];
+    sz_script_range_t_ curr[7];
+    for (sz_size_t i = 0; i < 7; ++i) {
+        best[i].start = 0;
+        best[i].length = 0;
+        best[i].runes_before = 0;
+        best[i].runes_within = 0;
+        curr[i].start = 0;
+        curr[i].length = 0;
+        curr[i].runes_before = 0;
+        curr[i].runes_within = 0;
+    }
+
+    // Track script-specific content presence (ASCII always valid, others need proof)
+    sz_bool_t has_content[7] = {sz_true_k, sz_false_k, sz_false_k, sz_false_k, sz_false_k, sz_false_k, sz_false_k};
 
     sz_u8_t const *ptr = (sz_u8_t const *)needle;
     sz_u8_t const *end = ptr + needle_length;
     sz_rune_t prev_rune = 0;
+    sz_size_t total_runes = 0;
 
     while (ptr < end) {
         // Decode current rune
         sz_u8_t lead = *ptr;
         sz_size_t rune_bytes = 1 + (lead >= 0xC0) + (lead >= 0xE0) + (lead >= 0xF0);
-        if (ptr + rune_bytes > end) rune_bytes = end - ptr;
+        if (ptr + rune_bytes > end) rune_bytes = (sz_size_t)(end - ptr);
 
         sz_rune_t rune = 0;
         if (rune_bytes == 1) rune = lead;
@@ -3949,7 +4093,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
             rune = ((lead & 0x1F) << 6) | (ptr[1] & 0x3F);
         else if (rune_bytes == 3)
             rune = ((lead & 0x0F) << 12) | ((ptr[1] & 0x3F) << 6) | (ptr[2] & 0x3F);
-        else // rune_bytes == 4
+        else
             rune = ((lead & 0x07) << 18) | ((ptr[1] & 0x3F) << 12) | ((ptr[2] & 0x3F) << 6) | (ptr[3] & 0x3F);
 
         // Decode next rune for context
@@ -3969,93 +4113,167 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
         sz_size_t byte_offset = (sz_size_t)(ptr - (sz_u8_t const *)needle);
 
-        // 1. Identify which scripts strictly 'own' this character (for validity check)
+        // Identify script-specific content
         if (rune_bytes == 2) {
-            if (lead >= 0xC2 && lead <= 0xC3) has_script_content[1] = sz_true_k; // Western
-            if (lead >= 0xC2 && lead <= 0xC5) has_script_content[2] = sz_true_k; // Central
-            if (lead >= 0xD0 && lead <= 0xD3) has_script_content[3] = sz_true_k; // Cyrillic
-            if (lead == 0xCE || lead == 0xCF) has_script_content[4] = sz_true_k; // Greek
-            if (lead >= 0xD4 && lead <= 0xD6) has_script_content[5] = sz_true_k; // Armenian
+            if (lead >= 0xC2 && lead <= 0xC3) has_content[1] = sz_true_k; // Western
+            if (lead >= 0xC2 && lead <= 0xC5) has_content[2] = sz_true_k; // Central
+            if (lead >= 0xD0 && lead <= 0xD3) has_content[3] = sz_true_k; // Cyrillic
+            if (lead == 0xCE || lead == 0xCF) has_content[4] = sz_true_k; // Greek
+            if (lead >= 0xD4 && lead <= 0xD6) has_content[5] = sz_true_k; // Armenian
         }
         else if (rune_bytes == 3) {
-            if (rune >= 0x1E00 && rune <= 0x1EFF) has_script_content[6] = sz_true_k; // Vietnamese
+            if (rune >= 0x1E00 && rune <= 0x1EFF) has_content[6] = sz_true_k; // Vietnamese
         }
 
-        // 2. Get Safety Profile
+        // Get safety profile for this rune
         sz_utf8_case_rune_safety_profile_t_ safety =
             sz_utf8_case_rune_safety_profile_(rune, rune_bytes, prev_rune, next_rune);
 
-        // 3. Update all windows in a loop
+        // Update all script windows
         for (sz_size_t i = 0; i < 7; i++) {
             if (safety & (1 << i)) {
                 // Extend current window
-                if (curr_ranges[i].length == 0) curr_ranges[i].start = byte_offset;
-                curr_ranges[i].length += rune_bytes;
+                if (curr[i].length == 0) {
+                    curr[i].start = byte_offset;
+                    curr[i].runes_before = total_runes;
+                    curr[i].runes_within = 0;
+                }
+                curr[i].length += rune_bytes;
+                curr[i].runes_within++;
             }
             else {
-                // Check if this run was the best so far
-                if (curr_ranges[i].length > best_ranges[i].length) { best_ranges[i] = curr_ranges[i]; }
-                // Reset
-                curr_ranges[i].length = 0;
+                // Window broken - check if it was the best
+                if (curr[i].length > best[i].length) best[i] = curr[i];
+                curr[i].length = 0;
+                curr[i].runes_within = 0;
             }
         }
 
+        total_runes++;
         prev_rune = rune;
         ptr += rune_bytes;
     }
 
-    // Finalize
+    // Finalize: check unclosed windows and populate result struct
+    sz_utf8_case_safe_window_t_ *windows[7] = {&results.ascii,     &results.western_europe, &results.central_europe,
+                                               &results.cyrillic,  &results.greek,          &results.armenian,
+                                               &results.vietnamese};
+
     for (sz_size_t i = 0; i < 7; i++) {
         // Check potentially open window at the end
-        if (curr_ranges[i].length > best_ranges[i].length) { best_ranges[i] = curr_ranges[i]; }
+        if (curr[i].length > best[i].length) best[i] = curr[i];
 
-        // Invalidate if script-specific content was missing (except ASCII)
-        if (i > 0 && !has_script_content[i]) {
-            windows[i]->start = 0;
-            windows[i]->length = 0;
-        }
-        else {
-            windows[i]->start = best_ranges[i].start;
-            windows[i]->length = best_ranges[i].length;
-        }
+        // Skip invalid scripts (no content) or empty windows
+        if ((i > 0 && !has_content[i]) || best[i].length == 0) continue;
+
+        // Populate lightweight window metadata
+        windows[i]->offset = best[i].start;
+        windows[i]->length = best[i].length;
+        windows[i]->runes_before = best[i].runes_before;
+        windows[i]->runes_within = best[i].runes_within;
+        windows[i]->runes_after = total_runes - best[i].runes_before - best[i].runes_within;
+        // Note: Case-folding and probe computation is deferred to kernel selection time
     }
 
     return results;
 }
 
 /**
- *  @brief Selects the best 3 probe positions and a 16-byte safe window for comparisons.
+ *  @brief Case-folds text into a folded window and computes optimal probe positions.
  *
- *  This function goes through text, locating a continuous slice that in a folded form fits into `folded_slice_limit`
- *  bytes in the `folded_slice` buffer. It's searching for a slice with ideally at least 3 distinct UTF-8 characters
- *  and points the `window` parameters to probe the last bytes of those characters. It also computes the prefix lengths
- *  for each probe to help us later identify character boundaries in search kernels.
+ *  This function case-folds the input text (up to 16 bytes) and finds 4 probe positions
+ *  with ideally distinct byte values:
+ *    - first: implicit at `folded_needle[0]`
+ *    - second: stored in `window->probe_second`
+ *    - third: stored in `window->probe_third`
+ *    - last: implicit at `folded_needle[folded_needle_length - 1]`
+ *
+ *  For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
+ *  The only hard constraint is that all probe indices remain within [0, folded_needle_length - 1].
  *
  *  @param[in] text The input string, assumed to be valid UTF-8.
  *  @param[in] text_length Length of the input string.
- *  @param[out] window Struct to update with probe_* and prefix_* values.
- *  @return The length of the folded slice.
+ *  @param[out] folded Struct to fill with folded content and probe positions.
+ *  @return The length of the folded slice (0 if input is empty).
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_locate_safe_anomalies_( //
-    sz_cptr_t text, sz_size_t text_length,                 //
-    sz_utf8_case_safe_window_t_ *window) {
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_and_probe_( //
+    sz_cptr_t text, sz_size_t text_length,          //
+    sz_utf8_case_folded_window_t_ *folded) {
 
-    // Go through every <= 16 byte subrange of [text;text+text_length) checking if, after case-folding
-    // into `folded_slice` it has at least 3 unique ending bytes in its UTF-8 characters. Prioritize picking
-    // one at start, one in the middle, and one in the end.
-    //
-    // If no unique bytes are found, try another window range. If the `text_length` is too small to contain
-    // multiple codepoints, return whatever is possible.
-    while (true) {
-        sz_size_t bytes_consumed = 0, bytes_exported = 0;
-        sz_utf8_case_fold_upto_(                                  //
-            text, text_length,                                    //
-            window->folded_needle, sizeof(window->folded_needle), //
-            SZ_NULL_CHAR, SZ_NULL_CHAR,                           //
-            &bytes_consumed, &bytes_exported);
+    if (text_length == 0) {
+        folded->folded_needle_length = 0;
+        folded->probe_second = 0;
+        folded->probe_third = 0;
+        return 0;
     }
 
-    return (sz_size_t)(dst - dst_start);
+    // Case-fold into the buffer
+    sz_size_t bytes_consumed = 0, bytes_exported = 0;
+    sz_utf8_case_fold_upto_(                                            //
+        text, text_length,                                              //
+        (sz_ptr_t)folded->folded_needle, sizeof(folded->folded_needle), //
+        SZ_NULL_CHAR, SZ_NULL_CHAR,                                     //
+        &bytes_consumed, &bytes_exported);
+
+    if (bytes_exported == 0) {
+        folded->folded_needle_length = 0;
+        folded->probe_second = 0;
+        folded->probe_third = 0;
+        return 0;
+    }
+
+    folded->folded_needle_length = bytes_exported;
+
+    // Find optimal probe positions with distinct byte values
+    sz_u8_t byte_first = folded->folded_needle[0];
+    sz_u8_t byte_last = folded->folded_needle[bytes_exported - 1];
+
+    sz_size_t probe_second = 0, probe_third = 0;
+
+    // Scan for 2nd distinct byte
+    for (sz_size_t i = 1; i < bytes_exported - 1; i++) {
+        sz_u8_t val = folded->folded_needle[i];
+        if (val != byte_first && val != byte_last) {
+            probe_second = i;
+            break;
+        }
+    }
+
+    // Scan for 3rd distinct byte (only if we found a 2nd distinct byte)
+    if (probe_second != 0) {
+        sz_u8_t byte_second = folded->folded_needle[probe_second];
+        for (sz_size_t i = 1; i < bytes_exported - 1; i++) {
+            sz_u8_t val = folded->folded_needle[i];
+            if (val != byte_first && val != byte_last && val != byte_second) {
+                probe_third = i;
+                break;
+            }
+        }
+    }
+
+    // For very short strings, probes will necessarily overlap - that's fine.
+    if (bytes_exported <= 3) {
+        probe_second = (bytes_exported > 1) ? 1 : 0;
+        probe_third = (bytes_exported > 1) ? 1 : 0;
+    }
+    else {
+        // If we didn't find distinct bytes, pick reasonable offsets
+        if (probe_second == 0) probe_second = bytes_exported / 3;
+        if (probe_third == 0) probe_third = (bytes_exported * 2) / 3;
+
+        // Ensure probe_second >= 1 (position 0 is the implicit first probe)
+        if (probe_second == 0) probe_second = 1;
+
+        // Clamp probe_third to valid range (must be < bytes_exported - 1 since last is implicit)
+        if (probe_third >= bytes_exported - 1) probe_third = bytes_exported - 2;
+
+        // Try to make probe_third > probe_second if there's room
+        if (probe_third <= probe_second && probe_second + 1 < bytes_exported - 1) probe_third = probe_second + 1;
+    }
+
+    folded->probe_second = probe_second;
+    folded->probe_third = probe_third;
+    return bytes_exported;
 }
 
 #pragma endregion Character Safety Profiles
@@ -4081,173 +4299,159 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(__m512i te
 /**
  *  @brief ASCII case-insensitive search for needles with safe slices up to 16 bytes.
  *
- *  Folding ASCII is so-ooo cheap (even compared to unaligned memory loads), that unlike following kernels,
- *  for simplicity, we just load 2 registers worth of ASCII data and match it against chactacters defined for
- *  our probes.
+ *  Scans the entire haystack from byte 0, looking for the folded window pattern.
+ *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
+ *  comparison to handle variable-width folding correctly.
  *
  *  @param[in] haystack Pointer to the haystack string.
  *  @param[in] haystack_length Length of the haystack in bytes.
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] window Safe window with start offset, length, and probe positions.
- *  @param[out] matched_length Set to needle_length if match found.
+ *  @param[in] window Safe window metadata (offset, length, rune counts).
+ *  @param[in] folded Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
     sz_utf8_case_safe_window_t_ const *window,                  //
-    sz_cptr_t needle_folded_window,                             //
+    sz_utf8_case_folded_window_t_ const *folded,                //
     sz_size_t *matched_length) {
 
-    // Extract window parameters
-    sz_assert_(window && "window must be provided");
-    sz_assert_(window->length > 0 && "safe slice must be non-empty");
-    // sz_assert_(window->length <= 16 && "safe slice must fit in XMM register");
-    sz_assert_(window->start + window->length <= needle_length && "safe slice must be within needle");
-    // 1. Dimensions: Head, Core (SIMD), and Tail
-    sz_size_t const head_len = window->start;
-    sz_size_t const core_safe_len = window->length; // Full safe length, currently unused in partial check
-    sz_size_t const core_simd_len = sz_min_of_two(core_safe_len, 16);
-    sz_size_t const tail_len = needle_length - head_len - core_simd_len;
+    // Validate inputs
+    sz_assert_(window && folded && "window and folded must be provided");
+    sz_assert_(folded->folded_needle_length > 0 && "folded window must be non-empty");
+    sz_assert_(window->offset + window->length <= needle_length && "window must be within needle");
 
-    // 2. Coordinates: The Pivot
-    // The search starts at the anchor point (safe window start)
-    sz_cptr_t const pivot_needle = needle + head_len;
-    sz_cptr_t const pivot_haystack = haystack + head_len;
-    sz_size_t const pivot_haystack_len = haystack_length - head_len;
+    sz_size_t const folded_window_offset = window->offset;
+    sz_size_t const folded_window_length = folded->folded_needle_length;
+    sz_cptr_t const haystack_end = haystack + haystack_length;
 
-    // Basic sanity checks relative to the Core SIMD window
-    sz_assert_(window->length > 0 && "safe window must be non-empty");
-    sz_assert_(window->probe_first < core_simd_len && "probes must be within the loaded SIMD core");
-    sz_assert_(window->probe_mid < core_simd_len);
-    sz_assert_(window->probe_last < core_simd_len);
+    // Needle tail parameters
+    sz_cptr_t const needle_tail = needle + window->offset + window->length;
+    sz_size_t const needle_tail_length = needle_length - window->offset - window->length;
 
-    // Shift haystack to start search at the Pivot
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
-    sz_cptr_t text = pivot_haystack;
-    sz_size_t text_length = pivot_haystack_len; // Remaining haystack from pivot
+    // Pre-load folded window into XMM
+    __mmask16 const folded_window_mask = sz_u16_mask_until_(folded_window_length);
+    sz_u128_vec_t needle_window_vec;
+    needle_window_vec.xmm = _mm_loadu_si128((__m128i const *)folded->folded_needle);
 
-    // Pre-fold safe slice only
-    // Use core_simd_len to limit the mask.
-    __mmask16 const core_mask = sz_u16_mask_until_(core_simd_len);
-    sz_u128_vec_t needle_core_vec;
-    needle_core_vec.xmm = _mm_loadu_si128((__m128i const *)needle_folded_window);
+    // 4 probe positions with meaningful names
+    sz_size_t const offset_second = folded->probe_second;
+    sz_size_t const offset_third = folded->probe_third;
+    sz_size_t const offset_last = folded_window_length - 1;
 
-    // Use probe positions from window (relative to core slice)
-    sz_size_t const offset_first = window->probe_first;
-    sz_size_t const offset_mid = window->probe_mid;
-    sz_size_t const offset_last = window->probe_last;
+    sz_u512_vec_t probe_first, probe_second, probe_third, probe_last;
+    probe_first.zmm = _mm512_set1_epi8(folded->folded_needle[0]);
+    probe_second.zmm = _mm512_set1_epi8(folded->folded_needle[offset_second]);
+    probe_third.zmm = _mm512_set1_epi8(folded->folded_needle[offset_third]);
+    probe_last.zmm = _mm512_set1_epi8(folded->folded_needle[offset_last]);
 
-    // Broadcast probe bytes
-    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_last]);
+    // Scan entire haystack - can't skip due to variable-width folding (e.g., Kelvin sign K→k)
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
+    sz_size_t const step = 64 - folded_window_length + 1;
 
-    // Main loop - single load per probe position, 3-probe filter, verify candidates
+    // Main loop - process 64-byte chunks
+    while (haystack_ptr + 64 <= haystack_end) {
+        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr));
 
-    sz_size_t const step = 64 - core_simd_len + 1;
-    __mmask64 const match_mask_valid = sz_u64_mask_until_(step);
+        // 4-way probe filter
+        sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first.zmm);
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second.zmm) >> offset_second;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_third.zmm) >> offset_third;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last.zmm) >> offset_last;
+        matches &= sz_u64_mask_until_(step);
 
-    for (; text_length >= 64; text += step, text_length -= step) {
-        // Single load and fold
-        sz_u512_vec_t haystack_vec;
-        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_loadu_si512(text));
+        for (; matches; matches &= matches - 1) {
+            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-        sz_u64_t mask_first = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
-        sz_u64_t mask_mid = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
-        sz_u64_t mask_last = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+            // Verify window bytes match using SSE comparison
+            sz_u128_vec_t haystack_candidate_vec;
+            haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-        sz_u64_t matches = (mask_first >> offset_first) & //
-                           (mask_mid >> offset_mid) &     //
-                           (mask_last >> offset_last);
+            __mmask16 window_mismatch =
+                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            if (window_mismatch) continue;
 
-        matches &= match_mask_valid;
+            // Verify the unsafe "head" using serial code
+            sz_size_t head_match_length = 0;
+            if (window->runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
+                                            needle, needle + folded_window_offset, // needle head
+                                            haystack, haystack_candidate_ptr,      // haystack before window
+                                            &head_match_length))
+                continue;
 
-        while (matches) {
-            sz_size_t cnt = sz_u64_ctz(matches);
-            sz_cptr_t candidate_pivot = text + cnt + head_len;
+            // Verify the unsafe "tail" using serial code
+            sz_size_t tail_match_length = 0;
+            if (window->runes_after &&
+                !sz_utf8_case_insensitive_match_verify_(                         //
+                    needle_tail, needle_tail_length,                             // needle tail
+                    haystack_candidate_ptr + folded_window_length, haystack_end, // haystack after window
+                    &tail_match_length))
+                continue;
 
-            // 1. Verify Core (SIMD)
-            __m512i candidate_zmm =
-                sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(core_mask, candidate_pivot));
-
-            __m512i needle_zmm = _mm512_castsi128_si512(needle_core_vec.xmm);
-            if (_mm512_mask_cmpneq_epi8_mask(core_mask, candidate_zmm, needle_zmm) == 0) {
-                sz_bool_t same_head = sz_true_k;
-                if (head_len) {
-                    same_head = sz_utf8_verify_case_insensitive_match_(needle, head_len, candidate_pivot - head_len,
-                                                                       candidate_pivot);
-                }
-
-                sz_bool_t same_tail = sz_true_k;
-                if (same_head && tail_len) {
-                    same_tail = sz_utf8_verify_case_insensitive_match_(pivot_needle + core_simd_len, tail_len,
-                                                                       candidate_pivot + core_simd_len,
-                                                                       candidate_pivot + core_simd_len + tail_len);
-                }
-
-                if (same_head && same_tail) {
-                    *matched_length = needle_length;
-                    sz_utf8_case_insensitive_find_verify_(candidate_pivot - head_len, haystack, haystack_length, needle,
-                                                          needle_length);
-                    return candidate_pivot - head_len;
-                }
-            }
-            matches &= matches - 1;
+            // Success!
+            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
+            *matched_length = head_match_length + folded_window_length + tail_match_length;
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            return match_start;
         }
+        haystack_ptr += step;
     }
 
-    // Tail processing
-    if (text_length > 0 && text_length >= core_simd_len) {
-        sz_size_t valid_starts = text_length - core_simd_len + 1;
+    // Tail processing - remaining bytes < 64
+    sz_size_t remaining = (sz_size_t)(haystack_end - haystack_ptr);
+    if (remaining >= folded_window_length) {
+        sz_size_t valid_starts = remaining - folded_window_length + 1;
         __mmask64 valid_mask = sz_u64_mask_until_(valid_starts);
-        __mmask64 load_mask = sz_u64_mask_until_(text_length);
+        __mmask64 load_mask = sz_u64_mask_until_(remaining);
 
-        sz_u512_vec_t haystack_vec;
-        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, text));
+        haystack_vec.zmm =
+            sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack_ptr));
 
-        sz_u64_t mask_first = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
-        sz_u64_t mask_mid = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
-        sz_u64_t mask_last = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-
-        sz_u64_t matches = (mask_first >> offset_first) & //
-                           (mask_mid >> offset_mid) &     //
-                           (mask_last >> offset_last);
-
+        sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first.zmm);
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second.zmm) >> offset_second;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_third.zmm) >> offset_third;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last.zmm) >> offset_last;
         matches &= valid_mask;
 
-        while (matches) {
-            sz_size_t cnt = sz_u64_ctz(matches);
-            sz_cptr_t candidate_pivot = text + cnt + head_len;
+        for (; matches; matches &= matches - 1) {
+            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-            __m512i candidate_zmm =
-                sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(core_mask, candidate_pivot));
+            sz_u128_vec_t haystack_candidate_vec;
+            haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __m512i needle_zmm = _mm512_castsi128_si512(needle_core_vec.xmm);
-            if (_mm512_mask_cmpneq_epi8_mask(core_mask, candidate_zmm, needle_zmm) == 0) {
-                sz_bool_t same_head = sz_true_k;
-                if (head_len) {
-                    same_head = sz_utf8_verify_case_insensitive_match_(needle, head_len, candidate_pivot - head_len,
-                                                                       candidate_pivot);
-                }
+            __mmask16 window_mismatch =
+                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            if (window_mismatch) continue;
 
-                sz_bool_t same_tail = sz_true_k;
-                if (same_head && tail_len) {
-                    same_tail = sz_utf8_verify_case_insensitive_match_(pivot_needle + core_simd_len, tail_len,
-                                                                       candidate_pivot + core_simd_len,
-                                                                       candidate_pivot + core_simd_len + tail_len);
-                }
+            sz_size_t head_match_length = 0;
+            if (window->runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
+                                            needle, needle + folded_window_offset, // needle head
+                                            haystack, haystack_candidate_ptr,      // haystack before window
+                                            &head_match_length))
+                continue;
 
-                if (same_head && same_tail) {
-                    *matched_length = needle_length;
-                    sz_utf8_case_insensitive_find_verify_(candidate_pivot - head_len, haystack, haystack_length, needle,
-                                                          needle_length);
-                    return candidate_pivot - head_len;
-                }
-            }
-            matches &= matches - 1;
+            sz_size_t tail_match_length = 0;
+            if (window->runes_after &&
+                !sz_utf8_case_insensitive_match_verify_(                         //
+                    needle_tail, needle_tail_length,                             // needle tail
+                    haystack_candidate_ptr + folded_window_length, haystack_end, // haystack after window
+                    &tail_match_length))
+                continue;
+
+            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
+            *matched_length = head_match_length + folded_window_length + tail_match_length;
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            return match_start;
         }
     }
 
@@ -4315,233 +4519,227 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(_
 }
 
 /**
- *  @brief Finds the first case-insensitive match of a needle in a haystack using Western European case-folding rules.
- *  @sa sz_utf8_case_rune_safe_western_europe_k
+ *  @brief Western European case-insensitive search for needles with safe slices up to 16 bytes.
  *
- *  @param[in] haystack The haystack to search within.
- *  @param[in] haystack_length The length of the haystack.
- *  @param[in] needle The needle to search for.
- *  @param[in] needle_length The length of the needle.
- *  @param[in] needle_folded_window The window of the needle to use for the search, must be already case-folded.
- *  @param[in] needle_folded_window_length The length of the needle_folded_window, must be under 16 bytes.
- *  @param[in] window The window to use for the search, must be non-empty and fit in XMM register.
- *  @param[out] matched_length The length of the matched needle.
+ *  Scans the entire haystack from byte 0, looking for the folded window pattern.
+ *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
+ *  comparison to handle variable-width folding correctly (e.g., ß→ss, µ→μ).
  *
- *  @return The first case-insensitive match of the needle in the haystack.
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] window Safe window metadata (offset, length, rune counts).
+ *  @param[in] folded Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
     sz_utf8_case_safe_window_t_ const *window,                           //
-    sz_cptr_t needle_folded_window,                                      //
+    sz_utf8_case_folded_window_t_ const *folded,                         //
     sz_size_t *matched_length) {
 
-    sz_assert_(window && "window must be provided");
-    sz_assert_(window->length > 0 && "safe slice must be non-empty");
-    // sz_assert_(window->length <= 16 && "safe slice must fit in XMM register");
-    sz_assert_(window->probe_first < 16 && "probe_first must be valid");
-    sz_assert_(window->probe_mid < 16 && "probe_mid must be valid");
-    sz_assert_(window->probe_last < 16 && "probe_last must be valid");
+    // Validate inputs
+    sz_assert_(window && folded && "window and folded must be provided");
+    sz_assert_(folded->folded_needle_length > 0 && "folded window must be non-empty");
+    sz_assert_(window->offset + window->length <= needle_length && "window must be within needle");
 
-    // 1. Dimensions
-    sz_size_t const head_len = window->start;
-    sz_size_t const core_safe_len = window->length;
-    sz_size_t const core_simd_len = sz_min_of_two(core_safe_len, 16);
-    sz_size_t const tail_len = needle_length - head_len - core_simd_len;
+    sz_size_t const folded_window_offset = window->offset;
+    sz_size_t const folded_window_length = folded->folded_needle_length;
+    sz_cptr_t const haystack_end = haystack + haystack_length;
 
-    // 2. Coordinates: The Pivot
-    sz_cptr_t const pivot_needle = needle + head_len;
-    sz_cptr_t const pivot_haystack = haystack + head_len;
-    sz_size_t const pivot_haystack_len = haystack_length - head_len;
+    // Needle tail parameters
+    sz_cptr_t const needle_tail = needle + window->offset + window->length;
+    sz_size_t const needle_tail_length = needle_length - window->offset - window->length;
 
-    // Basic sanity checks
-    sz_assert_(window->length > 0 && "safe window must be non-empty");
-    sz_assert_(window->probe_first < core_simd_len && "probes must be within the loaded SIMD core");
-    sz_assert_(window->probe_mid < core_simd_len);
-    sz_assert_(window->probe_last < core_simd_len);
+    // Pre-load folded window into XMM
+    __mmask16 const folded_window_mask = sz_u16_mask_until_(folded_window_length);
+    sz_u128_vec_t needle_window_vec;
+    needle_window_vec.xmm = _mm_loadu_si128((__m128i const *)folded->folded_needle);
 
-    // Shift haystack to start search at the Pivot
-    if (haystack_length < needle_length) return SZ_NULL_CHAR;
-    sz_cptr_t text = pivot_haystack;
-    sz_size_t text_length = pivot_haystack_len;
+    // 4 probe positions with meaningful names
+    sz_size_t const offset_second = folded->probe_second;
+    sz_size_t const offset_third = folded->probe_third;
+    sz_size_t const offset_last = folded_window_length - 1;
 
-    // Pre-fold safe slice only
-    __mmask16 const core_mask = sz_u16_mask_until_(core_simd_len);
-    sz_u128_vec_t needle_core_vec;
-    needle_core_vec.xmm = _mm_loadu_si128((__m128i const *)needle_folded_window);
+    sz_u512_vec_t probe_first, probe_second, probe_third, probe_last;
+    probe_first.zmm = _mm512_set1_epi8(folded->folded_needle[0]);
+    probe_second.zmm = _mm512_set1_epi8(folded->folded_needle[offset_second]);
+    probe_third.zmm = _mm512_set1_epi8(folded->folded_needle[offset_third]);
+    probe_last.zmm = _mm512_set1_epi8(folded->folded_needle[offset_last]);
 
-    sz_size_t const offset_first = window->probe_first;
-    sz_size_t const offset_mid = window->probe_mid;
-    sz_size_t const offset_last = window->probe_last;
+    // Constants for anomaly detection (characters that change byte width when folded)
+    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec;
+    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec;
+    x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1);
+    x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
+    x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
+    x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA);
+    x_84_vec.zmm = _mm512_set1_epi8((char)0x84);
+    x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
 
-    // Broadcast probe bytes
-    sz_u512_vec_t probe_first_vec, probe_mid_vec, probe_last_vec;
-    probe_first_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_first]);
-    probe_mid_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_mid]);
-    probe_last_vec.zmm = _mm512_set1_epi8(needle_folded_window[offset_last]);
-
-    // Constants for anomaly detection
-    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
-    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2);
-    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
-    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
-    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
-    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
-
+    // Scan entire haystack - can't skip due to variable-width folding
     sz_u512_vec_t haystack_vec;
-    sz_size_t const step = 64 - core_simd_len + 1;
-    __mmask64 const match_mask_valid = sz_u64_mask_until_(step);
+    sz_cptr_t haystack_ptr = haystack;
+    sz_size_t const step = 64 - folded_window_length + 1;
 
-    // Overlapping blocks loop
-    for (; text_length >= 64; text += step, text_length -= step) {
-        haystack_vec.zmm = _mm512_loadu_si512(text); // Load 64 bytes
+    // Main loop - process 64-byte chunks
+    while (haystack_ptr + 64 <= haystack_end) {
+        haystack_vec.zmm = _mm512_loadu_si512(haystack_ptr);
 
-        // Check for anomalies...
-        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_zmm);
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_zmm);
+        // Check for anomalies (characters that fold to different byte widths)
+        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
+        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
+        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
 
         if (x_e1_mask | x_e2_mask | x_ef_mask) {
-            __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_zmm);
-            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_zmm);
-            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_zmm);
+            __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
+            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
+            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
 
-            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | //
-                                    ((x_e2_mask << 1) & x_84_mask) | //
-                                    ((x_ef_mask << 1) & x_ac_mask);
+            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | // ẞ (E1 BA 9E)
+                                    ((x_e2_mask << 1) & x_84_mask) | // ℃, K, etc (E2 84 xx)
+                                    ((x_ef_mask << 1) & x_ac_mask);  // ﬁ, ﬂ, etc (EF AC xx)
 
-            if (danger_mask & match_mask_valid) { // Only check dangers within valid step
-                // Serial fallback for this block (chunk)
-                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(
-                    text - head_len, step + needle_length + head_len, // Approximate context
-                    needle, needle_length, matched_length);
+            if (danger_mask & sz_u64_mask_until_(step)) {
+                // Serial fallback for this block
+                sz_size_t chunk_len = step + needle_length - 1;
+                if (haystack_ptr + chunk_len > haystack_end) chunk_len = (sz_size_t)(haystack_end - haystack_ptr);
+                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, chunk_len, needle, needle_length,
+                                                                        matched_length);
                 if (result) return result;
-                continue; // Skip the SIMD check as we verified this block
+                haystack_ptr += step;
+                continue;
             }
         }
 
-        // Fold and Probe
+        // Fold and probe
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(haystack_vec.zmm);
 
-        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
-        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
-        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
+        // 4-way probe filter
+        sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first.zmm);
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second.zmm) >> offset_second;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_third.zmm) >> offset_third;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last.zmm) >> offset_last;
+        matches &= sz_u64_mask_until_(step);
 
-        sz_u64_t matches = (first_matches >> offset_first) & //
-                           (mid_matches >> offset_mid) &     //
-                           (last_matches >> offset_last);
+        for (; matches; matches &= matches - 1) {
+            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-        matches &= match_mask_valid; // Limit to overlapping step
+            // Verify window bytes match using SSE comparison
+            sz_u128_vec_t haystack_candidate_vec;
+            haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
+            haystack_candidate_vec.xmm =
+                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(
+                    _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-        while (matches) {
-            sz_size_t cnt = sz_u64_ctz(matches);
-            sz_cptr_t candidate_pivot = text + cnt + head_len;
+            __mmask16 window_mismatch =
+                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            if (window_mismatch) continue;
 
-            // Verify Core
-            __m512i candidate_zmm = sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(
-                _mm512_maskz_loadu_epi8(core_mask, candidate_pivot));
+            // Verify the unsafe "head" using serial code
+            sz_size_t head_match_length = 0;
+            if (window->runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
+                                            needle, needle + folded_window_offset, // needle head
+                                            haystack, haystack_candidate_ptr,      // haystack before window
+                                            &head_match_length))
+                continue;
 
-            __m512i needle_zmm = _mm512_castsi128_si512(needle_core_vec.xmm);
-            if (_mm512_mask_cmpneq_epi8_mask(core_mask, candidate_zmm, needle_zmm) == 0) {
-                sz_bool_t same_head = sz_true_k;
-                if (head_len) {
-                    same_head = sz_utf8_verify_case_insensitive_match_(needle, head_len, candidate_pivot - head_len,
-                                                                       candidate_pivot);
-                }
+            // Verify the unsafe "tail" using serial code
+            sz_size_t tail_match_length = 0;
+            if (window->runes_after &&
+                !sz_utf8_case_insensitive_match_verify_(                         //
+                    needle_tail, needle_tail_length,                             // needle tail
+                    haystack_candidate_ptr + folded_window_length, haystack_end, // haystack after window
+                    &tail_match_length))
+                continue;
 
-                sz_bool_t same_tail = sz_true_k;
-                if (same_head && tail_len) {
-                    same_tail = sz_utf8_verify_case_insensitive_match_(pivot_needle + core_simd_len, tail_len,
-                                                                       candidate_pivot + core_simd_len,
-                                                                       candidate_pivot + core_simd_len + tail_len);
-                }
-
-                if (same_head && same_tail) {
-                    *matched_length = needle_length;
-                    sz_utf8_case_insensitive_find_verify_(candidate_pivot - head_len, haystack, haystack_length, needle,
-                                                          needle_length);
-                    return candidate_pivot - head_len;
-                }
-            }
-            matches &= matches - 1;
+            // Success!
+            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
+            *matched_length = head_match_length + folded_window_length + tail_match_length;
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            return match_start;
         }
+        haystack_ptr += step;
     }
 
-    // Tail processing
-    if (text_length > 0 && text_length >= core_simd_len) {
-        sz_size_t valid_starts = text_length - core_simd_len + 1;
+    // Tail processing - remaining bytes < 64
+    sz_size_t remaining = (sz_size_t)(haystack_end - haystack_ptr);
+    if (remaining >= folded_window_length) {
+        sz_size_t valid_starts = remaining - folded_window_length + 1;
         __mmask64 valid_mask = sz_u64_mask_until_(valid_starts);
-        __mmask64 load_mask = sz_u64_mask_until_(text_length);
+        __mmask64 load_mask = sz_u64_mask_until_(remaining);
 
-        haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, text);
+        haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies...
-        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_zmm);
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_zmm);
+        // Check for anomalies
+        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
+        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
+        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
 
         if (x_e1_mask | x_e2_mask | x_ef_mask) {
-            __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_zmm);
-            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_zmm);
-            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_zmm);
+            __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
+            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
+            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
 
-            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | //
-                                    ((x_e2_mask << 1) & x_84_mask) | //
-                                    ((x_ef_mask << 1) & x_ac_mask);
+            __mmask64 danger_mask =
+                ((x_e1_mask << 1) & x_ba_mask) | ((x_e2_mask << 1) & x_84_mask) | ((x_ef_mask << 1) & x_ac_mask);
 
             if (danger_mask & valid_mask) {
-                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(text - head_len, text_length + head_len, needle,
-                                                                        needle_length, matched_length);
+                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, remaining, needle, needle_length,
+                                                                        matched_length);
                 if (result) return result;
+                sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
                 return SZ_NULL_CHAR;
             }
         }
 
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(haystack_vec.zmm);
 
-        sz_u64_t first_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
-        sz_u64_t mid_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_mid_vec.zmm);
-        sz_u64_t last_matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm);
-
-        sz_u64_t matches = (first_matches >> offset_first) & //
-                           (mid_matches >> offset_mid) &     //
-                           (last_matches >> offset_last);
-
+        sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first.zmm);
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second.zmm) >> offset_second;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_third.zmm) >> offset_third;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last.zmm) >> offset_last;
         matches &= valid_mask;
 
-        while (matches) {
-            sz_size_t cnt = sz_u64_ctz(matches);
-            sz_cptr_t candidate_pivot = text + cnt + head_len;
+        for (; matches; matches &= matches - 1) {
+            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-            // Verify Core
-            __m512i candidate_zmm = sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(
-                _mm512_maskz_loadu_epi8(core_mask, candidate_pivot));
+            sz_u128_vec_t haystack_candidate_vec;
+            haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
+            haystack_candidate_vec.xmm =
+                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(
+                    _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __m512i needle_zmm = _mm512_castsi128_si512(needle_core_vec.xmm);
-            if (_mm512_mask_cmpneq_epi8_mask(core_mask, candidate_zmm, needle_zmm) == 0) {
-                sz_bool_t same_head = sz_true_k;
-                if (head_len) {
-                    same_head = sz_utf8_verify_case_insensitive_match_(needle, head_len, candidate_pivot - head_len,
-                                                                       candidate_pivot);
-                }
+            __mmask16 window_mismatch =
+                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            if (window_mismatch) continue;
 
-                sz_bool_t same_tail = sz_true_k;
-                if (same_head && tail_len) {
-                    same_tail = sz_utf8_verify_case_insensitive_match_(pivot_needle + core_simd_len, tail_len,
-                                                                       candidate_pivot + core_simd_len,
-                                                                       candidate_pivot + core_simd_len + tail_len);
-                }
+            sz_size_t head_match_length = 0;
+            if (window->runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
+                                            needle, needle + folded_window_offset, //
+                                            haystack, haystack_candidate_ptr,      //
+                                            &head_match_length))
+                continue;
 
-                if (same_head && same_tail) {
-                    *matched_length = needle_length;
-                    sz_utf8_case_insensitive_find_verify_(candidate_pivot - head_len, haystack, haystack_length, needle,
-                                                          needle_length);
-                    return candidate_pivot - head_len;
-                }
-            }
-            matches &= matches - 1;
+            sz_size_t tail_match_length = 0;
+            if (window->runes_after && !sz_utf8_case_insensitive_match_verify_(                         //
+                                           needle_tail, needle_tail_length,                             //
+                                           haystack_candidate_ptr + folded_window_length, haystack_end, //
+                                           &tail_match_length))
+                continue;
+
+            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
+            *matched_length = head_match_length + folded_window_length + tail_match_length;
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            return match_start;
         }
     }
+
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
     return SZ_NULL_CHAR;
 }
@@ -4558,58 +4756,51 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         return haystack;
     }
 
-    // If the needle is enterily made of case-less characters - perform direct substring search
+    // If the needle is entirely made of case-less characters - perform direct substring search
     if (sz_utf8_case_agnostic_ice(needle, needle_length)) {
         sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
         if (result) *matched_length = needle_length;
         return result;
     }
 
-    // Check the
+    // Analyze needle to find the best safe window for each script
     sz_utf8_case_safe_windows_t_ analysis = sz_utf8_case_safe_windows_(needle, needle_length);
 
-    // Assuming all of the kernels have roughly similar throughput - pick the path matching the longest
-    // script-specific safe window in the needle.
-    sz_size_t longest_safe_window = 0;
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.ascii.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.western_europe.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.cyrillic.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.greek.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.armenian.length);
-    longest_safe_window = sz_max_of_two(longest_safe_window, analysis.vietnamese.length);
+    // Pick the path matching the longest script-specific safe window
+    sz_size_t longest = 0;
+    longest = sz_max_of_two(longest, analysis.ascii.length);
+    longest = sz_max_of_two(longest, analysis.western_europe.length);
+    longest = sz_max_of_two(longest, analysis.cyrillic.length);
+    longest = sz_max_of_two(longest, analysis.greek.length);
+    longest = sz_max_of_two(longest, analysis.armenian.length);
+    longest = sz_max_of_two(longest, analysis.vietnamese.length);
 
     // If no safe window was found (e.g., unsupported script like Georgian), fall back to serial
-    if (longest_safe_window == 0)
+    if (longest == 0)
         return sz_utf8_case_insensitive_find_serial( //
             haystack, haystack_length, needle, needle_length, matched_length);
 
-    // Select the best window to use logic selection consistent with the max logic above
-    sz_utf8_case_safe_window_t_ *best_window = SZ_NULL_CHAR;
-    if (longest_safe_window == analysis.ascii.length) best_window = &analysis.ascii;
-    else if (longest_safe_window == analysis.western_europe.length)
-        best_window = &analysis.western_europe;
-    else if (longest_safe_window == analysis.cyrillic.length)
-        best_window = &analysis.cyrillic;
-    else if (longest_safe_window == analysis.greek.length)
-        best_window = &analysis.greek;
-    else if (longest_safe_window == analysis.armenian.length)
-        best_window = &analysis.armenian;
-    else if (longest_safe_window == analysis.vietnamese.length)
-        best_window = &analysis.vietnamese;
+    // Select the best window (prefer ASCII > Western > others for tie-breaking)
+    sz_utf8_case_safe_window_t_ const *best = SZ_NULL_CHAR;
+    if (analysis.ascii.length == longest) { best = &analysis.ascii; }
+    else if (analysis.western_europe.length == longest) { best = &analysis.western_europe; }
+    else if (analysis.cyrillic.length == longest) { best = &analysis.cyrillic; }
+    else if (analysis.greek.length == longest) { best = &analysis.greek; }
+    else if (analysis.armenian.length == longest) { best = &analysis.armenian; }
+    else if (analysis.vietnamese.length == longest) { best = &analysis.vietnamese; }
 
-    // If a safe window was found - fold it into a small buffer of up-to 16 bytes
-    // and identify the best probe positions (anomalies) to use for the kernel.
-    char needle_folded_window[16];
-    sz_utf8_case_locate_safe_anomalies_(needle, best_window->start, best_window->length, needle_folded_window, 16,
-                                        best_window);
+    // Now fold the chosen window and compute 4 probe positions (deferred expensive operation)
+    sz_utf8_case_folded_window_t_ folded;
+    sz_utf8_case_fold_and_probe_(needle + best->offset, best->length, &folded);
 
-    if (best_window == &analysis.ascii)
+    // Dispatch to appropriate kernel
+    if (best == &analysis.ascii)
         return sz_utf8_case_insensitive_find_ice_ascii_( //
-            haystack, haystack_length, needle, needle_length, best_window, needle_folded_window, matched_length);
+            haystack, haystack_length, needle, needle_length, best, &folded, matched_length);
 
-    if (best_window == &analysis.western_europe)
+    if (best == &analysis.western_europe)
         return sz_utf8_case_insensitive_find_ice_western_europe_( //
-            haystack, haystack_length, needle, needle_length, best_window, needle_folded_window, matched_length);
+            haystack, haystack_length, needle, needle_length, best, &folded, matched_length);
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, matched_length);
