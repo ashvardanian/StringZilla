@@ -3886,14 +3886,14 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 's':
-            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
-            //   can't precede 's', 't'.
-            //   Avoids: "ss" (Eszett) and "st" ligatures.
-            // - Western: SAFE. Eszett/ligatures detected in haystack.
+            // - Strict: UNSAFE. 'ſ' (U+017F) folds to 's'.
+            // - Central/Viet: Contextual. Can't be first/last; can't follow 's';
+            //   can't precede 's', 't'. Avoids: "ss" (Eszett) and "st" ligatures.
+            // - Western: SAFE. Eszett folds to "ss"; 'ſ' & "st" ligatures detected in haystack.
             case 's':
                 if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
                     lower_next != 's' && lower_next != 't')
-                    safety |= strict_ascii_group | central_viet_group;
+                    safety |= central_viet_group;
                 safety |= western_group;
                 break;
 
