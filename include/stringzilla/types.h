@@ -788,8 +788,12 @@ typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, s
 /** @brief Signature of `sz_utf8_case_fold`. */
 typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
+/** @brief Forward declaration for case-insensitive needle metadata. */
+struct sz_utf8_case_insensitive_needle_metadata_t;
+
 /** @brief Signature of `sz_utf8_case_insensitive_find`. */
-typedef sz_cptr_t (*sz_utf8_case_insensitive_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t *);
+typedef sz_cptr_t (*sz_utf8_case_insensitive_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
+                                                     struct sz_utf8_case_insensitive_needle_metadata_t *, sz_size_t *);
 
 /** @brief Signature of `sz_utf8_case_insensitive_order`. */
 typedef sz_ordering_t (*sz_utf8_case_insensitive_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);

@@ -1350,8 +1350,9 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
         sz_size_t n_len = std::strlen(tc.needle);
 
         // Method 1 & 2: Case-insensitive find (serial vs SIMD)
-        sz_cptr_t serial_match = find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_matched_len);
-        sz_cptr_t simd_match = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_matched_len);
+        sz_utf8_case_insensitive_needle_metadata_t serial_metadata = {}, simd_metadata = {};
+        sz_cptr_t serial_match = find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_metadata, &serial_matched_len);
+        sz_cptr_t simd_match = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_metadata, &simd_matched_len);
 
         // Method 3: Fold haystack + fold needle + regular sz_find (independent oracle)
         sz_size_t folded_h_len = case_fold(tc.haystack, h_len, folded_haystack_buf.data());
@@ -1401,6 +1402,14 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
             std::fprintf(stderr, "  SIMD: folded_char_offset=%zu, len=%zu\n",
                          simd_folded_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_folded_char_offset,
                          simd_matched_len);
+            std::fprintf(stderr, "  SIMD metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
+                         simd_metadata.kernel_id, simd_metadata.safe_window.offset, simd_metadata.safe_window.length);
+            std::fprintf(stderr, "  SIMD metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
+                         simd_metadata.folded_slice_length, simd_metadata.probe_second, simd_metadata.probe_third);
+            std::fprintf(stderr, "  SIMD metadata folded_slice: ");
+            for (sz_size_t j = 0; j < simd_metadata.folded_slice_length && j < 16; ++j)
+                std::fprintf(stderr, "%02X ", simd_metadata.folded_slice[j]);
+            std::fprintf(stderr, "\n");
             std::fprintf(stderr, "  Oracle: char_offset=%zu (folded_h=%zu, folded_n=%zu)\n",
                          oracle_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : oracle_char_offset, folded_h_len,
                          folded_n_len);
@@ -1664,10 +1673,11 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
             // Compare serial vs SIMD implementations
             // Both operate on the same haystack, so we can compare pointers directly
             sz_size_t serial_matched_len = 0, simd_matched_len = 0;
-            sz_cptr_t serial_match =
-                find_serial(haystack.data(), haystack.size(), needle_data, needle_byte_len, &serial_matched_len);
-            sz_cptr_t simd_match =
-                find_simd(haystack.data(), haystack.size(), needle_data, needle_byte_len, &simd_matched_len);
+            sz_utf8_case_insensitive_needle_metadata_t serial_metadata = {}, simd_metadata = {};
+            sz_cptr_t serial_match = find_serial(haystack.data(), haystack.size(), needle_data, needle_byte_len,
+                                                 &serial_metadata, &serial_matched_len);
+            sz_cptr_t simd_match = find_simd(haystack.data(), haystack.size(), needle_data, needle_byte_len,
+                                             &simd_metadata, &simd_matched_len);
 
             // Check implementations agree on position (pointer) and matched length
             // Note: We don't use an oracle here because the needle is always a substring of the haystack,
@@ -1689,6 +1699,14 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
                              serial_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_offset, serial_matched_len);
                 std::fprintf(stderr, "  SIMD: offset=%zu, len=%zu\n",
                              simd_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_offset, simd_matched_len);
+                std::fprintf(stderr, "  SIMD metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
+                             simd_metadata.kernel_id, simd_metadata.safe_window.offset, simd_metadata.safe_window.length);
+                std::fprintf(stderr, "  SIMD metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
+                             simd_metadata.folded_slice_length, simd_metadata.probe_second, simd_metadata.probe_third);
+                std::fprintf(stderr, "  SIMD metadata folded_slice: ");
+                for (sz_size_t j = 0; j < simd_metadata.folded_slice_length && j < 16; ++j)
+                    std::fprintf(stderr, "%02X ", simd_metadata.folded_slice[j]);
+                std::fprintf(stderr, "\n");
                 assert(implementations_agree && "Fuzz byte offset mismatch");
                 assert(lengths_agree && "Fuzz length mismatch");
             }
@@ -3488,52 +3506,63 @@ void test_utf8() {
         sz_size_t matched_len;
         sz_cptr_t haystack;
         sz_cptr_t result;
+        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
 
         // Basic ASCII search
         haystack = "Hello World";
-        result = sz_utf8_case_insensitive_find(haystack, 11, "WORLD", 5, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 11, "WORLD", 5, &metadata, &matched_len);
         assert(result == haystack + 6 && matched_len == 5);
 
-        result = sz_utf8_case_insensitive_find(haystack, 11, "world", 5, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 11, "world", 5, &metadata, &matched_len);
         assert(result == haystack + 6 && matched_len == 5);
 
         // Search at start
         haystack = "HELLO";
-        result = sz_utf8_case_insensitive_find(haystack, 5, "hello", 5, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 5, "hello", 5, &metadata, &matched_len);
         assert(result == haystack && matched_len == 5);
 
         // Not found
-        result = sz_utf8_case_insensitive_find("Hello", 5, "xyz", 3, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find("Hello", 5, "xyz", 3, &metadata, &matched_len);
         assert(result == SZ_NULL_CHAR);
 
         // Empty needle
         haystack = "Hello";
-        result = sz_utf8_case_insensitive_find(haystack, 5, "", 0, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 5, "", 0, &metadata, &matched_len);
         assert(result == haystack && matched_len == 0);
 
         // Eszett matching: search for "ss" in "straße"
         haystack = "straße";
-        result = sz_utf8_case_insensitive_find(haystack, 7, "SS", 2, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 7, "SS", 2, &metadata, &matched_len);
         assert(result != SZ_NULL_CHAR);
 
         // Search for "straße" in "STRASSE"
         haystack = "STRASSE";
-        result = sz_utf8_case_insensitive_find(haystack, 7, "straße", 7, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 7, "straße", 7, &metadata, &matched_len);
         assert(result == haystack);
 
         // Greek case folding search
         haystack = "αβγδ";
-        result = sz_utf8_case_insensitive_find(haystack, 8, "ΑΒΓΔ", 8, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 8, "ΑΒΓΔ", 8, &metadata, &matched_len);
         assert(result == haystack);
 
         // Cyrillic search
         haystack = "привет мир";
-        result = sz_utf8_case_insensitive_find(haystack, 19, "ПРИВЕТ", 12, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 19, "ПРИВЕТ", 12, &metadata, &matched_len);
         assert(result == haystack);
 
         // Mixed case in middle
         haystack = "foo BAR baz";
-        result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &matched_len);
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &metadata, &matched_len);
         assert(result == haystack + 4 && matched_len == 3);
     }
 
