@@ -1922,7 +1922,7 @@ SZ_INTERNAL sz_size_t sz_ice_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mas
  */
 SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
     sz_cptr_t result, sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-    char const *file, int line) {
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, char const *file, int line) {
 
     sz_size_t serial_matched_length;
     sz_cptr_t expected = sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
@@ -1944,6 +1944,21 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
     if (result) fprintf(stderr, "Found Offset: %zu\n", (size_t)(result - haystack));
     else
         fprintf(stderr, "Found: NULL (Not Found)\n");
+
+    // Print SIMD metadata for debugging
+    if (needle_metadata) {
+        fprintf(stderr, "SIMD Metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
+                needle_metadata->kernel_id, needle_metadata->safe_window.offset, needle_metadata->safe_window.length);
+        fprintf(stderr, "SIMD Metadata: runes_before=%zu, runes_within=%zu, runes_after=%zu\n",
+                needle_metadata->safe_window.runes_before, needle_metadata->safe_window.runes_within,
+                needle_metadata->safe_window.runes_after);
+        fprintf(stderr, "SIMD Metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
+                needle_metadata->folded_slice_length, needle_metadata->probe_second, needle_metadata->probe_third);
+        fprintf(stderr, "SIMD Metadata folded_slice: ");
+        for (sz_size_t i = 0; i < needle_metadata->folded_slice_length && i < 16; ++i)
+            fprintf(stderr, "%02X ", needle_metadata->folded_slice[i]);
+        fprintf(stderr, "\n");
+    }
 
     // Print Needle (First 64 bytes)
     fprintf(stderr, "Needle (Hex): ");
@@ -1969,17 +1984,19 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
     fprintf(stderr, "--------------------------------------------------------\n");
     abort();
 #else
+    sz_unused(needle_metadata);
     // Force crash without LibC
     *((volatile int *)0) = 0;
 #endif
 }
 
-#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length)       \
+#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length,       \
+                                              needle_metadata)                                                \
     sz_utf8_case_insensitive_find_verify_and_crash_(result, haystack, haystack_length, needle, needle_length, \
-                                                    __FILE__, __LINE__)
+                                                    needle_metadata, __FILE__, __LINE__)
 
 #else
-#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length)
+#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length, needle_metadata)
 #endif
 
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
@@ -4149,7 +4166,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
     }
 
     // Track script-specific content presence (ASCII always valid, others need proof)
-    sz_bool_t has_content[count_profiles] = {sz_true_k, sz_false_k, sz_false_k, sz_false_k,
+    sz_bool_t has_content[count_profiles] = {sz_true_k,  sz_false_k, sz_false_k, sz_false_k,
                                              sz_false_k, sz_false_k, sz_false_k};
 
     sz_u8_t const *ptr = (sz_u8_t const *)needle;
@@ -4457,9 +4474,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             // Verify the unsafe "head" using serial code
             sz_size_t head_match_length = 0;
             if (needle_metadata->safe_window.runes_before &&
-                !sz_utf8_case_insensitive_match_rverify_(        //
-                    needle, needle + folded_window_offset,       // needle head
-                    haystack, haystack_candidate_ptr,            // haystack before window
+                !sz_utf8_case_insensitive_match_rverify_(  //
+                    needle, needle + folded_window_offset, // needle head
+                    haystack, haystack_candidate_ptr,      // haystack before window
                     &head_match_length))
                 continue;
 
@@ -4476,8 +4493,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             // Verify the unsafe "tail" using serial code
             sz_size_t tail_match_length = 0;
             if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                    //
-                    needle_tail, needle_tail_length,                                        // needle tail
+                !sz_utf8_case_insensitive_match_verify_(                                        //
+                    needle_tail, needle_tail_length,                                            // needle tail
                     haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
                     &tail_match_length))
                 continue;
@@ -4485,7 +4502,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             // Success!
             sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
             *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
+                                                  needle_metadata);
             return match_start;
         }
         haystack_ptr += step;
@@ -4520,10 +4538,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             if (window_mismatch) continue;
 
             sz_size_t head_match_length = 0;
-            if (needle_metadata->safe_window.runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
-                                                                 needle, needle + folded_window_offset, // needle head
-                                                                 haystack, haystack_candidate_ptr,      // haystack before window
-                                                                 &head_match_length))
+            if (needle_metadata->safe_window.runes_before &&
+                !sz_utf8_case_insensitive_match_rverify_(  //
+                    needle, needle + folded_window_offset, // needle head
+                    haystack, haystack_candidate_ptr,      // haystack before window
+                    &head_match_length))
                 continue;
 
             // Verify the "middle" of the expanded safe window (if any)
@@ -4538,20 +4557,22 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
 
             sz_size_t tail_match_length = 0;
             if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                       //
-                    needle_tail, needle_tail_length,                                           // needle tail
+                !sz_utf8_case_insensitive_match_verify_(                                        //
+                    needle_tail, needle_tail_length,                                            // needle tail
                     haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
                     &tail_match_length))
                 continue;
 
             sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
             *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
+                                                  needle_metadata);
             return match_start;
         }
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+                                          needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -4746,9 +4767,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
             // Verify the unsafe "head" using serial code
             sz_size_t head_match_length = 0;
             if (needle_metadata->safe_window.runes_before &&
-                !sz_utf8_case_insensitive_match_rverify_(        //
-                    needle, needle + folded_window_offset,       // needle head
-                    haystack, haystack_candidate_ptr,            // haystack before window
+                !sz_utf8_case_insensitive_match_rverify_(  //
+                    needle, needle + folded_window_offset, // needle head
+                    haystack, haystack_candidate_ptr,      // haystack before window
                     &head_match_length))
                 continue;
 
@@ -4765,8 +4786,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
             // Verify the unsafe "tail" using serial code
             sz_size_t tail_match_length = 0;
             if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                    //
-                    needle_tail, needle_tail_length,                                        // needle tail
+                !sz_utf8_case_insensitive_match_verify_(                                        //
+                    needle_tail, needle_tail_length,                                            // needle tail
                     haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
                     &tail_match_length))
                 continue;
@@ -4774,7 +4795,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
             // Success!
             sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
             *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
+                                                  needle_metadata);
             return match_start;
         }
         haystack_ptr += step;
@@ -4810,7 +4832,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, remaining, needle, needle_length,
                                                                         matched_length);
                 if (result) return result;
-                sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
+                sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
                 return SZ_NULL_CHAR;
             }
         }
@@ -4855,20 +4878,22 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
 
             sz_size_t tail_match_length = 0;
             if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                       //
-                    needle_tail, needle_tail_length,                                           //
+                !sz_utf8_case_insensitive_match_verify_(                                        //
+                    needle_tail, needle_tail_length,                                            //
                     haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, //
                     &tail_match_length))
                 continue;
 
             sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
             *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length);
+            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
+                                                  needle_metadata);
             return match_start;
         }
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length);
+    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+                                          needle_metadata);
     return SZ_NULL_CHAR;
 }
 

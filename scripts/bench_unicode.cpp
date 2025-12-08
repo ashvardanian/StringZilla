@@ -31,6 +31,7 @@
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
+#include <cstring>
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -82,9 +83,6 @@ void bench_utf8_case_fold(environment_t const &env) {
 
 #pragma region Case-Insensitive Find Functions
 
-/** @brief Type alias for case-insensitive find function signature. */
-using sz_utf8_case_insensitive_find_t = sz_cptr_t (*)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t *);
-
 /** @brief Wraps a hardware-specific UTF-8 case-insensitive find backend. */
 template <sz_utf8_case_insensitive_find_t func_>
 struct utf8_case_insensitive_find_from_sz {
@@ -104,10 +102,12 @@ struct utf8_case_insensitive_find_from_sz {
         std::size_t count_matches = 0;
         sz_cptr_t h = haystack.data();
         sz_size_t h_len = haystack.size();
+        sz_utf8_case_insensitive_needle_metadata_t metadata;
+        std::memset(&metadata, 0, sizeof(metadata));
 
         // Count all case-insensitive matches
         while (h_len >= needle.size()) {
-            sz_cptr_t match = func_(h, h_len, needle.data(), needle.size(), &matched_length);
+            sz_cptr_t match = func_(h, h_len, needle.data(), needle.size(), &metadata, &matched_length);
             if (!match) break;
             ++count_matches;
             // Move past the match

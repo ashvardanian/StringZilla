@@ -3564,6 +3564,33 @@ void test_utf8() {
         metadata = {};
         result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &metadata, &matched_len);
         assert(result == haystack + 4 && matched_len == 3);
+
+        // Turkish I test (İ -> i + dot)
+        // İ (U+0130, C4 B0) should match "i\u0307" (69 CC 87)
+        haystack = "İstanbul";
+        metadata = {};
+        // Search for "istanbul" (default verify might fail if it expects strict folding?)
+        // Actually, "İ" folds to "i\u0307". "i" folds to "i".
+        // So "İ" != "i".
+        // "İ" matches "i\u0307".
+        result = sz_utf8_case_insensitive_find(haystack, 9, "i\xcc\x87stanbul", 10, &metadata, &matched_len);
+        assert(result == haystack); 
+
+        // German Maße -> MASSE
+        haystack = "Maße";
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 5, "MASSE", 5, &metadata, &matched_len);
+        // "ß" folds to "ss". "SS" folds to "ss". Match!
+        assert(result != SZ_NULL_CHAR);
+        assert(matched_len == 2); // Matched "ß" (2 bytes) against "SS" (2 chars)? No, matched_len is in haystack bytes. "ß" is 2 bytes.
+
+        // Weird combination: "ß" vs "ss"
+        // Haystack "Fuss" (4 bytes), Needle "Fuß" (4 bytes)
+        // "Fuss" folds to "fuss". "Fuß" folds to "fuss".
+        haystack = "Fuss";
+        metadata = {};
+        result = sz_utf8_case_insensitive_find(haystack, 4, "Fu\xc3\x9f", 4, &metadata, &matched_len);
+        assert(result == haystack);
     }
 
     // Test Unicode word boundary detection (TR29 Word_Break)
