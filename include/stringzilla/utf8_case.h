@@ -3004,6 +3004,26 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
             if (is_two) {
                 __mmask64 is_bicameral = _mm512_cmp_epu8_mask( //
                     _mm512_sub_epi8(data, xc3_vec), _mm512_set1_epi8(0x14), _MM_CMPINT_LT);
+
+                // Special case: C2 B5 = U+00B5 MICRO SIGN folds to Greek mu (U+03BC)
+                __mmask64 is_c2 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xC2)) & is_two;
+                if (is_c2) {
+                    __mmask64 c2_sec = is_c2 << 1;
+                    __mmask64 is_b5 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xB5));
+                    if (c2_sec & is_b5) return sz_false_k;
+                }
+
+                // Exclude CA B0-BF (Spacing Modifier Letters U+02B0-02BF) from bicameral
+                // CA 80-AF = IPA Extensions (bicameral), CA B0-BF = Spacing Modifier Letters (not bicameral)
+                __mmask64 is_ca = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xCA)) & is_two;
+                if (is_ca) {
+                    __mmask64 ca_sec = is_ca << 1; // positions of second bytes after CA
+                    __mmask64 is_ge_b0 = _mm512_cmp_epu8_mask(data, _mm512_set1_epi8((char)0xB0), _MM_CMPINT_NLT);
+                    // If second byte >= B0, exclude this CA from bicameral
+                    __mmask64 exclude_ca = ((ca_sec & is_ge_b0) >> 1) & is_ca;
+                    is_bicameral &= ~exclude_ca;
+                }
+
                 if (is_bicameral & is_two) return sz_false_k;
             }
 
