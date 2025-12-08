@@ -4628,14 +4628,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     probe_last.zmm = _mm512_set1_epi8(folded->folded_needle[offset_last]);
 
     // Constants for anomaly detection (characters that change byte width when folded)
-    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec;
-    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec;
+    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec;
+    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec, x_bf_vec;
     x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1);
     x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
     x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
+    x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5);
     x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA);
     x_84_vec.zmm = _mm512_set1_epi8((char)0x84);
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
+    x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF);
 
     // Scan entire haystack - can't skip due to variable-width folding
     sz_u512_vec_t haystack_vec;
@@ -4650,15 +4652,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
+        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
 
-        if (x_e1_mask | x_e2_mask | x_ef_mask) {
+        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask) {
             __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
             __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
+            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
 
             __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | // ẞ (E1 BA 9E)
                                     ((x_e2_mask << 1) & x_84_mask) | // ℃, K, etc (E2 84 xx)
-                                    ((x_ef_mask << 1) & x_ac_mask);  // ﬁ, ﬂ, etc (EF AC xx)
+                                    ((x_ef_mask << 1) & x_ac_mask) | // ﬁ, ﬂ, etc (EF AC xx)
+                                    ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask & sz_u64_mask_until_(step)) {
                 // Serial fallback for this block
@@ -4743,15 +4748,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
+        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
 
-        if (x_e1_mask | x_e2_mask | x_ef_mask) {
+        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask) {
             __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
             __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
+            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
 
             __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | // ẞ (E1 BA 9E)
                                     ((x_e2_mask << 1) & x_84_mask) | // ℃, K, etc (E2 84 xx)
-                                    ((x_ef_mask << 1) & x_ac_mask);  // ﬁ, ﬂ, etc (EF AC xx)
+                                    ((x_ef_mask << 1) & x_ac_mask) | // ﬁ, ﬂ, etc (EF AC xx)
+                                    ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask & valid_mask) {
                 sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, remaining, needle, needle_length,
