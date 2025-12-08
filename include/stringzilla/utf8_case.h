@@ -2998,10 +2998,12 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
                 if (f0_sec & (is_90 | is_91 | is_96 | is_9d | is_9e)) return sz_false_k;
             }
 
-            // 5. Check 2-byte bicameral leads: C3-D5
+            // 5. Check 2-byte bicameral leads: C3-D6
+            // C3-CF: Latin Extended (umlauts, accents, Eszett)
+            // D0-D1: Cyrillic, D4-D6: Armenian (D6 needed for small letters U+0580+)
             if (is_two) {
                 __mmask64 is_bicameral = _mm512_cmp_epu8_mask( //
-                    _mm512_sub_epi8(data, xc3_vec), _mm512_set1_epi8(0x13), _MM_CMPINT_LT);
+                    _mm512_sub_epi8(data, xc3_vec), _mm512_set1_epi8(0x14), _MM_CMPINT_LT);
                 if (is_bicameral & is_two) return sz_false_k;
             }
 
