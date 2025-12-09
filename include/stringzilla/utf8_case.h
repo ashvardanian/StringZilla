@@ -5620,25 +5620,17 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_zmm_(__m512i te
 
     // 1. CE ranges (Uppercase -> Lowercase)
     // -------------------------------------
-
-    // Group 1: CE 91-9F ('Α'-'Ο') -> CE B1-BF ('α'-'ο') (Add 0x20)
+    // Basic Greek Upper (Range 1): CE 91-9F ('Α'-'Ο') -> CE B1-BF ('α'-'ο') (Add 0x20)
     __mmask64 is_basic1 = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, result_zmm, x_91_zmm);
     is_basic1 &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, result_zmm, x_9f_zmm);
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_basic1, result_zmm, x_20_zmm);
 
-    // Group 2: CE A0-A9 ('Π'-'Ω') -> CF 80-89 ('π'-'ω') (Change lead CE->CF, subtract 0x20 from 2nd)
+    // Basic Greek Upper (Range 2): CE A0-A9 ('Π'-'Ω') -> CF 80-89 ('π'-'ω') (Change lead CE->CF, subtract 0x20 from
+    // 2nd)
     __mmask64 is_basic2 = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, result_zmm, x_a0_zmm);
     is_basic2 &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, result_zmm, x_a9_zmm);
-    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_basic2 >> 1, x_cf_zmm);        // Lead CE -> CF
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_basic2, result_zmm, x_e0_zmm); // 2nd -0x20 (using add E0)
 
-    // Group 3: CE 86-8F (Accented 'Ά'-'Ώ') -> Lowercase
+    // Accented Greek Upper: CE 86-8F ('Ά'-'Ώ') -> Lowercase
     // Most map nicely: CE 8x -> CE Ax (+20) or CE 8x -> CF 8x (Lead change, 2nd same)
-    // - 'Ά' (86) -> 'ά' (AC) -- +0x26
-    // - 'Έ' (88), 'Ή' (89), 'Ί' (8A) -> 'έ' (AD), 'ή' (AE), 'ί' (AF) -- +0x25
-    // - 'Ό' (8C) -> 'ό' (CF 8C) -- Lead change!
-    // - 'Ύ' (8E), 'Ώ' (8F) -> 'ύ' (CF 8D), 'ώ' (CF 8E) -- Lead change + 2nd change!
-
     __mmask64 is_accented = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, result_zmm, x_86_zmm);
     is_accented &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, result_zmm, x_8f_zmm);
 
@@ -5652,7 +5644,25 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_zmm_(__m512i te
 
     __mmask64 is_8e_8f = is_accented & _mm512_cmpge_epu8_mask(result_zmm, _mm512_set1_epi8((char)0x8E));
 
-    // Apply transformations using masked operations (branchless)
+    // Dialytika Greek Upper: CE AA-AB ('Ϊ', 'Ϋ') -> CF 8A-8B (Lead CE->CF, 2nd -0x20)
+    __mmask64 is_dialytika = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, result_zmm, x_aa_zmm);
+    is_dialytika &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, result_zmm, x_ab_zmm);
+
+    // 2. CF ranges (Final Sigma)
+    // --------------------------
+    // 'ς' (CF 82) -> 'σ' (CF 83)
+    __mmask64 is_final_sigma = _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm, x_82_zmm);
+
+    // Apply transformations using masked operations
+    // ---------------------------------------------
+    // Apply Basic Greek Upper (Range 1)
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_basic1, result_zmm, x_20_zmm);
+
+    // Apply Basic Greek Upper (Range 2)
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_basic2 >> 1, x_cf_zmm);        // Lead CE -> CF
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_basic2, result_zmm, x_e0_zmm); // 2nd -0x20 (using add E0)
+
+    // Apply Accented Greek Upper
     // 1. Additions for Same-Block Mappings (CE -> CE)
     // 'Ά' -> +0x26
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_86, result_zmm, _mm512_set1_epi8(0x26));
@@ -5668,16 +5678,11 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_zmm_(__m512i te
     // 'Ύ', 'Ώ' -> -1
     result_zmm = _mm512_mask_sub_epi8(result_zmm, is_8e_8f, result_zmm, x_01_zmm);
 
-    // Group 4: CE AA-AB (Dialytika 'Ϊ', 'Ϋ') -> CF 8A-8B (Lead CE->CF, 2nd -0x20)
-    __mmask64 is_dialytika = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, result_zmm, x_aa_zmm);
-    is_dialytika &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, result_zmm, x_ab_zmm);
+    // Apply Dialytika Greek Upper
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_dialytika >> 1, x_cf_zmm);
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_dialytika, result_zmm, x_e0_zmm); // -0x20
 
-    // 2. CF ranges (Final Sigma)
-    // --------------------------
-    // 'ς' (CF 82) -> 'σ' (CF 83)
-    __mmask64 is_final_sigma = _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm, x_82_zmm);
+    // Apply Final Sigma
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_final_sigma, x_83_zmm);
 
     return result_zmm;
