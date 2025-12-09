@@ -1148,6 +1148,13 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
          "Greek λόγος vs ΛΟΓΟΣ"},
         {"\xCF\x83\xCE\xBF\xCF\x86\xCF\x8C\xCF\x82", "\xCE\xA3\xCE\x9F\xCE\xA6\xCE\x8C\xCE\xA3",
          "Greek σοφός vs ΣΟΦΟΣ"},
+
+        // Armenian Fuzz Regression
+        // Needle "nԱԲՐԵշ" (Mixed case)
+        {"\x6E\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", "\x6E\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE",
+         "Armenian Fuzz Regression"},
+        // Ech-Yiwn (U+0587) expansion check
+        {"\xD6\x87", "\xD5\xA5\xD6\x82", "Ech-Yiwn U+0587 -> ech yiwn"},
         // Greek + ASCII mixed
         {"Hello \xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\xCE\xB5 World", "\xCE\x9A\xCE\x8C\xCE\xA3\xCE\x9C\xCE\x95",
          "Greek in ASCII context"},
@@ -1899,6 +1906,7 @@ void test_equivalence() {
         sz_utf8_find_newline_ice,                //
         sz_utf8_find_whitespace_serial,          //
         sz_utf8_find_whitespace_ice);
+
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);

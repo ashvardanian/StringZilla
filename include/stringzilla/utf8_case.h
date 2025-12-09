@@ -4111,6 +4111,10 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 // 'ß' excluded from Central Europe and Vietnamese, allowed in Western Europe
                 safety |= western_group;
             }
+            else if (rune == 0x00B5) {
+                // 'µ' (Micro Sign) folds to 'μ' (Greek Mu, CE BC), not handled by Latin kernels
+                safety |= western_group;
+            }
             else { safety |= western_group | central_viet_group; }
         }
 
@@ -5461,13 +5465,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
     // Constants for anomaly detection (characters that we don't handle or handle differently than simple folding):
-    // - D5 87: 'և' (Ech-Yiwn ligature) -> "եւ" (D5 A5 D6 82) - 2 bytes -> 4 bytes
+    // - D6 87: 'և' (Ech-Yiwn ligature) -> "եւ" (D5 A5 D6 82) - 2 bytes -> 4 bytes
     // - FB 13-17 (EF AC 93-97): Men-Now, Men-Ech, Men-Ini, Vew-Now, Men-Xeh ligatures
     //   Actually we catch all EF AC xx sequences (U+FB00-FB4F are Alphabetic Presentation Forms, mostly ligatures)
-    sz_u512_vec_t x_d5_vec, x_ef_vec, x_ac_vec;
+    sz_u512_vec_t x_d6_vec, x_ef_vec, x_ac_vec;
     sz_u512_vec_t x_87_vec;
 
-    x_d5_vec.zmm = _mm512_set1_epi8((char)0xD5);
+    x_d6_vec.zmm = _mm512_set1_epi8((char)0xD6);
     x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
     x_87_vec.zmm = _mm512_set1_epi8((char)0x87);
@@ -5497,12 +5501,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
         // Check for anomalies
-        __mmask64 x_d5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_d5_vec.zmm);
+        __mmask64 x_d6_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_d6_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
 
-        if (x_d5_mask | x_ef_mask) {
+        if (x_d6_mask | x_ef_mask) {
             __mmask64 x_87_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_87_vec.zmm);
-            __mmask64 x_ech_yiwn = (x_d5_mask << 1) & x_87_mask; // D5 87
+            __mmask64 x_ech_yiwn = (x_d6_mask << 1) & x_87_mask; // D6 87
 
             __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
             __mmask64 x_ef_ac = (x_ef_mask << 1) & x_ac_mask; // EF AC
