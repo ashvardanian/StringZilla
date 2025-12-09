@@ -1118,6 +1118,24 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
          "Greek uppercase to lowercase"}, // Καλημέρα
         {"\xCE\x91\xCE\x92\xCE\x93\xCE\x94\xCE\x95", "\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5",
          "Greek ΑΒΓΔΕ to αβγδε"},
+
+        // Vietnamese path tests (C3/C6/E1 lead bytes)
+        // C6 A0 (Ơ) -> C6 A1 (ơ)
+        {"\xC6\xA0\x20", "\xC6\xA1", "Vietnamese Ơ to ơ"},
+        {"\xC6\xA1\x20", "\xC6\xA0", "Vietnamese ơ to Ơ"},
+        // C6 AF (Ư) -> C6 B0 (ư)
+        {"\xC6\xAF\x20", "\xC6\xB0", "Vietnamese Ư to ư"},
+        {"\xC6\xB0\x20", "\xC6\xAF", "Vietnamese ư to Ư"},
+
+        // Latin Extended Additional (E1 B8-BB)
+        // E1 B8 80 (Ḁ) -> E1 B8 81 (ḁ)
+        {"\xE1\xB8\x80", "\xE1\xB8\x81", "Vietnamese Ḁ to ḁ"},
+        // E1 B8 BE (Ḿ) -> E1 B8 BF (ḿ)
+        {"\xE1\xB8\xBE", "\xE1\xB8\xBF", "Vietnamese Ḿ to ḿ"},
+
+        // Mixed Vietnamese
+        // Ơ (C6 A0) + Ḁ (E1 B8 80) + Ư (C6 AF)
+        {"\xC6\xA0\xE1\xB8\x80\xC6\xAF", "\xC6\xA1\xE1\xB8\x81\xC6\xB0", "Mixed Vietnamese ƠḀƯ -> ơḁư"},
         {"\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5", "\xCE\x91\xCE\x92\xCE\x93\xCE\x94\xCE\x95",
          "Greek αβγδε to ΑΒΓΔΕ"},
         // Greek with CE/CF boundary crossing (π-ω are CF 80-89)
@@ -1133,6 +1151,42 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
         // Greek + ASCII mixed
         {"Hello \xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\xCE\xB5 World", "\xCE\x9A\xCE\x8C\xCE\xA3\xCE\x9C\xCE\x95",
          "Greek in ASCII context"},
+
+        // Greek Corner Cases (Anomalies & Danger Zones)
+        // ---------------------------------------------
+        // Dialytika with Tonos 'ΐ' (CE 90) -> (Standard folding might expand or mapping is complex)
+        // Our implementation detects this as anomaly and falls back to serial.
+        // Serial usually folds 'ΐ' (U+0390) -> 'ΐ' (U+0390) if simple case folding,
+        // or to 'ι' + marks if full. Let's verify identity or simple mapping.
+        // Basic check: Find 'ΐ' in 'ΐ' (identity)
+        {"\xCE\x90", "\xCE\x90", "Greek ΐ (CE 90) identity"},
+        // Check mixed case if applicable (U+0390 is lowercase, U+03AA 'Ϊ' is upper but different)
+        // Let's check 'ΰ' (CE B0)
+        {"\xCE\xB0", "\xCE\xB0", "Greek ΰ (CE B0) identity"},
+
+        // Greek Symbols (CF 90-96, CF B0-B6)
+        // 'ϐ' (CF 90) -> 'β' (CE B2)
+        {"\xCF\x90", "\xCE\xB2", "Greek Symbol ϐ to β"},
+        {"\xCE\xB2", "\xCF\x90", "Greek Symbol β to ϐ"},
+        // 'ϑ' (CF 91) -> 'θ' (CE B8)
+        {"\xCF\x91", "\xCE\xB8", "Greek Symbol ϑ to θ"},
+        // 'ϕ' (CF 95) -> 'φ' (CF 86) -- Wait, standard 'φ' is CF 86
+        // 'ϖ' (CF 96) -> 'π' (CF 80)
+        {"\xCF\x96", "\xCF\x80", "Greek Symbol ϖ to π"},
+
+        // Armenian Edge Cases
+        // -------------------
+        // Ligature 'և' (D5 87) -> "եւ" (D5 A5 D6 82) (ech + yiwn)
+        // This expands from 2 bytes to 4 bytes.
+        {"\xD5\x87", "\xD5\xA5\xD6\x82", "Armenian Ligature և to եւ"},
+        {"\xD5\xA5\xD6\x82", "\xD5\x87", "Armenian եւ to Ligature և"},
+
+        // Ligature Men-Now 'ﬓ' (FB 13) -> "մն" (D5 B4 D5 B6)
+        {"\xEF\xAC\x93", "\xD5\xB4\xD5\xB6", "Armenian Ligature ﬓ to մն"},
+        {"\xD5\xB4\xD5\xB6", "\xEF\xAC\x93", "Armenian մն to Ligature ﬓ"},
+
+        // Ligature Men-Ech 'ﬔ' (FB 14) -> "մե" (D5 B4 D5 A5)
+        {"\xEF\xAC\x94", "\xD5\xB4\xD5\xA5", "Armenian Ligature ﬔ to մե"},
 
         // Armenian path tests (D4/D5/D6 lead bytes)
         // Uppercase: D4 B1-BF (Ա-Խ), D5 80-96 (Ծ-Ֆ) -> Lowercase: D5 A1-BF, D6 80-86
