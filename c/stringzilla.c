@@ -523,9 +523,10 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
     sz_cptr_t haystack, sz_size_t haystack_length,  //
-    sz_cptr_t needle, sz_size_t needle_length, sz_size_t *matched_length) {
+    sz_cptr_t needle, sz_size_t needle_length,      //
+    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
     return sz_dispatch_table.utf8_case_insensitive_find(haystack, haystack_length, needle, needle_length,
-                                                        matched_length);
+                                                        needle_metadata, matched_length);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {

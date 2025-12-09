@@ -1081,73 +1081,6 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_ru
 }
 
 /**
- *  @brief  Helper to verify a case-insensitive match by comparing folded runes.
- *  @return sz_true_k if all folded runes match, sz_false_k otherwise.
- */
-SZ_INTERNAL sz_bool_t sz_utf8_verify_case_insensitive_match_( //
-    sz_cptr_t needle, sz_size_t needle_length,                //
-    sz_cptr_t window_start, sz_cptr_t window_end) {
-
-    sz_utf8_folded_iter_t needle_iterator, haystack_iterator;
-    sz_utf8_folded_iter_init_(&needle_iterator, needle, needle_length);
-    sz_utf8_folded_iter_init_(&haystack_iterator, window_start, (sz_size_t)(window_end - window_start));
-
-    sz_rune_t needle_rune = 0, haystack_rune = 0;
-    for (;;) {
-        sz_bool_t loaded_from_needle = sz_utf8_folded_iter_next_(&needle_iterator, &needle_rune);
-        sz_bool_t loaded_from_haystack = sz_utf8_folded_iter_next_(&haystack_iterator, &haystack_rune);
-
-        if (!loaded_from_needle && !loaded_from_haystack) return sz_true_k;  // Both exhausted = match
-        if (!loaded_from_needle || !loaded_from_haystack) return sz_false_k; // One exhausted early = no match
-        if (needle_rune != haystack_rune) return sz_false_k;
-    }
-}
-
-/**
- *  @brief  Forward case-insensitive verification of needle tail against haystack.
- *
- *  Walks forward through needle and haystack, comparing folded codepoints.
- *  Used to verify the "tail" portion of a match (bytes after the safe window).
- *
- *  @param[in] needle_tail Pointer to needle tail (bytes after safe window)
- *  @param[in] needle_tail_length Length of needle tail in bytes
- *  @param[in] haystack_ptr Start of haystack region to verify (after window match)
- *  @param[in] haystack_end End of haystack (boundary)
- *  @param[out] match_length_out Haystack bytes consumed by this tail match
- *  @return sz_true_k if tail matched, sz_false_k otherwise
- */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_verify_( //
-    sz_cptr_t needle_tail, sz_size_t needle_tail_length,      //
-    sz_cptr_t haystack_ptr, sz_cptr_t haystack_end,           //
-    sz_size_t *match_length_out) {
-
-    // Empty tail is trivially matched
-    if (needle_tail_length == 0) {
-        *match_length_out = 0;
-        return sz_true_k;
-    }
-
-    sz_utf8_folded_iter_t needle_iter, haystack_iter;
-    sz_utf8_folded_iter_init_(&needle_iter, needle_tail, needle_tail_length);
-    sz_utf8_folded_iter_init_(&haystack_iter, haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr));
-
-    sz_rune_t needle_rune = 0, haystack_rune = 0;
-    for (;;) {
-        sz_bool_t have_needle = sz_utf8_folded_iter_next_(&needle_iter, &needle_rune);
-
-        if (!have_needle) {
-            // Needle exhausted - success!
-            *match_length_out = (sz_size_t)(haystack_iter.ptr - haystack_ptr);
-            return sz_true_k;
-        }
-
-        sz_bool_t have_haystack = sz_utf8_folded_iter_next_(&haystack_iter, &haystack_rune);
-        if (!have_haystack) return sz_false_k;
-        if (needle_rune != haystack_rune) return sz_false_k;
-    }
-}
-
-/**
  *  @brief  Reverse iterator state for streaming through folded UTF-8 runes backwards.
  *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently in reverse order.
  */
@@ -1215,32 +1148,30 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
 }
 
 /**
- *  @brief  Reverse case-insensitive verification of needle head against haystack.
+ *  @brief Verify head region case-insensitively (backward iteration).
  *
- *  Walks backwards through needle and haystack, comparing folded codepoints.
- *  Used to verify the "head" portion of a match (bytes before the safe window).
+ *  Walks backward from needle_end/haystack_end, comparing folded runes.
+ *  Returns true if needle region exhausts (matched), with haystack bytes consumed.
  *
- *  @param[in] needle_start Pointer to start of needle
- *  @param[in] needle_head_end Pointer to end of needle head (exclusive, where window starts)
- *  @param[in] haystack_start Pointer to start of haystack
- *  @param[in] haystack_head_end Pointer to where window was found in haystack
- *  @param[out] match_length_out Haystack bytes consumed by this head match
- *  @return sz_true_k if head matched, sz_false_k otherwise
+ *  @param[in] needle_start Start of needle head region
+ *  @param[in] needle_end End of needle head region (where safe window begins)
+ *  @param[in] haystack_start Start of haystack (lower bound for backward scan)
+ *  @param[in] haystack_end End of haystack head region (where safe window was found)
+ *  @param[out] match_length Haystack bytes consumed by this match
  */
-SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_rverify_( //
-    sz_cptr_t needle_start, sz_cptr_t needle_head_end,         //
-    sz_cptr_t haystack_start, sz_cptr_t haystack_head_end,     //
-    sz_size_t *match_length_out) {
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
+                                                            sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                            sz_size_t *match_length) {
 
     // If needle head is empty, no haystack bytes needed
-    if (needle_head_end == needle_start) {
-        *match_length_out = 0;
+    if (needle_end <= needle_start) {
+        *match_length = 0;
         return sz_true_k;
     }
 
     sz_utf8_folded_reverse_iter_t_ needle_iter, haystack_iter;
-    sz_utf8_folded_reverse_iter_init_(&needle_iter, needle_start, needle_head_end);
-    sz_utf8_folded_reverse_iter_init_(&haystack_iter, haystack_start, haystack_head_end);
+    sz_utf8_folded_reverse_iter_init_(&needle_iter, needle_start, needle_end);
+    sz_utf8_folded_reverse_iter_init_(&haystack_iter, haystack_start, haystack_end);
 
     sz_rune_t needle_rune = 0, haystack_rune = 0;
     for (;;) {
@@ -1248,7 +1179,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_rverify_( //
 
         if (!have_needle) {
             // Needle exhausted - success!
-            *match_length_out = (sz_size_t)(haystack_head_end - haystack_iter.ptr);
+            *match_length = (sz_size_t)(haystack_end - haystack_iter.ptr);
             return sz_true_k;
         }
 
@@ -1259,25 +1190,158 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_match_rverify_( //
 }
 
 /**
- *  @brief  Lightweight chunk search for case-insensitive matching.
+ *  @brief Verify middle region case-insensitively (forward iteration).
  *
- *  Delegates to the serial implementation for proper ligature/expansion handling.
- *  Used as fallback when SIMD kernels detect problematic bytes (EF for ligatures,
- *  E1 BC-BF for Greek Extended) in haystack chunks.
+ *  Used for the "safe window" where SIMD already matched the first N bytes.
+ *  Returns true if needle region exhausts with matching folded runes.
  *
- *  @param[in] haystack Pointer to the haystack chunk.
- *  @param[in] chunk_length Length of the chunk in bytes.
- *  @param[in] needle Pointer to the needle string.
- *  @param[in] needle_length Length of the needle in bytes.
- *  @param[out] matched_length Length of the match in haystack bytes (may differ from needle_length for ligatures).
- *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ *  Note: The haystack bytes consumed may differ from needle bytes due to
+ *  variable-width Unicode folding (e.g., ẞ (3 bytes) → ss matches ß (2 bytes) → ss).
+ *  TODO: This can be made cheaper, cause the middle part is guaranteed to be folded in the needle?
+ *
+ *  @param[in] needle_start Start of needle middle region
+ *  @param[in] needle_end End of needle middle region
+ *  @param[in] haystack_start Start of haystack middle region
+ *  @param[in] haystack_end End of haystack (upper bound)
+ *  @param[out] match_length Haystack bytes consumed by this match
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_chunk_( //
-    sz_cptr_t haystack, sz_size_t chunk_length,             //
-    sz_cptr_t needle, sz_size_t needle_length,              //
-    sz_size_t *matched_length) {
-    // Delegate to serial implementation which properly handles ligatures and expansions
-    return sz_utf8_case_insensitive_find_serial(haystack, chunk_length, needle, needle_length, 0, matched_length);
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_middle_(sz_cptr_t needle_start, sz_cptr_t needle_end,
+                                                              sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                              sz_size_t *match_length) {
+
+    sz_size_t needle_length = (sz_size_t)(needle_end - needle_start);
+
+    // Empty middle is trivially matched
+    if (needle_length == 0) {
+        *match_length = 0;
+        return sz_true_k;
+    }
+
+    sz_utf8_folded_iter_t needle_iter, haystack_iter;
+    sz_utf8_folded_iter_init_(&needle_iter, needle_start, needle_length);
+    sz_utf8_folded_iter_init_(&haystack_iter, haystack_start, (sz_size_t)(haystack_end - haystack_start));
+
+    sz_rune_t needle_rune = 0, haystack_rune = 0;
+    for (;;) {
+        sz_bool_t have_needle = sz_utf8_folded_iter_next_(&needle_iter, &needle_rune);
+
+        if (!have_needle) {
+            // Needle exhausted - success!
+            *match_length = (sz_size_t)(haystack_iter.ptr - haystack_start);
+            return sz_true_k;
+        }
+
+        sz_bool_t have_haystack = sz_utf8_folded_iter_next_(&haystack_iter, &haystack_rune);
+        if (!have_haystack) return sz_false_k;
+        if (needle_rune != haystack_rune) return sz_false_k;
+    }
+}
+
+/**
+ *  @brief Verify tail region case-insensitively (forward iteration).
+ *
+ *  Walks forward, comparing folded runes. Returns true if needle exhausts.
+ *
+ *  @param[in] needle_start Start of needle tail region
+ *  @param[in] needle_end End of needle tail region (= needle + needle_length)
+ *  @param[in] haystack_start Start of haystack tail region
+ *  @param[in] haystack_end End of haystack (upper bound for forward scan)
+ *  @param[out] match_length Haystack bytes consumed by this match
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
+                                                            sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                            sz_size_t *match_length) {
+
+    sz_size_t needle_length = (sz_size_t)(needle_end - needle_start);
+
+    // Empty tail is trivially matched
+    if (needle_length == 0) {
+        *match_length = 0;
+        return sz_true_k;
+    }
+
+    sz_utf8_folded_iter_t needle_iter, haystack_iter;
+    sz_utf8_folded_iter_init_(&needle_iter, needle_start, needle_length);
+    sz_utf8_folded_iter_init_(&haystack_iter, haystack_start, (sz_size_t)(haystack_end - haystack_start));
+
+    sz_rune_t needle_rune = 0, haystack_rune = 0;
+    for (;;) {
+        sz_bool_t have_needle = sz_utf8_folded_iter_next_(&needle_iter, &needle_rune);
+
+        if (!have_needle) {
+            // Needle exhausted - success!
+            *match_length = (sz_size_t)(haystack_iter.ptr - haystack_start);
+            return sz_true_k;
+        }
+
+        sz_bool_t have_haystack = sz_utf8_folded_iter_next_(&haystack_iter, &haystack_rune);
+        if (!have_haystack) return sz_false_k;
+        if (needle_rune != haystack_rune) return sz_false_k;
+    }
+}
+
+/**
+ *  @brief Validate a complete match around a SIMD-detected window.
+ *
+ *  Validates three regions: "head" (before window), "middle" (remaining safe window), "tail" (after window).
+ *  The "middle" part is already at least in-part validated and only `remaining_safe_bytes` need checking.
+ *
+ *  @param[in] haystack_ptr Haystack start pointer, arbitrary case
+ *  @param[in] haystack_length Haystack length in bytes
+ *  @param[in] needle_ptr Needle start pointer, arbitrary case
+ *  @param[in] needle_length Needle length in bytes
+ *  @param[in] folded_needle_ptr Pointer to the case-folded slice of the needle
+ *  @param[in] folded_needle_length Length of the folded needle in bytes
+ *  @param[in] haystack_matched_offset Start offset of matched safe window in haystack in bytes
+ *  @param[in] haystack_matched_length Length of matched safe window in haystack in bytes
+ *  @param[in] needle_head_bytes Start of matched safe window in needle in bytes
+ *  @param[in] needle_matched_bytes Length of matched safe window in needle in bytes, <= folded_needle_length
+ *  @param[in] needle_tail_bytes Number of bytes in the needle remaining after the safe window
+ *  @param[out] match_length Total length of the validated match in haystack bytes
+ *  @return Match start pointer, or SZ_NULL_CHAR if validation fails
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_validate_(                                     //
+    sz_cptr_t haystack_ptr, sz_size_t haystack_length,                                        //
+    sz_cptr_t needle_ptr, sz_size_t needle_length,                                            //
+    sz_cptr_t folded_needle_ptr, sz_size_t folded_needle_length,                              //
+    sz_size_t haystack_matched_offset, sz_size_t haystack_matched_length,                     //
+    sz_size_t needle_head_bytes, sz_size_t needle_matched_bytes, sz_size_t needle_tail_bytes, //
+    sz_size_t *match_length) {
+
+    sz_cptr_t needle_end = needle_ptr + needle_length;
+    sz_cptr_t haystack_end = haystack_ptr + haystack_length;
+
+    // Verify head (backwards from window start)
+    sz_size_t head_match_length = 0;
+    if (needle_head_bytes)
+        if (!sz_utf8_case_insensitive_verify_head_(                   //
+                needle_ptr, needle_ptr + needle_head_bytes,           // needle head region
+                haystack_ptr, haystack_ptr + haystack_matched_offset, // haystack head region
+                &head_match_length))
+            return SZ_NULL_CHAR;
+
+    // Verify middle, beyond the part already validate by the SIMD/SWAR backend
+    sz_size_t middle_match_length = 0;
+    if (needle_matched_bytes < folded_needle_length)
+        if (!sz_utf8_case_insensitive_verify_middle_(                                               //
+                folded_needle_ptr + needle_matched_bytes, folded_needle_ptr + folded_needle_length, //
+                haystack_ptr + haystack_matched_offset + haystack_matched_length, haystack_end,     //
+                &middle_match_length))
+            return SZ_NULL_CHAR;
+
+    // Verify tail (forward from where middle ended)
+    sz_size_t tail_match_length = 0;
+    sz_cptr_t haystack_tail_start =
+        haystack_ptr + haystack_matched_offset + haystack_matched_length + middle_match_length;
+    if (needle_tail_bytes)
+        if (!sz_utf8_case_insensitive_verify_tail_(                         //
+                needle_ptr + needle_length - needle_tail_bytes, needle_end, // needle tail region
+                haystack_tail_start, haystack_end,                          // haystack tail region
+                &tail_match_length))
+            return SZ_NULL_CHAR;
+
+    *match_length = head_match_length + haystack_matched_length + middle_match_length + tail_match_length;
+    return haystack_ptr + haystack_matched_offset - head_match_length;
 }
 
 SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
@@ -1412,6 +1476,61 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_1folded_serial_( //
     }
 
     *match_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+/**
+ *  @brief Search a "danger zone" region using 1-folded candidate search + validation.
+ *
+ *  When SIMD kernels detect potentially problematic bytes (ligatures, Greek Extended, etc.),
+ *  they fall back to this serial search within the affected chunk. This function:
+ *  1. Extracts the first folded rune from the needle's safe window
+ *  2. Searches for candidates matching that rune
+ *  3. Validates each candidate using the full verification pipeline
+ *
+ *  @param[in] haystack_ptr Full haystack string, arbitrary case
+ *  @param[in] haystack_length Full haystack length in bytes
+ *  @param[in] needle_ptr Full needle string, arbitrary case
+ *  @param[in] needle_length Full needle length
+ *  @param[in] danger_ptr Start of the danger zone region to search
+ *  @param[in] danger_length Length of the danger zone region in bytes
+ *  @param[in] needle_metadata Precomputed needle metadata (safe window, folded slice, etc.)
+ *  @param[out] match_length Haystack bytes consumed by the match
+ *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
+    sz_cptr_t haystack_ptr, sz_size_t haystack_length,               //
+    sz_cptr_t needle_ptr, sz_size_t needle_length,                   //
+    sz_cptr_t danger_ptr, sz_size_t danger_length,                   //
+    sz_rune_t needle_first_safe_folded_rune,                         //
+    sz_size_t needle_head_bytes, sz_size_t needle_tail_bytes,        //
+    sz_size_t *match_length) {
+
+    while (danger_length) {
+        sz_size_t candidate_match_length = 0;
+        sz_cptr_t candidate = sz_utf8_case_insensitive_find_1folded_serial_(
+            danger_ptr, danger_length, needle_first_safe_folded_rune, &candidate_match_length);
+
+        // Stop if no more candidates or past the search bound
+        if (!candidate) break;
+
+        // Validate the full match using the unified validator
+        sz_cptr_t match = sz_utf8_case_insensitive_validate_( //
+            haystack_ptr, haystack_length,                    //
+            needle_ptr, needle_length,                        //
+            0, 0,                                             // no folded needle needed in this case
+            candidate - haystack_ptr, candidate_match_length, //
+            needle_head_bytes, 0, needle_tail_bytes,          // mark as if no bytes were matched in the needle
+            match_length);
+
+        if (match) return match;
+
+        // Move to next candidate
+        sz_size_t step = candidate + candidate_match_length - danger_ptr;
+        danger_ptr += step;
+        danger_length -= step;
+    }
+
     return SZ_NULL_CHAR;
 }
 
@@ -1694,8 +1813,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
                 if (needle_total_count <= ring_capacity) {
                     // Verify the match to handle edge cases where window_start includes partial
                     // multi-rune expansions (e.g., ß→ss where only the second 's' is in the match)
-                    if (sz_utf8_verify_case_insensitive_match_(needle, needle_length, window_start, window_end)) {
-                        *match_length = (sz_size_t)(window_end - window_start);
+                    sz_size_t verified_match_length = 0;
+                    if (sz_utf8_case_insensitive_verify_middle_(needle, needle + needle_length, window_start,
+                                                                window_end, &verified_match_length)) {
+                        *match_length = verified_match_length;
                         return window_start;
                     }
                     // Rune hash matched but byte-level verification failed, continue searching
@@ -4413,15 +4534,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
     sz_assert_(needle_metadata->safe_window.offset + needle_metadata->safe_window.length <= needle_length &&
                "window must be within needle");
 
-    sz_size_t const folded_window_offset = needle_metadata->safe_window.offset;
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
     sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
-
-    // Needle tail parameters
-    sz_cptr_t const needle_tail = needle + needle_metadata->safe_window.offset + needle_metadata->safe_window.length;
-    sz_size_t const needle_tail_length =
-        needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length;
 
     // Pre-load folded window into XMM
     __mmask16 const folded_window_mask = sz_u16_mask_until_(folded_window_length);
@@ -4468,40 +4583,21 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch) continue;
 
-            // Verify the unsafe "head" using serial code
-            sz_size_t head_match_length = 0;
-            if (needle_metadata->safe_window.runes_before &&
-                !sz_utf8_case_insensitive_match_rverify_(  //
-                    needle, needle + folded_window_offset, // needle head
-                    haystack, haystack_candidate_ptr,      // haystack before window
-                    &head_match_length))
-                continue;
-
-            // Verify the "middle" of the expanded safe window (if any)
-            if (needle_metadata->safe_window.length > folded_window_length) {
-                if (!sz_utf8_verify_case_insensitive_match_( //
-                        needle + folded_window_offset + folded_window_length,
-                        needle_metadata->safe_window.length - folded_window_length,
-                        haystack_candidate_ptr + folded_window_length,
-                        haystack_candidate_ptr + needle_metadata->safe_window.length))
-                    continue;
+            // Validate the full match using the unified validator
+            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                               //
+                haystack, haystack_length,                                                      //
+                needle, needle_length,                                                          //
+                (sz_cptr_t)needle_metadata->folded_slice, needle_metadata->folded_slice_length, // same matched length
+                haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
+                needle_metadata->safe_window.offset,                                            // head
+                needle_metadata->folded_slice_length,                                           // matched
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                matched_length);
+            if (match) {
+                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
+                return match;
             }
-
-            // Verify the unsafe "tail" using serial code
-            sz_size_t tail_match_length = 0;
-            if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                        //
-                    needle_tail, needle_tail_length,                                            // needle tail
-                    haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
-                    &tail_match_length))
-                continue;
-
-            // Success!
-            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
-            *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
-                                                  needle_metadata);
-            return match_start;
         }
         haystack_ptr += step;
     }
@@ -4534,37 +4630,21 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch) continue;
 
-            sz_size_t head_match_length = 0;
-            if (needle_metadata->safe_window.runes_before &&
-                !sz_utf8_case_insensitive_match_rverify_(  //
-                    needle, needle + folded_window_offset, // needle head
-                    haystack, haystack_candidate_ptr,      // haystack before window
-                    &head_match_length))
-                continue;
-
-            // Verify the "middle" of the expanded safe window (if any)
-            if (needle_metadata->safe_window.length > folded_window_length) {
-                if (!sz_utf8_verify_case_insensitive_match_( //
-                        needle + folded_window_offset + folded_window_length,
-                        needle_metadata->safe_window.length - folded_window_length,
-                        haystack_candidate_ptr + folded_window_length,
-                        haystack_candidate_ptr + needle_metadata->safe_window.length))
-                    continue;
+            // Validate the full match using the unified validator
+            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                               //
+                haystack, haystack_length,                                                      //
+                needle, needle_length,                                                          //
+                (sz_cptr_t)needle_metadata->folded_slice, needle_metadata->folded_slice_length, // same matched length
+                haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
+                needle_metadata->safe_window.offset,                                            // head
+                needle_metadata->folded_slice_length,                                           // matched
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                matched_length);
+            if (match) {
+                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
+                return match;
             }
-
-            sz_size_t tail_match_length = 0;
-            if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                        //
-                    needle_tail, needle_tail_length,                                            // needle tail
-                    haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
-                    &tail_match_length))
-                continue;
-
-            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
-            *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
-                                                  needle_metadata);
-            return match_start;
         }
     }
 
@@ -4661,15 +4741,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     sz_assert_(needle_metadata->safe_window.offset + needle_metadata->safe_window.length <= needle_length &&
                "window must be within needle");
 
-    sz_size_t const folded_window_offset = needle_metadata->safe_window.offset;
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
     sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
-
-    // Needle tail parameters
-    sz_cptr_t const needle_tail = needle + needle_metadata->safe_window.offset + needle_metadata->safe_window.length;
-    sz_size_t const needle_tail_length =
-        needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length;
 
     // Pre-load folded window into XMM
     __mmask16 const folded_window_mask = sz_u16_mask_until_(folded_window_length);
@@ -4704,6 +4778,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     sz_cptr_t haystack_ptr = haystack;
     sz_size_t const step = 64 - folded_window_length + 1;
 
+    // Pre-load the first folded rune to simplify matching in danger zones
+    sz_rune_t needle_first_safe_folded_rune;
+    {
+        sz_rune_length_t dummy;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+    }
+
     // Main loop - process 64-byte chunks
     while (haystack_ptr + 64 <= haystack_end) {
         haystack_vec.zmm = _mm512_loadu_si512(haystack_ptr);
@@ -4726,12 +4807,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                                     ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask & sz_u64_mask_until_(step)) {
-                // Serial fallback for this block
-                sz_size_t chunk_len = step + needle_length - 1;
-                if (haystack_ptr + chunk_len > haystack_end) chunk_len = (sz_size_t)(haystack_end - haystack_ptr);
-                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, chunk_len, needle, needle_length,
-                                                                        matched_length);
-                if (result) return result;
+                // Danger zone: use serial fallback with validation
+                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(
+                    haystack, haystack_length, //
+                    needle, needle_length,     //
+                    haystack_ptr, step,        //
+                    needle_first_safe_folded_rune,
+                    needle_metadata->safe_window.offset,                                                       // head
+                    needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                    matched_length);
+                if (match) return match;
                 haystack_ptr += step;
                 continue;
             }
@@ -4761,40 +4846,21 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch) continue;
 
-            // Verify the unsafe "head" using serial code
-            sz_size_t head_match_length = 0;
-            if (needle_metadata->safe_window.runes_before &&
-                !sz_utf8_case_insensitive_match_rverify_(  //
-                    needle, needle + folded_window_offset, // needle head
-                    haystack, haystack_candidate_ptr,      // haystack before window
-                    &head_match_length))
-                continue;
-
-            // Verify the "middle" of the expanded safe window (if any)
-            if (needle_metadata->safe_window.length > folded_window_length) {
-                if (!sz_utf8_verify_case_insensitive_match_( //
-                        needle + folded_window_offset + folded_window_length,
-                        needle_metadata->safe_window.length - folded_window_length,
-                        haystack_candidate_ptr + folded_window_length,
-                        haystack_candidate_ptr + needle_metadata->safe_window.length))
-                    continue;
+            // Validate the full match using the unified validator
+            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                               //
+                haystack, haystack_length,                                                      //
+                needle, needle_length,                                                          //
+                (sz_cptr_t)needle_metadata->folded_slice, needle_metadata->folded_slice_length, // same matched length
+                haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
+                needle_metadata->safe_window.offset,                                            // head
+                needle_metadata->folded_slice_length,                                           // matched
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                matched_length);
+            if (match) {
+                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
+                return match;
             }
-
-            // Verify the unsafe "tail" using serial code
-            sz_size_t tail_match_length = 0;
-            if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                        //
-                    needle_tail, needle_tail_length,                                            // needle tail
-                    haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, // haystack after window
-                    &tail_match_length))
-                continue;
-
-            // Success!
-            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
-            *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
-                                                  needle_metadata);
-            return match_start;
         }
         haystack_ptr += step;
     }
@@ -4826,9 +4892,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                                     ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask & valid_mask) {
-                sz_cptr_t result = sz_utf8_case_insensitive_find_chunk_(haystack_ptr, remaining, needle, needle_length,
-                                                                        matched_length);
-                if (result) return result;
+                // Danger zone in tail: use serial fallback with validation
+                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(
+                    haystack, haystack_length,                 //
+                    needle, needle_length,                     //
+                    haystack_ptr, haystack_end - haystack_ptr, //
+                    needle_first_safe_folded_rune,
+                    needle_metadata->safe_window.offset,                                                       // head
+                    needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                    matched_length);
+                if (match) return match;
                 sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return SZ_NULL_CHAR;
@@ -4856,36 +4929,21 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch) continue;
 
-            sz_size_t head_match_length = 0;
-            if (needle_metadata->safe_window.runes_before && !sz_utf8_case_insensitive_match_rverify_(  //
-                                                                 needle, needle + folded_window_offset, //
-                                                                 haystack, haystack_candidate_ptr,      //
-                                                                 &head_match_length))
-                continue;
-
-            // Verify the "middle" of the expanded safe window (if any)
-            if (needle_metadata->safe_window.length > folded_window_length) {
-                if (!sz_utf8_verify_case_insensitive_match_( //
-                        needle + folded_window_offset + folded_window_length,
-                        needle_metadata->safe_window.length - folded_window_length,
-                        haystack_candidate_ptr + folded_window_length,
-                        haystack_candidate_ptr + needle_metadata->safe_window.length))
-                    continue;
+            // Validate the full match using the unified validator
+            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                               //
+                haystack, haystack_length,                                                      //
+                needle, needle_length,                                                          //
+                (sz_cptr_t)needle_metadata->folded_slice, needle_metadata->folded_slice_length, // same matched length
+                haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
+                needle_metadata->safe_window.offset,                                            // head
+                needle_metadata->folded_slice_length,                                           // matched
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                matched_length);
+            if (match) {
+                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
+                return match;
             }
-
-            sz_size_t tail_match_length = 0;
-            if (needle_metadata->safe_window.runes_after &&
-                !sz_utf8_case_insensitive_match_verify_(                                        //
-                    needle_tail, needle_tail_length,                                            //
-                    haystack_candidate_ptr + needle_metadata->safe_window.length, haystack_end, //
-                    &tail_match_length))
-                continue;
-
-            sz_cptr_t match_start = haystack_candidate_ptr - head_match_length;
-            *matched_length = head_match_length + needle_metadata->safe_window.length + tail_match_length;
-            sz_utf8_case_insensitive_find_verify_(match_start, haystack, haystack_length, needle, needle_length,
-                                                  needle_metadata);
-            return match_start;
         }
     }
 
