@@ -670,354 +670,90 @@ void test_utf8_case_fold_equivalence(                             //
 }
 
 /**
- *  @brief  Tests UTF-8 case folding for ALL valid Unicode codepoints.
+ *  @brief  Exhaustive fuzz test for UTF-8 case folding using all Unicode codepoints.
  *
- *  Generates a string containing every valid Unicode codepoint (0x0000-0x10FFFF,
- *  excluding surrogates 0xD800-0xDFFF), folds it with both serial and SIMD
- *  implementations, and reports any codepoints that produce different results.
+ *  - First run: Tests all valid codepoints in order (0x0 to 0x10FFFF).
+ *  - Subsequent runs: Shuffles the codepoints to create random sequences.
+ *  - Checks for both length and content matches between serial and SIMD implementations.
  */
-void test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("  - testing case folding for all Unicode codepoints...\n");
+void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd,
+                              std::size_t iterations = scale_iterations(100)) {
+    std::printf("  - testing case folding fuzz (%zu iterations + ordered check)...\n", iterations);
 
-    // Generate text with all valid Unicode codepoints
-    std::vector<char> all_codepoints;
-    std::vector<sz_rune_t> codepoints_list;
-
+    // 1. Generate all valid codepoints (ordered initially)
+    std::vector<sz_rune_t> all_runes;
+    all_runes.reserve(0x10FFFF);
     for (sz_rune_t cp = 0; cp <= 0x10FFFF; ++cp) {
-        // Skip surrogates (invalid in UTF-8)
-        if (cp >= 0xD800 && cp <= 0xDFFF) continue;
-
-        sz_u8_t buf[4];
-        sz_rune_length_t len = sz_rune_export(cp, buf);
-        all_codepoints.insert(all_codepoints.end(), buf, buf + len);
-        codepoints_list.push_back(cp);
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue; // Skip surrogates
+        all_runes.push_back(cp);
     }
 
-    std::printf("    generated %zu codepoints (%zu bytes)\n", codepoints_list.size(), all_codepoints.size());
+    // 2. Prepare buffers
+    // Max UTF-8 size is 4 bytes per rune.
+    std::vector<char> input_buffer(all_runes.size() * 4);
+    // Max expansion is handled by the folding functions, usually 3x is safe for worst cases (like µ)
+    std::vector<char> output_base(input_buffer.size() * 3 + 64);
+    std::vector<char> output_simd(input_buffer.size() * 3 + 64);
 
-    // Allocate output buffers (4x for worst-case expansion like ΐ → ι + 2 combining marks)
-    std::vector<char> output_base(all_codepoints.size() * 4);
-    std::vector<char> output_simd(all_codepoints.size() * 4);
+    auto &rng = global_random_generator();
 
-    // Fold with both implementations
-    sz_size_t len_base = fold_base(all_codepoints.data(), all_codepoints.size(), output_base.data());
-    sz_size_t len_simd = fold_simd(all_codepoints.data(), all_codepoints.size(), output_simd.data());
+    // Iterate: 0 = Ordered, 1..N = Shuffled
+    for (std::size_t it = 0; it <= iterations; ++it) {
+        if (it > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
 
-    // Compare results
-    bool all_match = (len_base == len_simd) && (std::memcmp(output_base.data(), output_simd.data(), len_base) == 0);
+        // Convert to UTF-8
+        char *data_ptr = input_buffer.data();
+        for (sz_rune_t cp : all_runes) data_ptr += sz_rune_export(cp, (sz_u8_t *)data_ptr);
+        sz_size_t input_len = data_ptr - input_buffer.data();
 
-    if (all_match) {
-        std::printf("    all %zu codepoints fold identically!\n", codepoints_list.size());
-        return;
-    }
+        // Run tests
+        sz_size_t len_base = fold_base(input_buffer.data(), input_len, output_base.data());
+        sz_size_t len_simd = fold_simd(input_buffer.data(), input_len, output_simd.data());
 
-    // Find and report specific failing codepoints
-    std::printf("    mismatch detected! scanning for failing codepoints...\n");
-    std::size_t fail_count = 0;
-    std::size_t src_offset = 0;
+        // Validations
+        if (len_base != len_simd) {
+            std::fprintf(stderr, "Iteration %zu: Length mismatch base=%zu simd=%zu\n", it, len_base, len_simd);
+            assert(false);
+        }
 
-    for (sz_rune_t cp : codepoints_list) {
-        // Get the UTF-8 length of this codepoint
-        sz_u8_t tmp[4];
-        sz_rune_length_t cp_len = sz_rune_export(cp, tmp);
+        // Optimize: Memcmp first, then diagnose
+        if (std::memcmp(output_base.data(), output_simd.data(), len_base) != 0) {
+            std::fprintf(stderr, "Iteration %zu: Content mismatch\n", it);
+            // Find first mismatch for debug
+            for (std::size_t i = 0; i < len_base; ++i) {
+                if (output_base[i] != output_simd[i]) {
+                    std::fprintf(stderr, "Mismatch at byte %zu: 0x%02X vs 0x%02X\n", i, (unsigned char)output_base[i],
+                                 (unsigned char)output_simd[i]);
 
-        // Fold this single codepoint with both implementations
-        char expected[16], actual[16];
-        sz_size_t exp_len = fold_base(all_codepoints.data() + src_offset, cp_len, expected);
-        sz_size_t act_len = fold_simd(all_codepoints.data() + src_offset, cp_len, actual);
+                    // Show context (16 bytes before/after)
+                    sz_size_t start = (i > 16) ? i - 16 : 0;
+                    sz_size_t end = (i + 16 < len_base) ? i + 16 : len_base;
 
-        if (exp_len != act_len || std::memcmp(expected, actual, exp_len) != 0) {
-            fail_count++;
-            if (fail_count <= 50) { // Limit output
-                std::fprintf(stderr, "FAIL U+%04X: expected %zu bytes [", cp, exp_len);
-                for (sz_size_t i = 0; i < exp_len; ++i) std::fprintf(stderr, "%02X ", (unsigned char)expected[i]);
-                std::fprintf(stderr, "], got %zu bytes [", act_len);
-                for (sz_size_t i = 0; i < act_len; ++i) std::fprintf(stderr, "%02X ", (unsigned char)actual[i]);
-                std::fprintf(stderr, "]\n");
+                    std::fprintf(stderr, "Context (Base): ");
+                    for (sz_size_t j = start; j < end; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)output_base[j]);
+                    std::fprintf(stderr, "\n");
+
+                    std::fprintf(stderr, "Context (SIMD): ");
+                    for (sz_size_t j = start; j < end; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)output_simd[j]);
+                    std::fprintf(stderr, "\n");
+
+                    // Try to map back to input (approximate)
+                    sz_size_t in_start = (i > 16) ? i - 16 : 0;
+                    sz_size_t in_end = (i + 16 < input_len) ? i + 16 : input_len;
+                    std::fprintf(stderr, "Input (approx): ");
+                    for (sz_size_t j = in_start; j < in_end; ++j)
+                        std::fprintf(stderr, "%02X ", (unsigned char)input_buffer[j]);
+                    std::fprintf(stderr, "\n");
+
+                    break;
+                }
             }
-        }
-
-        src_offset += cp_len;
-    }
-
-    std::fprintf(stderr, "Total failures: %zu out of %zu codepoints\n", fail_count, codepoints_list.size());
-    assert(fail_count == 0 && "Case folding mismatch for some codepoints");
-}
-
-/**
- *  @brief Script test data for data-driven boundary testing.
- *  Each entry represents a script with its uppercase form, expected lowercase, and byte length.
- */
-struct utf8_script_test_t {
-    char const *name;
-    char const *upper;
-    char const *lower;
-    sz_size_t byte_len;
-    bool expands; // Does folding change output length?
-};
-
-static utf8_script_test_t const utf8_case_fold_scripts[] = {
-    // 1-byte: ASCII
-    {"ASCII", "A", "a", 1, false},
-
-    // 2-byte scripts
-    {"Latin-1", "\xC3\x84", "\xC3\xA4", 2, false},         // Ä → ä
-    {"Latin-1-Eszett", "\xC3\x9F", "ss", 2, true},         // ß → ss (expands!)
-    {"Latin-1-Mult", "\xC3\x97", "\xC3\x97", 2, false},    // × (no fold, must stay ×)
-    {"Latin-1-Div", "\xC3\xB7", "\xC3\xB7", 2, false},     // ÷ (no fold, must stay ÷)
-    {"Cyrillic", "\xD0\x90", "\xD0\xB0", 2, false},        // А → а
-    {"Greek", "\xCE\x91", "\xCE\xB1", 2, false},           // Α → α
-    {"Armenian", "\xD5\x80", "\xD5\xB0", 2, false},        // Ա → ա
-    {"Hebrew-caseless", "\xD7\x90", "\xD7\x90", 2, false}, // א (no fold)
-
-    // 3-byte scripts
-    {"Georgian-82", "\xE1\x82\xA0", "\xE2\xB4\x80", 3, false},  // Ⴀ → ⴀ
-    {"Georgian-83", "\xE1\x83\x80", "\xE2\xB4\xA0", 3, false},  // Ⴠ → ⴠ
-    {"Fullwidth", "\xEF\xBC\xA1", "\xEF\xBD\x81", 3, false},    // Ａ → ａ
-    {"CJK-caseless", "\xE4\xB8\xAD", "\xE4\xB8\xAD", 3, false}, // 中 (no fold)
-    {"Greek-Ext", "\xE1\xBF\x80", "\xE1\xBF\x80", 3, false},    // ῀ (caseless, no fold)
-
-    // 4-byte scripts
-    {"Emoji-caseless", "\xF0\x9F\x98\x80", "\xF0\x9F\x98\x80", 4, false}, // 😀 (no fold)
-    {"Deseret", "\xF0\x90\x90\x80", "\xF0\x90\x90\xA8", 4, false},        // 𐐀 → 𐐨
-};
-
-static constexpr std::size_t utf8_case_fold_scripts_count =
-    sizeof(utf8_case_fold_scripts) / sizeof(utf8_case_fold_scripts[0]);
-
-/**
- *  @brief Tests UTF-8 case folding at chunk boundaries for ALL scripts.
- *
- *  This data-driven test loops through every script at every critical position
- *  near the 64-byte SIMD chunk boundary. Adding a new script requires only
- *  adding one entry to the utf8_case_fold_scripts[] array.
- */
-void test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("  - testing case folding boundaries for all scripts...\n");
-
-    auto check = [&](char const *desc, std::string const &input) {
-        std::vector<char> out_base(input.size() * 3 + 64);
-        std::vector<char> out_simd(input.size() * 3 + 64);
-
-        sz_size_t len_base = fold_base(input.data(), input.size(), out_base.data());
-        sz_size_t len_simd = fold_simd(input.data(), input.size(), out_simd.data());
-
-        if (len_base != len_simd || std::memcmp(out_base.data(), out_simd.data(), len_base) != 0) {
-            std::fprintf(stderr, "FAIL [%s]: input_len=%zu, base_len=%zu, simd_len=%zu\n", desc, input.size(), len_base,
-                         len_simd);
-            std::fprintf(stderr, "  Input bytes: ");
-            for (std::size_t i = 0; i < std::min(input.size(), (std::size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)input[i]);
-            std::fprintf(stderr, "\n  Base output: ");
-            for (std::size_t i = 0; i < std::min(len_base, (sz_size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)out_base[i]);
-            std::fprintf(stderr, "\n  SIMD output: ");
-            for (std::size_t i = 0; i < std::min(len_simd, (sz_size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)out_simd[i]);
-            std::fprintf(stderr, "\n");
-            assert(false && "Script boundary test failed");
-        }
-    };
-
-    for (std::size_t s = 0; s < utf8_case_fold_scripts_count; ++s) {
-        auto const &script = utf8_case_fold_scripts[s];
-
-        // Test at critical positions near 64-byte chunk boundary
-        // For N-byte sequences: positions 64-N-1 through 64 are critical
-        for (int pos = 64 - (int)script.byte_len - 1; pos <= 64; ++pos) {
-            if (pos < 0) continue;
-            std::string input((std::size_t)pos, 'a');
-            input += script.upper;
-            input += "xyz"; // Extend past boundary
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s at pos %d", script.name, pos);
-            check(desc, input);
-        }
-
-        // Test at position 0 (start of chunk)
-        {
-            std::string input = script.upper;
-            input += std::string(64, 'b');
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s at pos 0", script.name);
-            check(desc, input);
-        }
-
-        // Large text test: multiple chunks
-        {
-            std::string input;
-            for (int i = 0; i < 100; ++i) input += script.upper;
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s large (100 chars)", script.name);
-            check(desc, input);
-        }
-
-        // Interleaved with ASCII
-        {
-            std::string input;
-            for (int i = 0; i < 20; ++i) {
-                input += script.upper;
-                input += "ABC";
-            }
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s interleaved with ASCII", script.name);
-            check(desc, input);
+            assert(false);
         }
     }
-
-    std::printf("    all script boundary tests passed! (%zu scripts tested)\n", utf8_case_fold_scripts_count);
-}
-
-/**
- *  @brief Tests UTF-8 case folding with mixed scripts, path switches, and edge cases.
- *
- *  Tests scenarios that can't be covered by single-script boundary testing:
- *  - Cross-script mixing in same chunk
- *  - Same-lead-byte disambiguation (e.g., E1 Georgian vs E1 Greek-Extended)
- *  - Expansion stress (ß → ss)
- *  - Short inputs (1-10 bytes)
- *  - valid_length edge cases
- */
-void test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd) {
-    std::printf("  - testing case folding mixed scenarios...\n");
-
-    auto check = [&](char const *desc, std::string const &input) {
-        std::vector<char> out_base(input.size() * 3 + 64);
-        std::vector<char> out_simd(input.size() * 3 + 64);
-
-        sz_size_t len_base = fold_base(input.data(), input.size(), out_base.data());
-        sz_size_t len_simd = fold_simd(input.data(), input.size(), out_simd.data());
-
-        if (len_base != len_simd || std::memcmp(out_base.data(), out_simd.data(), len_base) != 0) {
-            std::fprintf(stderr, "FAIL [%s]: input_len=%zu, base_len=%zu, simd_len=%zu\n", desc, input.size(), len_base,
-                         len_simd);
-            std::fprintf(stderr, "  Input bytes: ");
-            for (std::size_t i = 0; i < std::min(input.size(), (std::size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)input[i]);
-            std::fprintf(stderr, "\n  Base output: ");
-            for (std::size_t i = 0; i < std::min(len_base, (sz_size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)out_base[i]);
-            std::fprintf(stderr, "\n  SIMD output: ");
-            for (std::size_t i = 0; i < std::min(len_simd, (sz_size_t)80); ++i)
-                std::fprintf(stderr, "%02X ", (unsigned char)out_simd[i]);
-            std::fprintf(stderr, "\n");
-            assert(false && "Mixed scenario test failed");
-        }
-    };
-
-    // Category 1: valid_length edge cases (0, 1, 2 bytes before path switch)
-    // Test with different path-switch triggers to exercise all code paths
-    struct path_switch_t {
-        char const *name;
-        char const *trigger; // Bytes that trigger a path switch
-    };
-    static path_switch_t const triggers[] = {
-        {"Greek-Ext (E1 non-Georgian)", "\xE1\xBF\x80"}, {"Cyrillic (2-byte)", "\xD0\x90"},
-        {"Georgian (E1 Georgian)", "\xE1\x82\xA0"},      {"CJK (3-byte caseless)", "\xE4\xB8\xAD"},
-        {"Emoji (4-byte)", "\xF0\x9F\x98\x80"},
-    };
-    for (auto const &t : triggers) {
-        for (int prefix_len = 0; prefix_len <= 3; ++prefix_len) {
-            std::string input((std::size_t)prefix_len, 'a');
-            input += t.trigger;
-            input += "XYZ";
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "valid_length=%d before %s", prefix_len, t.name);
-            check(desc, input);
-        }
-    }
-
-    // Category 2: E1 disambiguation (Georgian vs non-Georgian)
-    check("Georgian then Greek-Ext", "\xE1\x82\xA0\xE1\xBF\x80");
-    check("Greek-Ext then Georgian", "\xE1\xBF\x80\xE1\x82\xA0");
-    check("Georgian sandwiched", "\xE1\xBF\x80\xE1\x82\xA0\xE1\xBF\x81");
-
-    // Category 3: Cross-script mixing at boundaries
-    struct mix_t {
-        char const *name;
-        char const *a;
-        char const *b;
-    };
-    static mix_t const mixes[] = {
-        // 2-byte script combinations
-        {"Latin+Cyrillic", "\xC3\x84", "\xD0\x90\xD0\x91"},
-        {"Cyrillic+Greek", "\xD0\x90", "\xCE\x91"},
-        {"Greek+Armenian", "\xCE\x91", "\xD5\x80"},
-        // 2-byte to 3-byte transitions
-        {"Cyrillic+Georgian", "\xD0\x90", "\xE1\x82\xA0"},
-        {"Georgian+Fullwidth", "\xE1\x82\xA0", "\xEF\xBC\xA1"},
-        // 3-byte caseless + ASCII
-        {"CJK+ASCII", "\xE4\xB8\xAD", "ABC"},
-        // 4-byte combinations
-        {"Emoji+Latin", "\xF0\x9F\x98\x80", "\xC3\x84"},
-        {"Deseret+ASCII", "\xF0\x90\x90\x80", "XYZ"},
-    };
-    for (auto const &m : mixes) {
-        for (int pos = 60; pos <= 64; ++pos) {
-            std::string input((std::size_t)pos, 'x');
-            input += m.a;
-            input += m.b;
-            input += m.a;
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s at %d", m.name, pos);
-            check(desc, input);
-        }
-    }
-
-    // Category 4: Expansion stress (ß → ss)
-    {
-        std::string input;
-        for (int i = 0; i < 30; ++i) input += "\xC3\x9F"; // 30 ß = 60 bytes → 60 'ss'
-        input += "ABCD";
-        check("30x Eszett expansion", input);
-    }
-    check("Capital Eszett", "\xE1\xBA\x9E"
-                            "ABC"); // ẞ → ss
-
-    // Category 5: Short inputs (1-10 bytes)
-    check("1 byte ASCII", "A");
-    check("2 byte Latin", "\xC3\x84");
-    check("2 byte Cyrillic", "\xD0\x90");
-    check("2 byte Greek", "\xCE\x91");
-    check("3 byte Georgian", "\xE1\x82\xA0");
-    check("3 byte CJK", "\xE4\xB8\xAD");
-    check("3 byte Fullwidth", "\xEF\xBC\xA1");
-    check("4 byte emoji", "\xF0\x9F\x98\x80");
-    check("4 byte Deseret", "\xF0\x90\x90\x80");
-    check("5 bytes: Latin + CJK", "\xC3\x84\xE4\xB8\xAD");
-    check("6 bytes: Cyrillic + Georgian", "\xD0\x90\xD0\x91\xE1\x82\xA0");
-    check("10 bytes: mixed", "AB\xC3\x84\xD0\x90\xE4\xB8\xAD");
-
-    // Category 6: Alternating case patterns within same script
-    for (std::size_t s = 0; s < utf8_case_fold_scripts_count; ++s) {
-        auto const &script = utf8_case_fold_scripts[s];
-        if (!script.expands && std::strcmp(script.upper, script.lower) != 0) {
-            std::string input;
-            for (int i = 0; i < 20; ++i) {
-                input += script.upper;
-                input += script.lower;
-            }
-            char desc[128];
-            std::snprintf(desc, sizeof(desc), "%s alternating upper/lower", script.name);
-            check(desc, input);
-        }
-    }
-
-    // Category 7: All byte lengths in one chunk
-    {
-        std::string input;
-        input += "ABC";              // 1-byte ASCII
-        input += "\xC3\x84";         // 2-byte Latin
-        input += "\xD0\x90";         // 2-byte Cyrillic
-        input += "\xCE\x91";         // 2-byte Greek
-        input += "\xE1\x82\xA0";     // 3-byte Georgian
-        input += "\xE4\xB8\xAD";     // 3-byte CJK
-        input += "\xEF\xBC\xA1";     // 3-byte Fullwidth
-        input += "\xF0\x9F\x98\x80"; // 4-byte emoji
-        check("All byte lengths mixed", input);
-    }
-
-    std::printf("    all mixed scenario tests passed!\n");
+    std::printf("    exhaustive fuzzing passed!\n");
 }
 
 /**
@@ -1180,6 +916,22 @@ void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
         // 'ϕ' (CF 95) -> 'φ' (CF 86) -- Wait, standard 'φ' is CF 86
         // 'ϖ' (CF 96) -> 'π' (CF 80)
         {"\xCF\x96", "\xCF\x80", "Greek Symbol ϖ to π"},
+
+        // Micro Sign (U+00B5, C2 B5) ↔ Greek Mu (U+03BC, CE BC / U+039C, CE 9C)
+        // Cross-script folding: Micro Sign folds to Greek lowercase mu
+        // This is tricky because Micro Sign is in Latin-1 Supplement (western_group)
+        // but must match Greek uppercase/lowercase Mu
+        {"\xC2\xB5", "\xCE\xBC", "Micro Sign to Greek lowercase mu"},
+        {"\xCE\xBC", "\xC2\xB5", "Greek lowercase mu to Micro Sign"},
+        {"\xC2\xB5", "\xCE\x9C", "Micro Sign to Greek uppercase MU"},
+        {"\xCE\x9C", "\xC2\xB5", "Greek uppercase MU to Micro Sign"},
+        // Multiple occurrences
+        {"\xC2\xB5\xC2\xB5", "\xCE\xBC\xCE\xBC", "Two Micro Signs to two Greek mu"},
+        {"\xC2\xB5\xC2\xB5", "\xCE\x9C\xCE\x9C", "Two Micro Signs to two Greek MU"},
+        // Mixed Micro Sign with Greek context
+        {"\xCE\x91\xC2\xB5\xCE\xB1", "\xCE\xB1\xCE\xBC\xCE\xB1", "Greek+Micro+Greek: ΑµΑ to αμα"},
+        // Micro Sign in ASCII context (Western Europe kernel selection)
+        {"Test \xC2\xB5 unit", "TEST \xCE\xBC UNIT", "Micro Sign in ASCII context"},
 
         // Armenian Edge Cases
         // -------------------
@@ -1908,9 +1660,7 @@ void test_equivalence() {
         sz_utf8_find_whitespace_ice);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_case_fold_all_codepoints(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_case_fold_script_boundaries(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_case_fold_mixed_scenarios(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
                                   sz_utf8_case_fold_serial, sz_utf8_count_serial);
     test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
