@@ -3667,8 +3667,9 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
     }
 
     sz_size_t matched_length = 0;
-    sz_cptr_t result =
-        sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length, &matched_length);
+    sz_utf8_case_insensitive_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
+    sz_cptr_t result = sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length,
+                                                     &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 

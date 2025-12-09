@@ -127,6 +127,48 @@ impl IndexSpan {
     }
 }
 
+/// Metadata for case-insensitive UTF-8 search operations.
+///
+/// This structure caches pre-computed information about the needle for reuse
+/// across multiple searches. Zero-initialization (default) triggers automatic
+/// analysis on first use.
+///
+/// Matches C's `sz_utf8_case_insensitive_needle_metadata_t`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Utf8CaseInsensitiveNeedleMetadata {
+    // sz_utf8_string_slice_t safe_window (5 x usize = 40 bytes on 64-bit)
+    safe_window_offset: usize,
+    safe_window_length: usize,
+    safe_window_runes_before: usize,
+    safe_window_runes_within: usize,
+    safe_window_runes_after: usize,
+    // sz_u8_t folded_slice[16]
+    folded_slice: [u8; 16],
+    // 4 x sz_u8_t fields
+    folded_slice_length: u8,
+    probe_second: u8,
+    probe_third: u8,
+    kernel_id: u8,
+}
+
+impl Default for Utf8CaseInsensitiveNeedleMetadata {
+    fn default() -> Self {
+        Self {
+            safe_window_offset: 0,
+            safe_window_length: 0,
+            safe_window_runes_before: 0,
+            safe_window_runes_within: 0,
+            safe_window_runes_after: 0,
+            folded_slice: [0; 16],
+            folded_slice_length: 0,
+            probe_second: 0,
+            probe_third: 0,
+            kernel_id: 0, // sz_utf8_case_rune_unknown_k = 0, triggers analysis
+        }
+    }
+}
+
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
 /// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
@@ -351,6 +393,7 @@ extern "C" {
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
+        needle_metadata: *mut Utf8CaseInsensitiveNeedleMetadata,
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_insensitive_order(
@@ -971,12 +1014,14 @@ where
     let needle_ref = needle.as_ref();
     let mut matched_length: usize = 0;
 
+    let mut needle_metadata = Utf8CaseInsensitiveNeedleMetadata::default();
     let result = unsafe {
         sz_utf8_case_insensitive_find(
             haystack_ref.as_ptr() as *const c_void,
             haystack_ref.len(),
             needle_ref.as_ptr() as *const c_void,
             needle_ref.len(),
+            &mut needle_metadata,
             &mut matched_length,
         )
     };
