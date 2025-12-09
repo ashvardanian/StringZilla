@@ -2717,17 +2717,26 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                                                                      _mm512_set1_epi8((char)0x8D));
                     __mmask64 is_83_uppercase = is_83_range | is_83_c7 | is_83_cd;
 
-                    // Include ASCII, ALL Georgian E1 (not just uppercase), E2 (punctuation), continuations, safe EA
-                    // E2 is mostly safe (punctuation, symbols) - only a few codepoints fold (Kelvin, Angstrom)
-                    // but we can safely pass those through unchanged (they're rare in Georgian text)
+                    // Include ASCII, ALL Georgian E1 (not just uppercase), safe E2, continuations, safe EA
+                    // E2 80-83 are safe (General Punctuation), others have case folding (Glagolitic, Coptic, etc.)
                     // Also include C2 leads (Latin-1 Supplement: U+0080-00BF) - no case folding needed
                     __mmask64 is_safe_ea = is_ea_lead & ~(is_ea_complex >> 1);
                     __mmask64 is_c2_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC2));
+                    // E2 is only safe if second byte is 80-83 (General Punctuation quotes)
+                    __m512i second_bytes_for_e2 =
+                        _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(1)), source_vec.zmm);
+                    __mmask64 safe_e2_positions = is_e2_lead & (load_mask >> 1); // Ensure second byte is in chunk
+                    __mmask64 is_safe_e2 =
+                        safe_e2_positions &
+                        _mm512_mask_cmp_epu8_mask(safe_e2_positions,
+                                                  _mm512_sub_epi8(second_bytes_for_e2, _mm512_set1_epi8((char)0x80)),
+                                                  _mm512_set1_epi8(0x04), _MM_CMPINT_LT); // 80-83
                     __mmask64 is_valid_georgian_mix =
-                        ~is_non_ascii | is_georgian_e1 | is_e2_lead | is_cont_mask | is_safe_ea | is_c2_lead;
-                    // Exclude other 2-byte leads (C3-DF may need folding), 4-byte, EF
+                        ~is_non_ascii | is_georgian_e1 | is_safe_e2 | is_cont_mask | is_safe_ea | is_c2_lead;
+                    // Exclude other 2-byte leads (C3-DF may need folding), 4-byte, EF, and unsafe E2
                     __mmask64 is_foldable_2byte = is_two_byte_lead & ~is_c2_lead;
-                    is_valid_georgian_mix &= ~(is_foldable_2byte | is_four_byte_lead_mask | is_ef_lead);
+                    __mmask64 is_unsafe_e2 = is_e2_lead & ~is_safe_e2;
+                    is_valid_georgian_mix &= ~(is_foldable_2byte | is_four_byte_lead_mask | is_ef_lead | is_unsafe_e2);
                     sz_size_t georgian_length = sz_ice_first_invalid_(is_valid_georgian_mix, load_mask, chunk_size);
 
                     // Don't split multi-byte sequences (2-byte C2, 3-byte E1/E2/EA).
@@ -2882,7 +2891,12 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 __mmask64 three_byte_leads_in_prefix = is_three_byte_lead_mask & prefix_mask_3;
 
                 // Check for problematic lead bytes in this prefix
-                __mmask64 problematic_leads = (is_e1_lead | is_ef_lead) & three_byte_leads_in_prefix;
+
+                // E2 leads: E2 80-83 are safe (General Punctuation), but others need folding.
+                // For safety and simplicity, treating ALL E2s here as unsafe forces serial fallback,
+                // which handles both folding and identity cases correctly.
+                __mmask64 is_unsafe_e2 = is_e2_lead & three_byte_leads_in_prefix;
+                __mmask64 problematic_leads = (is_e1_lead | is_ef_lead | is_unsafe_e2) & three_byte_leads_in_prefix;
 
                 if (!problematic_leads) {
                     // No E1 or EF leads in prefix - fold ASCII A-Z, copy 3-byte chars unchanged
@@ -3062,10 +3076,13 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 }
 
                 // No special 3-byte cases found - fold ASCII A-Z, copy 3-byte unchanged
-                _mm512_mask_storeu_epi8(target, prefix_mask_3,
-                                        sz_ice_fold_ascii_in_prefix_(source_vec.zmm, prefix_mask_3));
-                target += three_byte_length, source += three_byte_length, source_length -= three_byte_length;
-                continue;
+                // But do NOT copy if we detected unsafe E2s that weren't handled!
+                if (!is_unsafe_e2) {
+                    _mm512_mask_storeu_epi8(target, prefix_mask_3,
+                                            sz_ice_fold_ascii_in_prefix_(source_vec.zmm, prefix_mask_3));
+                    target += three_byte_length, source += three_byte_length, source_length -= three_byte_length;
+                    continue;
+                }
             }
         }
 
@@ -3120,7 +3137,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 }
                 break;
             }
-
             // Serial fallback for remaining bytes (assumes valid UTF-8)
             sz_rune_t rune;
             sz_rune_length_t rune_length;
@@ -3128,6 +3144,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 
             sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+
             for (sz_size_t i = 0; i != folded_count; ++i) target += sz_rune_export(folded_runes[i], (sz_u8_t *)target);
             source += rune_length;
             source_length -= rune_length;
