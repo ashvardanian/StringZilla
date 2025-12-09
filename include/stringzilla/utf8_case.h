@@ -2250,13 +2250,11 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                     // But ASCII mixed in still needs folding! Use sz_ice_fold_ascii_in_prefix_.
                     // Just need to avoid splitting a 3-byte sequence at the end.
                     sz_size_t copy_len = chunk_size;
-                    if (copy_len < 64) {
-                        // Check if last 1-2 bytes are an incomplete sequence
-                        __mmask64 leads_in_chunk_mask = is_three_byte_lead_mask & load_mask;
-                        if (leads_in_chunk_mask) {
-                            int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_mask);
-                            if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
-                        }
+                    // Check if last 1-2 bytes are an incomplete sequence
+                    __mmask64 leads_in_chunk_mask = is_three_byte_lead_mask & load_mask;
+                    if (leads_in_chunk_mask) {
+                        int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_mask);
+                        if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
                     }
                     if (copy_len > 0) {
                         __mmask64 copy_mask = sz_u64_mask_until_(copy_len);
