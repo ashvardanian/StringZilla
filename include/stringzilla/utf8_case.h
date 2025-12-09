@@ -1515,12 +1515,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
         if (!candidate) break;
 
         // Validate the full match using the unified validator
+        // We bypass "middle" validation using folded slice because it might be truncated (e.g. 16 bytes vs 18 byte
+        // window). Instead, we treat the entire safe window + tail as the "tail" to be verified serially.
+        // This ensures no gaps in verification.
         sz_cptr_t match = sz_utf8_case_insensitive_validate_( //
             haystack_ptr, haystack_length,                    //
             needle_ptr, needle_length,                        //
-            0, 0,                                             // no folded needle needed in this case
-            candidate - haystack_ptr, candidate_match_length, //
-            needle_head_bytes, 0, needle_tail_bytes,          // mark as if no bytes were matched in the needle
+            NULL, 0,                                          // No folded slice
+            candidate - haystack_ptr, 0,                      // No pre-matched middle
+            needle_head_bytes, 0, needle_tail_bytes,          // Full tail from start of safe window
             match_length);
 
         if (match) return match;
@@ -4591,7 +4594,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
                 needle_metadata->safe_window.offset,                                            // head
                 needle_metadata->folded_slice_length,                                           // matched
-                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->folded_slice_length, // tail
                 matched_length);
             if (match) {
                 sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
@@ -4638,7 +4641,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
                 needle_metadata->safe_window.offset,                                            // head
                 needle_metadata->folded_slice_length,                                           // matched
-                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->folded_slice_length, // tail
                 matched_length);
             if (match) {
                 sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
@@ -4784,6 +4787,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         sz_rune_length_t dummy;
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
+    sz_size_t const needle_head_bytes = needle_metadata->safe_window.offset;
+    sz_size_t const needle_tail_bytes = needle_length - needle_head_bytes;
 
     // Main loop - process 64-byte chunks
     while (haystack_ptr + 64 <= haystack_end) {
@@ -4808,13 +4813,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
 
             if (danger_mask & sz_u64_mask_until_(step)) {
                 // Danger zone: use serial fallback with validation
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(
-                    haystack, haystack_length, //
-                    needle, needle_length,     //
-                    haystack_ptr, step,        //
-                    needle_first_safe_folded_rune,
-                    needle_metadata->safe_window.offset,                                                       // head
-                    needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                // Danger zone: use serial fallback with validation
+                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                    haystack, haystack_length,                                   //
+                    needle, needle_length,                                       //
+                    haystack_ptr, step,                                          //
+                    needle_first_safe_folded_rune,                               //
+                    needle_head_bytes, needle_tail_bytes,                        //
                     matched_length);
                 if (match) return match;
                 haystack_ptr += step;
@@ -4854,7 +4859,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
                 needle_metadata->safe_window.offset,                                            // head
                 needle_metadata->folded_slice_length,                                           // matched
-                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->folded_slice_length, // tail
                 matched_length);
             if (match) {
                 sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
@@ -4893,13 +4898,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
 
             if (danger_mask & valid_mask) {
                 // Danger zone in tail: use serial fallback with validation
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(
-                    haystack, haystack_length,                 //
-                    needle, needle_length,                     //
-                    haystack_ptr, haystack_end - haystack_ptr, //
-                    needle_first_safe_folded_rune,
-                    needle_metadata->safe_window.offset,                                                       // head
-                    needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                    haystack, haystack_length,                                   //
+                    needle, needle_length,                                       //
+                    haystack_ptr, haystack_end - haystack_ptr,                   //
+                    needle_first_safe_folded_rune,                               //
+                    needle_head_bytes, needle_tail_bytes,                        //
                     matched_length);
                 if (match) return match;
                 sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
@@ -4937,7 +4941,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,        // for needle & haystack
                 needle_metadata->safe_window.offset,                                            // head
                 needle_metadata->folded_slice_length,                                           // matched
-                needle_length - needle_metadata->safe_window.offset - needle_metadata->safe_window.length, // tail
+                needle_length - needle_metadata->safe_window.offset - needle_metadata->folded_slice_length, // tail
                 matched_length);
             if (match) {
                 sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
