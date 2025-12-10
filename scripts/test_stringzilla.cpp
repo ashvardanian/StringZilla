@@ -2826,6 +2826,18 @@ void test_utf8_case() {
     let_assert(auto m = str("straßebahn").utf8_case_insensitive_find("SS"), m.offset == 4 && m.length == 2);
     let_assert(auto m = str("Eine straßebahn").utf8_case_insensitive_find("SS"), m.offset == 9 && m.length == 2);
 
+    // Same case-folding, but different relation
+    let_assert(auto m = str("HelloäeßHelloL").utf8_case_insensitive_find("helloäesshellol"),
+               m.offset == 0 && m.length == 16);
+    let_assert(auto m = str("helloäesshellol").utf8_case_insensitive_find("HelloäeßHelloL"),
+               m.offset == 0 && m.length == 16);
+
+    // Same case-folding, but different relation and needle length due to uppercase tripple-byte 'ẞ' (U+1E9E, E1 BA 9E)
+    let_assert(auto m = str("HelloäeẞHelloL").utf8_case_insensitive_find("helloäesshellol"),
+               m.offset == 0 && m.length == 17);
+    let_assert(auto m = str("helloäesshellol").utf8_case_insensitive_find("HelloäeẞHelloL"),
+               m.offset == 0 && m.length == 16);
+
     // Haystack "STRASSE", Needle "straße"
     let_assert(auto m = str("STRASSE").utf8_case_insensitive_find("straße"),
                m.offset == 0 && m.length == 7); // Matches "STRASSE" (7 bytes)
@@ -3086,6 +3098,12 @@ void test_utf8_case() {
     // 'ﬅ' (U+FB05, EF AC 85)
     let_assert(auto m = str("Ligature ﬅ check").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
     let_assert(auto m = str("end with ﬅ").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
+
+    // More complex ligatures
+    let_assert(auto m = str("ﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 2 && m.length == 5);
+    let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 2 && m.length == 5);
 
     // 'ﬆ' (U+FB06, EF AC 86)
     let_assert(auto m = str("Big ﬆ").utf8_case_insensitive_find("st"), m.offset == 4 && m.length == 3);
