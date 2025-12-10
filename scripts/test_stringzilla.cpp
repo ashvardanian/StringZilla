@@ -3277,6 +3277,113 @@ void test_utf8_case() {
     let_assert(auto m = str("HELLO").utf8_case_insensitive_find("hello"), m.offset == 0 && m.length == 5);
     let_assert(auto m = str("Hello").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
     let_assert(auto m = str("Hello").utf8_case_insensitive_find(""), m.offset == 0 && m.length == 0);
+
+    // ==========================================================================
+    // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
+    // These patterns were discovered by test_utf8_ci_find_fuzz() and expose
+    // disagreements between serial and SIMD implementations.
+    // ==========================================================================
+
+    // Pattern 1: "st" + Latin-1 char (st ligature expansion issue?)
+    // Needle: 73 74 C2 BA = "st" + º (masculine ordinal indicator)
+    // Needle: 73 74 C3 B1 = "st" + ñ
+    // Needle: 73 74 C3 A5 = "st" + å
+    // Needle: 73 74 C3 A9 = "st" + é
+    // Needle: 73 74 D5 A2 = "st" + Armenian բ
+    // Needle: 73 74 CE B1 = "st" + Greek α
+    // These trigger kernel=2 (Central Europe) with safe_window issues
+    {
+        // "st" followed by º - should this match "st" ligature + º?
+        let_assert(auto m = str("test\xEF\xAC\x85\xC2\xBA"
+                                "end")
+                                .utf8_case_insensitive_find("st\xC2\xBA"),
+                   m.offset == 4 && m.length == 5); // st ligature (3) + º (2)
+
+        // "st" followed by ñ
+        let_assert(auto m = str("test\xEF\xAC\x85\xC3\xB1"
+                                "end")
+                                .utf8_case_insensitive_find("st\xC3\xB1"),
+                   m.offset == 4 && m.length == 5); // st ligature (3) + ñ (2)
+
+        // "st" followed by Greek α
+        let_assert(auto m = str("prefix\xEF\xAC\x85\xCE\xB1"
+                                "suffix")
+                                .utf8_case_insensitive_find("st\xCE\xB1"),
+                   m.offset == 6 && m.length == 5); // st ligature (3) + α (2)
+    }
+
+    // Pattern 2: "ss" + Latin-1/Greek (Eszett expansion)
+    // Needle: 73 73 CE B1 = "ss" + Greek α
+    // Needle: 73 73 C3 A5 = "ss" + å
+    {
+        // "ss" followed by Greek α - should match ß + α
+        let_assert(auto m = str("test\xC3\x9F\xCE\xB1"
+                                "end")
+                                .utf8_case_insensitive_find("ss\xCE\xB1"),
+                   m.offset == 4 && m.length == 4); // ß (2) + α (2)
+
+        // "ss" followed by å
+        let_assert(auto m = str("prefix\xC3\x9F\xC3\xA5"
+                                "suffix")
+                                .utf8_case_insensitive_find("ss\xC3\xA5"),
+                   m.offset == 6 && m.length == 4); // ß (2) + å (2)
+    }
+
+    // Pattern 3: ASCII + combining diacritical + other char
+    // Needle: 68 CC B1 D5 A5 = "h" + combining macron below + Armenian ե
+    // Needle: 77 CC 8A CE B2 = "w" + combining ring above + Greek β
+    // Needle: 6A CC 8C D5 A2 = "j" + combining caron + Armenian բ
+    // These test one-to-many expansions (U+1E96 range) mixed with other scripts
+    {
+        // h + combining macron below should match ẖ (U+1E96)
+        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_case_insensitive_find("h\xCC\xB1\xD5\xA5"),
+                   m.offset == 0 && m.length == 5); // ẖ (3) + ե (2)
+
+        // w + combining ring above should match ẘ (U+1E98)
+        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_case_insensitive_find("w\xCC\x8A\xCE\xB2"),
+                   m.offset == 0 && m.length == 5); // ẘ (3) + β (2)
+
+        // j + combining caron should match ǰ (U+01F0)
+        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_case_insensitive_find("j\xCC\x8C\xD5\xA2"),
+                   m.offset == 0 && m.length == 4); // ǰ (2) + բ (2)
+    }
+
+    // Pattern 4: Modifier letters + other chars
+    // Needle: CA BC 6E CE BC = modifier apostrophe + "n" + Greek μ
+    // Needle: 61 CA BE D5 A5 = "a" + modifier right half ring + Armenian ե
+    // These test n-apostrophe (U+0149) and a-right-half-ring (U+1E9A) expansions
+    {
+        // 'n (U+0149) expands to modifier apostrophe + n
+        let_assert(auto m = str("\xC5\x89\xCE\xBC")
+                                .utf8_case_insensitive_find("\xCA\xBC"
+                                                            "n\xCE\xBC"),
+                   m.offset == 0 && m.length == 4); // ʼn (2) + μ (2)
+
+        // a + modifier right half ring should match ẚ (U+1E9A)
+        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_case_insensitive_find("a\xCA\xBE\xD5\xA5"),
+                   m.offset == 0 && m.length == 5); // ẚ (3) + ե (2)
+    }
+
+    // Pattern 5: Armenian + combining chars / ligatures
+    // Needle: D5 A5 D6 82 CE B2 = Armenian delays + Greek β
+    {
+        // Armenian delays character followed by Greek
+        let_assert(auto m = str("\xD5\xA5\xD6\x82\xCE\xB2").utf8_case_insensitive_find("\xD5\xA5\xD6\x82\xCE\xB2"),
+                   m.offset == 0 && m.length == 6);
+    }
+
+    // Pattern 6: Long complex needles crossing multiple scripts
+    // These stress test the kernel selection and danger zone handling
+    {
+        // Armenian barev + Latin ligatures + Vietnamese
+        std::string haystack = "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE" // barev
+                               "\xEF\xAC\x83"                             // ffi ligature
+                               "\xE1\xBB\x87";                            // Vietnamese ệ
+        std::string needle = "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE"   // barev
+                             "ffi"                                        // expanded
+                             "\xE1\xBB\x86";                              // Vietnamese Ệ
+        let_assert(auto m = str(haystack).utf8_case_insensitive_find(needle), m.offset == 0 && m.length == 16);
+    }
 }
 
 void test_utf8_words() {
