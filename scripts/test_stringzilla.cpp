@@ -757,32 +757,30 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
 }
 
 /**
- *  @brief  Tests case-insensitive UTF-8 substring search equivalence between base and SIMD implementations.
+ *  @brief  Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
  *
- *  Uses three independent verification methods:
- *  1. Serial case-insensitive find (baseline)
- *  2. SIMD case-insensitive find (under test)
- *  3. Fold haystack + fold needle + regular sz_find (independent oracle)
- *  @brief  Fuzz tests case-insensitive UTF-8 substring search with random haystacks.
+ *  Uses two verification modes:
+ *  - Exhaustive (max_needles_per_haystack == 0): Tests ALL N*(N+1)/2 substrings of each folded haystack
+ *  - Sampled (max_needles_per_haystack > 0): Tests up to that many random substrings per haystack
  *
- *  Uses three independent verification methods:
- *  1. Serial case-insensitive find (baseline)
- *  2. SIMD case-insensitive find (under test)
- *  3. Fold haystack + fold needle + regular sz_find (independent oracle)
+ *  Algorithm:
+ *  1. Generate random haystack of ~haystack_length runes from character pool
+ *  2. Case-fold the haystack
+ *  3. Extract needles from folded haystack (guarantees needle exists case-insensitively)
+ *  4. Search needle in ORIGINAL (unfolded) haystack with both serial and SIMD
+ *  5. Both must return identical positions
  *
- *  Builds random haystacks from a pool of normal and edge-case Unicode characters, then picks valid UTF-8
- *  slices as needles. Covers ASCII, Latin-1, Cyrillic, Greek, Armenian, Vietnamese, ligatures, and
- *  one-to-many folding cases like Eszett and Turkish dotted I.
+ *  @param haystack_length Target number of bytes in each haystack
+ *  @param max_needles_per_haystack  0 = exhaustive, >0 = sample this many per haystack
+ *  @param total_queries Total needle searches to perform across all haystacks
  */
 void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8_case_insensitive_find_t find_simd,
-                            sz_utf8_case_fold_t case_fold, sz_utf8_case_agnostic_t agnostic_serial,
-                            sz_utf8_case_agnostic_t agnostic_simd, sz_utf8_find_nth_t utf8_find_nth,
-                            sz_utf8_count_t utf8_count, std::size_t iterations = scale_iterations(5000)) {
-    std::printf("  - fuzz testing with random haystacks (%zu iterations)...\n", iterations);
+                            sz_utf8_case_fold_t case_fold, sz_utf8_find_nth_t utf8_find_nth, sz_utf8_count_t utf8_count,
+                            std::size_t haystack_length, std::size_t max_needles_per_haystack,
+                            std::size_t total_queries) {
 
-    // Buffer for folded needle (case folding can expand, e.g., ß→ss, so 4x is safe)
-    constexpr std::size_t max_folded_size = 8192;
-    std::vector<char> folded_needle_buf(max_folded_size);
+    char const *mode = max_needles_per_haystack == 0 ? "exhaustive" : "sampled";
+    std::printf("    - fuzz testing (%s, haystack_len=%zu, queries=%zu)...\n", mode, haystack_length, total_queries);
 
     auto &rng = global_random_generator();
 
@@ -904,146 +902,105 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         "\xF0\x9F\x98\x80",         // Emoji grinning face
     };
     std::size_t const pool_size = sizeof(char_pool) / sizeof(char_pool[0]);
-
     std::uniform_int_distribution<std::size_t> pool_dist(0, pool_size - 1);
-    std::uniform_int_distribution<std::size_t> haystack_len_dist(50, 200);
 
-    std::size_t fuzz_passed = 0;
+    std::size_t queries_remaining = total_queries;
+    std::size_t haystacks_tested = 0;
+    std::size_t total_passed = 0;
 
-    // Scale iterations proportionally, with reasonable bounds
-    std::size_t const max_iters_per_haystack = 500;
-    std::size_t const min_rounds = 5;
-    std::size_t const num_rounds = std::max(min_rounds, iterations / max_iters_per_haystack);
-    std::size_t const iters_per_round = (iterations + num_rounds - 1) / num_rounds; // Round up
+    // Pre-allocate buffers - reusable between iterations
+    std::string haystack;
+    std::vector<char> haystack_folded;
+    haystack.reserve(haystack_length);
 
-    for (std::size_t round = 0; round < num_rounds; ++round) {
-        // Build random haystack by concatenating pool entries
-        std::size_t target_chars = haystack_len_dist(rng);
-        std::string haystack;
-        for (std::size_t i = 0; i < target_chars; ++i) { haystack += char_pool[pool_dist(rng)]; }
+    while (queries_remaining > 0) {
+        // 1. Generate random haystack of ~haystack_length bytes
+        haystack.clear();
+        while (haystack.size() < haystack_length) haystack += char_pool[pool_dist(rng)];
 
-        // Count actual characters in haystack (may differ from target due to multi-byte chars)
-        sz_size_t haystack_char_count = utf8_count(haystack.data(), haystack.size());
-        if (haystack_char_count < 2) continue;
+        // 2. Case-fold the haystack - expands up to 3x
+        haystack_folded.resize(haystack.size() * 3);
+        haystack_folded.resize(case_fold(haystack.data(), haystack.size(), haystack_folded.data()));
+        if (haystack_folded.empty()) continue;
 
-        std::uniform_int_distribution<sz_size_t> char_dist(0, haystack_char_count);
+        // 3. Count runes in folded haystack
+        sz_size_t runes_in_folded_haystack = utf8_count(haystack_folded.data(), haystack_folded.size());
+        if (runes_in_folded_haystack < 2) continue;
 
-        for (std::size_t iter = 0; iter < iters_per_round; ++iter) {
-            // Pick random character range for needle
-            sz_size_t start_char = char_dist(rng);
-            sz_size_t end_char = char_dist(rng);
-            if (start_char > end_char) std::swap(start_char, end_char);
-            if (start_char == end_char) {
-                if (end_char < haystack_char_count) ++end_char;
-                else if (start_char > 0)
-                    --start_char;
-                else
-                    continue;
-            }
+        // 4. Calculate needles for this haystack
+        std::size_t const needles_in_this_haystack =
+            max_needles_per_haystack == 0 ? ((runes_in_folded_haystack * (runes_in_folded_haystack + 1)) / 2)
+                                          : std::min(max_needles_per_haystack, queries_remaining);
 
-            // Find byte positions using sz_utf8_find_nth (no dynamic allocation)
-            sz_cptr_t needle_start_ptr =
-                (start_char == 0) ? haystack.data() : utf8_find_nth(haystack.data(), haystack.size(), start_char);
-            sz_cptr_t needle_end_ptr = (end_char == haystack_char_count)
-                                           ? haystack.data() + haystack.size()
-                                           : utf8_find_nth(haystack.data(), haystack.size(), end_char);
+        // Helper to extract needle from folded haystack and test both implementations
+        auto test_needle = [&](sz_size_t start, sz_size_t len) -> bool {
+            sz_cptr_t needle_start = (start == 0)
+                                         ? haystack_folded.data()
+                                         : utf8_find_nth(haystack_folded.data(), haystack_folded.size(), start);
+            sz_cptr_t needle_end = ((start + len) == runes_in_folded_haystack)
+                                       ? haystack_folded.data() + haystack_folded.size()
+                                       : utf8_find_nth(haystack_folded.data(), haystack_folded.size(), start + len);
+            if (!needle_start || !needle_end || needle_end <= needle_start) return false;
 
-            if (!needle_start_ptr || !needle_end_ptr || needle_end_ptr <= needle_start_ptr) continue;
+            sz_size_t needle_bytes = needle_end - needle_start;
+            sz_size_t serial_matched = 0, simd_matched = 0;
+            sz_utf8_case_insensitive_needle_metadata_t serial_meta = {}, simd_meta = {};
 
-            sz_size_t needle_byte_len = needle_end_ptr - needle_start_ptr;
-            sz_cptr_t needle_data = needle_start_ptr;
+            sz_cptr_t serial_result = find_serial(haystack.data(), haystack.size(), needle_start, needle_bytes,
+                                                  &serial_meta, &serial_matched);
+            sz_cptr_t simd_result =
+                find_simd(haystack.data(), haystack.size(), needle_start, needle_bytes, &simd_meta, &simd_matched);
 
-            // Verify case-agnostic agreement between implementations
-            sz_bool_t serial_agnostic_h = agnostic_serial(haystack.data(), haystack.size());
-            sz_bool_t simd_agnostic_h = agnostic_simd(haystack.data(), haystack.size());
-            sz_bool_t serial_agnostic_n = agnostic_serial(needle_data, needle_byte_len);
-            sz_bool_t simd_agnostic_n = agnostic_simd(needle_data, needle_byte_len);
-
-            if (serial_agnostic_h != simd_agnostic_h || serial_agnostic_n != simd_agnostic_n) {
-                std::fprintf(stderr, "CASE-AGNOSTIC MISMATCH round=%zu iter=%zu\n", round, iter);
-                if (serial_agnostic_h != simd_agnostic_h) {
-                    std::fprintf(stderr, "  Haystack: serial=%d, simd=%d (len=%zu)\n", serial_agnostic_h,
-                                 simd_agnostic_h, haystack.size());
-                    std::fprintf(stderr, "  Haystack bytes: ");
-                    for (std::size_t j = 0; j < haystack.size() && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)haystack[j]);
-                    std::fprintf(stderr, "...\n");
-                }
-                if (serial_agnostic_n != simd_agnostic_n) {
-                    std::fprintf(stderr, "  Needle: serial=%d, simd=%d (len=%zu)\n", serial_agnostic_n, simd_agnostic_n,
-                                 needle_byte_len);
-                    std::fprintf(stderr, "  Needle bytes: ");
-                    for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
-                    std::fprintf(stderr, "\n");
-                }
-                assert(serial_agnostic_h == simd_agnostic_h && "Case-agnostic mismatch on haystack");
-                assert(serial_agnostic_n == simd_agnostic_n && "Case-agnostic mismatch on needle");
-            }
-
-            // If needle is case-agnostic, folded version must equal original
-            if (serial_agnostic_n) {
-                sz_size_t folded_len = case_fold(needle_data, needle_byte_len, folded_needle_buf.data());
-                if (folded_len != needle_byte_len ||
-                    std::memcmp(needle_data, folded_needle_buf.data(), needle_byte_len) != 0) {
-                    std::fprintf(stderr, "CASE-AGNOSTIC FOLD MISMATCH round=%zu iter=%zu\n", round, iter);
-                    std::fprintf(stderr, "  Needle (len=%zu): ", needle_byte_len);
-                    for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
-                    std::fprintf(stderr, "\n  Folded (len=%zu): ", folded_len);
-                    for (std::size_t j = 0; j < folded_len && j < 50; ++j)
-                        std::fprintf(stderr, "%02X ", (unsigned char)folded_needle_buf[j]);
-                    std::fprintf(stderr, "\n");
-                    assert(false && "Case-agnostic string changed when folded");
-                }
-            }
-
-            // Compare serial vs SIMD implementations
-            // Both operate on the same haystack, so we can compare pointers directly
-            sz_size_t serial_matched_len = 0, simd_matched_len = 0;
-            sz_utf8_case_insensitive_needle_metadata_t serial_metadata = {}, simd_metadata = {};
-            sz_cptr_t serial_match = find_serial(haystack.data(), haystack.size(), needle_data, needle_byte_len,
-                                                 &serial_metadata, &serial_matched_len);
-            sz_cptr_t simd_match = find_simd(haystack.data(), haystack.size(), needle_data, needle_byte_len,
-                                             &simd_metadata, &simd_matched_len);
-
-            // Check implementations agree on position (pointer) and matched length
-            // Note: We don't use an oracle here because the needle is always a substring of the haystack,
-            // so existence is guaranteed. The oracle (fold+find) can also find different matches than
-            // case-insensitive search due to one-to-many folds like ligatures.
-            bool implementations_agree = (serial_match == simd_match);
-            bool lengths_agree = (serial_matched_len == simd_matched_len);
-
-            if (!implementations_agree || !lengths_agree) {
-                std::fprintf(stderr, "FUZZ FAIL round=%zu iter=%zu\n", round, iter);
-                std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_byte_len);
+            if (serial_result != simd_result || serial_matched != simd_matched) {
+                std::fprintf(stderr, "FUZZ FAIL haystack=%zu start=%zu len=%zu\n", haystacks_tested, start, len);
+                std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_bytes);
                 std::fprintf(stderr, "  Needle bytes: ");
-                for (sz_size_t j = 0; j < needle_byte_len && j < 50; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)needle_data[j]);
+                for (sz_size_t j = 0; j < needle_bytes && j < 50; ++j)
+                    std::fprintf(stderr, "%02X ", (unsigned char)needle_start[j]);
                 std::fprintf(stderr, "\n");
-                sz_size_t serial_offset = serial_match ? (sz_size_t)(serial_match - haystack.data()) : SZ_SIZE_MAX;
-                sz_size_t simd_offset = simd_match ? (sz_size_t)(simd_match - haystack.data()) : SZ_SIZE_MAX;
+                sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack.data()) : SZ_SIZE_MAX;
+                sz_size_t simd_off = simd_result ? (sz_size_t)(simd_result - haystack.data()) : SZ_SIZE_MAX;
                 std::fprintf(stderr, "  Serial: offset=%zu, len=%zu\n",
-                             serial_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_offset, serial_matched_len);
-                std::fprintf(stderr, "  SIMD: offset=%zu, len=%zu\n",
-                             simd_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_offset, simd_matched_len);
-                std::fprintf(stderr, "  SIMD metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
-                             simd_metadata.kernel_id, simd_metadata.safe_window.offset,
-                             simd_metadata.safe_window.length);
-                std::fprintf(stderr, "  SIMD metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
-                             simd_metadata.folded_slice_length, simd_metadata.probe_second, simd_metadata.probe_third);
-                std::fprintf(stderr, "  SIMD metadata folded_slice: ");
-                for (sz_size_t j = 0; j < simd_metadata.folded_slice_length && j < 16; ++j)
-                    std::fprintf(stderr, "%02X ", simd_metadata.folded_slice[j]);
-                std::fprintf(stderr, "\n");
-                assert(implementations_agree && "Fuzz byte offset mismatch");
-                assert(lengths_agree && "Fuzz length mismatch");
+                             serial_off == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_off, serial_matched);
+                std::fprintf(stderr, "  SIMD:   offset=%zu, len=%zu\n",
+                             simd_off == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_off, simd_matched);
+                std::fprintf(stderr, "  SIMD metadata: kernel=%u safe_window=[%zu,%zu]\n", simd_meta.kernel_id,
+                             simd_meta.safe_window.offset, simd_meta.safe_window.length);
+                assert(serial_result == simd_result && "Fuzz offset mismatch");
+                assert(serial_matched == simd_matched && "Fuzz length mismatch");
             }
-            ++fuzz_passed;
+            return true;
+        };
+
+        // 5. Generate and test needles
+        if (max_needles_per_haystack == 0) {
+            // Exhaustive mode: every possible (start, length) pair from folded haystack
+            for (sz_size_t start = 0; start < runes_in_folded_haystack && queries_remaining > 0; ++start) {
+                for (sz_size_t len = 1; len <= runes_in_folded_haystack - start && queries_remaining > 0; ++len) {
+                    if (test_needle(start, len)) {
+                        ++total_passed;
+                        --queries_remaining;
+                    }
+                }
+            }
         }
+        else {
+            // Sampled mode: random (start, length) pairs
+            std::uniform_int_distribution<sz_size_t> start_dist(0, runes_in_folded_haystack - 1);
+            for (std::size_t i = 0; i < needles_in_this_haystack && queries_remaining > 0; ++i) {
+                sz_size_t start = start_dist(rng);
+                std::uniform_int_distribution<sz_size_t> len_dist(1, runes_in_folded_haystack - start);
+                if (test_needle(start, len_dist(rng))) {
+                    ++total_passed;
+                    --queries_remaining;
+                }
+            }
+        }
+
+        ++haystacks_tested;
     }
 
-    std::printf("    passed %zu random slice tests\n", fuzz_passed);
+    std::printf("    passed %zu fuzz tests across %zu haystacks\n", total_passed, haystacks_tested);
 }
 
 void test_equivalence() {
@@ -1132,9 +1089,25 @@ void test_equivalence() {
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
-                           sz_utf8_case_fold_serial, sz_utf8_case_agnostic_serial, sz_utf8_case_agnostic_ice,
-                           sz_utf8_find_nth_serial, sz_utf8_count_serial);
+
+    // Fuzz testing with different haystack sizes and sampling strategies:
+    // - (16, 0, N): Exhaustive on tiny haystacks (~136 needles each)
+    // - (32, 0, N): Exhaustive on small haystacks (~528 needles each)
+    // - (100, 100, N): Sampled on medium haystacks (100 random needles)
+    // - (200, 100, N): Sampled on larger haystacks (100 random needles)
+    std::size_t fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, fuzz_queries);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
@@ -2789,7 +2762,6 @@ void test_utf8() {
 }
 
 void test_utf8_case() {
-    std::printf("  - testing utf8 case-insensitive operations...\n");
 
     using str = sz::string_view;
 
@@ -3201,6 +3173,103 @@ void test_utf8_case() {
                                  "\x74\x68\x65";
 
     let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
+
+    // ==========================================================================
+    // Cross-Script Mixed Needles (Regression tests for kernel selection issues)
+    // ==========================================================================
+
+    // Capital Eszett (U+1E9E, E1 BA 9E) - folds to "ss"
+    // Single Capital Eszett
+    let_assert(auto m = str("\xE1\xBA\x9E").utf8_case_insensitive_find("ss"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("ss").utf8_case_insensitive_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
+
+    // Capital Eszett vs lowercase ß (C3 9F)
+    let_assert(auto m = str("\xE1\xBA\x9E").utf8_case_insensitive_find("\xC3\x9F"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
+
+    // Double Capital Eszett
+    let_assert(auto m = str("\xE1\xBA\x9E\xE1\xBA\x9E").utf8_case_insensitive_find("ssss"),
+               m.offset == 0 && m.length == 6);
+
+    // Capital Eszett at boundaries
+    let_assert(auto m = str("prefix\xE1\xBA\x9E"
+                            "suffix")
+                            .utf8_case_insensitive_find("xss"),
+               m.offset == 5 && m.length == 4); // 'x'(1) + ẞ(3) = 4
+
+    // Capital Eszett + Vietnamese (Western + Vietnamese kernels)
+    // ẞ (E1 BA 9E) + ệ (E1 BB 87) - the exact failing pattern from fuzz tests
+    let_assert(auto m = str("test\xE1\xBA\x9E\xE1\xBB\x87"
+                            "end")
+                            .utf8_case_insensitive_find("ss\xE1\xBB\x86"),
+               m.offset == 4 && m.length == 6); // ẞ(3) + ệ(3) searched as ss + Ệ
+
+    // Micro Sign + Greek (Western + Greek kernels)
+    // µ (C2 B5) surrounded by Greek α (CE B1) and β (CE B2)
+    let_assert(auto m = str("\xCE\xB1\xC2\xB5\xCE\xB2").utf8_case_insensitive_find("\xCE\xB1\xCE\xBC\xCE\xB2"),
+               m.offset == 0 && m.length == 6); // αµβ vs αμβ
+
+    // Long S (C5 BF) + non-ASCII context
+    let_assert(auto m = str("me\xC5\xBF\xC5\xBF"
+                            "age")
+                            .utf8_case_insensitive_find("MESSAGE"),
+               m.offset == 0 && m.length == 9); // meſſage (9 bytes)
+
+    // One-to-Many Expansions (U+1E96-1E9A range)
+    // h with line below (U+1E96, E1 BA 96) -> h + combining line below (CC B1)
+    let_assert(auto m = str("\xE1\xBA\x96").utf8_case_insensitive_find("h\xCC\xB1"), m.offset == 0 && m.length == 3);
+
+    // t with diaeresis (U+1E97, E1 BA 97) -> t + combining diaeresis (CC 88)
+    let_assert(auto m = str("\xE1\xBA\x97").utf8_case_insensitive_find("t\xCC\x88"), m.offset == 0 && m.length == 3);
+
+    // w with ring above (U+1E98, E1 BA 98) -> w + combining ring above (CC 8A)
+    let_assert(auto m = str("\xE1\xBA\x98").utf8_case_insensitive_find("w\xCC\x8A"), m.offset == 0 && m.length == 3);
+
+    // y with ring above (U+1E99, E1 BA 99) -> y + combining ring above (CC 8A)
+    let_assert(auto m = str("\xE1\xBA\x99").utf8_case_insensitive_find("y\xCC\x8A"), m.offset == 0 && m.length == 3);
+
+    // Kelvin Sign (E2 84 AA) in mixed context
+    let_assert(auto m = str("273 \xE2\x84\xAA test").utf8_case_insensitive_find("273 k"),
+               m.offset == 0 && m.length == 7); // K is 3 bytes
+
+    // Angstrom Sign (E2 84 AB) with accented chars
+    let_assert(auto m = str("10 \xE2\x84\xAB unit").utf8_case_insensitive_find("10 \xC3\xA5"),
+               m.offset == 0 && m.length == 6); // Å (3) vs å (2)
+
+    // ==========================================================================
+    // 64-byte Boundary Stress Tests
+    // ==========================================================================
+
+    // Capital Eszett at position 63 (just at SIMD boundary)
+    {
+        std::string prefix(63, 'x');
+        let_assert(auto m = str((prefix + "\xE1\xBA\x9E"
+                                          "end")
+                                    .c_str())
+                                .utf8_case_insensitive_find("xss"),
+                   m.offset == 62 && m.length == 4); // last 'x' + ẞ(3)
+    }
+
+    // Vietnamese char at position 62
+    {
+        std::string prefix(62, 'a');
+        let_assert(auto m = str((prefix + "\xE1\xBB\x87"
+                                          "b")
+                                    .c_str())
+                                .utf8_case_insensitive_find("\xE1\xBB\x86"
+                                                            "B"),
+                   m.offset == 62 && m.length == 4); // ệ(3) + b(1)
+    }
+
+    // Micro Sign at position 64 (just past SIMD boundary)
+    {
+        std::string prefix(64, 'z');
+        let_assert(auto m = str((prefix + "\xC2\xB5"
+                                          "test")
+                                    .c_str())
+                                .utf8_case_insensitive_find("\xCE\xBC"),
+                   m.offset == 64 && m.length == 2); // µ matches μ
+    }
 
     // Basic ASCII search
     let_assert(auto m = str("Hello World").utf8_case_insensitive_find("WORLD"), m.offset == 6 && m.length == 5);
@@ -3721,6 +3790,9 @@ int main(int argc, char const **argv) {
     std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
+
+    // Call it once again at start - temporary measure to debug Ice Lake vs Serial differences
+    test_utf8_case();
 
 #if SZ_USE_CUDA
     cudaError_t cuda_error = cudaFree(0); // Force context initialization
