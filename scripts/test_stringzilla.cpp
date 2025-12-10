@@ -804,102 +804,105 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         "jumps",
 
         // Latin-1/Extended (Western European)
-        "\xC3\x9F", // Eszett ß (folds to ss)
-        "\xC3\xB6",
-        "\xC3\x96", // o-umlaut
-        "\xC3\xBC",
-        "\xC3\x9C", // u-umlaut
-        "\xC3\xA4",
-        "\xC3\x84", // a-umlaut
-        "\xC3\xA9",
-        "\xC3\x89", // e-accent
-        "\xC3\xA0",
-        "\xC3\x80", // a-grave
-        "\xC3\xB1",
-        "\xC3\x91", // n-tilde
-        "\xC2\xAA", // FEMININE ORDINAL INDICATOR (caseless)
-        "\xC2\xBA", // MASCULINE ORDINAL INDICATOR (caseless)
-        "\xC2\xB5", // MICRO SIGN (folds to Greek mu)
-        "\xC3\x85",
-        "\xC3\xA5", // A-ring (Angstrom target)
-        "\xC5\xBF", // LONG S ſ (U+017F, folds to regular s)
+        "\xC3\x9F", // 'ß' (U+00DF, C3 9F) - Latin Small Letter Sharp S (folds to ss)
+        "\xC3\xB6", // 'ö' (U+00F6, C3 B6) - Latin Small Letter O with Diaeresis
+        "\xC3\x96", // 'Ö' (U+00D6, C3 96) - Latin Capital Letter O with Diaeresis
+        "\xC3\xBC", // 'ü' (U+00FC, C3 BC) - Latin Small Letter U with Diaeresis
+        "\xC3\x9C", // 'Ü' (U+00DC, C3 9C) - Latin Capital Letter U with Diaeresis
+        "\xC3\xA4", // 'ä' (U+00E4, C3 A4) - Latin Small Letter A with Diaeresis
+        "\xC3\x84", // 'Ä' (U+00C4, C3 84) - Latin Capital Letter A with Diaeresis
+        "\xC3\xA9", // 'é' (U+00E9, C3 A9) - Latin Small Letter E with Acute
+        "\xC3\x89", // 'É' (U+00C9, C3 89) - Latin Capital Letter E with Acute
+        "\xC3\xA0", // 'à' (U+00E0, C3 A0) - Latin Small Letter A with Grave
+        "\xC3\x80", // 'À' (U+00C0, C3 80) - Latin Capital Letter A with Grave
+        "\xC3\xB1", // 'ñ' (U+00F1, C3 B1) - Latin Small Letter N with Tilde
+        "\xC3\x91", // 'Ñ' (U+00D1, C3 91) - Latin Capital Letter N with Tilde
+        "\xC2\xAA", // 'ª' (U+00AA, C2 AA) - Feminine Ordinal Indicator (caseless)
+        "\xC2\xBA", // 'º' (U+00BA, C2 BA) - Masculine Ordinal Indicator (caseless)
+        "\xC2\xB5", // 'µ' (U+00B5, C2 B5) - Micro Sign (folds to Greek mu)
+        "\xC3\x85", // 'Å' (U+00C5, C3 85) - Latin Capital Letter A with Ring Above
+        "\xC3\xA5", // 'å' (U+00E5, C3 A5) - Latin Small Letter A with Ring Above
+        "\xC5\xBF", // 'ſ' (U+017F, C5 BF) - Latin Small Letter Long S (folds to regular s)
 
-        // Kelvin sign (U+212A) - folds to ASCII k
-        "\xE2\x84\xAA",
-        // Angstrom sign (U+212B) - folds to Latin-1 a-ring
-        "\xE2\x84\xAB",
-        // Turkish dotted I (U+0130) - expands to i + combining dot
-        "\xC4\xB0",
-        // Turkish dotless i (U+0131) - folds to itself but maps to I (U+0049)
-        "\xC4\xB1",
+        // Kelvin sign and Angstrom sign
+        "\xE2\x84\xAA", // 'K' (U+212A, E2 84 AA) - Kelvin Sign (folds to ASCII k)
+        "\xE2\x84\xAB", // 'Å' (U+212B, E2 84 AB) - Angstrom Sign (folds to Latin-1 a-ring)
+
+        // Turkish
+        "\xC4\xB0", // 'İ' (U+0130, C4 B0) - Latin Capital Letter I with Dot Above
+        "\xC4\xB1", // 'ı' (U+0131, C4 B1) - Latin Small Letter Dotless I
 
         // Cyrillic (Russian, Ukrainian)
-        "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", // Cyrillic privet
-        "\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0", // Cyrillic Moskva
-        "\xD0\xB0",
-        "\xD0\x90", // a
-        "\xD0\xB1",
-        "\xD0\x91", // b
-        "\xD0\xB2",
-        "\xD0\x92", // v
+        "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", // "привет" (Cyrillic privet) - Russian Hello
+        "\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0", // "Москва" (Cyrillic Moskva) - Moscow
+        "\xD0\xB0",                                         // 'а' (U+0430, D0 B0) - Cyrillic Small Letter A
+        "\xD0\x90",                                         // 'А' (U+0410, D0 90) - Cyrillic Capital Letter A
+        "\xD0\xB1",                                         // 'б' (U+0431, D0 B1) - Cyrillic Small Letter Be
+        "\xD0\x91",                                         // 'Б' (U+0411, D0 91) - Cyrillic Capital Letter Be
+        "\xD0\xB2",                                         // 'в' (U+0432, D0 B2) - Cyrillic Small Letter Ve
+        "\xD0\x92",                                         // 'В' (U+0412, D0 92) - Cyrillic Capital Letter Ve
 
         // Greek (including final sigma)
-        "\xCE\xB1",
-        "\xCE\x91", // alpha
-        "\xCE\xB2",
-        "\xCE\x92", // beta
-        "\xCF\x83",
-        "\xCE\xA3",                         // sigma
-        "\xCF\x82",                         // final sigma
-        "\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC", // Greek kosm
+        "\xCE\xB1",                         // 'α' (U+03B1, CE B1) - Greek Small Letter Alpha
+        "\xCE\x91",                         // 'Α' (U+0391, CE 91) - Greek Capital Letter Alpha
+        "\xCE\xB2",                         // 'β' (U+03B2, CE B2) - Greek Small Letter Beta
+        "\xCE\x92",                         // 'Β' (U+0392, CE 92) - Greek Capital Letter Beta
+        "\xCF\x83",                         // 'σ' (U+03C3, CF 83) - Greek Small Letter Sigma
+        "\xCE\xA3",                         // 'Σ' (U+03A3, CE A3) - Greek Capital Letter Sigma
+        "\xCF\x82",                         // 'ς' (U+03C2, CF 82) - Greek Small Letter Final Sigma
+        "\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC", // "κόσμ" (Greek kosm) - World
 
         // Armenian
-        "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE", // Armenian barev
-        "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", // Armenian BAREV
-        "\xD5\xA5",
-        "\xD6\x87", // ech, ech-yiwn ligature
+        "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE", // "բարև" (Armenian barev) - Hello
+        "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", // "ԲԱՐԵՒ" (Armenian BAREV) - HELLO
+        "\xD5\xA5",                                 // 'ե' (U+0565, D5 A5) - Armenian Small Letter Ech
+        "\xD6\x87",                                 // 'և' (U+0587, D6 87) - Armenian Small Ligature Ech Yiwn
 
         // Vietnamese/Latin Extended Additional
-        "\xE1\xBB\x87",
-        "\xE1\xBB\x86", // e with hook + circumflex
-        "\xE1\xBA\xA1",
-        "\xE1\xBA\xA0", // a with dot below
-        "\xC4\x90",
-        "\xC4\x91", // D with stroke (Latin Ext-A)
-        "\xC6\xA0",
-        "\xC6\xA1", // O with horn (Latin Ext-B)
+        "\xE1\xBB\x87", // 'ệ' (U+1EC7, E1 BB 87) - Latin Small Letter E with Circumflex and Dot Below
+        "\xE1\xBB\x86", // 'Ệ' (U+1EC6, E1 BB 86) - Latin Capital Letter E with Circumflex and Dot Below
+        "\xE1\xBA\xA1", // 'ạ' (U+1EA1, E1 BA A1) - Latin Small Letter A with Dot Below
+        "\xE1\xBA\xA0", // 'Ạ' (U+1EA0, E1 BA A0) - Latin Capital Letter A with Dot Below
+        "\xC4\x90",     // 'Đ' (U+0110, C4 90) - Latin Capital Letter D with Stroke
+        "\xC4\x91",     // 'đ' (U+0111, C4 91) - Latin Small Letter D with Stroke
+        "\xC6\xA0",     // 'Ơ' (U+01A0, C6 A0) - Latin Capital Letter O with Horn
+        "\xC6\xA1",     // 'ơ' (U+01A1, C6 A1) - Latin Small Letter O with Horn
 
         // Latin ligatures (one-to-many folding)
-        "\xEF\xAC\x80", // ff ligature
-        "\xEF\xAC\x81", // fi ligature
-        "\xEF\xAC\x82", // fl ligature
-        "\xEF\xAC\x83", // ffi ligature
-        "\xEF\xAC\x84", // ffl ligature
-        "\xEF\xAC\x85", // st ligature
-        "\xEF\xAC\x86", // st ligature (variant)
+        "\xEF\xAC\x80", // 'ﬀ' (U+FB00, EF AC 80) - Latin Small Ligature ff
+        "\xEF\xAC\x81", // 'ﬁ' (U+FB01, EF AC 81) - Latin Small Ligature fi
+        "\xEF\xAC\x82", // 'ﬂ' (U+FB02, EF AC 82) - Latin Small Ligature fl
+        "\xEF\xAC\x83", // 'ﬃ' (U+FB03, EF AC 83) - Latin Small Ligature ffi
+        "\xEF\xAC\x84", // 'ﬄ' (U+FB04, EF AC 84) - Latin Small Ligature ffl
+        "\xEF\xAC\x85", // 'ﬅ' (U+FB05, EF AC 85) - Latin Small Ligature Long S T
+        "\xEF\xAC\x86", // 'ﬆ' (U+FB06, EF AC 86) - Latin Small Ligature St
 
         // One-to-many expansions (U+1E96-1E9A)
-        "\xE1\xBA\x96", // h with line below -> h + combining line
-        "\xE1\xBA\x97", // t with diaeresis -> t + combining diaeresis
-        "\xE1\xBA\x98", // w with ring -> w + combining ring
-        "\xE1\xBA\x99", // y with ring -> y + combining ring
-        "\xE1\xBA\x9A", // a with right half ring -> a + modifier letter
+        "\xE1\xBA\x96", // 'ẖ' (U+1E96, E1 BA 96) - Latin Small Letter H with Line Below
+        "\xE1\xBA\x97", // 'ẗ' (U+1E97, E1 BA 97) - Latin Small Letter T with Diaeresis
+        "\xE1\xBA\x98", // 'ẘ' (U+1E98, E1 BA 98) - Latin Small Letter W with Ring Above
+        "\xE1\xBA\x99", // 'ẙ' (U+1E99, E1 BA 99) - Latin Small Letter Y with Ring Above
+        "\xE1\xBA\x9A", // 'ẚ' (U+1E9A, E1 BA 9A) - Latin Small Letter A with Right Half Ring
 
         // Capital Eszett (U+1E9E) - folds to ss
-        "\xE1\xBA\x9E",
+        "\xE1\xBA\x9E", // 'ẞ' (U+1E9E, E1 BA 9E) - Latin Capital Letter Sharp S
+
         // Afrikaans n-apostrophe (U+0149) -> 'n
-        "\xC5\x89",
+        "\xC5\x89", // 'ŉ' (U+0149, C5 89) - Latin Small Letter N Preceded by Apostrophe
+
         // J-caron (U+01F0) -> j + combining caron
-        "\xC7\xB0",
+        "\xC7\xB0", // 'ǰ' (U+01F0, C7 B0) - Latin Small Letter J with Caron
+
         // Modifier letter apostrophe (U+02BC) - context for n
-        "\xCA\xBC",
+        "\xCA\xBC", // 'ʼ' (U+02BC, CA BC) - Modifier Letter Apostrophe
+
         // Modifier letter right half ring (U+02BE) - context for a
-        "\xCA\xBE",
+        "\xCA\xBE", // 'ʾ' (U+02BE, CA BE) - Modifier Letter Right Half Ring
 
         // Caseless scripts (for coverage)
-        "\xE4\xB8\xAD\xE6\x96\x87", // CJK zhongwen
-        "\xE3\x81\x82\xE3\x81\x84", // Hiragana ai
-        "\xF0\x9F\x98\x80",         // Emoji grinning face
+        "\xE4\xB8\xAD\xE6\x96\x87", // "中文" (CJK zhongwen) - Caseless
+        "\xE3\x81\x82\xE3\x81\x84", // "あい" (Hiragana ai) - Caseless
+        "\xF0\x9F\x98\x80",         // '😀' (U+1F600, F0 9F 98 80) - Grinning Face
     };
     std::size_t const pool_size = sizeof(char_pool) / sizeof(char_pool[0]);
     std::uniform_int_distribution<std::size_t> pool_dist(0, pool_size - 1);
