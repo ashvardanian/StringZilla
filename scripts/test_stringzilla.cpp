@@ -3105,6 +3105,22 @@ void test_utf8_case() {
     let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 2 && m.length == 5);
     let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 2 && m.length == 5);
 
+    // Combining diacritical marks: ǰ (U+01F0) folds to 'j' + combining caron (U+030C)
+    // Needle starts with combining caron - can match mid-expansion of ǰ
+    let_assert(auto m = str("ǰ0").utf8_case_insensitive_find("\xCC\x8C"
+                                                             "0"), // caron + '0'
+               m.offset == 0 && m.length == 3);                    // Match entire ǰ0 (2 byte ǰ + 1 byte 0)
+    let_assert(auto m = str("abcǰ0def")
+                            .utf8_case_insensitive_find("\xCC\x8C"
+                                                        "0"),
+               m.offset == 3 && m.length == 3); // "abc" = 3 bytes
+
+    // Mid-expansion matches with ß (U+00DF) → "ss"
+    // Needle "sfoxeepmº" should match in "ßfoxeEPMº" (folded: "ssfoxeepmº") at position 1 of folded text
+    // Return position is byte 0 where ß starts (first contributing character)
+    let_assert(auto m = str("ßfoxeEPMº").utf8_case_insensitive_find("sfoxeepmº"),
+               m.offset == 0 && m.length == 11); // Entire haystack
+
     // 'ﬆ' (U+FB06, EF AC 86)
     let_assert(auto m = str("Big ﬆ").utf8_case_insensitive_find("st"), m.offset == 4 && m.length == 3);
 

@@ -1177,7 +1177,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_head_(sz_cptr_t needle_sta
     for (;;) {
         sz_bool_t have_needle = sz_utf8_folded_reverse_iter_prev_(&needle_riter, &needle_rune);
 
-        // Needle exhausted - success!
+        // Needle exhausted - success! Unconsumed haystack runes are OK.
+        // Example: "fi" matches suffix of "ﬃ" (folds to "ffi"), leaving first 'f' unused.
         if (!have_needle) {
             *match_length = (sz_size_t)(haystack_end - haystack_riter.ptr);
             return sz_true_k;
@@ -1510,10 +1511,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
                 if (needle_riter_rune != haystack_riter_rune) goto consider_third_haystack_folded_rune;
             }
 
-            // First match the tail
+            // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
             sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
-            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_length - needle_first_safe_folded_rune_offset,
+            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
             sz_utf8_folded_iter_init_(&haystack_iter, danger_ptr + haystack_rune_length,
                                       haystack_end - (danger_ptr + haystack_rune_length));
@@ -1591,10 +1592,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
                 if (needle_riter_rune != haystack_riter_rune) goto consider_following_haystack_runes;
             }
 
-            // First match the tail
+            // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
             sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
-            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_length - needle_first_safe_folded_rune_offset,
+            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
             sz_utf8_folded_iter_init_(&haystack_iter, danger_ptr + haystack_rune_length,
                                       haystack_end - (danger_ptr + haystack_rune_length));
@@ -1846,8 +1847,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_rune_t needle_runes[32];
     sz_size_t needle_prefix_count = 0, needle_total_count = 0;
     sz_u64_t needle_hash = 0;
-    sz_cptr_t needle_tail = SZ_NULL_CHAR;
-    sz_size_t needle_tail_length = 0;
     {
         sz_utf8_folded_iter_t_ needle_iter;
         sz_utf8_folded_iter_init_(&needle_iter, needle, needle_length);
@@ -1857,11 +1856,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             needle_hash = needle_hash * 257 + rune;
         }
         needle_total_count = needle_prefix_count;
-        if (needle_prefix_count == ring_capacity) {
-            needle_tail = needle_iter.ptr;
-            while (sz_utf8_folded_iter_next_(&needle_iter, &rune)) needle_total_count++;
-            needle_tail_length = needle_length - (sz_size_t)(needle_tail - needle);
-        }
+        // For long needles, count remaining runes beyond ring buffer
+        while (sz_utf8_folded_iter_next_(&needle_iter, &rune)) needle_total_count++;
     }
     if (!needle_prefix_count) {
         *match_length = 0;
@@ -1872,7 +1868,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     for (sz_size_t i = 1; i < needle_prefix_count; ++i) hash_multiplier *= 257;
 
     sz_rune_t window_runes[32];
-    sz_cptr_t window_sources[32];
+    sz_cptr_t window_sources[32]; // Byte position of character that produced each window rune
     sz_size_t ring_head = 0;
     sz_u64_t window_hash = 0;
     sz_utf8_folded_iter_t_ haystack_iter;
@@ -1887,7 +1883,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         sz_rune_t rune;
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &rune)) break;
         window_runes[window_count] = rune;
-        current_source = haystack_iter.pending_idx <= 1 ? before_ptr : current_source;
+        // Update source only when starting a new character (not mid-expansion)
+        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) current_source = before_ptr;
         window_sources[window_count] = current_source;
         window_hash = window_hash * 257 + rune;
         window_count++;
@@ -1911,34 +1908,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             for (sz_size_t i = 0; i < ring_head; ++i) mismatches += window_runes[i] != needle_runes[first_segment + i];
 
             if (!mismatches) {
+                // Short needle: rune comparison above is sufficient verification
                 if (needle_total_count <= ring_capacity) {
-                    // Verify the match to handle edge cases where window_start includes partial
-                    // multi-rune expansions (e.g., ß→ss where only the second 's' is in the match)
-                    sz_size_t verified_match_length = 0;
-                    if (sz_utf8_case_insensitive_verify_tail_(needle, needle + needle_length, window_start, window_end,
-                                                              &verified_match_length)) {
-                        *match_length = verified_match_length;
-                        return window_start;
-                    }
-                    // Rune hash matched but byte-level verification failed, continue searching
+                    *match_length = (sz_size_t)(window_end - window_start);
+                    return window_start;
                 }
-                else {
-                    sz_size_t haystack_tail_length = haystack_length - (sz_size_t)(window_end - haystack);
-                    sz_utf8_folded_iter_t_ needle_tail_iter, haystack_tail_iter;
-                    sz_utf8_folded_iter_init_(&needle_tail_iter, needle_tail, needle_tail_length);
-                    sz_utf8_folded_iter_init_(&haystack_tail_iter, window_end, haystack_tail_length);
-                    sz_rune_t needle_tail_rune, haystack_tail_rune;
-                    sz_bool_t tail_matches = sz_true_k;
-                    while (tail_matches && sz_utf8_folded_iter_next_(&needle_tail_iter, &needle_tail_rune)) {
-                        if (!sz_utf8_folded_iter_next_(&haystack_tail_iter, &haystack_tail_rune) ||
-                            needle_tail_rune != haystack_tail_rune)
-                            tail_matches = sz_false_k;
-                    }
-                    if (tail_matches) {
-                        *match_length = (sz_size_t)(haystack_tail_iter.ptr - window_start);
-                        return window_start;
-                    }
-                }
+                // Long needle: verify FULL needle from window_start (not just tail from window_end).
+                // This handles mid-expansion matches correctly. Example: if window ends mid-way through
+                // ﬃ→"ffi", starting verification from window_start ensures proper rune alignment.
+                if (sz_utf8_case_insensitive_verify_tail_(needle, needle + needle_length, window_start,
+                                                          haystack + haystack_length, match_length))
+                    return window_start;
             }
         }
 
@@ -1954,7 +1934,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         next_head = next_head == needle_prefix_count ? 0 : next_head;
 
         window_runes[ring_head] = new_rune;
-        current_source = haystack_iter.pending_idx <= 1 ? before_ptr : current_source;
+        // Update source only when starting a new character (not mid-expansion)
+        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) current_source = before_ptr;
         window_sources[ring_head] = current_source;
 
         ring_head = next_head;
