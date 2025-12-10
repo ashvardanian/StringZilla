@@ -1299,6 +1299,11 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
     // because uppercase versions fold TO them. We must mark entire bicameral
     // script ranges as "not caseless" to enable proper case-insensitive matching.
     //
+    // IMPORTANT: Combining diacritical marks (U+0300-U+036F) can appear as non-first
+    // runes in multi-rune case fold expansions. Example: ǰ (U+01F0) → j + ̌ (U+030C).
+    // A needle starting with combining caron could match inside such an expansion,
+    // so combining marks must NOT be treated as case-agnostic.
+    //
     // Bicameral scripts organized by UTF-8 lead byte for efficient checking:
     //
     // 1-byte sequences with upper and lower case (U+0000-007F): 00-7F
@@ -1309,6 +1314,7 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
     if (rune >= 0x00C0 && rune <= 0x00FF) return sz_false_k; // Latin-1 Supplement (À-ÿ)
     if (rune >= 0x0100 && rune <= 0x024F) return sz_false_k; // Latin Extended-A/B
     if (rune >= 0x0250 && rune <= 0x02AF) return sz_false_k; // IPA Extensions
+    if (rune >= 0x0300 && rune <= 0x036F) return sz_false_k; // Combining Diacritical Marks (can appear in expansions!)
     if (rune >= 0x0370 && rune <= 0x03FF) return sz_false_k; // Greek and Coptic
     if (rune >= 0x0400 && rune <= 0x04FF) return sz_false_k; // Cyrillic
     if (rune >= 0x0500 && rune <= 0x052F) return sz_false_k; // Cyrillic Supplement
@@ -3472,18 +3478,21 @@ typedef enum {
      *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
      *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width:
      *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *  - 1x special case of cross-script folding from Latin-1 to Greek, preserving byte-width:
-     *    - 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC) - also a target of the uppercase Greek 'Μ' (U+039C, CE 9C)
      *
      *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
      *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_safe_ascii_k`, but not all!
      *
-     *  Assuming how common 'ß' (U+00DF, C3 9F) and "ss" are in German text, we allow 's' (U+0073, 73) in this
-     *  safety profile. The main issue there is handling the uppercase 'ẞ' (U+1E9E, E1 BA 9E) that also folds
-     *  into "ss" (73 73), but is outside of Latin-1. In UTF-8 it is a 3-byte sequence, so it resizes into a
-     *  2-byte sequence when folded. Luckily for us, it's almost never used in practice: introduced to Unicode
-     *  in 2008 and officially adopted into German orthography in 2017. When processing the haystack, we check
-     *  if 'ẞ' (U+1E9E, E1 BA 9E) appears, and if so, we revert to serial processing for that tiny block of text.
+     *  The lowercase 'ß' (U+00DF, C3 9F) folds to "ss" (73 73) in-place (2 bytes → 2 bytes). This creates a
+     *  mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find a match
+     *  at the second byte of the "ss" expansion, which is a UTF-8 continuation byte in the original haystack.
+     *  Example: haystack "ßStra" folds to "ssstra", needle "sstra" matches at position 1 (the 0x9F byte of ß).
+     *  To avoid this, 's' is only safe when NOT at the start or end of the needle (contextual restriction).
+     *
+     *  The uppercase 'ẞ' (U+1E9E, E1 BA 9E) also folds into "ss" (73 73), but is outside of Latin-1.
+     *  In UTF-8 it is a 3-byte sequence, so it resizes into a 2-byte sequence when folded. Luckily for us,
+     *  it's almost never used in practice: introduced to Unicode in 2008 and officially adopted into German
+     *  orthography in 2017. When processing the haystack, we check if 'ẞ' appears, and if so, we revert to
+     *  serial processing for that tiny block of text.
      *
      *  Another place where 's' (U+0073, 73) appears are ligatures 'ﬅ' (U+FB05, EF AC 85) and 'ﬆ' (U+FB06, EF AC 86)
      *  that both fold into "st" (73 74). They also result in serial fallback when detected in the haystack.
@@ -3503,7 +3512,8 @@ typedef enum {
      *  Similarly, we check for "ſ" (Latin Small Letter Long S, U+017F, C5 BF) which folds to 's' (U+0073, 73).
      *  It's archaic in modern languages but theoretically possible in historical texts.
      *
-     *  So we allow both 's' and 'k' and inherit only the following limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  So we allow 'k' unconditionally and inherit/extend the following limitations from
+     * `sz_utf8_case_rune_safe_ascii_k`:
      *
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
      *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87).
@@ -3519,11 +3529,22 @@ typedef enum {
      *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
      *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
      *
+     *  - 's' (U+0073, 73) - can't be first or last
+     *    to avoid mid-ß-expansion matches: 'ß' (U+00DF) folds to "ss" in-place, so a needle starting/ending
+     *    with 's' could match at position 1 (the 0x9F continuation byte). Example: "ßStra" → "ssstra",
+     *    needle "sstra" would match at the second byte of ß. Needles with 's' in the middle are safe.
+     *
      *  We also add one more limitation for a special 2-byte character that is an irregular folding target of
      *  codepoints of different length:
      *
      *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
      *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *
+     *  There is also a Latin-1 character that doesn't change the width, but we still ban it from the safe strings:
+     *
+     *  - 'µ' (U+00B5, C2 B5) - the mathematical Micro sign folds to the Greek lowercase 'μ' (U+03BC, CE BC), which
+     *    is also a folding target of the uppercase Greek letter 'Μ' (U+039C, CE 9C). To avoid having to filter/check
+     *    for Greek symbols in the haystacks, we ban the Micro sign from the needles.
      *
      *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
      *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
@@ -3635,8 +3656,7 @@ typedef enum {
     /**
      *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic designed mostly
      *          for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
-     *          (like Serbian, Bulgarian, & Macedonian) with a mixture of single-byte and double-byte UTF-8
-     *          character sequences.
+     *          (like Serbian, Bulgarian, & Macedonian), but excluding Cyrillic Extensions.
      *
      *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
      *
@@ -3671,12 +3691,11 @@ typedef enum {
      *  - D1 80-8F: Basic lowercase 'р'-'я' (U+0440-U+044F)
      *  - D1 90-9F: Extensions lowercase 'ѐ'-'џ' (U+0450-U+045F)
      *
-     *  UTF-8 byte patterns for Extended Cyrillic (D2/D3 lead bytes):
-     *  - D2 80-BF: Extended-A/B uppercase+lowercase (U+0480-U+04BF) - used by Ukrainian, Kazakh, Uzbek, etc.
-     *    - Even second bytes are uppercase, fold to +1 (e.g., 'Ґ' D2 90 → 'ґ' D2 91)
-     *    - Odd second bytes are already lowercase
-     *  - D3 80-BF: Extended-B/C uppercase+lowercase (U+04C0-U+04FF) - used by Chechen, various Turkic
-     *    - Same +1 folding rule, except Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F)
+     *  We entirely ban all of the Extended Cyrillic (D2/D3 lead bytes), sometimes used in Ukranian,
+     *  Kazakh, and Uzbek languages, like the 'Ґ' (D2 90) → 'ґ' (D2 91) folding with even/odd ordering
+     *  of uppercase and lowercase. Similar rules apply to some Chechen, and various Turkic languages.
+     *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
+     *  By ommitting those extensions we can make our folding kernel much lighter.
      *
      *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *
@@ -4201,16 +4220,19 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 safety |= western_group;
                 break;
 
-            // 's':
+            // 's'
             // - Strict: UNSAFE. 'ſ' (U+017F) folds to 's'.
-            // - Central/Viet: Contextual. Can't be first/last; can't follow 's';
-            //   can't precede 's', 't'. Avoids: "ss" (Eszett) and "st" ligatures.
-            // - Western: SAFE. Eszett folds to "ss"; 'ſ' & "st" ligatures detected in haystack.
+            // - Central/Viet: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
+            //   Avoids: "ss" (Eszett expansion) and "st" (ligature expansion).
+            // - Western: Contextual. Can't be first/last.
+            //   Avoids mid-ß-expansion matches: ß→"ss" means needle starting/ending with 's'
+            //   could match at position 1 (UTF-8 continuation byte). Example: "ßStra" folds
+            //   to "ssstra", needle "sstra" matches at pos 1 which is mid-character.
             case 's':
                 if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
                     lower_next != 's' && lower_next != 't')
                     safety |= central_viet_group;
-                safety |= western_group;
+                if (at_start == sz_false_k && at_end == sz_false_k) safety |= western_group;
                 break;
 
             default:
@@ -4244,8 +4266,8 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 safety |= western_group;
             }
             else if (rune == 0x00B5) {
-                // 'µ' (Micro Sign) folds to 'μ' (Greek Mu, CE BC), not handled by Latin kernels
-                safety |= western_group;
+                // 'µ' (Micro Sign) folds to 'μ' (Greek Mu, CE BC) - BANNED from Western Europe
+                // to avoid Greek complexity. Needles with µ use serial fallback.
             }
             else { safety |= western_group | central_viet_group; }
         }
@@ -4265,12 +4287,9 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
         // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
         // D1 80-9F: U+0440-U+045F (lowercase continuation)
-        // D2 80-BF: U+0480-U+04BF (Extended-A/B for Ukrainian, Kazakh, etc.)
-        // D3 80-BF: U+04C0-U+04FF (Extended-B/C for Chechen, Turkic, etc.)
+        // NOTE: D2/D3 Extended Cyrillic BANNED from SIMD kernel - needles with D2/D3 use serial fallback
         if ((lead == 0xD0 && second >= 0x80 && second <= 0xBF) || //
-            (lead == 0xD1 && second >= 0x80 && second <= 0x9F) || //
-            (lead == 0xD2 && second >= 0x80 && second <= 0xBF) || //
-            (lead == 0xD3 && second >= 0x80 && second <= 0xBF)) { //
+            (lead == 0xD1 && second >= 0x80 && second <= 0x9F)) { //
             safety |= (1 << sz_utf8_case_rune_safe_cyrillic_k);
         }
 
@@ -4474,7 +4493,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         if (rune_bytes == 2) {
             if (lead >= 0xC2 && lead <= 0xC3) has_content[sz_utf8_case_rune_safe_western_europe_k] = sz_true_k;
             if (lead >= 0xC2 && lead <= 0xC5) has_content[sz_utf8_case_rune_safe_central_europe_k] = sz_true_k;
-            if (lead >= 0xD0 && lead <= 0xD3) has_content[sz_utf8_case_rune_safe_cyrillic_k] = sz_true_k;
+            if (lead >= 0xD0 && lead <= 0xD1) has_content[sz_utf8_case_rune_safe_cyrillic_k] = sz_true_k;
             if (lead == 0xCE || lead == 0xCF) has_content[sz_utf8_case_rune_safe_greek_k] = sz_true_k;
             if (lead >= 0xD4 && lead <= 0xD6) has_content[sz_utf8_case_rune_safe_armenian_k] = sz_true_k;
         }
@@ -4887,17 +4906,10 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(_
     __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
     __m512i const x_73_zmm = _mm512_set1_epi8('s');
 
-    // Constants for Latin-1 Supplement (C2/C3 lead bytes)
-    // ----------------------------------------------------
-    // Common Lead Bytes:
-    __m512i const x_c2_zmm = _mm512_set1_epi8((char)0xC2); // Latin-1 Supplement (lower half) & others
+    // Constants for Latin-1 Supplement (C3 lead byte)
+    // NOTE: µ (Micro Sign, C2 B5) is BANNED - needles with µ use serial fallback
     __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3); // Latin-1 Supplement (upper half)
-
-    // Specific Characters for Special Handling:
-    __m512i const x_b5_zmm = _mm512_set1_epi8((char)0xB5); // 'µ' Micro Sign (C2 B5) -> folds to Greek 'μ'
-    __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE); // 'μ' Greek Small Letter Mu (CE BC) - Lead
-    __m512i const x_bc_zmm = _mm512_set1_epi8((char)0xBC); // 'μ' Greek Small Letter Mu (CE BC) - Trail
-    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' Small Letter Sharp S (C3 9F) -> folds to "ss"
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' Sharp S (C3 9F) -> folds to "ss"
 
     // Range Logic Constants for Uppercase Detection (C3 80..9E):
     __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80); // Lower bound of the range (offset)
@@ -4907,24 +4919,14 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(_
     // Note: '÷' Division Sign (C3 B7) is outside the uppercase range (0x80..0x9E), so it's safe.
     __m512i const x_97_zmm = _mm512_set1_epi8((char)0x97); // '×' Multiplication Sign (C3 97) - has no case
 
-    // 1. Handle Micro sign µ (C2 B5) → Greek mu μ (CE BC)
-    // This is a cross-block mapping that preserves byte width
-    __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c2_zmm);
-    __mmask64 is_after_c2_mask = is_c2_mask << 1;
-    __mmask64 is_mu_second_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c2_mask, text_zmm, x_b5_zmm);
-    __mmask64 is_mu_lead_mask = is_mu_second_mask >> 1;
-    // Replace C2 with CE and B5 with BC
-    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_mu_lead_mask, x_ce_zmm);
-    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_mu_second_mask, x_bc_zmm);
-
-    // 2. Handle Eszett ß (C3 9F) → ss (73 73)
+    // 1. Handle Eszett ß (C3 9F) → ss (73 73)
     __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c3_zmm);
     __mmask64 is_after_c3_mask = is_c3_mask << 1;
     __mmask64 is_eszett_second_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_9f_zmm);
     __mmask64 is_eszett_mask = is_eszett_second_mask | (is_eszett_second_mask >> 1);
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_eszett_mask, x_73_zmm);
 
-    // 3. Handle Latin-1 supplement uppercase letters (C3 80-9E) → add 0x20
+    // 2. Handle Latin-1 supplement uppercase letters (C3 80-9E) → add 0x20
     //    We need to map:
     //    - 'À' (C3 80) ... 'Þ' (C3 9E) to 'à' (C3 A0) ... 'þ' (C3 BE)
     //    Exceptions:
@@ -4946,7 +4948,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_zmm_(_
  *
  *  Scans the entire haystack from byte 0, looking for the folded window pattern.
  *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
- *  comparison to handle variable-width folding correctly (e.g., ß→ss, µ→μ).
+ *  comparison to handle variable-width folding correctly (e.g., ß→ss).
  *
  *  @param[in] haystack Pointer to the haystack string.
  *  @param[in] haystack_length Length of the haystack in bytes.
@@ -4991,7 +4993,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     // - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
     // - EF AC 80-86: 'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' (ligatures) → 2-3 bytes
     // - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
-    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec, x_ce_vec;
+    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec;
     sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec, x_bf_vec;
     x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1); // for 'ẞ'
     x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2); // for 'K'
@@ -5001,7 +5003,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     x_84_vec.zmm = _mm512_set1_epi8((char)0x84); // 2nd byte of 'K'
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of ligatures
     x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF); // 2nd byte of 'ſ'
-    x_ce_vec.zmm = _mm512_set1_epi8((char)0xCE); // Greek uppercase (CE 9x folds to same target as µ)
 
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;
@@ -5030,9 +5031,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
         __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
-        __mmask64 x_ce_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ce_vec.zmm);
 
-        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask | x_ce_mask) {
+        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask) {
             __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
             __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
@@ -5041,8 +5041,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
             __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | // ẞ (E1 BA 9E)
                                     ((x_e2_mask << 1) & x_84_mask) | // K (E2 84 AA)
                                     ((x_ef_mask << 1) & x_ac_mask) | // ﬁ, ﬂ (EF AC xx)
-                                    ((x_c5_mask << 1) & x_bf_mask) | // ſ (C5 BF)
-                                    x_ce_mask;                       // Greek (CE xx) for µ→μ
+                                    ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask) {
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
@@ -5337,33 +5336,22 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
     // Start with ASCII folded
     __m512i result_zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(text_zmm);
 
-    // Constants for Cyrillic Folding
-    // ------------------------------
-    // Transformation Deltas:
-    __m512i const x_01_zmm = _mm512_set1_epi8((char)0x01); // +1 for simple case pairs
-    __m512i const x_0f_zmm = _mm512_set1_epi8((char)0x0F); // +15 for Palochka 'Ӏ' (D3 80) → 'ӏ' (D3 8F)
+    // Constants for Basic Cyrillic Folding (D0/D1 only)
+    // NOTE: Extended Cyrillic (D2/D3) is BANNED - needles with D2/D3 use serial fallback
     __m512i const x_10_zmm = _mm512_set1_epi8((char)0x10); // +16 for Extensions (D0 80-8F → D1 90-9F)
     __m512i const x_20_zmm = _mm512_set1_epi8((char)0x20); // +/-32 for basic block shifts
 
     // Lead Bytes:
     __m512i const x_d0_zmm = _mm512_set1_epi8((char)0xD0); // Basic Cyrillic upper (U+0400-U+043F)
     __m512i const x_d1_zmm = _mm512_set1_epi8((char)0xD1); // Basic Cyrillic lower (U+0440-U+047F)
-    __m512i const x_d2_zmm = _mm512_set1_epi8((char)0xD2); // Extended Cyrillic (U+0480-U+04BF)
-    __m512i const x_d3_zmm = _mm512_set1_epi8((char)0xD3); // Extended Cyrillic (U+04C0-U+04FF)
 
     // Range Boundary Constants:
-    __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80); // Base offset (0x80)
-    __m512i const x_8a_zmm = _mm512_set1_epi8((char)0x8A); // D2: first letter after symbols
-    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90); // D0: 'А' start, D3: second block start
-    __m512i const x_a0_zmm = _mm512_set1_epi8((char)0xA0); // D0: 'Р' start
-
-    // Range Lengths:
-    __m512i const x_0e_zmm = _mm512_set1_epi8((char)0x0E);    // 14: D3 80-8D length (Palochka block)
+    __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80);    // Base offset (0x80)
+    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);    // D0: 'А' start
+    __m512i const x_a0_zmm = _mm512_set1_epi8((char)0xA0);    // D0: 'Р' start
     __m512i const x_len16_zmm = _mm512_set1_epi8((char)0x10); // 16: D0 block length
-    __m512i const x_30_zmm = _mm512_set1_epi8((char)0x30);    // 48: D3 90-BF length
-    __m512i const x_36_zmm = _mm512_set1_epi8((char)0x36);    // 54: D2 8A-BF length
 
-    // 1. Basic Cyrillic (D0/D1 lead bytes) - U+0400 to U+047F
+    // Basic Cyrillic (D0/D1 lead bytes) - U+0400 to U+047F
     // Three sub-ranges need folding:
     //   - Extensions:  D0 80-8F ('Ѐ'-'Џ') → D1 90-9F ('ѐ'-'џ') : lead D0→D1, second +0x10
     //   - Basic A-Pe:  D0 90-9F ('А'-'П') → D0 B0-BF ('а'-'п') : lead unchanged, second +0x20
@@ -5388,51 +5376,6 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_(__m512i
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_ext_range, result_zmm, x_10_zmm);    // +0x10
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_basic1_range, result_zmm, x_20_zmm); // +0x20
     result_zmm = _mm512_mask_sub_epi8(result_zmm, is_basic2_range, result_zmm, x_20_zmm); // -0x20
-
-    // 2. Extended Cyrillic D2 (U+0480-U+04BF) - Ukrainian, Kazakh, etc.
-    // Special cases and ranges:
-    //   - D2 80 'Ҁ' (Koppa) → D2 81 'ҁ': +1
-    //   - D2 82-88: symbols/combining marks, NO folding needed
-    //   - D2 8A-BE even bytes: uppercase letters (e.g., 'Ґ' D2 90) → +1 for lowercase
-
-    __mmask64 is_lead_d2_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_d2_zmm);
-    __mmask64 is_after_d2_mask = is_lead_d2_mask << 1;
-    __mmask64 is_even_mask = _mm512_testn_epi8_mask(text_zmm, x_01_zmm);
-
-    // D2 80 'Ҁ' (Cyrillic Koppa) → D2 81 'ҁ'
-    __mmask64 is_d2_koppa = is_after_d2_mask & _mm512_cmpeq_epi8_mask(text_zmm, x_80_zmm);
-
-    // D2 8A-BE even: uppercase letters like 'Ґ' (D2 90), 'Ғ' (D2 92), etc.
-    __mmask64 is_d2_8a_bf = _mm512_mask_cmplt_epu8_mask(is_after_d2_mask, //
-                                                        _mm512_sub_epi8(text_zmm, x_8a_zmm), x_36_zmm);
-    __mmask64 is_d2_uppercase = is_d2_koppa | (is_d2_8a_bf & is_even_mask);
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_d2_uppercase, result_zmm, x_01_zmm); // +1
-
-    // 3. Extended Cyrillic D3 (U+04C0-U+04FF) - Palochka, Turkic vowels, etc.
-    // Special cases and ranges:
-    //   - D3 80 'Ӏ' (Palochka) → D3 8F 'ӏ': +15 (special case)
-    //   - D3 81-8D ODD bytes: uppercase (e.g., 'Ӂ' D3 81) → +1
-    //   - D3 90-BE EVEN bytes: uppercase (e.g., 'Ӑ' D3 90) → +1
-
-    __mmask64 is_lead_d3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_d3_zmm);
-    __mmask64 is_after_d3_mask = is_lead_d3_mask << 1;
-    __mmask64 is_odd_mask = ~is_even_mask;
-
-    // D3 80 'Ӏ' (Palochka, Chechen vertical bar) → D3 8F 'ӏ' (+15, unique)
-    __mmask64 is_palochka = is_after_d3_mask & _mm512_cmpeq_epi8_mask(text_zmm, x_80_zmm);
-
-    // D3 81-8D ODD bytes: 'Ӂ', 'Ӄ', 'Ӆ', 'Ӈ', 'Ӊ', 'Ӌ' (81, 83, 85, 87, 89, 8B, 8D)
-    __mmask64 is_d3_80_8d = _mm512_mask_cmplt_epu8_mask(is_after_d3_mask, //
-                                                        _mm512_sub_epi8(text_zmm, x_80_zmm), x_0e_zmm);
-
-    // D3 90-BE EVEN bytes: 'Ӑ', 'Ӓ', 'Ӕ', etc. (90, 92, 94, ...)
-    __mmask64 is_d3_90_bf = _mm512_mask_cmplt_epu8_mask(is_after_d3_mask, //
-                                                        _mm512_sub_epi8(text_zmm, x_90_zmm), x_30_zmm);
-
-    // Combine: odd in first block, even in second block
-    __mmask64 is_d3_uppercase = (is_d3_80_8d & is_odd_mask) | (is_d3_90_bf & is_even_mask);
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_d3_uppercase, result_zmm, x_01_zmm); // +1
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_palochka, result_zmm, x_0f_zmm);     // +15
 
     return result_zmm;
 }

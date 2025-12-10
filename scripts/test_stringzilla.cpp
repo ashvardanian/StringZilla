@@ -2852,6 +2852,46 @@ void test_utf8_case() {
     let_assert(auto m = str("Fuss").utf8_case_insensitive_find("Fuß"),
                m.offset == 0 && m.length == 4); // Matches "Fuss"
 
+    // Mid-expansion matching: needle starts with 's' (uses serial fallback)
+    // Haystack: "ßfox" (5 bytes) → folds to "ssfox"
+    // Needle "sfox" matches at position 1 in folded, but we report offset=0 (start of ß)
+    // Length is 5 because we consume the entire ß character (can't point to half of it)
+    let_assert(auto m = str("\xC3\x9F"
+                            "fox")
+                            .utf8_case_insensitive_find("sfox"),
+               m.offset == 0 && m.length == 5);
+
+    // Needle ends with 's' - suffix case (uses serial fallback)
+    // Haystack: "foxß" → folds to "foxss"
+    // Needle "foxs" matches through first 's' of expansion
+    let_assert(auto m = str("fox\xC3\x9F").utf8_case_insensitive_find("foxs"), m.offset == 0 && m.length == 5);
+
+    // Cross-boundary case: "ßS" folds to "sss" (uses serial fallback)
+    // Haystack: "ßStra" (6 bytes) → folds to "ssstra"
+    // Needle "sstra" starts with 's', would match at position 1 (mid-ß) without the rule
+    // Length is 6 because we consume the entire haystack (ß expands, consuming whole character)
+    let_assert(auto m = str("\xC3\x9F"
+                            "Stra")
+                            .utf8_case_insensitive_find("sstra"),
+               m.offset == 0 && m.length == 6);
+
+    // Needle with 's' NOT at boundary - should use fast SIMD path
+    let_assert(auto m = str("te\xC3\x9F"
+                            "t")
+                            .utf8_case_insensitive_find("tesst"),
+               m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ma\xC3\x9F"
+                            "e")
+                            .utf8_case_insensitive_find("masse"),
+               m.offset == 0 && m.length == 5);
+
+    // Needle with 'ss' at boundary - also uses serial (can't match across ß boundary)
+    let_assert(auto m = str("fo\xC3\x9F").utf8_case_insensitive_find("foss"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("\xC3\x9F"
+                            "fo")
+                            .utf8_case_insensitive_find("ssfo"),
+               m.offset == 0 && m.length == 4);
+
     // Math Symbols
     // Multiplication × (U+00D7, C3 97) and Division ÷ (U+00F7, C3 B7)
     // Often confusable with 'x' and '+'/'=', but strictly they are distinct.
