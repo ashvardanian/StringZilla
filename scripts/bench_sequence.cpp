@@ -421,9 +421,9 @@ void bench_intersections(environment_t const &env) {
     bench_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_SKYLAKE
-    auto skylake_call = intersect_strings_via_sz<sz_sequence_intersect_ice> {tokens_a, tokens_b, permute_a, permute_b};
-    bench_nullary(env, "sz_sequence_intersect_ice", base_call, skylake_call).log(base);
+#if SZ_USE_ICE
+    auto ice_call = intersect_strings_via_sz<sz_sequence_intersect_ice> {tokens_a, tokens_b, permute_a, permute_b};
+    bench_nullary(env, "sz_sequence_intersect_ice", base_call, ice_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = intersect_strings_via_sz<sz_sequence_intersect_sve> {tokens_a, tokens_b, permute_a, permute_b};
