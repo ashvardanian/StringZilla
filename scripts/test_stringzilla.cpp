@@ -763,535 +763,6 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
  *  1. Serial case-insensitive find (baseline)
  *  2. SIMD case-insensitive find (under test)
  *  3. Fold haystack + fold needle + regular sz_find (independent oracle)
- *
- *  Static unit tests covering specific edge cases: ASCII, Latin-1, Cyrillic, Greek, Armenian, Vietnamese,
- *  Georgian, Cherokee, Coptic, Glagolitic, ligatures, Eszett ↔ SS, multiplication/division signs,
- *  script transitions, and caseless scripts (CJK, Arabic, Hebrew, etc.).
- */
-void test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_t find_serial,
-                                   sz_utf8_case_insensitive_find_t find_simd, sz_utf8_case_fold_t case_fold,
-                                   sz_utf8_count_t utf8_count) {
-    std::printf("  - testing case-insensitive find equivalence...\n");
-
-    // Buffers for folded strings (case folding can expand, e.g., ß→ss, so 4x is safe)
-    constexpr std::size_t max_folded_size = 4096;
-    std::vector<char> folded_haystack_buf(max_folded_size);
-    std::vector<char> folded_needle_buf(max_folded_size);
-
-    struct test_case {
-        char const *haystack;
-        char const *needle;
-        char const *description;
-    };
-
-    // Static test cases covering all paths
-    test_case cases[] = {
-        // ASCII path tests
-        {"Hello World", "WORLD", "ASCII uppercase needle"},
-        {"Hello World", "world", "ASCII lowercase needle"},
-        {"the quick brown fox", "QUICK", "ASCII mid-string"},
-        {"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "mnop", "ASCII lowercase in uppercase"},
-        {"abcdefghijklmnopqrstuvwxyz", "MNOP", "ASCII uppercase in lowercase"},
-        {"Hello Hello Hello", "HELLO", "ASCII multiple matches"},
-
-        // Latin1 path tests (C3 lead byte characters: À-ÿ)
-        {"Das ist ein sch\xC3\xB6ner Tag",
-         "SCH\xC3\x96"
-         "NER",
-         "German umlaut o"},                                       // schöner
-        {"Caf\xC3\xA9 au lait", "CAF\xC3\x89", "French accent e"}, // café
-        {"\xC3\x9C"
-         "ber allen Gipfeln",
-         "\xC3\xBC"
-         "BER",
-         "German U umlaut"}, // Über
-        {"na\xC3\xAFve approach",
-         "NA\xC3\x8F"
-         "VE",
-         "French diaeresis i"}, // naïve
-        {"El ni\xC3\xB1o juega",
-         "NI\xC3\x91"
-         "O",
-         "Spanish n tilde"}, // niño
-        {"M\xC3\xA4"
-         "dchen und B\xC3\xBC"
-         "cher",
-         "M\xC3\x84"
-         "DCHEN",
-         "German a umlaut"},                                    // Mädchen
-        {"\xC3\x80 la carte", "\xC3\xA0 LA", "French A grave"}, // À la
-
-        // Cyrillic path tests (D0/D1 lead bytes)
-        {"\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xD0\xBC\xD0\xB8\xD1\x80",
-         "\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "Cyrillic lowercase needle"}, // Привет мир
-        {"\xD0\x9C\xD0\x9E\xD0\xA1\xD0\x9A\xD0\x92\xD0\x90 \xD1\x81\xD1\x82\xD0\xBE\xD0\xBB\xD0\xB8\xD1\x86"
-         "\xD0\xB0",
-         "\xD0\xBC\xD0\xbe\xD1\x81\xD0\xba\xD0\xB2\xD0\xB0", "Cyrillic uppercase haystack"}, // МОСКВА
-        {"\xD0\x94\xD0\xBE\xD0\xB1\xD1\x80\xD1\x8B\xD0\xB9 \xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8C",
-         "\xD0\x94\xD0\x9E\xD0\x91\xD0\xA0\xD0\xAB\xD0\x99", "Cyrillic mixed case"}, // Добрый
-
-        // Cyrillic Extended (D2/D3 lead bytes)
-        {"\xD2\x90\xD2\x90", "\xD2\x91\xD2\x91", "Cyrillic Extended Ґ->ґ"},
-        {"\xD3\x80\xD3\x80", "\xD3\x8F\xD3\x8F", "Cyrillic Extended Ӏ->ӏ"}, // Palochka
-        {"\xD0\x9F\xD2\x90\xD3\x80", "\xD0\xBF\xD2\x91\xD3\x8F", "Cyrillic Mixed D0/D2/D3"},
-
-        // Central European (Latin Extended-A C4/C5)
-        {"\xC4\x84\xC4\x86\xC4\x98\xC5\x81\xC5\x83\xC3\x93\xC5\x9A\xC5\xB9\xC5\xBB",
-         "\xC4\x85\xC4\x87\xC4\x99\xC5\x82\xC5\x84\xC3\xB3\xC5\x9B\xC5\xBA\xC5\xBC",
-         "Polish uppercase to lowercase (ĄĆĘŁŃÓŚŹŻ)"},
-
-        // Turkish
-        {"\xC4\x9E\xC5\x9E", "\xC4\x9F\xC5\x9F", "Turkish ĞŞ -> ğş"},
-
-        // Mixed script tests
-        {"Hello \xD0\x9C\xD0\xB8\xD1\x80 World", "\xD0\x9C\xD0\x98\xD0\xA0", "Cyrillic in mixed string"}, // Мир
-        {"\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0 is beautiful",
-         "\xD0\x9C\xD0\x9E\xD0\xA1\xD0\x9A\xD0\x92\xD0\x90", "Cyrillic + ASCII"}, // Москва
-
-        // Greek path tests (CE/CF lead bytes)
-        {"\xCE\x9A\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1",
-         "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1",
-         "Greek uppercase to lowercase"}, // Καλημέρα
-        {"\xCE\x91\xCE\x92\xCE\x93\xCE\x94\xCE\x95", "\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5",
-         "Greek ΑΒΓΔΕ to αβγδε"},
-
-        // Vietnamese path tests (C3/C6/E1 lead bytes)
-        // C6 A0 (Ơ) -> C6 A1 (ơ)
-        {"\xC6\xA0\x20", "\xC6\xA1", "Vietnamese Ơ to ơ"},
-        {"\xC6\xA1\x20", "\xC6\xA0", "Vietnamese ơ to Ơ"},
-        // C6 AF (Ư) -> C6 B0 (ư)
-        {"\xC6\xAF\x20", "\xC6\xB0", "Vietnamese Ư to ư"},
-        {"\xC6\xB0\x20", "\xC6\xAF", "Vietnamese ư to Ư"},
-
-        // Latin Extended Additional (E1 B8-BB)
-        // E1 B8 80 (Ḁ) -> E1 B8 81 (ḁ)
-        {"\xE1\xB8\x80", "\xE1\xB8\x81", "Vietnamese Ḁ to ḁ"},
-        // E1 B8 BE (Ḿ) -> E1 B8 BF (ḿ)
-        {"\xE1\xB8\xBE", "\xE1\xB8\xBF", "Vietnamese Ḿ to ḿ"},
-
-        // Mixed Vietnamese
-        // Ơ (C6 A0) + Ḁ (E1 B8 80) + Ư (C6 AF)
-        {"\xC6\xA0\xE1\xB8\x80\xC6\xAF", "\xC6\xA1\xE1\xB8\x81\xC6\xB0", "Mixed Vietnamese ƠḀƯ -> ơḁư"},
-        {"\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5", "\xCE\x91\xCE\x92\xCE\x93\xCE\x94\xCE\x95",
-         "Greek αβγδε to ΑΒΓΔΕ"},
-        // Greek with CE/CF boundary crossing (π-ω are CF 80-89)
-        {"\xCE\xA0\xCE\xA1\xCE\xA3\xCE\xA4", "\xCF\x80\xCF\x81\xCF\x83\xCF\x84", "Greek ΠΡΣΤ to πρστ"},
-        {"\xCF\x80\xCF\x81\xCF\x83\xCF\x84", "\xCE\xA0\xCE\xA1\xCE\xA3\xCE\xA4", "Greek πρστ to ΠΡΣΤ"},
-        // Final sigma tests (ς CF 82 should match σ CF 83 and Σ CE A3)
-        {"\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\xCE\xBF\xCF\x82", "\xCE\x9A\xCE\x8C\xCE\xA3\xCE\x9C\xCE\x9F\xCE\xA3",
-         "Greek κόσμος vs ΚΟΣΜΟΣ"}, // final sigma
-        {"\xCE\xBB\xCF\x8C\xCE\xB3\xCE\xBF\xCF\x82", "\xCE\x9B\xCE\x8C\xCE\x93\xCE\x9F\xCE\xA3",
-         "Greek λόγος vs ΛΟΓΟΣ"},
-        {"\xCF\x83\xCE\xBF\xCF\x86\xCF\x8C\xCF\x82", "\xCE\xA3\xCE\x9F\xCE\xA6\xCE\x8C\xCE\xA3",
-         "Greek σοφός vs ΣΟΦΟΣ"},
-
-        // Armenian Fuzz Regression
-        // Needle "nԱԲՐԵշ" (Mixed case)
-        {"\x6E\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", "\x6E\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE",
-         "Armenian Fuzz Regression"},
-        // Ech-Yiwn (U+0587) expansion check
-        {"\xD6\x87", "\xD5\xA5\xD6\x82", "Ech-Yiwn U+0587 -> ech yiwn"},
-        // Greek + ASCII mixed
-        {"Hello \xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\xCE\xB5 World", "\xCE\x9A\xCE\x8C\xCE\xA3\xCE\x9C\xCE\x95",
-         "Greek in ASCII context"},
-
-        // Greek Corner Cases (Anomalies & Danger Zones)
-        // ---------------------------------------------
-        // Dialytika with Tonos 'ΐ' (CE 90) -> (Standard folding might expand or mapping is complex)
-        // Our implementation detects this as anomaly and falls back to serial.
-        // Serial usually folds 'ΐ' (U+0390) -> 'ΐ' (U+0390) if simple case folding,
-        // or to 'ι' + marks if full. Let's verify identity or simple mapping.
-        // Basic check: Find 'ΐ' in 'ΐ' (identity)
-        {"\xCE\x90", "\xCE\x90", "Greek ΐ (CE 90) identity"},
-        // Check mixed case if applicable (U+0390 is lowercase, U+03AA 'Ϊ' is upper but different)
-        // Let's check 'ΰ' (CE B0)
-        {"\xCE\xB0", "\xCE\xB0", "Greek ΰ (CE B0) identity"},
-
-        // Greek Symbols (CF 90-96, CF B0-B6)
-        // 'ϐ' (CF 90) -> 'β' (CE B2)
-        {"\xCF\x90", "\xCE\xB2", "Greek Symbol ϐ to β"},
-        {"\xCE\xB2", "\xCF\x90", "Greek Symbol β to ϐ"},
-        // 'ϑ' (CF 91) -> 'θ' (CE B8)
-        {"\xCF\x91", "\xCE\xB8", "Greek Symbol ϑ to θ"},
-        // 'ϕ' (CF 95) -> 'φ' (CF 86) -- Wait, standard 'φ' is CF 86
-        // 'ϖ' (CF 96) -> 'π' (CF 80)
-        {"\xCF\x96", "\xCF\x80", "Greek Symbol ϖ to π"},
-
-        // Micro Sign (U+00B5, C2 B5) ↔ Greek Mu (U+03BC, CE BC / U+039C, CE 9C)
-        // Cross-script folding: Micro Sign folds to Greek lowercase mu
-        // This is tricky because Micro Sign is in Latin-1 Supplement (western_group)
-        // but must match Greek uppercase/lowercase Mu
-        {"\xC2\xB5", "\xCE\xBC", "Micro Sign to Greek lowercase mu"},
-        {"\xCE\xBC", "\xC2\xB5", "Greek lowercase mu to Micro Sign"},
-        {"\xC2\xB5", "\xCE\x9C", "Micro Sign to Greek uppercase MU"},
-        {"\xCE\x9C", "\xC2\xB5", "Greek uppercase MU to Micro Sign"},
-        // Multiple occurrences
-        {"\xC2\xB5\xC2\xB5", "\xCE\xBC\xCE\xBC", "Two Micro Signs to two Greek mu"},
-        {"\xC2\xB5\xC2\xB5", "\xCE\x9C\xCE\x9C", "Two Micro Signs to two Greek MU"},
-        // Mixed Micro Sign with Greek context
-        {"\xCE\x91\xC2\xB5\xCE\xB1", "\xCE\xB1\xCE\xBC\xCE\xB1", "Greek+Micro+Greek: ΑµΑ to αμα"},
-        // Micro Sign in ASCII context (Western Europe kernel selection)
-        {"Test \xC2\xB5 unit", "TEST \xCE\xBC UNIT", "Micro Sign in ASCII context"},
-
-        // Armenian Edge Cases
-        // -------------------
-        // Ligature 'և' (D5 87) -> "եւ" (D5 A5 D6 82) (ech + yiwn)
-        // This expands from 2 bytes to 4 bytes.
-        {"\xD5\x87", "\xD5\xA5\xD6\x82", "Armenian Ligature և to եւ"},
-        {"\xD5\xA5\xD6\x82", "\xD5\x87", "Armenian եւ to Ligature և"},
-
-        // Ligature Men-Now 'ﬓ' (FB 13) -> "մն" (D5 B4 D5 B6)
-        {"\xEF\xAC\x93", "\xD5\xB4\xD5\xB6", "Armenian Ligature ﬓ to մն"},
-        {"\xD5\xB4\xD5\xB6", "\xEF\xAC\x93", "Armenian մն to Ligature ﬓ"},
-
-        // Ligature Men-Ech 'ﬔ' (FB 14) -> "մե" (D5 B4 D5 A5)
-        {"\xEF\xAC\x94", "\xD5\xB4\xD5\xA5", "Armenian Ligature ﬔ to մե"},
-
-        // Armenian path tests (D4/D5/D6 lead bytes)
-        // Uppercase: D4 B1-BF (Ա-Խ), D5 80-96 (Ծ-Ֆ) -> Lowercase: D5 A1-BF, D6 80-86
-        {"\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xB5\xD5\xBE",
-         "Armenian Բdelays to delays"}, // Barev
-        {"\xD5\xA2\xD5\xA1\xD6\x80\xD5\xB5\xD5\xBE", "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E",
-         "Armenian delays to ԲDELAYS"},
-        {"\xD4\xB1\xD4\xB2\xD4\xB3\xD4\xB4\xD4\xB5", "\xD5\xA1\xD5\xA2\xD5\xA3\xD5\xA4\xD5\xA5",
-         "Armenian DELAYS to delays"},
-        {"\xD5\xA1\xD5\xA2\xD5\xA3\xD5\xA4\xD5\xA5", "\xD4\xB1\xD4\xB2\xD4\xB3\xD4\xB4\xD4\xB5",
-         "Armenian delays to ABGDE"},
-        // Armenian with D5/D6 boundary (Ֆ D5 96 -> ֆ D6 86)
-        {"\xD5\x94\xD5\x95\xD5\x96", "\xD5\xB4\xD5\xB5\xD6\x86", "Armenian ՔՕՖ to qoف"},
-        // Armenian + ASCII mixed
-        {"Hello \xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE World", "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E",
-         "Armenian in ASCII context"},
-
-        // Vietnamese/Latin Extended Additional path tests (E1 B8-BB lead bytes)
-        // Even third byte = uppercase, odd = lowercase
-        {"\xE1\xBA\xA0\xE1\xBA\xA2\xE1\xBA\xA4", "\xE1\xBA\xA1\xE1\xBA\xA3\xE1\xBA\xA5", "Vietnamese ẠẢẤ to ạảấ"},
-        {"\xE1\xBA\xA1\xE1\xBA\xA3\xE1\xBA\xA5", "\xE1\xBA\xA0\xE1\xBA\xA2\xE1\xBA\xA4", "Vietnamese ạảấ to ẠẢẤ"},
-        // Vietnamese with ASCII
-        {"Vi\xE1\xBB\x87t Nam", "VI\xE1\xBB\x86T NAM", "Vietnamese Việt to VIỆT"},
-        {"VI\xE1\xBB\x86T NAM", "vi\xE1\xBB\x87t nam", "Vietnamese VIỆT to việt"},
-        // Latin Extended Additional - Ṁ (E1 B9 80) / ṁ (E1 B9 81)
-        {"\xE1\xB9\x80"
-         "acedonia",
-         "\xE1\xB9\x81"
-         "ACEDONIA",
-         "Ṁacedonia to ṁACEDONIA"},
-        // Mixed Vietnamese + ASCII
-        {"Hello \xE1\xBB\x86 World", "\xE1\xBB\x87", "Vietnamese Ệ vs ệ in ASCII"},
-
-        // Latin Extended-B C6 range tests (U+0180-U+01BF)
-        // +1 folding patterns (16 chars that stay within C6)
-        {"\xC6\x82\xC6\x84", "\xC6\x83\xC6\x85", "C6 +1: Ƃ Ƅ to ƃ ƅ"},
-        {"\xC6\x83\xC6\x85", "\xC6\x82\xC6\x84", "C6 +1: ƃ ƅ to Ƃ Ƅ"},
-        // Vietnamese Horn letters - important for Vietnamese text
-        {"\xC6\xA0\xC6\xAF", "\xC6\xA1\xC6\xB0", "C6 Vietnamese: Ơ Ư to ơ ư"},
-        {"\xC6\xA1\xC6\xB0", "\xC6\xA0\xC6\xAF", "C6 Vietnamese: ơ ư to Ơ Ư"},
-        {"Vi\xC6\xA1t Nam", "VI\xC6\xA0T NAM", "C6 Vietnamese: Việt Nam mixed"},
-        // More +1 patterns
-        {"\xC6\x87\xC6\x8B\xC6\x91", "\xC6\x88\xC6\x8C\xC6\x92", "C6 +1 odd: Ƈ Ƌ Ƒ to ƈ ƌ ƒ"},
-        {"\xC6\xA7\xC6\xB3\xC6\xB5", "\xC6\xA8\xC6\xB4\xC6\xB6", "C6 +1 odd: Ƨ Ƴ Ƶ to ƨ ƴ ƶ"},
-        {"\xC6\x98\xC6\xAC\xC6\xB8\xC6\xBC", "\xC6\x99\xC6\xAD\xC6\xB9\xC6\xBD", "C6 +1 even: Ƙ Ƭ Ƹ Ƽ to ƙ ƭ ƹ ƽ"},
-
-        // C6 cross-block mappings (C6→C9) - West African/Azerbaijani languages
-        {"\xC6\x81", "\xC9\x93", "C6→C9: Ɓ to ɓ (Hausa/Fula)"},
-        {"\xC9\x93", "\xC6\x81", "C6→C9: ɓ to Ɓ (reverse)"},
-        {"\xC6\x86", "\xC9\x94", "C6→C9: Ɔ to ɔ (Akan/Ewe)"},
-        {"\xC6\x8F", "\xC9\x99", "C6→C9: Ə to ə (Azerbaijani schwa)"},
-        {"\xC9\x99", "\xC6\x8F", "C6→C9: ə to Ə (Azerbaijani reverse)"},
-        {"Az\xC9\x99rbaycan", "AZ\xC6\x8FRBAYCAN", "C6 Azerbaijani: Azərbaycan mixed"},
-        {"\xC6\x89\xC6\x8A", "\xC9\x96\xC9\x97", "C6→C9: Ɖ Ɗ to ɖ ɗ (Ewe/Hausa)"},
-        {"\xC6\x90\xC6\x93\xC6\x94", "\xC9\x9B\xC9\xA0\xC9\xA3", "C6→C9: Ɛ Ɠ Ɣ to ɛ ɠ ɣ (African)"},
-        {"\xC6\x96\xC6\x97", "\xC9\xA9\xC9\xA8", "C6→C9: Ɩ Ɨ to ɩ ɨ"},
-        {"\xC6\x9C\xC6\x9D\xC6\x9F", "\xC9\xAF\xC9\xB2\xC9\xB5", "C6→C9: Ɯ Ɲ Ɵ to ɯ ɲ ɵ"},
-
-        // C6 cross-block mappings (C6→CA) - IPA/African
-        {"\xC6\xA6", "\xCA\x80", "C6→CA: Ʀ to ʀ (Old Norse/IPA)"},
-        {"\xCA\x80", "\xC6\xA6", "C6→CA: ʀ to Ʀ (reverse)"},
-        {"\xC6\xA9", "\xCA\x83", "C6→CA: Ʃ to ʃ (African/IPA)"},
-        {"\xC6\xAE\xC6\xB1\xC6\xB2", "\xCA\x88\xCA\x8A\xCA\x8B", "C6→CA: Ʈ Ʊ Ʋ to ʈ ʊ ʋ"},
-        {"\xC6\xB7", "\xCA\x92", "C6→CA: Ʒ to ʒ (Skolt Sami/IPA)"},
-        {"\xCA\x92", "\xC6\xB7", "C6→CA: ʒ to Ʒ (reverse)"},
-
-        // C6 cross-block mapping (C6→C7) - just one character
-        {"\xC6\x8E", "\xC7\x9D", "C6→C7: Ǝ to ǝ (Pan-Nigerian)"},
-        {"\xC7\x9D", "\xC6\x8E", "C6→C7: ǝ to Ǝ (reverse)"},
-
-        // C6 mixed with ASCII
-        {"Hello \xC6\x8F World", "\xC9\x99", "C6 schwa in ASCII: Ə vs ə"},
-        {"Test \xC6\xA0\xC6\xAF text", "TEST \xC6\xA1\xC6\xB0 TEXT", "C6 Vietnamese in ASCII context"},
-        {"Word\xC6\x81word", "WORD\xC9\x93WORD", "C6→C9 in ASCII sandwich"},
-
-        // Georgian path tests (E1 82/83 for Asomtavruli/Mkhedruli, E1 B2 for Mtavruli, E2 B4 for lowercase)
-        // Uppercase Asomtavruli Ⴀ (E1 82 A0) -> lowercase ⴀ (E2 B4 80)
-        // Mkhedruli ა (E1 83 90) is already lowercase, Mtavruli Ა (E1 B2 90) is uppercase
-        {"\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2", "\xE2\xB4\x80\xE2\xB4\x81\xE2\xB4\x82",
-         "Georgian Ⴀ Ⴁ Ⴂ to ⴀⴁⴂ (Asomtavruli upper to lower)"},
-        {"\xE2\xB4\x80\xE2\xB4\x81\xE2\xB4\x82", "\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2",
-         "Georgian ⴀⴁⴂ to ႠႡႢ (lower to Asomtavruli upper)"},
-        {"\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92", "\xE1\x83\x90\xE1\x83\x91\xE1\x83\x92",
-         "Georgian Ა Ბ Გ to აბგ (Mtavruli upper to Mkhedruli lower)"},
-        {"\xE1\x83\x90\xE1\x83\x91\xE1\x83\x92", "\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92",
-         "Georgian აბგ to ᲐᲑᲒ (Mkhedruli lower to Mtavruli upper)"},
-        // Georgian + ASCII mixed
-        {"Hello \xE1\x83\x90\xE1\x83\x91\xE1\x83\x92 World", "\xE1\xB2\x90\xE1\xB2\x91\xE1\xB2\x92",
-         "Georgian აბგ in ASCII context"},
-
-        // Cherokee path tests (E1 8E/8F for uppercase, EA AD/AE/AF for lowercase supplement)
-        // Cherokee is unusual: lowercase folds TO uppercase (opposite of most scripts!)
-        // Uppercase Ꭰ (E1 8E A0) is the fold target of lowercase ꭰ (EA AD B0)
-        {"\xE1\x8E\xA0\xE1\x8E\xA1\xE1\x8E\xA2", "\xEA\xAD\xB0\xEA\xAD\xB1\xEA\xAD\xB2",
-         "Cherokee Ꭰ Ꭱ Ꭲ vs ꭰꭱꭲ (upper vs lower supplement)"},
-        {"\xEA\xAD\xB0\xEA\xAD\xB1\xEA\xAD\xB2", "\xE1\x8E\xA0\xE1\x8E\xA1\xE1\x8E\xA2",
-         "Cherokee ꭰꭱꭲ vs ᎠᎡᎢ (lower supplement vs upper)"},
-        // Cherokee + ASCII mixed
-        {"Hello \xE1\x8E\xA0\xE1\x8E\xA1 World", "\xEA\xAD\xB0\xEA\xAD\xB1", "Cherokee ᎠᎡ in ASCII context"},
-
-        // Coptic path tests (E2 B2/B3 lead bytes) - separate script from Greek
-        // Uppercase Ϣ (E2 B2 A2) -> lowercase ϣ (E2 B2 A3)
-        {"\xE2\xB2\xA0\xE2\xB2\xA2\xE2\xB2\xA4", "\xE2\xB2\xA1\xE2\xB2\xA3\xE2\xB2\xA5",
-         "Coptic Ⲡ Ⲣ Ⲥ to ⲡⲣⲥ (upper to lower)"},
-        {"\xE2\xB2\xA1\xE2\xB2\xA3\xE2\xB2\xA5", "\xE2\xB2\xA0\xE2\xB2\xA2\xE2\xB2\xA4",
-         "Coptic ⲡⲣⲥ to ⲠⲢⲤ (lower to upper)"},
-
-        // Glagolitic path tests (E2 B0 80-BF for uppercase, E2 B1 80-9F for lowercase)
-        // Uppercase Ⰰ (E2 B0 80) -> lowercase ⰰ (E2 B1 80)
-        {"\xE2\xB0\x80\xE2\xB0\x81\xE2\xB0\x82", "\xE2\xB1\x80\xE2\xB1\x81\xE2\xB1\x82",
-         "Glagolitic Ⰰ Ⰱ Ⰲ to ⰰⰱⰲ (upper to lower)"},
-        {"\xE2\xB1\x80\xE2\xB1\x81\xE2\xB1\x82", "\xE2\xB0\x80\xE2\xB0\x81\xE2\xB0\x82",
-         "Glagolitic ⰰⰱⰲ to ႠჁჂ (lower to upper)"},
-
-        // Caseless script tests (should trigger fast binary search path)
-        // These needles contain NO bicameral characters, so sz_utf8_is_fully_caseless_ returns true
-        // Arabic (right-to-left, no textual form in comments)
-        {"\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85", "\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85",
-         "Arabic caseless exact match"},
-        // Hebrew (right-to-left, no textual form in comments)
-        {"\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", "Hebrew caseless exact match"},
-        // CJK - 中文 (zhōngwén)
-        {"\xE4\xB8\xAD\xE6\x96\x87\xE6\xB5\x8B\xE8\xAF\x95", "\xE4\xB8\xAD\xE6\x96\x87",
-         "CJK 中文测试 find 中文 (caseless)"},
-        // Japanese Hiragana - あいう (aiū)
-        {"\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86\xE3\x81\x88\xE3\x81\x8A", "\xE3\x81\x84\xE3\x81\x86",
-         "Hiragana あいうえお find いう (caseless)"},
-        // Japanese Katakana - アイウ (aiu)
-        {"\xE3\x82\xA2\xE3\x82\xA4\xE3\x82\xA6", "\xE3\x82\xA2\xE3\x82\xA4", "Katakana アイウ find アイ (caseless)"},
-        // Thai - สวัสดี (sawatdee)
-        {"\xE0\xB8\xAA\xE0\xB8\xA7\xE0\xB8\xB1\xE0\xB8\xAA\xE0\xB8\x94\xE0\xB8\xB5",
-         "\xE0\xB8\xAA\xE0\xB8\xA7\xE0\xB8\xB1\xE0\xB8\xAA", "Thai สวัสดี find สวัส (caseless)"},
-        // Devanagari - नमस्ते (namaste)
-        {"\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\xA4\xE0\xA5\x87", "\xE0\xA4\xA8\xE0\xA4\xAE",
-         "Devanagari नमस्ते find नम (caseless)"},
-        // Korean Hangul - 안녕하세요 (annyeonghaseyo)
-        {"\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94", "\xEB\x85\x95\xED\x95\x98",
-         "Hangul 안녕하세요 find 녕하 (caseless)"},
-        // Emoji - caseless symbols
-        {"\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82", "\xF0\x9F\x98\x81", "Emoji 😀😁😂 find 😁 (caseless)"},
-        // Mixed caseless + cased: CJK haystack with ASCII needle (should NOT match)
-        {"\xE4\xB8\xAD\xE6\x96\x87", "abc", "CJK 中文 vs ASCII abc (not found)"},
-        // Numbers and punctuation (caseless)
-        {"12345!@#$%", "345", "Numbers/punctuation caseless match"},
-
-        // Script-crossing edge cases
-        {"\xCE\xB1\xCE\xB2\xCE\xB3"
-         "ABC",
-         "\xCE\x91\xCE\x92\xCE\x93"
-         "abc",
-         "Greek to ASCII transition"},
-        {"ABC\xCE\xB1\xCE\xB2\xCE\xB3", "abc\xCE\x91\xCE\x92\xCE\x93", "ASCII to Greek transition"},
-        {"ABC\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82XYZ",
-         "abc\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2xyz", "ASCII-Cyrillic-ASCII sandwich"},
-
-        // Eszett tests (ß ↔ SS)
-        {"stra\xC3\x9F"
-         "e",
-         "STRASSE", "Eszett to SS"}, // straße
-        {"STRASSE",
-         "stra\xC3\x9F"
-         "e",
-         "SS to eszett"},                          // reverse
-        {"gro\xC3\x9F", "GROSS", "Eszett at end"}, // groß
-        {"Fu\xC3\x9F"
-         "ball spielen",
-         "FUSSBALL", "Eszett mid-word"}, // Fußball
-
-        // Long S tests (ſ U+017F, C5 BF) - folds to regular 's' (U+0073)
-        // This is a 2-byte → 1-byte length-changing fold
-        {"Progre\xC5\xBF\xC5\xBF", "PROGRESS", "Long S to regular S"},                 // Progreſſ → PROGRESS
-        {"PROGRESS", "progre\xC5\xBF\xC5\xBF", "Regular S to Long S"},                 // reverse
-        {"\xC5\xBFtring", "STRING", "Long S at start"},                                // ſtring
-        {"cla\xC5\xBF\xC5\xBFic", "CLASSIC", "Long S mid-word"},                       // claſſic
-        {"\xC5\xBF", "s", "Single Long S to s"},                                       // ſ → s
-        {"\xC5\xBF", "S", "Single Long S to S"},                                       // ſ → S
-        {"s", "\xC5\xBF", "Single s to Long S"},                                       // s → ſ
-        {"Mi\xC5\xBF\xC5\xBFi\xC5\xBF\xC5\xBFippi", "MISSISSIPPI", "Long S multiple"}, // Miſſiſſippi
-
-        // Feminine ordinal indicator (ª U+00AA, C2 AA) - caseless, folds to itself
-        {"1\xC2\xAA planta", "1\xC2\xAA PLANTA", "Feminine ordinal with ASCII"}, // 1ª planta
-        {"2\xC2\xAA", "2\xC2\xAA", "Feminine ordinal exact match"},              // 2ª
-        {"La 3\xC2\xAA vez", "la 3\xC2\xAA VEZ", "Feminine ordinal mixed case"}, // La 3ª vez
-        // Masculine ordinal indicator (º U+00BA, C2 BA) - also caseless
-        {"1\xC2\xBA lugar", "1\xC2\xBA LUGAR", "Masculine ordinal with ASCII"}, // 1º lugar
-
-        // Multiplication × (C3 97) and Division ÷ (C3 B7) signs - must NOT be folded to each other
-        {"2\xC3\x97"
-         "3=6",
-         "\xC3\x97", "Find multiplication sign"}, // 2×3=6, find ×
-        {"6\xC3\xB7"
-         "2=3",
-         "\xC3\xB7", "Find division sign"}, // 6÷2=3, find ÷
-        {"2\xC3\x97"
-         "3=6",
-         "\xC3\xB7", "Mult not equal to div (not found)"}, // × ≠ ÷
-        {"6\xC3\xB7"
-         "2=3",
-         "\xC3\x97", "Div not equal to mult (not found)"},             // ÷ ≠ ×
-        {"\xC3\x97\xC3\xB7", "\xC3\x97", "Mult in mult-div sequence"}, // ×÷, find ×
-        {"\xC3\x97\xC3\xB7", "\xC3\xB7", "Div in mult-div sequence"},  // ×÷, find ÷
-        {"A\xC3\x97"
-         "B",
-         "a\xC3\x97"
-         "b",
-         "Mult with case-insensitive ASCII"}, // A×B vs a×b
-
-        // Not found cases
-        {"Hello World", "xyz", "Not found ASCII"},
-        {"\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "xyz", "Not found in Cyrillic"},
-        {"Hello World", "\xD0\x9F\xD1\x80\xD0\xB8", "Cyrillic needle not in ASCII"},
-
-        // Regression test: SIMD returned NULL when serial found match
-        // Needle contains: ǰ (Latin Extended-B), ẞ (capital sharp S expands to "ss"), Turkish ı, emoji
-        // Safe window is "Ithe" at bytes 31-34 which folds to "ithe"
-        // Bug triggered by specific prefix content with Armenian, Greek, CJK, ligatures
-        {"\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82"
-         "\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC\x85\x57\x6F\x72\x6C\x64"
-         "\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81"
-         "\x84\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4"
-         "\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF\x8C\xCF"
-         "\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21"
-         "\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0"
-         "\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F"
-         "\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3"
-         "\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85\xD0\x91\xC5\xBF"
-         "\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91"
-         "\x4D\x52\xE1\xBA\xA1\x4A\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F"
-         "\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3"
-         "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A"
-         "\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91\x66\x67\x6F\x41\xC3\x85"
-         "\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA"
-         "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF"
-         "\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F\xCE\x92"
-         "\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA"
-         "\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59\xEF\xAC\x86\x59\x56\x2E\x33\xC3"
-         "\xA9\x7A\x4C\x4C",
-         "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80"
-         "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49"
-         "\x74\x68\x65",
-         "Regression: complex needle with expansion chars in mixed-script haystack"},
-
-        // Edge cases
-        {"", "", "Both empty"},
-        {"Hello", "", "Empty needle"},
-        {"", "Hello", "Empty haystack"},
-        {"A", "a", "Single char match"},
-        {"a", "A", "Single char reverse"},
-    };
-
-    std::size_t num_cases = sizeof(cases) / sizeof(cases[0]);
-    std::size_t passed = 0;
-
-    for (std::size_t i = 0; i < num_cases; ++i) {
-        test_case const &tc = cases[i];
-        sz_size_t serial_matched_len = 0, simd_matched_len = 0;
-        sz_size_t h_len = std::strlen(tc.haystack);
-        sz_size_t n_len = std::strlen(tc.needle);
-
-        // Method 1 & 2: Case-insensitive find (serial vs SIMD)
-        sz_utf8_case_insensitive_needle_metadata_t serial_metadata = {}, simd_metadata = {};
-        sz_cptr_t serial_match =
-            find_serial(tc.haystack, h_len, tc.needle, n_len, &serial_metadata, &serial_matched_len);
-        sz_cptr_t simd_match = find_simd(tc.haystack, h_len, tc.needle, n_len, &simd_metadata, &simd_matched_len);
-
-        // Method 3: Fold haystack + fold needle + regular sz_find (independent oracle)
-        sz_size_t folded_h_len = case_fold(tc.haystack, h_len, folded_haystack_buf.data());
-        sz_size_t folded_n_len = case_fold(tc.needle, n_len, folded_needle_buf.data());
-        sz_cptr_t oracle_match = (folded_n_len == 0) ? folded_haystack_buf.data()
-                                                     : sz_find(folded_haystack_buf.data(), folded_h_len,
-                                                               folded_needle_buf.data(), folded_n_len);
-
-        // Compute oracle char offset first (before we overwrite the buffer)
-        sz_size_t oracle_char_offset =
-            oracle_match ? utf8_count(folded_haystack_buf.data(), oracle_match - folded_haystack_buf.data())
-                         : SZ_SIZE_MAX;
-
-        // Convert match positions to normalized character offsets by folding the prefix up to the match
-        // and counting characters in the folded result. This accounts for length-changing folds like ß→ss.
-        auto compute_folded_char_offset = [&](sz_cptr_t match, sz_cptr_t haystack_start) -> sz_size_t {
-            if (!match) return SZ_SIZE_MAX;
-            sz_size_t prefix_byte_len = match - haystack_start;
-            sz_size_t folded_prefix_len = case_fold(haystack_start, prefix_byte_len, folded_haystack_buf.data());
-            return utf8_count(folded_haystack_buf.data(), folded_prefix_len);
-        };
-
-        sz_size_t serial_folded_char_offset = compute_folded_char_offset(serial_match, tc.haystack);
-        sz_size_t simd_folded_char_offset = compute_folded_char_offset(simd_match, tc.haystack);
-
-        // Check implementations agree on normalized character position and length
-        bool implementations_agree = (serial_folded_char_offset == simd_folded_char_offset);
-        bool lengths_agree = (serial_matched_len == simd_matched_len);
-        // For oracle, we only check existence agreement because one-to-many folds (like ligatures "ﬁ"→"fi")
-        // can cause the case-insensitive search and fold+find to locate different matches in the haystack.
-        // For example, if haystack has both "ﬁ" and "fi", case-insensitive search finds whichever comes
-        // first in the original, while fold+find finds whichever comes first in the folded version.
-        bool oracle_agrees = (serial_match != SZ_NULL_CHAR) == (oracle_match != SZ_NULL_CHAR);
-
-        if (!implementations_agree || !lengths_agree || !oracle_agrees) {
-            std::fprintf(stderr, "FAIL: %s\n", tc.description);
-            std::fprintf(stderr, "  Haystack (%zu bytes): ", h_len);
-            for (std::size_t j = 0; j < h_len && j < 50; ++j)
-                std::fprintf(stderr, "%02X ", (unsigned char)tc.haystack[j]);
-            std::fprintf(stderr, "\n  Needle (%zu bytes): ", n_len);
-            for (std::size_t j = 0; j < n_len && j < 50; ++j)
-                std::fprintf(stderr, "%02X ", (unsigned char)tc.needle[j]);
-            std::fprintf(stderr, "\n");
-            std::fprintf(stderr, "  Serial: folded_char_offset=%zu, len=%zu\n",
-                         serial_folded_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_folded_char_offset,
-                         serial_matched_len);
-            std::fprintf(stderr, "  SIMD: folded_char_offset=%zu, len=%zu\n",
-                         simd_folded_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_folded_char_offset,
-                         simd_matched_len);
-            std::fprintf(stderr, "  SIMD metadata: kernel_id=%u, safe_window.offset=%zu, safe_window.length=%zu\n",
-                         simd_metadata.kernel_id, simd_metadata.safe_window.offset, simd_metadata.safe_window.length);
-            std::fprintf(stderr, "  SIMD metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
-                         simd_metadata.folded_slice_length, simd_metadata.probe_second, simd_metadata.probe_third);
-            std::fprintf(stderr, "  SIMD metadata folded_slice: ");
-            for (sz_size_t j = 0; j < simd_metadata.folded_slice_length && j < 16; ++j)
-                std::fprintf(stderr, "%02X ", simd_metadata.folded_slice[j]);
-            std::fprintf(stderr, "\n");
-            std::fprintf(stderr, "  Oracle: char_offset=%zu (folded_h=%zu, folded_n=%zu)\n",
-                         oracle_char_offset == SZ_SIZE_MAX ? (sz_size_t)-1 : oracle_char_offset, folded_h_len,
-                         folded_n_len);
-            if (!oracle_agrees) {
-                // Re-fold to show folded content
-                case_fold(tc.haystack, h_len, folded_haystack_buf.data());
-                std::fprintf(stderr, "  Folded haystack: ");
-                for (std::size_t j = 0; j < folded_h_len && j < 50; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)folded_haystack_buf[j]);
-                std::fprintf(stderr, "\n  Folded needle: ");
-                for (std::size_t j = 0; j < folded_n_len && j < 50; ++j)
-                    std::fprintf(stderr, "%02X ", (unsigned char)folded_needle_buf[j]);
-                std::fprintf(stderr, "\n");
-            }
-            assert(implementations_agree && "Folded character offset mismatch between serial and SIMD");
-            assert(lengths_agree && "Length mismatch between serial and SIMD");
-            assert(oracle_agrees && "Oracle character offset disagrees with case-insensitive find");
-        }
-        ++passed;
-    }
-
-    std::printf("    passed %zu/%zu basic equivalence tests\n", passed, num_cases);
-}
-
-/**
  *  @brief  Fuzz tests case-insensitive UTF-8 substring search with random haystacks.
  *
  *  Uses three independent verification methods:
@@ -1661,8 +1132,6 @@ void test_equivalence() {
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_ci_find_equivalence(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
-                                  sz_utf8_case_fold_serial, sz_utf8_count_serial);
     test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice,
                            sz_utf8_case_fold_serial, sz_utf8_case_agnostic_serial, sz_utf8_case_agnostic_ice,
                            sz_utf8_find_nth_serial, sz_utf8_count_serial);
@@ -3317,138 +2786,431 @@ void test_utf8() {
         assert(case_fold("日本語") == "日本語"); // Japanese (no case)
         assert(case_fold("中文") == "中文");     // Chinese (no case)
     }
+}
 
-    // Test case-insensitive string comparison
-    {
-        // Equal strings (ASCII)
-        let_assert(auto r = sz_utf8_case_insensitive_order("hello", 5, "HELLO", 5), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("abc", 3, "ABC", 3), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("HeLLo WoRLd", 11, "hello world", 11), r == sz_equal_k);
+void test_utf8_case() {
+    std::printf("  - testing utf8 case-insensitive operations...\n");
 
-        // Less than
-        let_assert(auto r = sz_utf8_case_insensitive_order("abc", 3, "abd", 3), r == sz_less_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("ab", 2, "abc", 3), r == sz_less_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("ABC", 3, "abd", 3), r == sz_less_k);
+    using str = sz::string_view;
 
-        // Greater than
-        let_assert(auto r = sz_utf8_case_insensitive_order("abd", 3, "abc", 3), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("abcd", 4, "abc", 3), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("ABD", 3, "abc", 3), r == sz_greater_k);
+    // Equal strings (ASCII)
+    assert(str("hello").utf8_case_insensitive_order("HELLO") == sz_equal_k);
+    assert(str("abc").utf8_case_insensitive_order("ABC") == sz_equal_k);
+    assert(str("HeLLo WoRLd").utf8_case_insensitive_order("hello world") == sz_equal_k);
 
-        // German Eszett: "straße" (7 bytes) vs "STRASSE" (7 bytes) should be equal
-        let_assert(auto r = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("STRASSE", 7, "straße", 7), r == sz_equal_k);
+    // ASCII Extensions
+    let_assert(auto m = str("prefixhello").utf8_case_insensitive_find("HELLO"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("hello_suffix").utf8_case_insensitive_find("HELLO"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("mid_hello_mid").utf8_case_insensitive_find("HELLO"), m.offset == 4 && m.length == 5);
 
-        // Multiplication × (C3 97) and Division ÷ (C3 B7) must NOT be treated as case pairs
-        let_assert(auto r = sz_utf8_case_insensitive_order("×", 2, "×", 2), r == sz_equal_k); // × == ×
-        let_assert(auto r = sz_utf8_case_insensitive_order("÷", 2, "÷", 2), r == sz_equal_k); // ÷ == ÷
-        let_assert(auto r = sz_utf8_case_insensitive_order("×", 2, "÷", 2), r != sz_equal_k); // × ≠ ÷
-        let_assert(auto r = sz_utf8_case_insensitive_order("a×b", 4, "A×B", 4),
-                   r == sz_equal_k); // a×b == A×B
+    // Less than
+    assert(str("abc").utf8_case_insensitive_order("abd") == sz_less_k);
+    assert(str("ab").utf8_case_insensitive_order("abc") == sz_less_k);
+    assert(str("ABC").utf8_case_insensitive_order("abd") == sz_less_k);
 
-        // Empty strings
-        let_assert(auto r = sz_utf8_case_insensitive_order("", 0, "", 0), r == sz_equal_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("a", 1, "", 0), r == sz_greater_k);
-        let_assert(auto r = sz_utf8_case_insensitive_order("", 0, "a", 1), r == sz_less_k);
+    // Greater than
+    assert(str("abd").utf8_case_insensitive_order("abc") == sz_greater_k);
+    assert(str("abcd").utf8_case_insensitive_order("abc") == sz_greater_k);
+    assert(str("ABD").utf8_case_insensitive_order("abc") == sz_greater_k);
 
-        // Greek case folding
-        let_assert(auto r = sz_utf8_case_insensitive_order("αβγδ", 8, "ΑΒΓΔ", 8), r == sz_equal_k);
+    // Latin-1 Supplement & Latin Extended-A
+    // German Umlauts
+    assert(str("schöner").utf8_case_insensitive_order("SCHÖNER") == sz_equal_k);
+    let_assert(auto m = str("Das ist ein schöner Tag").utf8_case_insensitive_find("SCHÖNER"),
+               m.offset == 12 && m.length == 8); // 'ö' (U+00F6, C3 B6) is 2 bytes
 
-        // Cyrillic case folding
-        let_assert(auto r = sz_utf8_case_insensitive_order("привет", 12, "ПРИВЕТ", 12), r == sz_equal_k);
-    }
+    // French Accents
+    assert(str("café").utf8_case_insensitive_order("CAFÉ") == sz_equal_k);
+    assert(str("naïve").utf8_case_insensitive_order("NAÏVE") == sz_equal_k);
+    assert(str("À la carte").utf8_case_insensitive_order("à la CARTE") == sz_equal_k);
 
-    // Test case-insensitive substring search
-    {
-        sz_size_t matched_len;
-        sz_cptr_t haystack;
-        sz_cptr_t result;
-        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+    // Spanish/Portuguese
+    assert(str("niño").utf8_case_insensitive_order("NIÑO") == sz_equal_k);
 
-        // Basic ASCII search
-        haystack = "Hello World";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 11, "WORLD", 5, &metadata, &matched_len);
-        assert(result == haystack + 6 && matched_len == 5);
+    // Polish / Central European (Latin Extended-A)
+    // "ĄĆĘŁŃÓŚŹŻ" -> "ąćęłńóśźż"
+    // "Zaółć gęślą jaźń" (classic Polish pangram fragment)
+    assert(str("Zaółć gęślą jaźń").utf8_case_insensitive_order("ZAÓŁĆ GĘŚLĄ JAŹŃ") == sz_equal_k);
 
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 11, "world", 5, &metadata, &matched_len);
-        assert(result == haystack + 6 && matched_len == 5);
+    // German (Eszett 'ß')
+    // 'ß' (U+00DF, C3 9F) -> "ss"
+    // "straße" -> "strasse"
+    // "STRASSE" -> "strasse"
+    assert(str("straße").utf8_case_insensitive_order("STRASSE") == sz_equal_k);
+    assert(str("STRASSE").utf8_case_insensitive_order("straße") == sz_equal_k);
 
-        // Search at start
-        haystack = "HELLO";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 5, "hello", 5, &metadata, &matched_len);
-        assert(result == haystack && matched_len == 5);
+    // Uppercase 'ẞ' (U+1E9E, E1 BA 9E) -> "ss" or "ß" depending on fold
+    // StringZilla generally folds to lowercase first. 'ẞ' -> 'ss'.
+    // Haystack uses 'ß' (2 bytes), Needle "SS".
+    let_assert(auto m = str("straße").utf8_case_insensitive_find("SS"),
+               m.offset == 4 && m.length == 2); // Matches 'ß' (2 bytes)
 
-        // Not found
-        metadata = {};
-        result = sz_utf8_case_insensitive_find("Hello", 5, "xyz", 3, &metadata, &matched_len);
-        assert(result == SZ_NULL_CHAR);
+    // Eszett Context Extensions
+    let_assert(auto m = str("Eine straße").utf8_case_insensitive_find("SS"),
+               m.offset == 9 && m.length == 2); // "Eine " is 5 chars -> 5 bytes + "stra" (4) = 9
+    let_assert(auto m = str("straßebahn").utf8_case_insensitive_find("SS"), m.offset == 4 && m.length == 2);
+    let_assert(auto m = str("Eine straßebahn").utf8_case_insensitive_find("SS"), m.offset == 9 && m.length == 2);
 
-        // Empty needle
-        haystack = "Hello";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 5, "", 0, &metadata, &matched_len);
-        assert(result == haystack && matched_len == 0);
+    // Haystack "STRASSE", Needle "straße"
+    let_assert(auto m = str("STRASSE").utf8_case_insensitive_find("straße"),
+               m.offset == 0 && m.length == 7); // Matches "STRASSE" (7 bytes)
 
-        // Eszett matching: search for "ss" in "straße"
-        haystack = "straße";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 7, "SS", 2, &metadata, &matched_len);
-        assert(result != SZ_NULL_CHAR);
+    // "Maße" -> "MASSE"
+    let_assert(auto m = str("Maße").utf8_case_insensitive_find("MASSE"),
+               m.offset == 0 && m.length == 5); // Matches "Maße" (5 bytes)
 
-        // Search for "straße" in "STRASSE"
-        haystack = "STRASSE";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 7, "straße", 7, &metadata, &matched_len);
-        assert(result == haystack);
+    // Haystack: "Fuss" (4 bytes) "u", "s", "s"
+    // Needle: "Fuß" (4 bytes) "u", "ß"
+    // They are equal in order, and searching "Fuß" in "Fuss" works.
+    let_assert(auto m = str("Fuss").utf8_case_insensitive_find("Fuß"),
+               m.offset == 0 && m.length == 4); // Matches "Fuss"
 
-        // Greek case folding search
-        haystack = "αβγδ";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 8, "ΑΒΓΔ", 8, &metadata, &matched_len);
-        assert(result == haystack);
+    // Math Symbols
+    // Multiplication × (U+00D7, C3 97) and Division ÷ (U+00F7, C3 B7)
+    // Often confusable with 'x' and '+'/'=', but strictly they are distinct.
+    // They should equal themselves but not each other.
+    assert(str("×").utf8_case_insensitive_order("×") == sz_equal_k); // × == ×
+    assert(str("÷").utf8_case_insensitive_order("÷") == sz_equal_k); // ÷ == ÷
+    assert(str("×").utf8_case_insensitive_order("÷") != sz_equal_k); // × ≠ ÷
+    assert(str("a×b").utf8_case_insensitive_order("A×B") == sz_equal_k);
 
-        // Cyrillic search
-        haystack = "привет мир";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 19, "ПРИВЕТ", 12, &metadata, &matched_len);
-        assert(result == haystack);
+    // Math Context Extensions
+    let_assert(auto m = str("2×3=6").utf8_case_insensitive_find("×"), m.offset == 1 && m.length == 2);
+    let_assert(auto m = str("6÷2=3").utf8_case_insensitive_find("÷"), m.offset == 1 && m.length == 2);
 
-        // Mixed case in middle
-        haystack = "foo BAR baz";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 11, "bar", 3, &metadata, &matched_len);
-        assert(result == haystack + 4 && matched_len == 3);
+    // Empty strings
+    assert(str("").utf8_case_insensitive_order("") == sz_equal_k);
+    assert(str("a").utf8_case_insensitive_order("") == sz_greater_k);
+    assert(str("").utf8_case_insensitive_order("a") == sz_less_k);
 
-        // Turkish I test (İ -> i + dot)
-        // İ (U+0130, C4 B0) should match "i\u0307" (69 CC 87)
-        haystack = "İstanbul";
-        metadata = {};
-        // Search for "istanbul" (default verify might fail if it expects strict folding?)
-        // Actually, "İ" folds to "i\u0307". "i" folds to "i".
-        // So "İ" != "i".
-        // "İ" matches "i\u0307".
-        result = sz_utf8_case_insensitive_find(haystack, 9, "i\xcc\x87stanbul", 10, &metadata, &matched_len);
-        assert(result == haystack);
+    // Greek
+    // Basic casing: "αβγδ" vs "ΑΒΓΔ"
+    assert(str("αβγδ").utf8_case_insensitive_order("ΑΒΓΔ") == sz_equal_k);
+    let_assert(auto m = str("αβγδ").utf8_case_insensitive_find("ΑΒΓΔ"),
+               m.offset == 0 && m.length == 8); // 4 * 2 bytes = 8 bytes
 
-        // German Maße -> MASSE
-        haystack = "Maße";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 5, "MASSE", 5, &metadata, &matched_len);
-        // "ß" folds to "ss". "SS" folds to "ss". Match!
-        assert(result != SZ_NULL_CHAR);
-        assert(matched_len == 5); // Matched "Maße" (5 bytes) against "MASSE"
+    // Greek Context Extensions
+    // "prefix " is 7 bytes.
+    let_assert(auto m = str("prefix αβγδ").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
+    // " suffix" is 7 bytes. "αβγδ" is 8 bytes.
+    let_assert(auto m = str("αβγδ suffix").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("prefix αβγδ suffix").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
 
-        // Weird combination: "ß" vs "ss"
-        // Haystack "Fuss" (4 bytes), Needle "Fuß" (4 bytes)
-        // "Fuss" folds to "fuss". "Fuß" folds to "fuss".
-        haystack = "Fuss";
-        metadata = {};
-        result = sz_utf8_case_insensitive_find(haystack, 4, "Fu\xc3\x9f", 4, &metadata, &matched_len);
-        assert(result == haystack);
-    }
+    // Sigma: 'Σ' (U+03A3, CE A3) matches both 'σ' (U+03C3, CF 83, medial) and 'ς' (U+03C2, CF 82, final)
+    // Haystack: "ΟΔΥΣΣΕΥΣ" (Odysseus uppercase)
+    // Needle: "οδυσσευς" (lowercase with final sigma)
+    // Lengths match byte-for-byte in this case.
+    let_assert(auto m = str("ΟΔΥΣΣΕΥΣ").utf8_case_insensitive_find("οδυσσευς"),
+               m.offset == 0 && m.length == 16); // 8 chars * 2 bytes
+
+    // Micro Sign 'µ' (U+00B5) vs Greek Mu 'μ' (U+03BC) vs 'Μ' (U+039C)
+    // These should all fold to the same canonical representation.
+    let_assert(auto m = str("µ").utf8_case_insensitive_find("μ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("μ").utf8_case_insensitive_find("µ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("µ").utf8_case_insensitive_find("Μ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("Μ").utf8_case_insensitive_find("µ"), m.offset == 0 && m.length == 2);
+    // Context: Head/Tail/Middle
+    let_assert(auto m = str("123µ456").utf8_case_insensitive_find("123μ456"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("LongPrefix Μ Suffix").utf8_case_insensitive_find("Prefix µ Suf"),
+               m.offset == 4 && m.length == 13);
+
+    // Greek Lunate Epsilon 'ϵ' (U+03F5) -> 'ε' (U+03B5)
+    let_assert(auto m = str("ϵ").utf8_case_insensitive_find("ε"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("start ϵ end").utf8_case_insensitive_find("start ε end"), m.offset == 0 && m.length == 12);
+    let_assert(auto m = str("...ϵ...").utf8_case_insensitive_find(".ε."), m.offset == 2 && m.length == 4);
+    // Greek Kappa Symbol 'ϰ' (U+03F0) -> 'κ' (U+03BA)
+    let_assert(auto m = str("ϰ").utf8_case_insensitive_find("κ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("text ϰ").utf8_case_insensitive_find("text κ"), m.offset == 0 && m.length == 7); // 5 + 2
+    let_assert(auto m = str("ϰ text").utf8_case_insensitive_find("κ text"), m.offset == 0 && m.length == 7);
+
+    // Greek Symbols & Anomalies
+    // 'ϐ' (CF 90) -> 'β' (CE B2)
+    let_assert(auto m = str("ϐ").utf8_case_insensitive_find("β"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("alpha ϐ").utf8_case_insensitive_find("alpha β"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("ϐ beta").utf8_case_insensitive_find("β beta"), m.offset == 0 && m.length == 7);
+    // 'ϑ' (CF 91) -> 'θ' (CE B8)
+    let_assert(auto m = str("ϑ").utf8_case_insensitive_find("θ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("1ϑ2").utf8_case_insensitive_find("1θ2"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("prefix ϑ suffix").utf8_case_insensitive_find("fix θ suf"),
+               m.offset == 3 && m.length == 10);
+    // 'ϖ' (CF 96) -> 'π' (CF 80)
+    let_assert(auto m = str("ϖ").utf8_case_insensitive_find("π"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("AϖB").utf8_case_insensitive_find("AπB"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("Long string with ϖ in it").utf8_case_insensitive_find("th π in"),
+               m.offset == 14 && m.length == 8);
+
+    // Greek Context Extensions (Symbols)
+    let_assert(auto m = str("alpha ϖ omega").utf8_case_insensitive_find("π"), m.offset == 6 && m.length == 2);
+
+    // Dialytika with Tonos 'ΐ' (CE 90) -> Identity check mostly
+    assert(str("ΐ").utf8_case_insensitive_order("ΐ") == sz_equal_k);
+
+    // Greek in Mixed Scripts (boundary checks)
+    let_assert(auto m = str("ABCαβγ").utf8_case_insensitive_find("abcΑΒΓ"),
+               m.offset == 0 && m.length == 9); // 3 + 3*2 bytes
+
+    // Cyrillic
+    // Basic: "привет" vs "ПРИВЕТ"
+    assert(str("привет").utf8_case_insensitive_order("ПРИВЕТ") == sz_equal_k);
+    let_assert(auto m = str("привет мир").utf8_case_insensitive_find("ПРИВЕТ"),
+               m.offset == 0 && m.length == 12); // 6 chars * 2 bytes
+
+    // Cyrillic Context Extensions
+    // "Check " is 6 bytes.
+    let_assert(auto m = str("Check привет").utf8_case_insensitive_find("ПРИВЕТ"), m.offset == 6 && m.length == 12);
+    let_assert(auto m = str("привет check").utf8_case_insensitive_find("ПРИВЕТ"), m.offset == 0 && m.length == 12);
+
+    // Palochka 'Ӏ' (U+04C0, D3 80) -> 'ӏ' (U+04CF, D3 8F)
+    // Used in Caucasian languages. Case agnostic.
+    let_assert(auto m = str("Ӏ").utf8_case_insensitive_find("ӏ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("ӏ").utf8_case_insensitive_find("Ӏ"), m.offset == 0 && m.length == 2);
+
+    // Ukrainian Ґ (U+0490) -> ґ (U+0491)
+    let_assert(auto m = str("Ґ").utf8_case_insensitive_find("ґ"), m.offset == 0 && m.length == 2);
+
+    // Mixed Cyrillic
+    let_assert(auto m = str("Москва is beautiful").utf8_case_insensitive_find("МОСКВА"),
+               m.offset == 0 && m.length == 12); // 6 chars * 2
+
+    // Turkish
+    // Dotted 'İ' (U+0130, C4 B0) -> 'i' (ASCII) + combining dot (U+0307, CC 87)
+    // "İstanbul" (starts with İ) vs "i̇stanbul" (starts with i + dot)
+    // StringZilla finds canonical equivalence. 'İ' (2 bytes) matches 'i̇' (3 bytes).
+    let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("i̇stanbul"), // "i" + dot
+               m.offset == 0 && m.length == 9); // Haystack length is 2 (İ) + 7 (stanbul) = 9
+
+    // Turkish Context Extensions
+    // "Welcome to " is 11 bytes.
+    let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("i̇stanbul"),
+               m.offset == 11 && m.length == 9);
+    // "İstanbul city"
+    let_assert(auto m = str("İstanbul city").utf8_case_insensitive_find("i̇stanbul"), m.offset == 0 && m.length == 9);
+
+    // Undotted 'ı' (U+0131)
+    // Typically 'I' (ASCII) folds to 'i' (ASCII).
+    // 'ı' folds to... itself? Or 'I' if we are in Turkish mode?
+    // Default fold often treats 'ı' as distinct from 'i'.
+    // 'I' -> 'i'. 'ı' -> 'ı'. So 'I' != 'ı'.
+    let_assert(auto m = str("I").utf8_case_insensitive_find("ı"), m.offset == str::npos);
+
+    // Turkish Ğ (U+011E) -> ğ (U+011F) and Ş (U+015E) -> ş (U+015F)
+    let_assert(auto m = str("ĞŞ").utf8_case_insensitive_find("ğş"), m.offset == 0 && m.length == 4);
+
+    // Armenian
+    // Ligature: 'և' (U+0587, D6 87) -> 'ե' (U+0565, D5 A5) + 'ւ' (U+0582, D6 82)
+    // Haystack: "և" (2 bytes). Needle: "եւ" (2 + 2 = 4 bytes).
+    // Match should return haystack slice (2 bytes).
+    let_assert(auto m = str("և").utf8_case_insensitive_find("եւ"), m.offset == 0 && m.length == 2);
+
+    // Armenian Context Extensions
+    let_assert(auto m = str("abcև").utf8_case_insensitive_find("եւ"), m.offset == 3 && m.length == 2);
+    let_assert(auto m = str("ևabc").utf8_case_insensitive_find("եւ"), m.offset == 0 && m.length == 2);
+    // Reverse: Haystack "եւ" (4 bytes). Needle "և" (2 bytes).
+    // Match should return haystack slice (4 bytes).
+    let_assert(auto m = str("եւ").utf8_case_insensitive_find("և"), m.offset == 0 && m.length == 4);
+
+    // Armenian Context Extensions Reverse
+    let_assert(auto m = str("abcեւ").utf8_case_insensitive_find("և"), m.offset == 3 && m.length == 4);
+
+    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + 'ն' (U+0576)
+    // Haystack 3 bytes (EF AC 93). Needle 4 bytes (D5 B4 D5 B6).
+    let_assert(auto m = str("ﬓ").utf8_case_insensitive_find("մն"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("abcﬓdef").utf8_case_insensitive_find("մն"), m.offset == 3 && m.length == 3);
+    let_assert(auto m = str("ﬓ start").utf8_case_insensitive_find("մն start"), m.offset == 0 && m.length == 9);
+
+    // Ligature: 'ﬔ' (U+FB14 Men-Ech) -> 'մ' (U+0574) + 'ե' (U+0565)
+    let_assert(auto m = str("ﬔ").utf8_case_insensitive_find("մե"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Some ﬔ text").utf8_case_insensitive_find("մե"), m.offset == 5 && m.length == 3);
+    let_assert(auto m = str("End ﬔ").utf8_case_insensitive_find("End մե"), m.offset == 0 && m.length == 7);
+
+    // Ligature: 'ﬕ' (U+FB15 Men-Ini) -> 'մ' (U+0574) + 'ի' (U+056B)
+    let_assert(auto m = str("ﬕ").utf8_case_insensitive_find("մի"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("123 ﬕ 456").utf8_case_insensitive_find("123 մի 456"), m.offset == 0 && m.length == 11);
+    let_assert(auto m = str("prefixﬕ").utf8_case_insensitive_find("մի"), m.offset == 6 && m.length == 3);
+
+    // Ligature: 'ﬖ' (U+FB16 Vew-Now) -> 'վ' (U+057E) + 'ն' (U+0576)
+    let_assert(auto m = str("ﬖ").utf8_case_insensitive_find("վն"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Test ﬖ Case").utf8_case_insensitive_find("Test վն Case"), m.offset == 0 && m.length == 13);
+    let_assert(auto m = str("ﬖ").utf8_case_insensitive_find("վն"),
+               m.offset == 0 && m.length == 3); // Redundant but safe
+
+    // Ligature: 'ﬗ' (U+FB17 Men-Xeh) -> 'մ' (U+0574) + 'խ' (U+056D)
+    let_assert(auto m = str("ﬗ").utf8_case_insensitive_find("մխ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Mid ﬗ dle").utf8_case_insensitive_find("մխ"), m.offset == 4 && m.length == 3);
+    let_assert(auto m = str("Start ﬗ").utf8_case_insensitive_find("Start մխ"), m.offset == 0 && m.length == 9);
+
+    // Vietnamese / Latin Extended Additional
+    // 'Ạ' (U+1EA0, E1 BA A0) -> 'ạ' (U+1EA1, E1 BA A1)
+    let_assert(auto m = str("Ạ").utf8_case_insensitive_find("ạ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Word Ạ End").utf8_case_insensitive_find("Word ạ End"), m.offset == 0 && m.length == 12);
+    let_assert(auto m = str("PrefixẠ").utf8_case_insensitive_find("ạ"), m.offset == 6 && m.length == 3);
+
+    // 'Ấ' (U+1EA4, E1 BA A4) -> 'ấ' (U+1EA5, E1 BA A5)
+    let_assert(auto m = str("Ấ").utf8_case_insensitive_find("ấ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Ấ Start").utf8_case_insensitive_find("ấ Start"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("Mid Ấ dle").utf8_case_insensitive_find("Mid ấ dle"), m.offset == 0 && m.length == 11);
+
+    // Horn letters: Ơ (U+01A0, C6 A0) -> ơ (U+01A1, C6 A1), Ư (U+01AF, C6 AF) -> ư (U+01B0, C6 B0)
+    let_assert(auto m = str("ƠƯ").utf8_case_insensitive_find("ơư"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("Big ƠƯ Horns").utf8_case_insensitive_find("Big ơư Horns"),
+               m.offset == 0 && m.length == 14);
+    let_assert(auto m = str("Prefix ƠƯ").utf8_case_insensitive_find("ơư"), m.offset == 7 && m.length == 4);
+
+    // Latin Extended Additional: Ḁ (U+1E80, E1 BA 80) -> ḁ (U+1E81, E1 BA 81)
+    let_assert(auto m = str("Ḁ").utf8_case_insensitive_find("ḁ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Code Ḁ").utf8_case_insensitive_find("Code ḁ"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("StartḀ").utf8_case_insensitive_find("Startḁ"), m.offset == 0 && m.length == 8);
+
+    // Vietnamese Context Extensions
+    let_assert(auto m = str("xin chào Ḁ").utf8_case_insensitive_find("ḁ"), m.offset == 10 && m.length == 3);
+
+    // Special Symbols (Latin)
+    // Kelvin Sign 'K' (U+212A, E2 84 AA) -> 'k' (1 byte). Match length includes 3-byte 'K'.
+    let_assert(auto m = str("273 K").utf8_case_insensitive_find("273 k"), m.offset == 0 && m.length == 7);
+
+    // Reverse: Haystack "273 k" (5 bytes). Needle "273 K".
+    // Should match.
+    let_assert(auto m = str("273 k").utf8_case_insensitive_find("273 K"), m.offset == 0 && m.length == 5);
+
+    // Angstrom Sign 'Å' (U+212B) -> 'å' (U+00E5)
+    let_assert(auto m = str("Å").utf8_case_insensitive_find("å"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Å").utf8_case_insensitive_find("Å"), m.offset == 0 && m.length == 3);
+
+    // Context Extensions (Special Symbols)
+    let_assert(auto m = str("Temp: 273 K").utf8_case_insensitive_find("k"), m.offset == 10 && m.length == 3);
+    let_assert(auto m = str("Unit: Å").utf8_case_insensitive_find("å"), m.offset == 6 && m.length == 3);
+
+    // Long S 'ſ' (U+017F) -> 's'
+    // "Messer" vs "Meſſer"
+    // Haystack "Meſſer": M(1) e(1) ſ(2) ſ(2) e(1) r(1) = 8 bytes.
+    // Needle "MESSER": 6 bytes.
+    let_assert(auto m = str("Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Ein Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 4 && m.length == 8);
+    let_assert(auto m = str("Meſſer block").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
+
+    // Ligature 'ﬅ' (U+FB05 "st") -> "st"
+    // Haystack "ﬅ" (3 bytes). Needle "st" (2 bytes).
+    let_assert(auto m = str("ﬅ").utf8_case_insensitive_find("st"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Test ﬅ").utf8_case_insensitive_find("Test st"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("ﬅart").utf8_case_insensitive_find("start"), m.offset == 0 && m.length == 6);
+
+    // Ligature 'ﬆ' (U+FB06, EF AC 86) -> "st"
+    let_assert(auto m = str("ﬆ").utf8_case_insensitive_find("st"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("My ﬆyle").utf8_case_insensitive_find("My style"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("Faﬆ").utf8_case_insensitive_find("Fast"), m.offset == 0 && m.length == 5);
+
+    // Extended Ligature Contexts
+    // "Messer" vs "Meſſer" ('ſ' is U+017F, C5 BF)
+    let_assert(auto m = str("Das Meſſer schneidet").utf8_case_insensitive_find("MESSER"),
+               m.offset == 4 && m.length == 8); // "Das " (4) + "Meſſer" (8) = 12, start at 4
+    let_assert(auto m = str("Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Großes Meſſer").utf8_case_insensitive_find("MESSER"),
+               m.offset == 8 && m.length == 8); // "Großes " (4+2+1+1+1 = 9 bytes? No. 'ß' is 2 bytes.
+                                                // G(1)r(1)o(1)ß(2)e(1)s(1) (1) = 8 bytes. So offset 8.
+
+    // 'ﬅ' (U+FB05, EF AC 85)
+    let_assert(auto m = str("Ligature ﬅ check").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
+    let_assert(auto m = str("end with ﬅ").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
+
+    // 'ﬆ' (U+FB06, EF AC 86)
+    let_assert(auto m = str("Big ﬆ").utf8_case_insensitive_find("st"), m.offset == 4 && m.length == 3);
+
+    // Georgian
+    // Mtavruli (Upper) -> Mkhedruli (Lower)
+    // 'Ა' (U+1C90, E1 B2 90) -> 'ა' (U+10D0, E1 83 90)
+    // Both are 3 bytes in UTF-8.
+    // Georgian Context
+    let_assert(auto m = str("Text Ა").utf8_case_insensitive_find("ა"), m.offset == 5 && m.length == 3);
+
+    // Cherokee
+    // Cherokee Supplement (Lower, U+AB70, EA AD B0, 'ꭰ') -> Cherokee (Upper, U+13A0, E1 8E A0, 'Ꭰ')
+    // Both 3 bytes.
+    let_assert(auto m = str("ꭰ").utf8_case_insensitive_find("Ꭰ"), m.offset == 0 && m.length == 3);
+
+    // Cherokee Context
+    let_assert(auto m = str("Syllable ꭰ").utf8_case_insensitive_find("Ꭰ"), m.offset == 9 && m.length == 3);
+
+    // Coptic (Extended)
+    // Coptic Ⲡ (U+2C80, E2 B2 80) -> ⲡ (U+2C81, E2 B2 81)
+    let_assert(auto m = str("Ⲡ").utf8_case_insensitive_find("ⲡ"), m.offset == 0 && m.length == 3);
+
+    // Glagolitic
+    // Ⰰ (U+2C00, E2 B0 80) -> ⰰ (U+2C30, E2 B0 B0)
+    let_assert(auto m = str("Ⰰ").utf8_case_insensitive_find("ⰰ"), m.offset == 0 && m.length == 3);
+
+    // Glagolitic Context
+    let_assert(auto m = str("Letter Ⰰ").utf8_case_insensitive_find("ⰰ"), m.offset == 7 && m.length == 3);
+
+    // Caseless Scripts (CJK, Arabic, Hebrew, Emoji)
+    // These generally don't fold, so they must match exactly or effectively be case-insensitive by identity.
+
+    // Arabic "Salam"
+    assert(str("السلام").utf8_case_insensitive_order("السلام") == sz_equal_k);
+
+    // Hebrew "Shalom"
+    assert(str("שלום").utf8_case_insensitive_order("שלום") == sz_equal_k);
+
+    // Numbers & Punctuation
+    let_assert(auto m = str("12345!@#$%").utf8_case_insensitive_find("345"), m.offset == 2 && m.length == 3);
+
+    // Negative Tests
+    // Not found in Cyrillic
+    let_assert(auto m = str("Привет").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
+    // Not found Cyrillic in ASCII
+    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("При"), m.offset == str::npos);
+
+    // CJK "Chinese"
+    let_assert(auto m = str("中文测试").utf8_case_insensitive_find("中文"), m.offset == 0 && m.length == 6);
+
+    // Emoji
+    let_assert(auto m = str("😀😁😂").utf8_case_insensitive_find("😁"), m.offset == 4 && m.length == 4);
+
+    // Emoji Context
+    let_assert(auto m = str("smile 😀😁😂").utf8_case_insensitive_find("😁"), m.offset == 10 && m.length == 4);
+
+    // Regressions & Complex Cases
+    // "Fuzz Regression": Needle "nԱԲՐԵշ" (Mixed case Armenian + ASCII)
+    let_assert(auto m = str("nԱԲՐԵշ").utf8_case_insensitive_find("nաբրեշ"), m.offset == 0 && m.length == 11);
+
+    // Complex SIMD Regression Trigger
+    // Needle includes: ǰ (Latin B), ẞ (Sharp S), Turkish ı, Emoji
+    std::string complex_haystack = "\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82"
+                                   "\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC\x85\x57\x6F\x72\x6C\x64"
+                                   "\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81"
+                                   "\x84\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4"
+                                   "\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF\x8C\xCF"
+                                   "\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21"
+                                   "\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0"
+                                   "\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F"
+                                   "\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3"
+                                   "\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85\xD0\x91\xC5\xBF"
+                                   "\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91"
+                                   "\x4D\x52\xE1\xBA\xA1\x4A\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F"
+                                   "\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3"
+                                   "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A"
+                                   "\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91\x66\x67\x6F\x41\xC3\x85"
+                                   "\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA"
+                                   "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF"
+                                   "\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F\xCE\x92"
+                                   "\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA"
+                                   "\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59\xEF\xAC\x86\x59\x56\x2E\x33\xC3"
+                                   "\xA9\x7A\x4C\x4C";
+
+    std::string complex_needle = "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80"
+                                 "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49"
+                                 "\x74\x68\x65";
+
+    let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
+
+    // Basic ASCII search
+    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("WORLD"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("world"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("HELLO").utf8_case_insensitive_find("hello"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("Hello").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
+    let_assert(auto m = str("Hello").utf8_case_insensitive_find(""), m.offset == 0 && m.length == 0);
+}
+
+void test_utf8_words() {
 
     // Test Unicode word boundary detection (TR29 Word_Break)
     {
@@ -4062,6 +3824,8 @@ int main(int argc, char const **argv) {
     test_search();
     std::printf("- test_utf8...\n");
     test_utf8();
+    std::printf("- test_utf8_case...\n");
+    test_utf8_case();
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     std::printf("- test_search_with_misaligned_repetitions...\n");
     test_search_with_misaligned_repetitions();

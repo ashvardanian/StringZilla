@@ -2298,6 +2298,39 @@ class basic_string_slice {
     }
 
     /**
+     *  @brief Compares two strings lexicographically, ignoring case. If prefix matches, lengths are compared.
+     *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     */
+    int utf8_case_insensitive_order(string_view other) const noexcept {
+        return (int)sz_utf8_case_insensitive_order(start_, length_, other.data(), other.size());
+    }
+
+    struct sized_match_t {
+        size_type offset {};
+        size_type length {};
+
+        operator bool() const noexcept { return offset != npos; }
+        bool operator==(sized_match_t const &other) const noexcept {
+            return offset == other.offset && length == other.length;
+        }
+        bool operator!=(sized_match_t const &other) const noexcept {
+            return offset != other.offset || length != other.length;
+        }
+    };
+
+    /**
+     *  @brief Find the byte offset of the first occurence of a substring.
+     *  @return Slice of the current string representing the first match, or an empty slice if not found.
+     */
+    sized_match_t utf8_case_insensitive_find(string_view other) const noexcept {
+        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+        sz_size_t match_length = 0;
+        auto ptr = sz_utf8_case_insensitive_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        if (!ptr) return {npos, 0};
+        return {static_cast<size_type>(ptr - start_), match_length};
+    }
+
+    /**
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
