@@ -964,8 +964,8 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
                              serial_off == SZ_SIZE_MAX ? (sz_size_t)-1 : serial_off, serial_matched);
                 std::fprintf(stderr, "  SIMD:   offset=%zu, len=%zu\n",
                              simd_off == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_off, simd_matched);
-                std::fprintf(stderr, "  SIMD metadata: kernel=%u safe_window=[%zu,%zu]\n", simd_meta.kernel_id,
-                             simd_meta.safe_window.offset, simd_meta.safe_window.length);
+                std::fprintf(stderr, "  SIMD metadata: kernel=%u offset_in_unfolded=%zu, length_in_unfolded=%zu\n",
+                             simd_meta.kernel_id, simd_meta.offset_in_unfolded, simd_meta.length_in_unfolded);
                 assert(serial_result == simd_result && "Fuzz offset mismatch");
                 assert(serial_matched == simd_matched && "Fuzz length mismatch");
             }
