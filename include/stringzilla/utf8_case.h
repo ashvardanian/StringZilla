@@ -3529,7 +3529,7 @@ typedef enum {
      *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
      *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
      *
-     *  - 's' (U+0073, 73) - can't be first or last
+     *  - 's' (U+0073, 73) - can't be first or last, or part of the folded "ss" prefix or suffix,
      *    to avoid mid-ß-expansion matches: 'ß' (U+00DF) folds to "ss" in-place, so a needle starting/ending
      *    with 's' could match at position 1 (the 0x9F continuation byte). Example: "ßStra" → "ssstra",
      *    needle "sstra" would match at the second byte of ß. Needles with 's' in the middle are safe.
@@ -4065,6 +4065,8 @@ typedef struct {
  *  @param[in] rune_bytes UTF-8 byte length of this codepoint (1-4)
  *  @param[in] prev_rune Previous codepoint (0 if at start)
  *  @param[in] next_rune Next codepoint (0 if at end)
+ *  @param[in] prev_prev_rune Codepoint before prev_rune (0 if prev is at start)
+ *  @param[in] next_next_rune Codepoint after next_rune (0 if next is at end)
  *  @return Safety flags for each script path
  *
  *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
@@ -4072,10 +4074,15 @@ typedef struct {
  *        1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
  *        2. Ligature checks use inequality (lower_prev != 'f'), and 0 never matches letters
  *        3. NUL doesn't participate in any Unicode case folding or ligature expansions
+ *
+ *  @note The neighbor-of-neighbor context (prev_prev, next_next) enables position-1 and
+ *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
+ *        position 1; if next_next==0 && next!=0, we're at position N-2.
  */
 SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
     sz_rune_t rune, sz_size_t rune_bytes,                     //
-    sz_rune_t prev_rune, sz_rune_t next_rune) {
+    sz_rune_t prev_rune, sz_rune_t next_rune,                 //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune) {
 
     unsigned safety = 0;
 
@@ -4102,6 +4109,12 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
     sz_bool_t next_ascii = (next_rune != 0 && next_rune < 0x80) ? sz_true_k : sz_false_k;
     sz_bool_t at_start = (prev_rune == 0) ? sz_true_k : sz_false_k;
     sz_bool_t at_end = (next_rune == 0) ? sz_true_k : sz_false_k;
+
+    // Helper: position detection for 's' rule (mid-ß-expansion avoidance)
+    // Position 1: prev exists but prev_prev doesn't (prev is at position 0)
+    // Position N-2: next exists but next_next doesn't (next is at position N-1)
+    sz_bool_t at_pos_1 = (prev_rune != 0 && prev_prev_rune == 0) ? sz_true_k : sz_false_k;
+    sz_bool_t at_pos_n_minus_2 = (next_rune != 0 && next_next_rune == 0) ? sz_true_k : sz_false_k;
 
     // ASCII character (1-byte UTF-8)
     if (rune < 0x80) {
@@ -4224,15 +4237,20 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
             // - Strict: UNSAFE. 'ſ' (U+017F) folds to 's'.
             // - Central/Viet: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
             //   Avoids: "ss" (Eszett expansion) and "st" (ligature expansion).
-            // - Western: Contextual. Can't be first/last.
-            //   Avoids mid-ß-expansion matches: ß→"ss" means needle starting/ending with 's'
-            //   could match at position 1 (UTF-8 continuation byte). Example: "ßStra" folds
-            //   to "ssstra", needle "sstra" matches at pos 1 which is mid-character.
+            // - Western: Contextual. Can't be at positions 0, 1 (if prev='s'), N-1, or N-2 (if next='s').
+            //   Avoids mid-ß-expansion matches: ß→"ss" in-place means needle with 's' at these
+            //   positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
+            //   Example: "ßStra" → "ssstra", needle "sstra" matches at pos 1 = mid-character.
+            //   Interior 's' like "tesst" or "masse" are safe for SIMD.
             case 's':
                 if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
                     lower_next != 's' && lower_next != 't')
                     safety |= central_viet_group;
-                if (at_start == sz_false_k && at_end == sz_false_k) safety |= western_group;
+                // Western: ban pos 0, pos 1 if prev='s', pos N-1, pos N-2 if next='s'
+                if (at_start == sz_false_k && at_end == sz_false_k && //
+                    !(at_pos_1 == sz_true_k && lower_prev == 's') &&  //
+                    !(at_pos_n_minus_2 == sz_true_k && lower_next == 's'))
+                    safety |= western_group;
                 break;
 
             default:
@@ -4469,6 +4487,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
     sz_u8_t const *ptr = (sz_u8_t const *)needle;
     sz_u8_t const *end = ptr + needle_length;
+    sz_rune_t prev_prev_rune = 0;
     sz_rune_t prev_rune = 0;
 
     while (ptr < end) {
@@ -4480,10 +4499,18 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
 
         // Decode next rune for context
         sz_rune_t next_rune = 0;
+        sz_rune_length_t next_bytes = sz_utf8_invalid_k;
         if (ptr + rune_bytes < end) {
-            sz_rune_length_t next_bytes;
             sz_rune_parse((sz_cptr_t)(ptr + rune_bytes), &next_rune, &next_bytes);
             if (ptr + rune_bytes + next_bytes > end) next_rune = 0; // Incomplete sequence
+        }
+
+        // Decode next-next rune for neighbor-of-neighbor context
+        sz_rune_t next_next_rune = 0;
+        if (next_rune != 0 && ptr + rune_bytes + next_bytes < end) {
+            sz_rune_length_t next_next_bytes;
+            sz_rune_parse((sz_cptr_t)(ptr + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
+            if (ptr + rune_bytes + next_bytes + next_next_bytes > end) next_next_rune = 0;
         }
 
         sz_size_t byte_offset = (sz_size_t)(ptr - (sz_u8_t const *)needle);
@@ -4502,7 +4529,8 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
         }
 
         // Get safety profile bitmask for this rune
-        unsigned safety = sz_utf8_case_rune_safety_profiles_mask_(rune, rune_bytes, prev_rune, next_rune);
+        unsigned safety = sz_utf8_case_rune_safety_profiles_mask_( //
+            rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune);
 
         // Update all script windows - loop directly over enum range
         for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
@@ -4523,6 +4551,7 @@ SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t ne
             }
         }
 
+        prev_prev_rune = prev_rune;
         prev_rune = rune;
         ptr += rune_bytes;
     }
@@ -6146,10 +6175,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
     // Also "Sharp S" (C3 9F) maps to "ss".
     // 1E 9E (ẞ) is in the 96-9F range, so covered.
     // EF AC 80-86: Ligatures (ﬀ-ﬆ) that expand when folded.
+    // E2 84 AA: Kelvin sign K folds to 'k'.
 
     sz_u512_vec_t x_e1_vec, x_ba_vec, x_96_vec, x_9f_vec;
     sz_u512_vec_t x_c3_vec, x_9f_byte_vec;
     sz_u512_vec_t x_ef_vec, x_ac_vec;
+    sz_u512_vec_t x_e2_vec, x_84_vec;
 
     x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1);
     x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA);
@@ -6159,6 +6190,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
     x_9f_byte_vec.zmm = _mm512_set1_epi8((char)0x9F);
     x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
+    x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
+    x_84_vec.zmm = _mm512_set1_epi8((char)0x84);
 
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;
@@ -6184,8 +6217,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
         __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
         __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
+        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
 
-        if (x_e1_mask | x_c3_mask | x_ef_mask) {
+        if (x_e1_mask | x_c3_mask | x_ef_mask | x_e2_mask) {
             // Check E1 BA 96-9F
             __mmask64 x_ba_second = (x_e1_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_bad_third = (x_ba_second << 1) &
@@ -6198,6 +6232,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
             // Check EF AC (Ligatures: ﬀ-ﬆ, U+FB00-FB06)
             __mmask64 x_ligature = (x_ef_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
 
+            // Check E2 84 (Kelvin K, U+212A -> 'k')
+            __mmask64 x_kelvin = (x_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
+
             // Alignment: these masks show the position of the *last* byte of the anomaly.
             // We need to shift back to the start byte to check against valid_starts?
             // "valid_starts" is a mask of valid *start* positions.
@@ -6205,8 +6242,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
             // x_bad_third marks the 3rd byte. Shift right 2.
             // x_sharp_s marks 2nd byte. Shift right 1.
             // x_ligature marks 2nd byte. Shift right 1.
+            // x_kelvin marks 2nd byte. Shift right 1.
 
-            __mmask64 danger_mask = (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_ligature >> 1);
+            __mmask64 danger_mask = (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_ligature >> 1) | (x_kelvin >> 1);
 
             if (danger_mask) {
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
