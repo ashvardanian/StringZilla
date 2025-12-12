@@ -4110,7 +4110,7 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
     sz_bool_t at_start = (prev_rune == 0) ? sz_true_k : sz_false_k;
     sz_bool_t at_end = (next_rune == 0) ? sz_true_k : sz_false_k;
 
-    // Helper: position detection for 's' rule (mid-ß-expansion avoidance)
+    // Helper: position detection for 's' rule (mid-ß-expansion avoidance in Western profile)
     // Position 1: prev exists but prev_prev doesn't (prev is at position 0)
     // Position N-2: next exists but next_next doesn't (next is at position N-1)
     sz_bool_t at_pos_1 = (prev_rune != 0 && prev_prev_rune == 0) ? sz_true_k : sz_false_k;
@@ -4183,12 +4183,21 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 break;
 
             // 'n':
-            // - All: Contextual. Can't be first; can't follow 'ʼ' (U+02BC).
+            // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC).
             //   Avoids: 'ŉ' (U+0149) → "ʼn".
+            // - Armenian: UNSAFE. Armenian kernel cannot handle ŉ (C5 89) → ʼn expansion.
+            //   The character 'n' can match the 2nd part of the expansion, causing false positives.
+            // - Western/Central/Viet: Contextual, same as above.
             //   Western profile does NOT detect this in haystack scan.
             case 'n':
-                if (at_start == sz_false_k && prev_ascii)
-                    safety |= strict_ascii_group | central_viet_group | western_group;
+                // Exclude Armenian - it cannot handle ŉ → ʼn one-to-many expansion
+                if (at_start == sz_false_k && prev_ascii) {
+                    safety |= (1 << sz_utf8_case_rune_safe_ascii_k) |    //
+                              (1 << sz_utf8_case_rune_safe_cyrillic_k) | //
+                              (1 << sz_utf8_case_rune_safe_greek_k);     //
+                    // Armenian EXCLUDED: sz_utf8_case_rune_safe_armenian_k
+                    safety |= central_viet_group | western_group;
+                }
                 break;
 
             // 'i':
@@ -4235,8 +4244,8 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
 
             // 's'
             // - Strict: UNSAFE. 'ſ' (U+017F) folds to 's'.
-            // - Central/Viet: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
-            //   Avoids: "ss" (Eszett expansion) and "st" (ligature expansion).
+            // - Central/Vietnamese: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
+            //   Avoids: "ss" (Eszett expansion), "st" (ligature expansion), and ſ→s in danger zones.
             // - Western: Contextual. Can't be at positions 0, 1 (if prev='s'), N-1, or N-2 (if next='s').
             //   Avoids mid-ß-expansion matches: ß→"ss" in-place means needle with 's' at these
             //   positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
@@ -4284,8 +4293,9 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 safety |= western_group;
             }
             else if (rune == 0x00B5) {
-                // 'µ' (Micro Sign) folds to 'μ' (Greek Mu, CE BC) - BANNED from Western Europe
-                // to avoid Greek complexity. Needles with µ use serial fallback.
+                // 'µ' (Micro Sign) folds to Greek 'μ' (U+03BC, CE BC).
+                // Allow only the Greek SIMD path; Latin paths remain unsafe.
+                safety |= (1 << sz_utf8_case_rune_safe_greek_k);
             }
             else { safety |= western_group | central_viet_group; }
         }
@@ -4379,8 +4389,9 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
                 case 0x0535: // U+0535 Ech uppercase
                     if (at_start || lower_prev_arm == 0x0574 || lower_next_arm == 0x0582) armenian_safe = sz_false_k;
                     break;
-                case 0x0582: // U+0582 yiwn - can't be last; can't follow U+0565 ech
-                    if (at_end || lower_prev_arm == 0x0565) armenian_safe = sz_false_k;
+                case 0x0582: // U+0582 yiwn - can't be first; can't be last; can't follow U+0565 ech
+                    // Armenian ligature և (U+0587) → ech + yiwn; needle starting with yiwn matches mid-expansion
+                    if (at_start || at_end || lower_prev_arm == 0x0565) armenian_safe = sz_false_k;
                     break;
                 case 0x0574: // U+0574 men - can't be last; can't precede U+0576, U+0565, U+056B, U+056D
                 case 0x0544: // U+0544 Men uppercase
@@ -5750,6 +5761,10 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_zmm_(__m512i te
     // Lead bytes:
     __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
     __m512i const x_cf_zmm = _mm512_set1_epi8((char)0xCF);
+    // Micro sign µ (C2 B5) folds to Greek μ (CE BC) in-place.
+    __m512i const x_c2_zmm = _mm512_set1_epi8((char)0xC2);
+    __m512i const x_b5_zmm = _mm512_set1_epi8((char)0xB5);
+    __m512i const x_bc_zmm = _mm512_set1_epi8((char)0xBC);
 
     // Ranges for CE lead byte:
     // CE 86-8F (Accented Upper): 'Ά' (86) ... 'Ώ' (8F)
@@ -5848,6 +5863,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_zmm_(__m512i te
     // Apply Final Sigma
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_final_sigma, x_83_zmm);
 
+    // Apply Micro Sign folding: C2 B5 -> CE BC
+    __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c2_zmm);
+    __mmask64 is_micro_second = (is_c2_mask << 1) & _mm512_cmpeq_epi8_mask(result_zmm, x_b5_zmm);
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_micro_second >> 1, x_ce_zmm); // Lead C2 -> CE
+    result_zmm = _mm512_mask_mov_epi8(result_zmm, is_micro_second, x_bc_zmm);      // Second B5 -> BC
+
     return result_zmm;
 }
 
@@ -5899,16 +5920,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
     // - CE B0: 'ΰ' -> "ΰ" (3 bytes)
     // - CF 90, 91, 95, 96: Greek Symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ'
     // - CF B0, B1, B5: Greek Symbols 'ϰ', 'ϱ', 'ϵ'
-    // - C2 B5: Micro Sign 'µ' -> 'μ' (CE BC)
     // - E2 84 A6: Ohm Sign 'Ω' -> 'ω' (CF 89) (detect E2 84 prefix)
     // - E1 xx xx: Polytonic Greek (excluded by safety profile, but just in case)
-    sz_u512_vec_t x_ce_vec, x_cf_vec, x_c2_vec, x_e1_vec, x_e2_vec, x_cd_vec;
+    sz_u512_vec_t x_ce_vec, x_cf_vec, x_e1_vec, x_e2_vec, x_cd_vec;
     sz_u512_vec_t x_90_vec, x_b0_vec, x_84_vec;
     sz_u512_vec_t x_91_vec, x_95_vec, x_96_vec, x_b1_vec, x_b5_vec;
 
     x_ce_vec.zmm = _mm512_set1_epi8((char)0xCE);
     x_cf_vec.zmm = _mm512_set1_epi8((char)0xCF);
-    x_c2_vec.zmm = _mm512_set1_epi8((char)0xC2);
     x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1); // E1 lead byte (Polytonic)
     x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
     x_cd_vec.zmm = _mm512_set1_epi8((char)0xCD); // CD lead byte (Combining Diacritics)
@@ -5948,12 +5967,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
         // Check for anomalies
         __mmask64 x_ce_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ce_vec.zmm);
         __mmask64 x_cf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_cf_vec.zmm);
-        __mmask64 x_c2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c2_vec.zmm);
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
         __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
         __mmask64 x_cd_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_cd_vec.zmm);
 
-        if (x_ce_mask | x_cf_mask | x_c2_mask | x_e2_mask | x_e1_mask | x_cd_mask) {
+        if (x_ce_mask | x_cf_mask | x_e2_mask | x_e1_mask | x_cd_mask) {
             __mmask64 x_90_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_90_vec.zmm);
             __mmask64 x_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_vec.zmm);
             __mmask64 x_be_ce_90_b0 = (x_ce_mask << 1) & (x_90_mask | x_b0_mask); // CE 90 or CE B0
@@ -5969,11 +5987,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
 
             __mmask64 x_be_cf_sym = (x_cf_mask << 1) & (x_9x_mask | x_bx_mask);
 
-            __mmask64 x_micro = (x_c2_mask << 1) & x_bx_mask; // C2 B5 (B5 is in bx_mask)
             __mmask64 x_ohm = (x_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
             // E1 is always dangerous in Greek path (Polytonic/Extensions)
             // CD is dangerous (Combining Diacritical Marks)
-            __mmask64 danger_mask = x_be_ce_90_b0 | x_be_cf_sym | x_micro | x_ohm | x_e1_mask | x_cd_mask;
+            __mmask64 danger_mask = x_be_ce_90_b0 | x_be_cf_sym | x_ohm | x_e1_mask | x_cd_mask;
 
             if (danger_mask) {
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
@@ -6176,9 +6193,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
     // 1E 9E (ẞ) is in the 96-9F range, so covered.
     // EF AC 80-86: Ligatures (ﬀ-ﬆ) that expand when folded.
     // E2 84 AA: Kelvin sign K folds to 'k'.
+    // C5 BF: Long S 'ſ' folds to 's'.
 
-    sz_u512_vec_t x_e1_vec, x_ba_vec, x_96_vec, x_9f_vec;
-    sz_u512_vec_t x_c3_vec, x_9f_byte_vec;
+    sz_u512_vec_t x_e1_vec, x_ba_vec, x_96_vec;
+    sz_u512_vec_t x_c3_vec, x_9f_vec;
+    sz_u512_vec_t x_c5_vec, x_bf_vec;
     sz_u512_vec_t x_ef_vec, x_ac_vec;
     sz_u512_vec_t x_e2_vec, x_84_vec;
 
@@ -6187,7 +6206,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
     x_96_vec.zmm = _mm512_set1_epi8((char)0x96);
     x_9f_vec.zmm = _mm512_set1_epi8((char)0x9F);
     x_c3_vec.zmm = _mm512_set1_epi8((char)0xC3);
-    x_9f_byte_vec.zmm = _mm512_set1_epi8((char)0x9F);
+    x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5);
+    x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF);
     x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
     x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
@@ -6216,10 +6236,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
         // Check for anomalies
         __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
         __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
+        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
 
-        if (x_e1_mask | x_c3_mask | x_ef_mask | x_e2_mask) {
+        if (x_e1_mask | x_c3_mask | x_c5_mask | x_ef_mask | x_e2_mask) {
             // Check E1 BA 96-9F
             __mmask64 x_ba_second = (x_e1_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_bad_third = (x_ba_second << 1) &
@@ -6227,7 +6248,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                                     _mm512_mask_cmple_epu8_mask(load_mask, haystack_vec.zmm, x_9f_vec.zmm);
 
             // Check C3 9F (Sharp S)
-            __mmask64 x_sharp_s = (x_c3_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_byte_vec.zmm);
+            __mmask64 x_sharp_s = (x_c3_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
+
+            // Check C5 BF (Long S)
+            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
+            __mmask64 x_long_s = (x_c5_mask << 1) & x_bf_mask;
 
             // Check EF AC (Ligatures: ﬀ-ﬆ, U+FB00-FB06)
             __mmask64 x_ligature = (x_ef_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
@@ -6244,7 +6269,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
             // x_ligature marks 2nd byte. Shift right 1.
             // x_kelvin marks 2nd byte. Shift right 1.
 
-            __mmask64 danger_mask = (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_ligature >> 1) | (x_kelvin >> 1);
+            __mmask64 danger_mask =
+                (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_long_s >> 1) | (x_ligature >> 1) | (x_kelvin >> 1);
 
             if (danger_mask) {
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
@@ -6332,6 +6358,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
         sz_size_t longest = 0;
         longest = sz_max_of_two(longest, analysis.ascii.length);
         longest = sz_max_of_two(longest, analysis.western_europe.length);
+        longest = sz_max_of_two(longest, analysis.central_europe.length);
         longest = sz_max_of_two(longest, analysis.cyrillic.length);
         longest = sz_max_of_two(longest, analysis.greek.length);
         longest = sz_max_of_two(longest, analysis.armenian.length);
@@ -6342,12 +6369,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
             return sz_utf8_case_insensitive_find_serial( //
                 haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 
-        // Select the best window (prefer ASCII > Western > others for tie-breaking)
+        // Select the best window (prefer ASCII > Western > Central > others for tie-breaking)
         sz_utf8_string_slice_t const *best = 0;
         if (analysis.ascii.length == longest)
             best = &analysis.ascii, needle_metadata->kernel_id = sz_utf8_case_rune_safe_ascii_k;
         else if (analysis.western_europe.length == longest)
             best = &analysis.western_europe, needle_metadata->kernel_id = sz_utf8_case_rune_safe_western_europe_k;
+        else if (analysis.central_europe.length == longest)
+            best = &analysis.central_europe, needle_metadata->kernel_id = sz_utf8_case_rune_safe_central_europe_k;
         else if (analysis.cyrillic.length == longest)
             best = &analysis.cyrillic, needle_metadata->kernel_id = sz_utf8_case_rune_safe_cyrillic_k;
         else if (analysis.greek.length == longest)
