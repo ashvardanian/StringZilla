@@ -4048,22 +4048,6 @@ typedef enum {
 } sz_utf8_case_rune_safety_profile_t_;
 
 /**
- *  @brief  Complete needle analysis result for all script paths.
- *
- *  Produced by sz_utf8_case_safe_windows_() in a single pass through the needle.
- *  Each script path gets its best (longest) safe window with pre-computed probes.
- */
-typedef struct {
-    sz_utf8_string_slice_t ascii;
-    sz_utf8_string_slice_t western_europe;
-    sz_utf8_string_slice_t central_europe;
-    sz_utf8_string_slice_t cyrillic;
-    sz_utf8_string_slice_t greek;
-    sz_utf8_string_slice_t armenian;
-    sz_utf8_string_slice_t vietnamese;
-} sz_utf8_case_safe_windows_t_;
-
-/**
  *  @brief  Determine safety profile for a character across all script contexts.
  *
  *  This function encodes the contextual safety rules from the ASCII selector
@@ -4075,7 +4059,8 @@ typedef struct {
  *  @param[in] next_rune Next codepoint (0 if at end)
  *  @param[in] prev_prev_rune Codepoint before prev_rune (0 if prev is at start)
  *  @param[in] next_next_rune Codepoint after next_rune (0 if next is at end)
- *  @return Safety flags for each script path
+ *  @param[out] safety_profiles Safety flags for each script path
+ *  @return The primary fast path preferred for this rune
  *
  *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
  *        codepoint in StringZilla's length-based strings. This works because:
@@ -4087,10 +4072,11 @@ typedef struct {
  *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
  *        position 1; if next_next==0 && next!=0, we're at position N-2.
  */
-SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
-    sz_rune_t rune, sz_size_t rune_bytes,                     //
-    sz_rune_t prev_rune, sz_rune_t next_rune,                 //
-    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune) {
+SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile_( //
+    sz_rune_t rune, sz_size_t rune_bytes,                                          //
+    sz_rune_t prev_rune, sz_rune_t next_rune,                                      //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                            //
+    unsigned int *safety_profiles) {
 
     unsigned safety = 0;
 
@@ -4281,7 +4267,8 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
             safety |= strict_ascii_group | central_viet_group | western_group;
         }
 
-        return safety;
+        *safety_profiles = safety;
+        return sz_utf8_case_rune_safe_ascii_k;
     }
 
     // 2-byte UTF-8 (U+0080 to U+07FF)
@@ -4430,7 +4417,14 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
             if (is_armenian_range && armenian_safe) { safety |= (1 << sz_utf8_case_rune_safe_armenian_k); }
         }
 
-        return safety;
+        // Output safety and determine primary script for 2-byte runes
+        *safety_profiles = safety;
+        if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k;  // Latin-1 Supplement
+        if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k;  // Latin Extended-A/B
+        if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;           // Greek
+        if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;        // Cyrillic
+        if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;        // Armenian
+        return sz_utf8_case_rune_case_agnostic_k;
     }
 
     // 3-byte UTF-8 (U+0800 to U+FFFF)
@@ -4449,158 +4443,16 @@ SZ_INTERNAL unsigned sz_utf8_case_rune_safety_profiles_mask_( //
             }
             else { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
         }
-        return safety;
+
+        // Output safety and determine primary script for 3-byte runes
+        *safety_profiles = safety;
+        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k;  // Latin Extended Additional
+        return sz_utf8_case_rune_case_agnostic_k;
     }
 
     // 4-byte UTF-8 - currently no fast paths
-    return safety;
-}
-
-/**
- *  @brief Find the longest safe window for each Unicode script group represented in the needle.
- *
- *  For each script, this function:
- *  1. Finds the longest contiguous "safe" byte range in the original needle
- *  2. Case-folds that range into the window's `folded_needle` buffer
- *  3. Computes optimal probe positions within the folded content
- *  4. Tracks rune counts before/within/after the window
- *
- *  @param needle Pointer to needle string (original, not folded)
- *  @param needle_length Length in bytes
- *  @return Analysis result with best windows and probes for each script
- */
-SZ_INTERNAL sz_utf8_case_safe_windows_t_ sz_utf8_case_safe_windows_(sz_cptr_t needle, sz_size_t needle_length) {
-    sz_utf8_case_safe_windows_t_ results;
-    results.ascii = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.western_europe = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.central_europe = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.cyrillic = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.greek = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.armenian = (sz_utf8_string_slice_t) {0, 0, 0};
-    results.vietnamese = (sz_utf8_string_slice_t) {0, 0, 0};
-    if (needle_length == 0) return results;
-
-    // Lightweight range tracking with rune counts
-    typedef struct {
-        sz_size_t start;        // Byte offset in original needle
-        sz_size_t length;       // Byte length in original needle
-        sz_size_t runes_within; // Runes within this window
-    } sz_script_range_t_;
-
-    // Use enum values directly as array indices for robustness against enum changes.
-    // Arrays are sized to sz_utf8_case_rune_case_agnostic_k (=8), indices 1-7 are used.
-    sz_script_range_t_ best[sz_utf8_case_rune_case_agnostic_k];
-    sz_script_range_t_ curr[sz_utf8_case_rune_case_agnostic_k];
-    sz_bool_t has_content[sz_utf8_case_rune_case_agnostic_k];
-
-    for (sz_size_t i = 0; i < sz_utf8_case_rune_case_agnostic_k; ++i) {
-        best[i].start = 0;
-        best[i].length = 0;
-        best[i].runes_within = 0;
-        curr[i].start = 0;
-        curr[i].length = 0;
-        curr[i].runes_within = 0;
-        // ASCII always valid (index 1), others need proof of script content
-        has_content[i] = (i == sz_utf8_case_rune_safe_ascii_k) ? sz_true_k : sz_false_k;
-    }
-
-    sz_u8_t const *ptr = (sz_u8_t const *)needle;
-    sz_u8_t const *end = ptr + needle_length;
-    sz_rune_t prev_prev_rune = 0;
-    sz_rune_t prev_rune = 0;
-
-    while (ptr < end) {
-        // Decode current rune using sz_rune_parse
-        sz_rune_t rune;
-        sz_rune_length_t rune_bytes;
-        sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_bytes);
-        if (ptr + rune_bytes > end) rune_bytes = (sz_rune_length_t)(end - ptr);
-
-        // Decode next rune for context
-        sz_rune_t next_rune = 0;
-        sz_rune_length_t next_bytes = sz_utf8_invalid_k;
-        if (ptr + rune_bytes < end) {
-            sz_rune_parse((sz_cptr_t)(ptr + rune_bytes), &next_rune, &next_bytes);
-            if (ptr + rune_bytes + next_bytes > end) next_rune = 0; // Incomplete sequence
-        }
-
-        // Decode next-next rune for neighbor-of-neighbor context
-        sz_rune_t next_next_rune = 0;
-        if (next_rune != 0 && ptr + rune_bytes + next_bytes < end) {
-            sz_rune_length_t next_next_bytes;
-            sz_rune_parse((sz_cptr_t)(ptr + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
-            if (ptr + rune_bytes + next_bytes + next_next_bytes > end) next_next_rune = 0;
-        }
-
-        sz_size_t byte_offset = (sz_size_t)(ptr - (sz_u8_t const *)needle);
-        sz_u8_t lead = *ptr;
-
-        // Identify script-specific content using enum indices directly
-        if (rune_bytes == 2) {
-            if (lead >= 0xC2 && lead <= 0xC3) has_content[sz_utf8_case_rune_safe_western_europe_k] = sz_true_k;
-            if (lead >= 0xC2 && lead <= 0xC5) has_content[sz_utf8_case_rune_safe_central_europe_k] = sz_true_k;
-            if (lead >= 0xD0 && lead <= 0xD1) has_content[sz_utf8_case_rune_safe_cyrillic_k] = sz_true_k;
-            if (lead == 0xCE || lead == 0xCF) has_content[sz_utf8_case_rune_safe_greek_k] = sz_true_k;
-            if (lead >= 0xD4 && lead <= 0xD6) has_content[sz_utf8_case_rune_safe_armenian_k] = sz_true_k;
-        }
-        else if (rune_bytes == 3) {
-            if (rune >= 0x1E00 && rune <= 0x1EFF) has_content[sz_utf8_case_rune_safe_vietnamese_k] = sz_true_k;
-        }
-
-        // Get safety profile bitmask for this rune
-        unsigned safety = sz_utf8_case_rune_safety_profiles_mask_( //
-            rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune);
-
-        // Update all script windows - loop directly over enum range
-        for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
-            if (safety & (1u << i)) {
-                // Extend current window
-                if (curr[i].length == 0) {
-                    curr[i].start = byte_offset;
-                    curr[i].runes_within = 0;
-                }
-                curr[i].length += rune_bytes;
-                curr[i].runes_within++;
-            }
-            else {
-                // Window broken - check if it was the best
-                if (curr[i].length > best[i].length && has_content[i]) best[i] = curr[i];
-                curr[i].length = 0;
-                curr[i].runes_within = 0;
-            }
-        }
-
-        prev_prev_rune = prev_rune;
-        prev_rune = rune;
-        ptr += rune_bytes;
-    }
-
-    // Final check for unclosed windows
-    for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
-        if (curr[i].length > best[i].length && has_content[i]) best[i] = curr[i];
-    }
-
-    // Map enum indices to result struct fields
-    sz_utf8_string_slice_t *windows[sz_utf8_case_rune_case_agnostic_k];
-    windows[sz_utf8_case_rune_safe_ascii_k] = &results.ascii;
-    windows[sz_utf8_case_rune_safe_western_europe_k] = &results.western_europe;
-    windows[sz_utf8_case_rune_safe_central_europe_k] = &results.central_europe;
-    windows[sz_utf8_case_rune_safe_cyrillic_k] = &results.cyrillic;
-    windows[sz_utf8_case_rune_safe_greek_k] = &results.greek;
-    windows[sz_utf8_case_rune_safe_armenian_k] = &results.armenian;
-    windows[sz_utf8_case_rune_safe_vietnamese_k] = &results.vietnamese;
-
-    for (sz_size_t i = sz_utf8_case_rune_safe_ascii_k; i <= sz_utf8_case_rune_safe_vietnamese_k; i++) {
-        // Skip scripts with no content or empty windows
-        if (!has_content[i] || best[i].length == 0) continue;
-
-        // Populate lightweight window metadata
-        windows[i]->offset = best[i].start;
-        windows[i]->length = best[i].length;
-        windows[i]->runes_within = best[i].runes_within;
-    }
-
-    return results;
+    *safety_profiles = safety;
+    return sz_utf8_case_rune_case_agnostic_k;
 }
 
 /**
@@ -4631,122 +4483,305 @@ SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_siz
 }
 
 /**
- *  @brief Case-folds text into a folded window and computes optimal probe positions.
+ *  @brief Find the "best safe window" in the needle for each script path.
  *
- *  This function finds the most "diverse" 16-byte slice within the input safe window.
- *  It scans the entire safe slice looking for the window with highest byte diversity,
- *  which minimizes false positives during SIMD filtering. The folded slice has 4 probe positions:
+ *  The objective is as follows. For a given needle, find a slice, that when folded fits into 16 bytes
+ *  and where all characters are "safe" with respect to a certain path. If no such path can be found,
+ *  an empty result is returned. It might be the case for a search query like "s" or "n", that by itself
+ *  isn't safe for any path given the number of Unicode characters expanding into multiple 's'- or 'n'-containing
+ *  sequences. The selected safe folded slice will never begin mid-character in the needle, so if it starts with
+ *  an 'ŉ' (U+0149, C5 89), we can't chose - 'n' (6E) - the second half of its folded sequence as a starting point.
+ *
+ *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX", unpacking runes.
+ *  For each input rune, perform folding, expanding into a sequence, like: 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E).
+ *  Continue unpacking the rest, until we reach a 16-byte limit, like:
+ *
+ *      ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
+ *      CA BC 6E 45 45 44 4C 45 5F 57 49 54 48 5F 4C 4F 4E 47
+ *
+ *  At this point, we need to trim it to make sure - its characters satisfy boundary conditions.
+ *  Assuming at the next step we'll move the iterator to the next input rune to point to 'E' (U+0045) input character,
+ *  we only trim from the end. But also invalidate the whole starting position if a bad character is chosen at start.
+ *  For safe window starting position we can have multiple length variants, assuming different safe paths can have
+ *  different rules for the last symbol in the safe sequence.
+ *
+ *  Once we have safe window for a certain script, we evaluate its diversity score - the number of distinct byte
+ *  values in the folded window. The more diverse - the better! We keep track of best seen window for each script.
+ *
+ *  We also track not only the safety with respect to a certain profile, but also applicability. For example,
+ *  the needle "xyz" is safe with respect to the Western European path, as well as Central European, Vietnamese,
+ *  and potentially others. But it's pure ASCII. We shouldn't pay the cost of complex Vietnamese case-folding of
+ *  triple-byte Latin extensions for just "xyz". So we must invalidate the "safe path" if its just "safe", but
+ *  not ideal.
+ *
+ *  In the end, we'll have up to 7 best safe windows, one per script path.
+ *  The heuristic is:
+ *
+ *  - Prefer ASCII, if there is an ASCII-safe path at least 4 bytes wide with at least 4 distinct byte values.
+ *    It's only one subtraction, a comparison, and a masked addition. Cheapest of all kernels.
+ *  - Pick the most diverse variant from all others, if ASCII variant isn't good enough.
+ *
+ *  We then identify the four "probe" positions within the <= 16 byte folded safe window, one more than
+ *  in exact substring search kernels with Raita heuristics:
+ *
  *  1. implicit at `refined->folded_slice[0]`
  *  2. stored in `refined->probe_second` - targets last byte of 2nd character when 4+ chars
  *  3. stored in `refined->probe_third` - targets last byte of 3rd character when 4+ chars
  *  4. implicit at `refined->folded_slice[refined->folded_slice_length - 1]`
  *
- *  For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
+ *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text almost
+ *  all letters will have the same first byte, but mostly different second byte. The same is true for many
+ *  other languages. For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
  *  The function also sets `offset_in_unfolded` and `length_in_unfolded` to track where the
  *  selected folded slice came from in the original unfolded input.
  *
- *  @param[in] text The input string, assumed to be valid UTF-8.
- *  @param[in] text_length Length of the input string.
- *  @param[out] refined Struct to fill with folded content, probe positions, and offset/length info.
- *  @return The length of the folded slice (0 if input is empty).
+ *  @param[in] needle Pointer to needle string (original, not folded)
+ *  @param[in] needle_length Length in bytes
+ *  @param[out] refined Output metadata structure to populate
  */
-SZ_INTERNAL sz_size_t sz_utf8_refine_safe_slice_and_probe_( //
-    sz_cptr_t text, sz_size_t text_length,                  //
-    sz_utf8_case_insensitive_needle_metadata_t *refined) {
+SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
+                                                           sz_utf8_case_insensitive_needle_metadata_t *refined) {
 
-    if (text_length == 0) {
-        refined->folded_slice_length = 0;
+    // Per-script window state during iteration
+    typedef struct {
+        sz_size_t start_offset;   // Byte offset in original needle
+        sz_size_t input_length;   // Bytes consumed from original needle
+        sz_u8_t folded_bytes[16]; // Folded content
+        sz_size_t folded_length;  // Length of folded content (bytes)
+        sz_bool_t applicable;     // Has >=1 primary-script character
+        sz_bool_t broken;         // Window continuity broken - skip further extension
+        sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
+    } script_window_t_;
+
+    // Number of script kernels (indices 1-7 used, 0 unused)
+    sz_size_t const num_scripts = 8;
+
+    // Best window found so far for each script
+    script_window_t_ best[8];
+    for (sz_size_t i = 0; i < num_scripts; ++i) {
+        best[i].start_offset = 0;
+        best[i].input_length = 0;
+        best[i].folded_length = 0;
+        best[i].applicable = sz_false_k;
+        best[i].broken = sz_false_k;
+        best[i].diversity = 0;
+    }
+
+    // Handle empty needle
+    if (needle_length == 0) {
+        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
         refined->offset_in_unfolded = 0;
         refined->length_in_unfolded = 0;
+        refined->folded_slice_length = 0;
         refined->probe_second = 0;
         refined->probe_third = 0;
-        return 0;
+        return;
     }
 
-    // Search for the most diverse 16-byte window within the safe slice.
-    // This handles pathological cases like "----------------abcd" where leading bytes lack diversity.
+    sz_u8_t const *needle_bytes = (sz_u8_t const *)needle;
+    sz_u8_t const *needle_end = needle_bytes + needle_length;
+
+    // Iterate through each starting position in the needle (stepping by rune)
+    for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
+        // Current window being built for each script at this starting position
+        script_window_t_ current[8];
+        for (sz_size_t i = 0; i < num_scripts; ++i) {
+            current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
+            current[i].input_length = 0;
+            current[i].folded_length = 0;
+            current[i].applicable = sz_false_k;
+            current[i].broken = sz_false_k;
+            current[i].diversity = 0;
+        }
+
+        // Track context for safety profile evaluation
+        sz_rune_t prev_prev_rune = 0;
+        sz_rune_t prev_rune = 0;
+
+        // Fold forward from start_ptr until 16 bytes or needle end
+        sz_u8_t const *pos = start_ptr;
+        sz_bool_t any_active = sz_true_k;
+
+        while (pos < needle_end && any_active) {
+            // Parse current rune
+            sz_rune_t rune;
+            sz_rune_length_t rune_bytes;
+            sz_rune_parse((sz_cptr_t)pos, &rune, &rune_bytes);
+            if (pos + rune_bytes > needle_end) break; // Incomplete rune
+
+            // Parse next rune for context (if available)
+            sz_rune_t next_rune = 0;
+            sz_rune_length_t next_bytes = sz_utf8_invalid_k;
+            if (pos + rune_bytes < needle_end) {
+                sz_rune_parse((sz_cptr_t)(pos + rune_bytes), &next_rune, &next_bytes);
+                if (pos + rune_bytes + next_bytes > needle_end) next_rune = 0;
+            }
+
+            // Parse next-next rune for context
+            sz_rune_t next_next_rune = 0;
+            if (next_rune != 0 && pos + rune_bytes + next_bytes < needle_end) {
+                sz_rune_length_t next_next_bytes;
+                sz_rune_parse((sz_cptr_t)(pos + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
+                if (pos + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
+            }
+
+            // Get safety mask and primary script for this rune
+            unsigned safety_mask = 0;
+            sz_utf8_case_rune_safety_profile_t_ primary_script = sz_utf8_case_rune_safety_profile_( //
+                rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune, &safety_mask);
+
+            // Fold this rune
+            sz_rune_t folded_runes[4];
+            sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+
+            // Convert folded runes to UTF-8 bytes
+            sz_u8_t folded_utf8[16];
+            sz_size_t folded_utf8_len = 0;
+            for (sz_size_t i = 0; i < folded_count; ++i) {
+                folded_utf8_len += sz_rune_export(folded_runes[i], folded_utf8 + folded_utf8_len);
+            }
+
+            // Update each script's window
+            any_active = sz_false_k;
+            for (sz_size_t script = 1; script < num_scripts; ++script) {
+                if (current[script].broken) continue;
+
+                // Check if this rune is safe for this script
+                sz_bool_t is_safe = (safety_mask & (1u << script)) ? sz_true_k : sz_false_k;
+
+                // Check if adding this rune would exceed 16 bytes
+                if (is_safe && current[script].folded_length + folded_utf8_len <= 16) {
+                    // Extend this script's window
+                    for (sz_size_t b = 0; b < folded_utf8_len; ++b) {
+                        current[script].folded_bytes[current[script].folded_length + b] = folded_utf8[b];
+                    }
+                    current[script].folded_length += folded_utf8_len;
+                    current[script].input_length += rune_bytes;
+
+                    // Mark as applicable if primary script matches
+                    if (primary_script == script) {
+                        current[script].applicable = sz_true_k;
+                    }
+                    any_active = sz_true_k;
+                }
+                else {
+                    // Window broken for this script
+                    current[script].broken = sz_true_k;
+                }
+            }
+
+            // Update context for next iteration
+            prev_prev_rune = prev_rune;
+            prev_rune = rune;
+            pos += rune_bytes;
+        }
+
+        // Compare current to best for each script
+        for (sz_size_t script = 1; script < num_scripts; ++script) {
+            if (!current[script].applicable || current[script].folded_length == 0) continue;
+
+            // Compute diversity score
+            current[script].diversity = sz_utf8_probe_diversity_score_(current[script].folded_bytes,
+                                                                        current[script].folded_length);
+
+            // Update best if this is better (prefer higher diversity, then longer length)
+            if (current[script].diversity > best[script].diversity ||
+                (current[script].diversity == best[script].diversity &&
+                 current[script].folded_length > best[script].folded_length)) {
+                best[script] = current[script];
+            }
+        }
+
+        // Advance to next rune for next starting position
+        sz_rune_t skip_rune;
+        sz_rune_length_t skip_len;
+        sz_rune_parse((sz_cptr_t)start_ptr, &skip_rune, &skip_len);
+        start_ptr += skip_len;
+    }
+
+    // Select final kernel based on best windows
+    // Rule: Prefer ASCII if >=4 bytes with >=4 diversity; otherwise pick most diverse applicable
+    sz_size_t chosen_script = 0;
     sz_size_t best_diversity = 0;
-    sz_size_t best_offset = 0;
-    sz_size_t best_bytes_consumed = 0;
-    sz_u8_t temp_fold[16];
-    sz_size_t scan_offset = 0;
 
-    while (scan_offset < text_length) {
-        sz_size_t bytes_consumed = 0, bytes_exported = 0;
-        sz_utf8_case_fold_upto_(                           //
-            text + scan_offset, text_length - scan_offset, //
-            (sz_ptr_t)temp_fold, sizeof(temp_fold),        //
-            0, 0,                                          //
-            &bytes_consumed, &bytes_exported);
-
-        if (bytes_exported == 0) break;
-
-        sz_size_t diversity = sz_utf8_probe_diversity_score_(temp_fold, bytes_exported);
-
-        if (diversity > best_diversity || best_bytes_consumed == 0) {
-            best_diversity = diversity;
-            best_offset = scan_offset;
-            best_bytes_consumed = bytes_consumed;
-            sz_copy((sz_ptr_t)refined->folded_slice, (sz_cptr_t)temp_fold, bytes_exported);
-            refined->folded_slice_length = (sz_u8_t)bytes_exported;
-
-            // Early exit if we have excellent diversity (4 distinct bytes for our 4 probes)
-            if (diversity >= 4 && bytes_exported >= 4) break;
-        }
-
-        // Advance by one character for next window attempt
-        sz_rune_t rune;
-        sz_rune_length_t rune_len;
-        sz_rune_parse(text + scan_offset, &rune, &rune_len);
-        scan_offset += rune_len;
-    }
-
-    // CRITICAL: Set offset_in_unfolded and length_in_unfolded for the caller
-    refined->offset_in_unfolded = best_offset;
-    refined->length_in_unfolded = best_bytes_consumed;
-
-    sz_size_t bytes_exported = refined->folded_slice_length;
-    if (bytes_exported == 0) {
-        refined->probe_second = 0;
-        refined->probe_third = 0;
-        return 0;
-    }
-
-    // Find character end positions in the folded slice.
-    // A byte is a character's last byte if the next byte is a UTF-8 leader (not a continuation byte).
-    sz_size_t char_ends[16];
-    sz_size_t char_count = 0;
-    for (sz_size_t i = 0; i < bytes_exported; ++i) {
-        sz_u8_t next = (i + 1 < bytes_exported) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
-        if ((next & 0xC0) != 0x80) {                                                   // Next is a UTF-8 leader
-            char_ends[char_count++] = i;
-        }
-    }
-
-    // Determine probe positions based on character count
-    sz_size_t probe_second, probe_third;
-
-    if (char_count >= 4) {
-        // 4+ characters: target last bytes of 2nd and 3rd characters for maximum entropy
-        // Trailing UTF-8 bytes have more relevant bits than leading bytes in script-specific text
-        probe_second = char_ends[1];
-        probe_third = char_ends[2];
-    }
-    else if (bytes_exported <= 3) {
-        // Very short: probes necessarily overlap
-        probe_second = (bytes_exported > 1) ? 1 : 0;
-        probe_third = (bytes_exported > 1) ? 1 : 0;
+    // Check ASCII preference
+    if (best[sz_utf8_case_rune_safe_ascii_k].applicable &&
+        best[sz_utf8_case_rune_safe_ascii_k].folded_length >= 4 &&
+        best[sz_utf8_case_rune_safe_ascii_k].diversity >= 4) {
+        chosen_script = sz_utf8_case_rune_safe_ascii_k;
     }
     else {
-        // 1-3 characters but 4+ bytes: fall back to byte-diversity search
-        sz_u8_t byte_first = refined->folded_slice[0];
-        sz_u8_t byte_last = refined->folded_slice[bytes_exported - 1];
+        // Find most diverse applicable script
+        for (sz_size_t script = 1; script < num_scripts; ++script) {
+            if (best[script].applicable && best[script].diversity > best_diversity) {
+                best_diversity = best[script].diversity;
+                chosen_script = script;
+            }
+        }
+    }
 
-        probe_second = bytes_exported / 3;
-        probe_third = (bytes_exported * 2) / 3;
+    // If no applicable window found, fall back to serial
+    if (chosen_script == 0) {
+        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
+        refined->offset_in_unfolded = 0;
+        refined->length_in_unfolded = 0;
+        refined->folded_slice_length = 0;
+        refined->probe_second = 0;
+        refined->probe_third = 0;
+        return;
+    }
+
+    // Populate output metadata
+    refined->kernel_id = (sz_u8_t)chosen_script;
+    refined->offset_in_unfolded = best[chosen_script].start_offset;
+    refined->length_in_unfolded = best[chosen_script].input_length;
+    refined->folded_slice_length = (sz_u8_t)best[chosen_script].folded_length;
+
+    // Copy folded bytes
+    for (sz_size_t i = 0; i < best[chosen_script].folded_length; ++i) {
+        refined->folded_slice[i] = best[chosen_script].folded_bytes[i];
+    }
+
+    // Compute probe positions - target last bytes of UTF-8 codepoints for maximum diversity
+    sz_size_t folded_len = best[chosen_script].folded_length;
+    if (folded_len == 0) {
+        refined->probe_second = 0;
+        refined->probe_third = 0;
+        return;
+    }
+
+    // Find character end positions in the folded slice
+    // A byte is a character's last byte if the next byte is a UTF-8 leader (not continuation)
+    sz_size_t char_ends[16];
+    sz_size_t char_count = 0;
+    for (sz_size_t i = 0; i < folded_len; ++i) {
+        sz_u8_t next = (i + 1 < folded_len) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
+        if ((next & 0xC0) != 0x80) { // Next is not a continuation byte
+            if (char_count < 16) char_ends[char_count++] = i;
+        }
+    }
+
+    // Determine probe positions
+    if (char_count >= 4) {
+        // 4+ characters: target last bytes of 2nd and 3rd characters
+        refined->probe_second = (sz_u8_t)char_ends[1];
+        refined->probe_third = (sz_u8_t)char_ends[2];
+    }
+    else if (folded_len <= 3) {
+        // Very short: probes overlap
+        refined->probe_second = (folded_len > 1) ? 1 : 0;
+        refined->probe_third = (folded_len > 1) ? 1 : 0;
+    }
+    else {
+        // 1-3 characters but 4+ bytes: use byte diversity search
+        sz_u8_t byte_first = refined->folded_slice[0];
+        sz_u8_t byte_last = refined->folded_slice[folded_len - 1];
+
+        sz_size_t probe_second = folded_len / 3;
+        sz_size_t probe_third = (folded_len * 2) / 3;
 
         // Try to find positions with bytes distinct from first/last
-        for (sz_size_t i = 1; i < bytes_exported - 1; ++i) {
+        for (sz_size_t i = 1; i < folded_len - 1; ++i) {
             if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last) {
                 probe_second = i;
                 break;
@@ -4754,7 +4789,7 @@ SZ_INTERNAL sz_size_t sz_utf8_refine_safe_slice_and_probe_( //
         }
 
         sz_u8_t byte_second = refined->folded_slice[probe_second];
-        for (sz_size_t i = probe_second + 1; i < bytes_exported - 1; ++i) {
+        for (sz_size_t i = probe_second + 1; i < folded_len - 1; ++i) {
             if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last &&
                 refined->folded_slice[i] != byte_second) {
                 probe_third = i;
@@ -4764,13 +4799,12 @@ SZ_INTERNAL sz_size_t sz_utf8_refine_safe_slice_and_probe_( //
 
         // Clamp bounds
         if (probe_second == 0) probe_second = 1;
-        if (probe_third >= bytes_exported - 1) probe_third = bytes_exported - 2;
-        if (probe_third <= probe_second && probe_second + 1 < bytes_exported - 1) probe_third = probe_second + 1;
-    }
+        if (probe_third >= folded_len - 1) probe_third = folded_len - 2;
+        if (probe_third <= probe_second && probe_second + 1 < folded_len - 1) probe_third = probe_second + 1;
 
-    refined->probe_second = (sz_u8_t)probe_second;
-    refined->probe_third = (sz_u8_t)probe_third;
-    return bytes_exported;
+        refined->probe_second = (sz_u8_t)probe_second;
+        refined->probe_third = (sz_u8_t)probe_third;
+    }
 }
 
 #pragma endregion Character Safety Profiles
@@ -6389,48 +6423,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 
     // Analyze needle to find the best safe window for each script
     if (is_unknown) {
-        sz_utf8_case_safe_windows_t_ analysis = sz_utf8_case_safe_windows_(needle, needle_length);
-
-        // Pick the path matching the longest script-specific safe window
-        sz_size_t longest = 0;
-        longest = sz_max_of_two(longest, analysis.ascii.length);
-        longest = sz_max_of_two(longest, analysis.western_europe.length);
-        longest = sz_max_of_two(longest, analysis.central_europe.length);
-        longest = sz_max_of_two(longest, analysis.cyrillic.length);
-        longest = sz_max_of_two(longest, analysis.greek.length);
-        longest = sz_max_of_two(longest, analysis.armenian.length);
-        longest = sz_max_of_two(longest, analysis.vietnamese.length);
-
-        // If no safe window was found (e.g., unsupported script like Georgian), fall back to serial
-        if (longest == 0)
-            return sz_utf8_case_insensitive_find_serial( //
-                haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-        // Select the best window (prefer ASCII > Western > Central > others for tie-breaking)
-        sz_utf8_string_slice_t const *best = 0;
-        if (analysis.ascii.length == longest)
-            best = &analysis.ascii, needle_metadata->kernel_id = sz_utf8_case_rune_safe_ascii_k;
-        else if (analysis.western_europe.length == longest)
-            best = &analysis.western_europe, needle_metadata->kernel_id = sz_utf8_case_rune_safe_western_europe_k;
-        else if (analysis.central_europe.length == longest)
-            best = &analysis.central_europe, needle_metadata->kernel_id = sz_utf8_case_rune_safe_central_europe_k;
-        else if (analysis.cyrillic.length == longest)
-            best = &analysis.cyrillic, needle_metadata->kernel_id = sz_utf8_case_rune_safe_cyrillic_k;
-        else if (analysis.greek.length == longest)
-            best = &analysis.greek, needle_metadata->kernel_id = sz_utf8_case_rune_safe_greek_k;
-        else if (analysis.armenian.length == longest)
-            best = &analysis.armenian, needle_metadata->kernel_id = sz_utf8_case_rune_safe_armenian_k;
-        else if (analysis.vietnamese.length == longest)
-            best = &analysis.vietnamese, needle_metadata->kernel_id = sz_utf8_case_rune_safe_vietnamese_k;
-
-        // Now fold the chosen window and compute 4 probe positions in the safe region,
-        // as if that's the only needle content there is
-        needle_metadata->offset_in_unfolded = 0, needle_metadata->length_in_unfolded = 0;
-        sz_utf8_refine_safe_slice_and_probe_(needle + best->offset, best->length, needle_metadata);
-
-        // Re-normalize back to the full needle context
-        needle_metadata->offset_in_unfolded += best->offset;
-        sz_assert_(needle_metadata->length_in_unfolded != 0 && "refined safe slice can't be empty");
+        sz_utf8_case_insensitive_needle_metadata_(needle, needle_length, needle_metadata);
+        // If no SIMD-safe window found, fall back to serial immediately
+        if (needle_metadata->kernel_id == sz_utf8_case_rune_fallback_serial_k)
+            return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
+                                                        needle_metadata, matched_length);
     }
 
     // Dispatch to appropriate kernel

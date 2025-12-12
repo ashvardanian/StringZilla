@@ -3658,6 +3658,185 @@ void test_utf8_case() {
         for (size_t i = 0; i < 58; ++i) latin58.insert(i * 2 + 1, 1, '\xA4'); // "äääää..."
         // This creates 116-byte prefix of ä characters
     }
+
+    // ==========================================================================
+    // Minimal Divergence Cases (Ice Lake vs Serial)
+    // These were discovered by multi-seed fuzzing and represent minimal inputs
+    // that previously caused Serial/SIMD disagreement.
+    // ==========================================================================
+
+    // Pattern 7: "sss" prefix matching "Sß" (seed 5678, Kernel 2)
+    // Haystack: "brown Sßà jumps" - bytes at [6]: 53 C3 9F C3 A0 ("Sßà") = 5 bytes
+    // Needle: "sssà" - bytes: 73 73 73 C3 A0 = 5 bytes
+    // 'S' → 's', 'ß' → "ss", 'à' → 'à', so "Sßà" → "sssà" (should match!)
+    {
+        // Simple case: "Sßà" should match "sssà" - match is 5 bytes (53 C3 9F C3 A0)
+        let_assert(auto m = str("brown S\xC3\x9F\xC3\xA0 jumps").utf8_case_insensitive_find("sss\xC3\xA0"),
+                   m.offset == 6 && m.length == 5);
+
+        // Lowercase: "sßà" should match "sssà" - match is 5 bytes
+        let_assert(auto m = str("brown s\xC3\x9F\xC3\xA0 jumps").utf8_case_insensitive_find("sss\xC3\xA0"),
+                   m.offset == 6 && m.length == 5);
+
+        // Uppercase ß (U+1E9E) when it exists - "ẞà" should match "ssà"
+        let_assert(auto m = str("brown \xE1\xBA\x9E\xC3\xA0 jumps").utf8_case_insensitive_find("ss\xC3\xA0"),
+                   m.offset == 6 && m.length == 5);
+
+        // Triple-s with space (seed 1234): "sß " should match "sss "
+        // Match starts at byte 7 where 's' is (byte 6 is space before 's')
+        let_assert(auto m = str("\xC7\xB0"
+                                "bee3 s\xC3\x9F ee\xC3\xA9 nc")
+                                .utf8_case_insensitive_find("sss ee\xC3\xA9"),
+                   m.offset == 7 && m.length == 8);
+
+        // "ss" needle vs "ß" haystack (basic case)
+        let_assert(auto m = str("\xC3\x9F"
+                                "abc")
+                                .utf8_case_insensitive_find("ssabc"),
+                   m.offset == 0 && m.length == 5);
+
+        // "sss" needle vs "sß" haystack
+        let_assert(auto m = str("s\xC3\x9F"
+                                "abc")
+                                .utf8_case_insensitive_find("sssabc"),
+                   m.offset == 0 && m.length == 6);
+    }
+
+    // Pattern 8: Greek Mu UTF-8 boundary (seed 300, 1000, 1700, Kernel 5)
+    // Needle: CE BC (Greek μ - U+03BC)
+    // Bug: SIMD was incorrectly matching mid-byte BC as standalone
+    // Fix: Ensure proper UTF-8 character boundary validation
+    {
+        // Simple Greek mu search
+        let_assert(auto m = str("hello \xCE\xBC world").utf8_case_insensitive_find("\xCE\xBC"),
+                   m.offset == 6 && m.length == 2);
+
+        // Greek mu NOT at position where 0xBC appears as second byte of another char
+        // Create haystack with Latin-1 char ending in 0xBC, then Greek mu
+        // This ensures we only match at valid UTF-8 boundaries
+        let_assert(auto m = str("test \xC2\xBC thing \xCE\xBC end").utf8_case_insensitive_find("\xCE\xBC"),
+                   m.offset == 14 && m.length == 2); // Only at actual μ, not at ¼
+
+        // Multiple Greek chars around mu
+        let_assert(auto m = str("\xCE\xB1\xCE\xBC\xCE\xB2").utf8_case_insensitive_find("\xCE\xBC"),
+                   m.offset == 2 && m.length == 2);
+    }
+
+    // Pattern 9: Cyrillic Moscow case folding (seed 9999, 44444, 55555, Kernel 4)
+    // Haystack: "се Москва" (uppercase М - D0 9C)
+    // Needle: "се москва" (lowercase м - D0 BC)
+    // Should match case-insensitively
+    {
+        // Simple Moscow: Москва vs москва
+        let_assert(auto m = str("\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0")
+                                .utf8_case_insensitive_find("\xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
+                   m.offset == 0 && m.length == 12);
+
+        // Moscow with Latin prefix
+        let_assert(auto m = str("se \xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0")
+                                .utf8_case_insensitive_find("se \xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
+                   m.offset == 0 && m.length == 15);
+
+        // All Cyrillic uppercase vs lowercase
+        let_assert(auto m = str("\xD0\x90\xD0\x91\xD0\x92")                              // АБВ
+                                .utf8_case_insensitive_find("\xD0\xB0\xD0\xB1\xD0\xB2"), // абв
+                   m.offset == 0 && m.length == 6);
+
+        // Mixed: ПРИВЕТ vs привет
+        let_assert(
+            auto m = str("\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2")                              // ПРИВЕТ
+                         .utf8_case_insensitive_find("\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82"), // привет
+            m.offset == 0 && m.length == 12);
+    }
+
+    // Pattern 10: Ligature fi expansion (seed 500, Kernel 2)
+    // Haystack contains ﬁ (EF AC 81 - U+FB01)
+    // Needle has "fi" (66 69)
+    // ﬁ should case-fold to "fi"
+    {
+        // Simple: ﬁ vs fi
+        let_assert(auto m = str("\xEF\xAC\x81"
+                                "nd")
+                                .utf8_case_insensitive_find("find"),
+                   m.offset == 0 && m.length == 5);
+
+        // With uppercase: ﬁ vs FI
+        let_assert(auto m = str("\xEF\xAC\x81"
+                                "nd")
+                                .utf8_case_insensitive_find("FInd"),
+                   m.offset == 0 && m.length == 5);
+
+        // ff ligature: ﬀ (EF AC 80) vs ff
+        let_assert(auto m = str("\xEF\xAC\x80"
+                                "oo")
+                                .utf8_case_insensitive_find("ffoo"),
+                   m.offset == 0 && m.length == 5);
+
+        // ffi ligature: ﬃ (EF AC 83) vs ffi
+        let_assert(auto m = str("\xEF\xAC\x83"
+                                "ce")
+                                .utf8_case_insensitive_find("ffice"),
+                   m.offset == 0 && m.length == 5);
+
+        // fl ligature: ﬂ (EF AC 82) vs fl
+        let_assert(auto m = str("\xEF\xAC\x82"
+                                "oor")
+                                .utf8_case_insensitive_find("floor"),
+                   m.offset == 0 && m.length == 6);
+
+        // ffl ligature: ﬄ (EF AC 84) vs ffl
+        let_assert(auto m = str("wa\xEF\xAC\x84"
+                                "e")
+                                .utf8_case_insensitive_find("waffle"),
+                   m.offset == 0 && m.length == 6);
+    }
+
+    // Pattern 11: Combining marks vs precomposed (seed 123, 42, Kernel 2)
+    // j + combining caron (6A CC 8C) vs ǰ (C7 B0 - U+01F0)
+    // These are canonically equivalent in Unicode
+    // Note: StringZilla may or may not perform normalization - document behavior
+    {
+        // Precomposed ǰ vs decomposed j+caron
+        // If normalization is performed, these should match
+        // If not, they won't match (current behavior TBD)
+        let_assert(auto m = str("\xC7\xB0"
+                                "ump")
+                                .utf8_case_insensitive_find("j\xCC\x8C"
+                                                            "ump"),
+                   m.offset == 0 && m.length == 5);
+
+        // é precomposed (C3 A9) vs e+acute (65 CC 81)
+        let_assert(auto m = str("\xC3\xA9"
+                                "lan")
+                                .utf8_case_insensitive_find("e\xCC\x81"
+                                                            "lan"),
+                   m.offset == str::npos);
+    }
+
+    // Pattern 12: Mixed script verification (seeds 456, 789, 22222, Kernels 3, 5, 6)
+    // These test that case folding works correctly when multiple scripts are mixed
+    {
+        // Greek κόσμ mixed with Latin
+        let_assert(
+            auto m = str("brown \xCE\xBA\xCF\x8C\xCF\x83 end").utf8_case_insensitive_find("\xCE\xBA\xCF\x8C\xCF\x83"),
+            m.offset == 6 && m.length == 6);
+
+        // Greek sigma case: Σ (CE A3) vs σ (CF 83) vs ς (CF 82 - final sigma)
+        let_assert(auto m = str("\xCE\xA3\xCE\xB5").utf8_case_insensitive_find("\xCF\x83\xCE\xB5"),
+                   m.offset == 0 && m.length == 4);
+
+        // Armenian + Latin mixed
+        let_assert(auto m = str("test \xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE world")
+                                .utf8_case_insensitive_find("\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE"),
+                   m.offset == 5 && m.length == 10);
+
+        // Armenian ligature: և (D6 87 - U+0587) vs ե+ւ (D5 A5 D6 82)
+        let_assert(auto m = str("\xD6\x87"
+                                "nd")
+                                .utf8_case_insensitive_find("\xD5\xA5\xD6\x82"
+                                                            "nd"),
+                   m.offset == 0 && m.length == 4);
+    }
 }
 
 void test_utf8_words() {
