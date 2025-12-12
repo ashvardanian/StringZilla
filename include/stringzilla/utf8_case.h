@@ -312,6 +312,8 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
 /** @copydoc sz_utf8_case_agnostic */
 SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length);
 
+#if SZ_USE_ICE
+
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
@@ -329,6 +331,10 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_ice( //
 /** @copydoc sz_utf8_case_agnostic */
 SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length);
 
+#endif
+
+#if SZ_USE_NEON
+
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
@@ -345,6 +351,8 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
 
 /** @copydoc sz_utf8_case_agnostic */
 SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_neon(sz_cptr_t str, sz_size_t length);
+
+#endif
 
 #pragma endregion
 
@@ -5182,15 +5190,44 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_central_europe_fold_zmm_(_
     __mmask64 fold_latin1 = is_latin1_range & ~is_97;
     result_zmm = _mm512_mask_add_epi8(result_zmm, fold_latin1, result_zmm, x_20_zmm);
 
-    // 2. Latin Extended-A: C4xx / C5xx -> Even + 1
-    //    Most uppercase letters in this block are even bytes that fold to the next odd byte.
-    //    We check for C4/C5 lead, then check if 2nd byte is even.
+    // 2. Latin Extended-A: C4xx / C5xx case folding
+    //    The uppercase/lowercase parity pattern varies within Latin Extended-A:
+    //    - C4 range (U+0100-U+013F): uppercase = EVEN second bytes
+    //    - C5 81-87 (U+0141-U+0147): uppercase = ODD (Ł,Ń,Ņ,Ň → +1)
+    //    - C5 8A-B6 (U+014A-U+0176): uppercase = EVEN (Ŋ-Ŷ → +1)
+    //    - C5 B9-BD (U+0179-U+017D): uppercase = ODD (Ź,Ż,Ž → +1)
+    //    NOT folded: C5 80 (ŀ), 88-89 (ň,ʼn), B7 (ŷ), B8 (Ÿ→ÿ special), BE (ž), BF (ſ)
     __mmask64 is_c4_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c4_zmm);
     __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c5_zmm);
-    __mmask64 is_after_latext_mask = (is_c4_mask | is_c5_mask) << 1;
+    __mmask64 is_after_c4_mask = is_c4_mask << 1;
+    __mmask64 is_after_c5_mask = is_c5_mask << 1;
 
     __mmask64 is_even_mask = _mm512_testn_epi8_mask(result_zmm, x_01_zmm); // (val & 1) == 0
-    __mmask64 fold_latext = is_after_latext_mask & is_even_mask;
+    __mmask64 is_odd_mask = ~is_even_mask;
+
+    // C5 sub-range detection for second bytes
+    __m512i const x_81_zmm = _mm512_set1_epi8((char)0x81);
+    __m512i const x_87_zmm = _mm512_set1_epi8((char)0x87);
+    __m512i const x_8a_zmm = _mm512_set1_epi8((char)0x8A);
+    __m512i const x_b6_zmm = _mm512_set1_epi8((char)0xB6);
+    __m512i const x_b9_zmm = _mm512_set1_epi8((char)0xB9);
+    __m512i const x_bd_zmm = _mm512_set1_epi8((char)0xBD);
+
+    // C5 81-87: odd = uppercase (Ł,Ń,Ņ,Ň)
+    __mmask64 is_c5_81_87 = _mm512_mask_cmpge_epu8_mask(is_after_c5_mask, result_zmm, x_81_zmm);
+    is_c5_81_87 &= _mm512_mask_cmple_epu8_mask(is_after_c5_mask, result_zmm, x_87_zmm);
+
+    // C5 8A-B6: even = uppercase (Ŋ-Ŷ)
+    __mmask64 is_c5_8a_b6 = _mm512_mask_cmpge_epu8_mask(is_after_c5_mask, result_zmm, x_8a_zmm);
+    is_c5_8a_b6 &= _mm512_mask_cmple_epu8_mask(is_after_c5_mask, result_zmm, x_b6_zmm);
+
+    // C5 B9-BD: odd = uppercase (Ź,Ż,Ž)
+    __mmask64 is_c5_b9_bd = _mm512_mask_cmpge_epu8_mask(is_after_c5_mask, result_zmm, x_b9_zmm);
+    is_c5_b9_bd &= _mm512_mask_cmple_epu8_mask(is_after_c5_mask, result_zmm, x_bd_zmm);
+
+    // Fold: C4 even, C5 81-87 odd, C5 8A-B6 even, C5 B9-BD odd
+    __mmask64 fold_latext = (is_after_c4_mask & is_even_mask) | (is_c5_81_87 & is_odd_mask) |
+                            (is_c5_8a_b6 & is_even_mask) | (is_c5_b9_bd & is_odd_mask);
 
     result_zmm = _mm512_mask_add_epi8(result_zmm, fold_latext, result_zmm, x_01_zmm);
 

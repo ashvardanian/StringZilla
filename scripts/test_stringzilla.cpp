@@ -957,10 +957,12 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
             if (serial_result != simd_result || serial_matched != simd_matched) {
                 std::fprintf(stderr, "FUZZ FAIL haystack=%zu start=%zu len=%zu\n", haystacks_tested, start, len);
                 std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_bytes);
+
                 std::fprintf(stderr, "  Needle bytes: ");
                 for (sz_size_t j = 0; j < needle_bytes && j < 50; ++j)
                     std::fprintf(stderr, "%02X ", (unsigned char)needle_start[j]);
                 std::fprintf(stderr, "\n");
+
                 sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack.data()) : SZ_SIZE_MAX;
                 sz_size_t simd_off = simd_result ? (sz_size_t)(simd_result - haystack.data()) : SZ_SIZE_MAX;
                 std::fprintf(stderr, "  Serial: offset=%zu, len=%zu\n",
@@ -2807,6 +2809,27 @@ void test_utf8_case() {
     // "Zaółć gęślą jaźń" (classic Polish pangram fragment)
     assert(str("Zaółć gęślą jaźń").utf8_case_insensitive_order("ZAÓŁĆ GĘŚLĄ JAŹŃ") == sz_equal_k);
 
+    // Czech characters: ř (U+0159, C5 99), ž (U+017E, C5 BE), č (U+010D, C4 8D), ě (U+011B, C4 9B)
+    assert(str("řžčě").utf8_case_insensitive_order("ŘŽČĚ") == sz_equal_k);
+    let_assert(auto m = str("Příklad").utf8_case_insensitive_find("PŘÍKLAD"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("žena").utf8_case_insensitive_find("ŽENA"), m.offset == 0 && m.length == 5);
+
+    // Polish ł (U+0142, C5 82) in city name
+    assert(str("Łódź").utf8_case_insensitive_order("ŁÓDŹ") == sz_equal_k);
+    let_assert(auto m = str("miasto Łódź").utf8_case_insensitive_find("łódź"), m.offset == 7 && m.length == 7);
+
+    // Hungarian: ő (U+0151, C5 91), ű (U+0171, C5 B1)
+    assert(str("őű").utf8_case_insensitive_order("ŐŰ") == sz_equal_k);
+    let_assert(auto m = str("Erdő").utf8_case_insensitive_find("ERDŐ"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("Győr").utf8_case_insensitive_find("GYŐR"), m.offset == 0 && m.length == 5);
+
+    // Central European at SIMD boundary (64 bytes)
+    {
+        std::string prefix(62, 'a');
+        let_assert(auto m = str(prefix + "ž").utf8_case_insensitive_find("Ž"), m.offset == 62 && m.length == 2);
+        let_assert(auto m = str(prefix + "řž").utf8_case_insensitive_find("ŘŽ"), m.offset == 62 && m.length == 4);
+    }
+
     // German (Eszett 'ß')
     // 'ß' (U+00DF, C3 9F) -> "ss"
     // "straße" -> "strasse"
@@ -3005,10 +3028,19 @@ void test_utf8_case() {
     // StringZilla finds canonical equivalence. 'İ' (2 bytes) matches 'i̇' (3 bytes).
     let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("i̇stanbul"), // "i" + dot
                m.offset == 0 && m.length == 9); // Haystack length is 2 (İ) + 7 (stanbul) = 9
+    // Needle starts with the combining dot (mid-expansion of 'İ'), so the match still anchors to 'İ'.
+    let_assert(auto m = str("İstanbul")
+                            .utf8_case_insensitive_find("\xCC\x87"
+                                                        "stanbul"),
+               m.offset == 0 && m.length == 9);
 
     // Turkish Context Extensions
     // "Welcome to " is 11 bytes.
     let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("i̇stanbul"),
+               m.offset == 11 && m.length == 9);
+    let_assert(auto m = str("Welcome to İstanbul")
+                            .utf8_case_insensitive_find("\xCC\x87"
+                                                        "stanbul"),
                m.offset == 11 && m.length == 9);
     // "İstanbul city"
     let_assert(auto m = str("İstanbul city").utf8_case_insensitive_find("i̇stanbul"), m.offset == 0 && m.length == 9);
@@ -3039,7 +3071,7 @@ void test_utf8_case() {
     // Armenian Context Extensions Reverse
     let_assert(auto m = str("abcեւ").utf8_case_insensitive_find("և"), m.offset == 3 && m.length == 4);
 
-    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + 'ն' (U+0576)
+    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + ' delays' (U+0576)
     // Haystack 3 bytes (EF AC 93). Needle 4 bytes (D5 B4 D5 B6).
     let_assert(auto m = str("ﬓ").utf8_case_insensitive_find("մն"), m.offset == 0 && m.length == 3);
     let_assert(auto m = str("abcﬓdef").utf8_case_insensitive_find("մն"), m.offset == 3 && m.length == 3);
@@ -3144,6 +3176,12 @@ void test_utf8_case() {
     let_assert(auto m = str("ﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 0 && m.length == 5);
     let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 2 && m.length == 5);
     let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 2 && m.length == 5);
+
+    // Mid-expansion matches inside a single ligature: we still report the source rune span.
+    // 'ﬃ' (EF AC 83) folds to "ffi", so "fi" occurs starting at index 1.
+    let_assert(auto m = str("ﬃ").utf8_case_insensitive_find("fi"), m.offset == 0 && m.length == 3);
+    // 'ﬄ' (EF AC 84) folds to "ffl", so "fl" occurs starting at index 1.
+    let_assert(auto m = str("ﬄ").utf8_case_insensitive_find("fl"), m.offset == 0 && m.length == 3);
 
     // Combining diacritical marks: ǰ (U+01F0) folds to 'j' + combining caron (U+030C)
     // Needle starts with combining caron - can match mid-expansion of ǰ
@@ -3348,6 +3386,26 @@ void test_utf8_case() {
                    m.offset == 64 && m.length == 2); // µ matches μ
     }
 
+    // 'ﬄ' at position 63 (just at SIMD boundary), matching from inside its fold.
+    {
+        std::string prefix(63, 'x');
+        let_assert(auto m = str((prefix + "\xEF\xAC\x84"
+                                          "end")
+                                    .c_str())
+                                .utf8_case_insensitive_find("fl"),
+                   m.offset == 63 && m.length == 3); // consume whole ligature
+    }
+
+    // ASCII + ligature spanning the SIMD boundary: 'P' at 62 and 'ﬄ' at 63.
+    {
+        std::string prefix(62, 'x');
+        let_assert(auto m = str((prefix + "P\xEF\xAC\x84"
+                                          "end")
+                                    .c_str())
+                                .utf8_case_insensitive_find("pf"),
+                   m.offset == 62 && m.length == 4); // "P"(1) + "ﬄ"(3)
+    }
+
     // Basic ASCII search
     let_assert(auto m = str("Hello World").utf8_case_insensitive_find("WORLD"), m.offset == 6 && m.length == 5);
     let_assert(auto m = str("Hello World").utf8_case_insensitive_find("world"), m.offset == 6 && m.length == 5);
@@ -3360,6 +3418,66 @@ void test_utf8_case() {
     // These patterns were discovered by test_utf8_ci_find_fuzz() and expose
     // disagreements between serial and SIMD implementations.
     // ==========================================================================
+
+    // Pattern 0: Ligature tail-match in mixed-case context (historical verify crash).
+    // Haystack: C3 96 45 47 76 C3 91 2C 50 EF AC 84 ... EF AC 82 70
+    // Needle:   67 76 C3 B1 2C 70 66
+    {
+        let_assert(auto m = str("\xC3\x96"
+                                "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
+                                .utf8_case_insensitive_find("gv\xC3\xB1,pf"),
+                   m.offset == 3 && m.length == 9);
+        let_assert(auto m = str("\xC3\x96"
+                                "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
+                                .utf8_case_insensitive_find("pf"),
+                   m.offset == 8 && m.length == 4);
+    }
+#if 0
+    // Pattern 0b: Fuzz mismatch (seed=3418818602) where the needle is extracted from the folded haystack,
+    // but `sz_utf8_case_insensitive_find_ice` disagrees with `sz_utf8_case_insensitive_find_serial`.
+    // Fuzzer parameters: haystack=0 start=21 len=41 (in folded runes), kernel=2.
+    {
+        static char const haystack[] =
+            "\xCA\xBE\x6F\x4F\xE1\xBA\xA0\x4E\x77\x66\x6F\x78\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\x50\xD5\xA2\xD5\xA1"
+            "\xD6\x80\xD5\xA5\xD5\xBE\x4C\xC7\xB0\x46\xCE\xB2\x69\xE2\x84\xAA\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x90"
+            "\xCE\x91\xE1\xBA\x98\xD0\xB0\x48\x51\xD0\xB1\x4C\x64\xE2\x84\xAA\xC3\xA5\x50\xC3\xB1\x74\x68\x65\x3F"
+            "\x4C\xC3\x9C\xC3\x9F\xE2\x84\xAB\xE1\xBA\x9E\x48\x78\xCE\xB1\x6E\xE1\xBA\xA1\x56\x49\xE1\xBB\x86\xCE"
+            "\x91";
+
+        static char const needle[] =
+            "\xCC\x8C\x66\xCE\xB2\x69\x6B\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x91\xCE\xB1\x77\xCC\x8A\xD0\xB0\x68\x71"
+            "\xD0\xB1\x6C\x64\x6B\xC3\xA5\x70\xC3\xB1\x74\x68\x65\x3F\x6C\xC3\xBC\x73\x73\xC3\xA5\x73\x73\x68\x78"
+            "\xCE\xB1\x6E\xE1\xBA\xA1\x76\x69";
+
+        sz_size_t haystack_length = (sz_size_t)sizeof(haystack) - 1;
+        sz_size_t needle_length = (sz_size_t)sizeof(needle) - 1;
+
+        sz_size_t serial_matched = 0, ice_matched = 0;
+        sz_utf8_case_insensitive_needle_metadata_t serial_meta = {}, ice_meta = {};
+        sz_cptr_t serial_result = sz_utf8_case_insensitive_find_serial( //
+            haystack, haystack_length,                                  //
+            needle, needle_length,                                      //
+            &serial_meta, &serial_matched);
+        sz_cptr_t ice_result = sz_utf8_case_insensitive_find_ice( //
+            haystack, haystack_length,                            //
+            needle, needle_length,                                //
+            &ice_meta, &ice_matched);
+
+        if (serial_result != ice_result || serial_matched != ice_matched) {
+            sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack) : (sz_size_t)-1;
+            sz_size_t ice_off = ice_result ? (sz_size_t)(ice_result - haystack) : (sz_size_t)-1;
+            std::fprintf(stderr,
+                         "FUZZ REGRESSION seed=3418818602: serial_off=%zu serial_len=%zu ice_off=%zu ice_len=%zu "
+                         "kernel=%u offset_in_unfolded=%zu length_in_unfolded=%zu\n",
+                         (std::size_t)serial_off, (std::size_t)serial_matched, (std::size_t)ice_off,
+                         (std::size_t)ice_matched, (unsigned)ice_meta.kernel_id,
+                         (std::size_t)ice_meta.offset_in_unfolded, (std::size_t)ice_meta.length_in_unfolded);
+        }
+
+        assert(serial_result == ice_result);
+        assert(serial_matched == ice_matched);
+    }
+#endif
 
     // Pattern 1: "st" + Latin-1 char (st ligature expansion issue?)
     // Needle: 73 74 C2 BA = "st" + º (masculine ordinal indicator)
@@ -3415,14 +3533,23 @@ void test_utf8_case() {
         // h + combining macron below should match ẖ (U+1E96)
         let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_case_insensitive_find("h\xCC\xB1\xD5\xA5"),
                    m.offset == 0 && m.length == 5); // ẖ (3) + ե (2)
+        // Needle starts with the combining mark (mid-expansion of ẖ).
+        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_case_insensitive_find("\xCC\xB1\xD5\xA5"),
+                   m.offset == 0 && m.length == 5);
 
         // w + combining ring above should match ẘ (U+1E98)
         let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_case_insensitive_find("w\xCC\x8A\xCE\xB2"),
                    m.offset == 0 && m.length == 5); // ẘ (3) + β (2)
+        // Needle starts with the combining mark (mid-expansion of ẘ).
+        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_case_insensitive_find("\xCC\x8A\xCE\xB2"),
+                   m.offset == 0 && m.length == 5);
 
         // j + combining caron should match ǰ (U+01F0)
         let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_case_insensitive_find("j\xCC\x8C\xD5\xA2"),
                    m.offset == 0 && m.length == 4); // ǰ (2) + բ (2)
+        // Needle starts with the combining mark (mid-expansion of ǰ).
+        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_case_insensitive_find("\xCC\x8C\xD5\xA2"),
+                   m.offset == 0 && m.length == 4);
     }
 
     // Pattern 4: Modifier letters + other chars
@@ -3435,10 +3562,16 @@ void test_utf8_case() {
                                 .utf8_case_insensitive_find("\xCA\xBC"
                                                             "n\xCE\xBC"),
                    m.offset == 0 && m.length == 4); // ʼn (2) + μ (2)
+        // Needle starts at the second rune of the expansion ("n..."), so it still anchors to 'ŉ'.
+        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_case_insensitive_find("n\xCE\xBC"),
+                   m.offset == 0 && m.length == 4);
 
         // a + modifier right half ring should match ẚ (U+1E9A)
         let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_case_insensitive_find("a\xCA\xBE\xD5\xA5"),
                    m.offset == 0 && m.length == 5); // ẚ (3) + ե (2)
+        // Needle starts at the second rune of the expansion ("ʾ..."), so it still anchors to 'ẚ'.
+        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_case_insensitive_find("\xCA\xBE\xD5\xA5"),
+                   m.offset == 0 && m.length == 5);
     }
 
     // Pattern 5: Armenian + combining chars / ligatures
@@ -3460,6 +3593,70 @@ void test_utf8_case() {
                              "ffi"                                        // expanded
                              "\xE1\xBB\x86";                              // Vietnamese Ệ
         let_assert(auto m = str(haystack).utf8_case_insensitive_find(needle), m.offset == 0 && m.length == 16);
+    }
+
+    // Long needle tests at ring buffer boundary (32 folded runes)
+    // The serial implementation uses a 32-rune ring buffer for fold comparisons
+    {
+        // Exactly 32 ASCII characters (32 folded runes)
+        std::string hay32(32, 'a');
+        let_assert(auto m = str(hay32 + "xyz").utf8_case_insensitive_find(hay32), m.offset == 0 && m.length == 32);
+
+        // 33 ASCII characters (crosses ring buffer boundary)
+        std::string hay33(33, 'a');
+        let_assert(auto m = str(hay33 + "xyz").utf8_case_insensitive_find(hay33), m.offset == 0 && m.length == 33);
+
+        // 16 eszett characters → 32 folded runes (ss×16), exactly at boundary
+        std::string hay_16_ss(16, '\xC3');
+        for (size_t i = 0; i < 16; ++i) hay_16_ss.insert(i * 2 + 1, 1, '\x9F'); // Build "ßßßßßßßßßßßßßßßß"
+        std::string needle_32_s(32, 's');
+        let_assert(auto m = str(hay_16_ss + "end").utf8_case_insensitive_find(needle_32_s),
+                   m.offset == 0 && m.length == 32);
+
+        // 64 ASCII characters (tests double boundary)
+        std::string hay64(64, 'b');
+        let_assert(auto m = str(hay64 + "xyz").utf8_case_insensitive_find(hay64), m.offset == 0 && m.length == 64);
+    }
+
+    // Eszett at SIMD 64-byte chunk boundaries
+    {
+        // ß at position 62 (ends exactly at 64-byte boundary)
+        std::string prefix62(62, 'a');
+        let_assert(auto m = str(prefix62 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+                   m.offset == 62 && m.length == 2);
+
+        // ß straddling 64-byte boundary (starts at 63)
+        std::string prefix63(63, 'a');
+        let_assert(auto m = str(prefix63 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+                   m.offset == 63 && m.length == 2);
+
+        // ß exactly at 64-byte boundary
+        std::string prefix64(64, 'a');
+        let_assert(auto m = str(prefix64 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+                   m.offset == 64 && m.length == 2);
+
+        // Word with ß crossing boundary: "straße" starting at position 60
+        std::string prefix60(60, 'a');
+        let_assert(auto m = str(prefix60 +
+                                "stra\xC3\x9F"
+                                "e" +
+                                "zzz")
+                                .utf8_case_insensitive_find("strasse"),
+                   m.offset == 60 && m.length == 7);
+    }
+
+    // Cross-script boundary tests (different SIMD kernels)
+    {
+        // ASCII → Greek transition at SIMD boundary
+        std::string ascii60(60, 'x');
+        let_assert(
+            auto m = str(ascii60 + "\xCE\xB1\xCE\xB2\xCE\xB3").utf8_case_insensitive_find("\xCE\x91\xCE\x92\xCE\x93"),
+            m.offset == 60 && m.length == 6); // ΑΒΓ matching αβγ
+
+        // Latin-1 → Cyrillic transition
+        std::string latin58(58, '\xC3');                                      // Build Latin-1 prefix
+        for (size_t i = 0; i < 58; ++i) latin58.insert(i * 2 + 1, 1, '\xA4'); // "äääää..."
+        // This creates 116-byte prefix of ä characters
     }
 }
 
