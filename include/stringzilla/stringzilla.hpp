@@ -2319,8 +2319,8 @@ class basic_string_slice {
     };
 
     /**
-     *  @brief Find the byte offset of the first occurence of a substring.
-     *  @return Slice of the current string representing the first match, or an empty slice if not found.
+     *  @brief Find the byte offset of the first occurrence of a substring.
+     *  @return Offset of the first occurrence or @c npos if not found.
      */
     sized_match_t utf8_case_insensitive_find(string_view other) const noexcept {
         sz_utf8_case_insensitive_needle_metadata_t metadata = {};

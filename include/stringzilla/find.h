@@ -206,7 +206,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, 
 #endif
 
 /**
- *  @brief  Finds the first occurence of a UTF-8 whitespace or punctuation character in a string.
+ *  @brief  Finds the first occurrence of a UTF-8 whitespace or punctuation character in a string.
  *
  *  Delimiters include all of the above, plus common "punctuation" characters, "symbols", and "separators",
  *  as defined by the "Unicode UAX #29" word segmentation standard and implemented in the ICU.
@@ -1669,7 +1669,7 @@ SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
     uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
     uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
     // The table lookup instruction in NEON replies to out-of-bound requests with zeros.
-    // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, substracting 16 will underflow
+    // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, subtracting 16 will underflow
     // and map into interval [240, 256). Meaning that those will be populated with zeros and we can safely
     // merge `matches_top_vec` and `matches_bottom_vec` with a bitwise OR.
     uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));

@@ -1509,7 +1509,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    // TODO: Implement a NEON-accelerated version of sz_utf8_find_nth in absense of PDEP instruction.
+    // TODO: Implement a NEON-accelerated version of sz_utf8_find_nth in absence of PDEP instruction.
     return sz_utf8_find_nth_serial(text, length, n);
 }
 

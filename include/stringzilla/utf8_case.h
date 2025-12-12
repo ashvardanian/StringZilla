@@ -74,7 +74,7 @@ typedef struct sz_utf8_string_slice_t {
  *  Reuse this structure to avoid re-computing the probe positions for the same needle multiple times.
  *  It's created internally in a multi-step process of:
  *  1. locating the longest "safe" slice of the needle with respect to different SIMD folding kernels,
- *  2. chrinking it further to find the most diverse slice that fits into a `folded_slice` when case-folded.
+ *  2. shrinking it further to find the most diverse slice that fits into a `folded_slice` when case-folded.
  *
  *  Unlike the exact substring search kernels, it uses 4 probe positions instead of 3:
  *    - first: implicit at `folded_slice[0]`
@@ -950,11 +950,11 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         case 0xFB05: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬅ → st
         case 0xFB06: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬆ → st
         // Armenian ligatures
-        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մdelays (men + nun)
-        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մdelays (men + ech)
-        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մdelays (men + ini)
-        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → delays (vew + nun)
-        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մdelays (men + xeh)
+        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մն (men + nun)
+        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մե (men + ech)
+        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մի (men + ini)
+        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → վն (vew + nun)
+        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մխ (men + xeh)
         }
 
         folded[0] = rune; return 1;  // 3-byte: no folding needed
@@ -1467,7 +1467,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
     while (danger_ptr < danger_end) {
 
         // The following part is practically the unpacked variant of `sz_utf8_case_insensitive_find_1folded_serial_`,
-        // that finds the first occurence of the `needle_first_safe_folded_rune` haystack. The issue is that each one
+        // that finds the first occurrence of the `needle_first_safe_folded_rune` haystack. The issue is that each one
         // `haystack_rune` may unpack into multiple `haystack_folded_runes`.
         sz_rune_t haystack_rune;
         sz_rune_length_t haystack_rune_length;
@@ -2588,7 +2588,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 // Cyrillic Extended: 0x0460-0x052F (has case folding, not covered)
                 _mm512_cmplt_epu32_mask(_mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x0460)),
                                         _mm512_set1_epi32(0x00D0)) | // 0x0460-0x052F
-                // Armenian ligature that expands: U+0587 (և → եdelays, ech + yiwn)
+                // Armenian ligature that expands: U+0587 (և → եւ, ech + yiwn)
                 _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x0587));
 
             // Only consider characters we're actually processing
@@ -3589,7 +3589,7 @@ typedef enum {
      *  - Turkish has moderate overlap from Ç, Ö, Ü (Latin-1) mixing with Ğ, İ, Ş (Latin-A).
      *    Examples: içeriği, öğrencilerden, dönüşüm.
      *
-     *  All those languages are not always related linguisticallly:
+     *  All those languages are not always related linguistically:
      *
      *  - Czech and Polish are Slavic languages, that use Latin script with háčeks since 15th century.
      *  - Hungarian is a Uralic language, that adopted Latin script in 11th century.
@@ -3605,9 +3605,9 @@ typedef enum {
      *  Czech, Polish. So we add one more check  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
      *  again - revert to serial. Same logic applies to "ſ" (Latin Small Letter Long S, U+017F, C5 BF) folding to 's'.
      *
-     *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning throhg the
+     *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning through the
      *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
-     *  frequenlty encounter in Turkish text.
+     *  frequently encounter in Turkish text.
      *
      *  We inherit most contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
      *
@@ -3703,7 +3703,7 @@ typedef enum {
      *  Kazakh, and Uzbek languages, like the 'Ґ' (D2 90) → 'ґ' (D2 91) folding with even/odd ordering
      *  of uppercase and lowercase. Similar rules apply to some Chechen, and various Turkic languages.
      *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
-     *  By ommitting those extensions we can make our folding kernel much lighter.
+     *  By omitting those extensions we can make our folding kernel much lighter.
      *
      *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
      *

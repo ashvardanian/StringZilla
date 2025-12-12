@@ -3071,7 +3071,7 @@ void test_utf8_case() {
     // Armenian Context Extensions Reverse
     let_assert(auto m = str("abcեւ").utf8_case_insensitive_find("և"), m.offset == 3 && m.length == 4);
 
-    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + ' delays' (U+0576)
+    // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + 'ն' (U+0576)
     // Haystack 3 bytes (EF AC 93). Needle 4 bytes (D5 B4 D5 B6).
     let_assert(auto m = str("ﬓ").utf8_case_insensitive_find("մն"), m.offset == 0 && m.length == 3);
     let_assert(auto m = str("abcﬓdef").utf8_case_insensitive_find("մն"), m.offset == 3 && m.length == 3);
@@ -3575,9 +3575,9 @@ void test_utf8_case() {
     }
 
     // Pattern 5: Armenian + combining chars / ligatures
-    // Needle: D5 A5 D6 82 CE B2 = Armenian delays + Greek β
+    // Needle: D5 A5 D6 82 CE B2 = Armenian ech+yiwn + Greek β
     {
-        // Armenian delays character followed by Greek
+        // Armenian ech+yiwn characters followed by Greek
         let_assert(auto m = str("\xD5\xA5\xD6\x82\xCE\xB2").utf8_case_insensitive_find("\xD5\xA5\xD6\x82\xCE\xB2"),
                    m.offset == 0 && m.length == 6);
     }
