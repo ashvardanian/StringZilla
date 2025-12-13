@@ -5165,18 +5165,24 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     // Constants for anomaly detection (characters that change byte width when folded):
     // - E1 BA 9E: 'ẞ' (U+1E9E) → "ss" (3 bytes → 2 bytes)
     // - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
-    // - EF AC 80-86: 'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' (ligatures) → 2-3 bytes
+    // - EF AC 80-86: `'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' (ligatures) → 2-3 bytes
     // - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
-    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec;
-    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec, x_bf_vec;
+    // - C3 9F: Sharp S (U+00DF) -> "ss" (2 bytes -> 2 bytes, but 1 rune -> 2 runes)
+    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec, x_c3_vec;
+    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec, x_bf_vec, x_9f_vec;
+    sz_u512_vec_t x_aa_vec, x_ab_vec;            // 3rd byte checks for Capital Sharp S and K
     x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1); // for 'ẞ'
     x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2); // for 'K'
     x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF); // for 'ﬁ', 'ﬂ', etc.
     x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5); // for 'ſ'
+    x_c3_vec.zmm = _mm512_set1_epi8((char)0xC3); // for 'ß' (U+00DF)
     x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA); // 2nd byte of 'ẞ'
     x_84_vec.zmm = _mm512_set1_epi8((char)0x84); // 2nd byte of 'K'
     x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of ligatures
     x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF); // 2nd byte of 'ſ'
+    x_9f_vec.zmm = _mm512_set1_epi8((char)0x9F); // 2nd byte of 'ß' (U+00DF)
+    x_aa_vec.zmm = _mm512_set1_epi8((char)0xAA); // 3rd byte of 'K' (U+212A)
+    x_ab_vec.zmm = _mm512_set1_epi8((char)0xAB); // 3rd byte of Angstrom (U+212B)
 
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;
@@ -5205,17 +5211,24 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
         __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
+        __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
 
-        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask) {
+        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask | x_c3_mask) {
             __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
             __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
             __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
             __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
+            __mmask64 x_aa_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_aa_vec.zmm);
+            __mmask64 x_ab_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ab_vec.zmm);
+            __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
 
-            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) | // ẞ (E1 BA 9E)
-                                    ((x_e2_mask << 1) & x_84_mask) | // K (E2 84 AA)
-                                    ((x_ef_mask << 1) & x_ac_mask) | // ﬁ, ﬂ (EF AC xx)
-                                    ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
+            // For E1 BA and E2 84, we must also check the third byte to avoid false positives.
+            // E.g., ẗ (U+1E97 = E1 BA 97) is NOT a danger character, only ẞ (U+1E9E = E1 BA 9E) is.
+            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) |                                  // ẞ (E1 BA 9E)
+                                    ((x_e2_mask << 1) & x_84_mask & ((x_aa_mask | x_ab_mask) >> 1)) | // K (E2 84 AA)
+                                    ((x_ef_mask << 1) & x_ac_mask) |                                  // ﬁ, ﬂ (EF AC xx)
+                                    ((x_c5_mask << 1) & x_bf_mask) |                                  // ſ (C5 BF)
+                                    ((x_c3_mask << 1) & x_9f_mask); // Sharp S (C3 9F -> ss)
 
             if (danger_mask) {
                 // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
