@@ -6707,30 +6707,32 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_naively_zmm_
  *  @brief Optimized danger zone detection for Greek text using Range+LUT technique.
  *  @sa sz_utf8_case_insensitive_find_ice_greek_alarm_naively_zmm_
  *
- *  Reduces port 5 pressure from 13 to 8 operations by:
- *  - Lead bytes CE/CF and E1/E2: 4 CMPEQ -> 2 CMPLT + 2 VPTESTNMB (p0)
- *  - CF 9x set {90,91,95,96}: 4 CMPEQ -> 1 CMPLT + 1 VPSHUFB + 1 VPTESTMB (p0)
- *  - CF Bx set {B0,B1,B5}: 3 CMPEQ -> 1 CMPLT + 1 VPSHUFB + 1 VPTESTMB (p0)
- *  - CE 90/B0 derived from range checks using VPTESTNMB (p0)
+ *  Reduces port 5 pressure from 13 to 6 operations by:
+ *  - Lead bytes CD/CE/CF: 3 CMPEQ -> 1 CMPLT + 2 VPTESTNMB (p0)
+ *  - Lead bytes E1/E2: 2 CMPEQ -> 1 CMPLT + 1 VPTESTNMB (p0)
+ *  - Second bytes 9x/Bx unified: 7 CMPEQ -> 1 CMPLT + 1 VPSHUFB + 1 CMPEQ (B6 filter)
+ *    Key insight: (byte & 0xDF) collapses 9x and Bx to same offset space
+ *  - Second byte 84: 1 CMPEQ (unchanged)
  *
- *  Port summary: 8 p5 ops + 6 p0 ops (vs 13 p5 originally)
+ *  Port summary: 6 p5 ops + 5 p0 ops (vs 13 p5 originally)
  *
  *  @param[in] h The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_efficiently_zmm_(__m512i h_zmm) {
     // Range constants
-    __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
-    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
     __m512i const x_cd_zmm = _mm512_set1_epi8((char)0xCD);
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
     __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);
-    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0);
     __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_01_zmm = _mm512_set1_epi8(0x01);
     __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
-    __m512i const x_07_zmm = _mm512_set1_epi8(0x07);
+    __m512i const x_03_zmm = _mm512_set1_epi8(0x03);
     __m512i const x_06_zmm = _mm512_set1_epi8(0x06);
+    __m512i const x_07_zmm = _mm512_set1_epi8(0x07);
 
-    // LUT for 9x set {90,91,95,96}: positions 0,1,5,6 are 0xFF (valid)
+    // Unified LUT for 9x/Bx set: positions 0,1,5,6 are 0xFF (valid)
+    // After masking with 0xDF, both 9x (90,91,95,96) and Bx (B0,B1,B5) collapse to same offsets
     // VPSHUFB uses low 4 bits as index; high bit set -> output 0
     __m512i const lut_9x_zmm = _mm512_set_epi8(              //
         0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1,  // lane 3: [15..0]
@@ -6738,19 +6740,16 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_efficiently_
         0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1,  // lane 1
         0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1); // lane 0
 
-    // LUT for Bx set {B0,B1,B5}: positions 0,1,5 are 0xFF (valid)
-    __m512i const lut_bx_zmm = _mm512_set_epi8(             //
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 3: [15..0]
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 2
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 1
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1); // lane 0
-
     // Lead byte detection using range compression
-    // Check for CE/CF range: (byte - 0xCE) < 2  [1 CMPLT on p5]
-    __m512i off_ce_zmm = _mm512_sub_epi8(h_zmm, x_ce_zmm);
-    __mmask64 is_ce_or_cf_mask = _mm512_cmplt_epu8_mask(off_ce_zmm, x_02_zmm);
-    __mmask64 is_ce_mask = is_ce_or_cf_mask & _mm512_testn_epi8_mask(off_ce_zmm, off_ce_zmm); // offset==0 [p0]
-    __mmask64 is_cf_mask = is_ce_or_cf_mask & ~is_ce_mask;
+    // Check for CD/CE/CF range: (byte - 0xCD) < 3  [1 CMPLT on p5]
+    // Saves 1 p5 op by consolidating CD check with CE/CF range
+    __m512i off_cd_zmm = _mm512_sub_epi8(h_zmm, x_cd_zmm);
+    __mmask64 is_cd_ce_cf_mask = _mm512_cmplt_epu8_mask(off_cd_zmm, x_03_zmm);
+    // Derive CD (offset==0), CE (offset==1), CF (offset==2) using TESTNM on p0
+    __mmask64 is_cd_mask = is_cd_ce_cf_mask & _mm512_testn_epi8_mask(off_cd_zmm, off_cd_zmm);
+    __m512i off_xor_1_zmm = _mm512_xor_si512(off_cd_zmm, x_01_zmm);
+    __mmask64 is_ce_mask = is_cd_ce_cf_mask & _mm512_testn_epi8_mask(off_xor_1_zmm, off_xor_1_zmm);
+    __mmask64 is_cf_mask = is_cd_ce_cf_mask & ~is_cd_mask & ~is_ce_mask;
 
     // Check for E1/E2 range: (byte - 0xE1) < 2  [1 CMPLT on p5]
     __m512i off_e1_zmm = _mm512_sub_epi8(h_zmm, x_e1_zmm);
@@ -6758,38 +6757,40 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_efficiently_
     __mmask64 is_e1_mask = is_e1_or_e2_mask & _mm512_testn_epi8_mask(off_e1_zmm, off_e1_zmm); // offset==0 [p0]
     __mmask64 is_e2_mask = is_e1_or_e2_mask & ~is_e1_mask;
 
-    // Check for CD (no adjacent partner)  [1 CMPEQ on p5]
-    __mmask64 is_cd_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_cd_zmm);
+    // Second byte detection using unified Range+LUT for 9x and Bx
+    // Key insight: 0x90-0x96 and 0xB0-0xB5 share the same low nibble pattern.
+    // Masking with 0xDF collapses both ranges to offsets 0-6 from 0x90:
+    //   0x90 & 0xDF = 0x90, 0xB0 & 0xDF = 0x90 -> offset 0
+    //   0x91 & 0xDF = 0x91, 0xB1 & 0xDF = 0x91 -> offset 1
+    //   0x95 & 0xDF = 0x95, 0xB5 & 0xDF = 0x95 -> offset 5
+    //   0x96 & 0xDF = 0x96, 0xB6 & 0xDF = 0x96 -> offset 6 (B6 must be excluded)
+    __m512i const x_df_zmm = _mm512_set1_epi8((char)0xDF);
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
+    __m512i masked_zmm = _mm512_and_si512(h_zmm, x_df_zmm);
+    __m512i offset_9x_bx_zmm = _mm512_sub_epi8(masked_zmm, x_90_zmm);
 
-    // Second byte detection using Range+LUT
-    // Check for 9x range [90-96]: compute offsets  [1 CMPLT on p5]
-    __m512i off_9x_zmm = _mm512_sub_epi8(h_zmm, x_90_zmm);
-    __mmask64 in_9x_range_mask = _mm512_cmplt_epu8_mask(off_9x_zmm, x_07_zmm);
+    // Check if masked byte is in range [0x90, 0x96]  [1 CMPLT on p5]
+    __mmask64 in_9x_bx_range_mask = _mm512_cmplt_epu8_mask(offset_9x_bx_zmm, x_07_zmm);
 
-    // Validate 9x set {90,91,95,96} using LUT  [1 VPSHUFB on p5, 1 VPTESTMB on p0]
-    __m512i shuffled_9x_zmm = _mm512_shuffle_epi8(lut_9x_zmm, off_9x_zmm);
-    __mmask64 valid_9x_mask = in_9x_range_mask & _mm512_test_epi8_mask(shuffled_9x_zmm, shuffled_9x_zmm);
+    // For CE: need exactly 90 or B0 (both map to offset 0)  [1 VPTESTNMB on p0]
+    __mmask64 is_90_or_b0_mask = in_9x_bx_range_mask & _mm512_testn_epi8_mask(offset_9x_bx_zmm, offset_9x_bx_zmm);
 
-    // Derive is_90 (offset == 0 within range)  [1 VPTESTNMB on p0]
-    __mmask64 is_90_mask = in_9x_range_mask & _mm512_testn_epi8_mask(off_9x_zmm, off_9x_zmm);
+    // For CF: validate using LUT, then exclude B6 false positives  [1 VPSHUFB on p5, 1 VPTESTMB on p0]
+    __m512i shuffled_9x_bx_zmm = _mm512_shuffle_epi8(lut_9x_zmm, offset_9x_bx_zmm);
+    __mmask64 valid_prelim_mask = in_9x_bx_range_mask & _mm512_test_epi8_mask(shuffled_9x_bx_zmm, shuffled_9x_bx_zmm);
 
-    // Check for Bx range [B0-B5]: compute offsets  [1 CMPLT on p5]
-    __m512i off_bx_zmm = _mm512_sub_epi8(h_zmm, x_b0_zmm);
-    __mmask64 in_bx_range_mask = _mm512_cmplt_epu8_mask(off_bx_zmm, x_06_zmm);
-
-    // Validate Bx set {B0,B1,B5} using LUT  [1 VPSHUFB on p5, 1 VPTESTMB on p0]
-    __m512i shuffled_bx_zmm = _mm512_shuffle_epi8(lut_bx_zmm, off_bx_zmm);
-    __mmask64 valid_bx_mask = in_bx_range_mask & _mm512_test_epi8_mask(shuffled_bx_zmm, shuffled_bx_zmm);
-
-    // Derive is_b0 (offset == 0 within range)  [1 VPTESTNMB on p0]
-    __mmask64 is_b0_mask = in_bx_range_mask & _mm512_testn_epi8_mask(off_bx_zmm, off_bx_zmm);
+    // Exclude B6: offset==6 && bit5 set means original was 0xB6 not 0x96  [1 CMPEQ on p5, 1 VPTESTMB on p0]
+    __mmask64 is_offset_6_mask = valid_prelim_mask & _mm512_cmpeq_epi8_mask(offset_9x_bx_zmm, x_06_zmm);
+    __m512i bit5_zmm = _mm512_and_si512(h_zmm, x_20_zmm);
+    __mmask64 is_b6_mask = is_offset_6_mask & _mm512_test_epi8_mask(bit5_zmm, bit5_zmm);
+    __mmask64 valid_9x_bx_mask = valid_prelim_mask & ~is_b6_mask;
 
     // Check for E2 84  [1 CMPEQ on p5]
     __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
 
     // Danger mask construction
-    __mmask64 ce_danger_mask = (is_ce_mask << 1) & (is_90_mask | is_b0_mask);
-    __mmask64 cf_danger_mask = (is_cf_mask << 1) & (valid_9x_mask | valid_bx_mask);
+    __mmask64 ce_danger_mask = (is_ce_mask << 1) & is_90_or_b0_mask;
+    __mmask64 cf_danger_mask = (is_cf_mask << 1) & valid_9x_bx_mask;
     __mmask64 e2_danger_mask = (is_e2_mask << 1) & is_84_mask;
     __mmask64 danger_mask = ce_danger_mask | cf_danger_mask | e2_danger_mask | is_e1_mask | is_cd_mask;
 
