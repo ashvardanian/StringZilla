@@ -4974,12 +4974,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
-    // Scan entire haystack - can't skip due to variable-width folding (e.g., Kelvin sign K→k)
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;
     sz_size_t const step = 64 - folded_window_length + 1;
-
-    // Main loop - process 64-byte chunks
     while (haystack_ptr + 64 <= haystack_end) {
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr));
 
@@ -5180,6 +5177,124 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_effici
 }
 
 /**
+ *  @brief Naive alarm function for Western Europe danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - E1 BA 9E: 'ẞ' (U+1E9E Capital Sharp S) → "ss" (3 bytes → 2 bytes)
+ *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
+ *  - E2 84 AB: 'Å' (U+212B Angstrom Sign) → 'å' (3 bytes → 2 bytes)
+ *  - EF AC 80-86: Ligatures 'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' → 2-3 bytes
+ *  - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
+ *  - C3 9F: 'ß' (U+00DF Sharp S) → "ss" (2 bytes → 2 bytes, 1 rune → 2 runes)
+ *
+ *  Uses 12 CMPEQ operations (5 lead + 7 second byte checks).
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_naively_zmm_(__m512i h_zmm) {
+    // Lead byte constants
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2);
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
+    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+
+    // Second/third byte constants
+    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
+    __m512i const x_aa_zmm = _mm512_set1_epi8((char)0xAA);
+    __m512i const x_ab_zmm = _mm512_set1_epi8((char)0xAB);
+
+    // Lead bytes (5 CMPEQ)
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e1_zmm);
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e2_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+
+    // Second/third bytes (7 CMPEQ)
+    __mmask64 is_ba_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ba_zmm);
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+    __mmask64 is_bf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+    __mmask64 is_9f_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+    __mmask64 is_aa_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_aa_zmm);
+    __mmask64 is_ab_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ab_zmm);
+
+    // Danger mask construction (checking third byte for E2 84 to avoid false positives)
+    return ((is_e1_mask << 1) & is_ba_mask) |                                    // Capital Sharp S (E1 BA 9E)
+           ((is_e2_mask << 1) & is_84_mask & ((is_aa_mask | is_ab_mask) >> 1)) | // Kelvin/Angstrom (E2 84 AA/AB)
+           ((is_ef_mask << 1) & is_ac_mask) |                                    // Ligatures (EF AC xx)
+           ((is_c5_mask << 1) & is_bf_mask) |                                    // Long S (C5 BF)
+           ((is_c3_mask << 1) & is_9f_mask);                                     // Sharp S (C3 9F)
+}
+
+/**
+ *  @brief Optimized alarm function for Western Europe danger zone detection.
+ *
+ *  Reduces port 5 pressure from 12 to 10 operations by:
+ *  - E1/E2 consecutive: 2 CMPEQ -> 1 CMPLT + 1 VPTESTNMB (p0)
+ *  - AA/AB consecutive: 2 CMPEQ -> 1 CMPLT
+ *
+ *  Port summary: 10 p5 ops + 1 p0 op (vs 12 p5 originally)
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_efficiently_zmm_(__m512i h_zmm) {
+    // Range constants
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
+    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
+    __m512i const x_aa_zmm = _mm512_set1_epi8((char)0xAA);
+    __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
+
+    // Check for E1/E2 range: (byte - 0xE1) < 2  [1 CMPLT on p5]
+    __m512i off_e1_zmm = _mm512_sub_epi8(h_zmm, x_e1_zmm);
+    __mmask64 is_e1_or_e2_mask = _mm512_cmplt_epu8_mask(off_e1_zmm, x_02_zmm);
+    __mmask64 is_e1_mask = is_e1_or_e2_mask & _mm512_testn_epi8_mask(off_e1_zmm, off_e1_zmm); // offset==0 [p0]
+    __mmask64 is_e2_mask = is_e1_or_e2_mask & ~is_e1_mask;
+
+    // Check for AA/AB range: (byte - 0xAA) < 2  [1 CMPLT on p5]
+    __m512i off_aa_zmm = _mm512_sub_epi8(h_zmm, x_aa_zmm);
+    __mmask64 is_aa_or_ab_mask = _mm512_cmplt_epu8_mask(off_aa_zmm, x_02_zmm);
+
+    // Other lead bytes (3 CMPEQ on p5)
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+
+    // Other second bytes (5 CMPEQ on p5)
+    __mmask64 is_ba_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ba_zmm);
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+    __mmask64 is_bf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+    __mmask64 is_9f_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+
+    // Danger mask construction
+    __mmask64 danger_mask =
+        ((is_e1_mask << 1) & is_ba_mask) |                           // Capital Sharp S (E1 BA xx)
+        ((is_e2_mask << 1) & is_84_mask & (is_aa_or_ab_mask >> 1)) | // Kelvin/Angstrom (E2 84 AA/AB)
+        ((is_ef_mask << 1) & is_ac_mask) |                           // Ligatures (EF AC xx)
+        ((is_c5_mask << 1) & is_bf_mask) |                           // Long S (C5 BF)
+        ((is_c3_mask << 1) & is_9f_mask);                            // Sharp S (C3 9F)
+
+    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_western_europe_alarm_naively_zmm_(h_zmm) &&
+               "Efficient Western Europe alarm must match naive implementation");
+    return danger_mask;
+}
+
+/**
  *  @brief Western European case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_western_europe_k
  *
@@ -5231,24 +5346,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
     // - EF AC 80-86: `'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' (ligatures) → 2-3 bytes
     // - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
     // - C3 9F: Sharp S (U+00DF) -> "ss" (2 bytes -> 2 bytes, but 1 rune -> 2 runes)
-    sz_u512_vec_t x_e1_vec, x_e2_vec, x_ef_vec, x_c5_vec, x_c3_vec;
-    sz_u512_vec_t x_ba_vec, x_84_vec, x_ac_vec, x_bf_vec, x_9f_vec;
-    sz_u512_vec_t x_aa_vec, x_ab_vec;            // 3rd byte checks for Capital Sharp S and K
-    x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1); // for 'ẞ'
-    x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2); // for 'K'
-    x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF); // for 'ﬁ', 'ﬂ', etc.
-    x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5); // for 'ſ'
-    x_c3_vec.zmm = _mm512_set1_epi8((char)0xC3); // for 'ß' (U+00DF)
-    x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA); // 2nd byte of 'ẞ'
-    x_84_vec.zmm = _mm512_set1_epi8((char)0x84); // 2nd byte of 'K'
-    x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of ligatures
-    x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF); // 2nd byte of 'ſ'
-    x_9f_vec.zmm = _mm512_set1_epi8((char)0x9F); // 2nd byte of 'ß' (U+00DF)
-    x_aa_vec.zmm = _mm512_set1_epi8((char)0xAA); // 3rd byte of 'K' (U+212A)
-    x_ab_vec.zmm = _mm512_set1_epi8((char)0xAB); // 3rd byte of Angstrom (U+212B)
-
-    sz_u512_vec_t haystack_vec;
-    sz_cptr_t haystack_ptr = haystack;
 
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
@@ -5257,7 +5354,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
 
-    // Unified loop - handles both full 64-byte chunks and the tail with a single code path
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -5273,29 +5371,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
 
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies (characters that fold to different byte widths)
-        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
-        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
-        __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
-
-        // Flattened: C3 is common (~10-20%) in Western European text
-        __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
-        __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
-        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-        __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
-        __mmask64 x_aa_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_aa_vec.zmm);
-        __mmask64 x_ab_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ab_vec.zmm);
-        __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
-
-        // For E1 BA and E2 84, we must also check the third byte to avoid false positives.
-        // E.g., ẗ (U+1E97 = E1 BA 97) is NOT a danger character, only ẞ (U+1E9E = E1 BA 9E) is.
-        __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) |                                  // ẞ (E1 BA 9E)
-                                ((x_e2_mask << 1) & x_84_mask & ((x_aa_mask | x_ab_mask) >> 1)) | // K (E2 84 AA)
-                                ((x_ef_mask << 1) & x_ac_mask) |                                  // ﬁ, ﬂ (EF AC xx)
-                                ((x_c5_mask << 1) & x_bf_mask) |                                  // ſ (C5 BF)
-                                ((x_c3_mask << 1) & x_9f_mask); // Sharp S (C3 9F -> ss)
+        // Check for anomalies using the alarm function
+        __mmask64 danger_mask =
+            sz_utf8_case_insensitive_find_ice_western_europe_alarm_efficiently_zmm_(haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
@@ -5518,6 +5596,117 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_central_europe_fold_effici
 }
 
 /**
+ *  @brief Naive alarm function for Central Europe danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
+ *  - C3 9F: 'ß' (U+00DF Eszett) → "ss" (2 bytes → 2 bytes, 1 rune → 2 runes)
+ *  - C4 B0: 'İ' (U+0130 Turkish Dotted I) → "i̇" (2 bytes → 3 bytes)
+ *  - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
+ *  - EF AC xx: Ligatures 'ﬀ', 'ﬁ', 'ﬂ', etc. → 2-3 bytes
+ *
+ *  Uses 10 CMPEQ operations (5 lead + 5 second byte checks).
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_central_europe_alarm_naively_zmm_(__m512i h_zmm) {
+    // Lead byte constants
+    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2); // for Kelvin sign
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3); // for Sharp S
+    __m512i const x_c4_zmm = _mm512_set1_epi8((char)0xC4); // for Dotted I
+    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5); // for Long S
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF); // for ligatures
+
+    // Second byte constants
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84); // 2nd byte of Kelvin
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 2nd byte of Sharp S
+    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0); // 2nd byte of Dotted I
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF); // 2nd byte of Long S
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of ligatures
+
+    // Lead bytes (5 CMPEQ)
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e2_zmm);
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+    __mmask64 is_c4_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c4_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+
+    // Second bytes (5 CMPEQ)
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+    __mmask64 is_9f_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+    __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_b0_zmm);
+    __mmask64 is_bf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+
+    // Danger mask construction
+    return ((is_e2_mask << 1) & is_84_mask) | // Kelvin (E2 84 AA)
+           ((is_c3_mask << 1) & is_9f_mask) | // Sharp S (C3 9F)
+           ((is_c4_mask << 1) & is_b0_mask) | // Dotted I (C4 B0)
+           ((is_c5_mask << 1) & is_bf_mask) | // Long S (C5 BF)
+           ((is_ef_mask << 1) & is_ac_mask);  // Ligatures (EF AC xx)
+}
+
+/**
+ *  @brief Optimized alarm function for Central Europe danger zone detection.
+ *
+ *  Reduces port 5 pressure from 10 to 8 operations by:
+ *  - C3/C4/C5 consecutive: 3 CMPEQ -> 1 CMPLT + 2 VPTESTNMB (p0)
+ *
+ *  Port summary: 8 p5 ops + 2 p0 ops (vs 10 p5 originally)
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_central_europe_alarm_efficiently_zmm_(__m512i h_zmm) {
+    // Lead byte constants (E2, EF not in consecutive range)
+    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2);
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+    __m512i const x_03_zmm = _mm512_set1_epi8(0x03);
+    __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
+
+    // Second byte constants
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
+    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0);
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
+
+    // Check for C3/C4/C5 range: (byte - 0xC3) < 3  [1 CMPLT on p5]
+    __m512i off_c3_zmm = _mm512_sub_epi8(h_zmm, x_c3_zmm);
+    __mmask64 in_c3_c5_range_mask = _mm512_cmplt_epu8_mask(off_c3_zmm, x_03_zmm);
+
+    // Derive C3, C4, C5 from range using VPTESTNMB (p0)
+    __mmask64 is_c3_mask = in_c3_c5_range_mask & _mm512_testn_epi8_mask(off_c3_zmm, off_c3_zmm); // offset==0
+    __m512i off_xor_2_zmm = _mm512_xor_si512(off_c3_zmm, x_02_zmm);
+    __mmask64 is_c5_mask = in_c3_c5_range_mask & _mm512_testn_epi8_mask(off_xor_2_zmm, off_xor_2_zmm); // offset==2
+    __mmask64 is_c4_mask = in_c3_c5_range_mask & ~is_c3_mask & ~is_c5_mask;                            // offset==1
+
+    // Other lead bytes (2 CMPEQ on p5)
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e2_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+
+    // Second bytes (5 CMPEQ on p5)
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+    __mmask64 is_9f_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+    __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_b0_zmm);
+    __mmask64 is_bf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+
+    // Danger mask construction
+    __mmask64 danger_mask = ((is_e2_mask << 1) & is_84_mask) | // Kelvin (E2 84 AA)
+                            ((is_c3_mask << 1) & is_9f_mask) | // Sharp S (C3 9F)
+                            ((is_c4_mask << 1) & is_b0_mask) | // Dotted I (C4 B0)
+                            ((is_c5_mask << 1) & is_bf_mask) | // Long S (C5 BF)
+                            ((is_ef_mask << 1) & is_ac_mask);  // Ligatures (EF AC xx)
+
+    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_central_europe_alarm_naively_zmm_(h_zmm) &&
+               "Efficient Central Europe alarm must match naive implementation");
+    return danger_mask;
+}
+
+/**
  *  @brief Central European case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_central_europe_k
  *
@@ -5559,29 +5748,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
-    // Constants for anomaly detection (characters that we don't handle or handle differently than simple folding):
-    // - E2 84 AA: 'K' (Kelvin Sign) → 'k' (3 bytes → 1 byte)
-    // - C3 9F: 'ß' (Eszett) → "ss" (2 bytes → 2 bytes, assumes Western expansion matches. If we see it, fallback)
-    // - C4 B0: 'İ' (Turkish Dotted I) → "i̇" (2 bytes → 3 bytes)
-    // - C5 BF: 'ſ' (Long S) → 's' (2 bytes → 1 byte)
-    // - EF AC ..: Ligatures
-    sz_u512_vec_t x_e2_vec, x_c3_vec, x_c4_vec, x_c5_vec, x_ef_vec;
-    sz_u512_vec_t x_84_vec, x_9f_vec, x_b0_vec, x_bf_vec, x_ac_vec;
-    x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
-    x_c3_vec.zmm = _mm512_set1_epi8((char)0xC3);
-    x_c4_vec.zmm = _mm512_set1_epi8((char)0xC4);
-    x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5);
-    x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
-
-    x_84_vec.zmm = _mm512_set1_epi8((char)0x84); // 2nd byte of Kelvin
-    x_9f_vec.zmm = _mm512_set1_epi8((char)0x9F); // 2nd byte of Eszett
-    x_b0_vec.zmm = _mm512_set1_epi8((char)0xB0); // 2nd byte of Dotted I
-    x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF); // 2nd byte of Long S
-    x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of Ligatures
-
-    sz_u512_vec_t haystack_vec;
-    sz_cptr_t haystack_ptr = haystack;
-
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
@@ -5589,7 +5755,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
 
-    // Unified loop
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -5605,25 +5772,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
 
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
-        __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
-        __mmask64 x_c4_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c4_vec.zmm);
-        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
-
-        // Flattened: C3/C4/C5 are common (~15-20%) in Central European text
-        __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
-        __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
-        __mmask64 x_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_vec.zmm);
-        __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
-        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-
-        __mmask64 danger_mask = ((x_e2_mask << 1) & x_84_mask) | // K
-                                ((x_c3_mask << 1) & x_9f_mask) | // ß
-                                ((x_c4_mask << 1) & x_b0_mask) | // İ
-                                ((x_c5_mask << 1) & x_bf_mask) | // ſ
-                                ((x_ef_mask << 1) & x_ac_mask);  // Ligatures
+        // Check for anomalies using the alarm function
+        __mmask64 danger_mask =
+            sz_utf8_case_insensitive_find_ice_central_europe_alarm_efficiently_zmm_(haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
@@ -5724,7 +5875,6 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_cyrillic_fold_naively_zmm_
     //   - Extensions:  D0 80-8F ('Ѐ'-'Џ') → D1 90-9F ('ѐ'-'џ') : lead D0→D1, second +0x10
     //   - Basic A-Pe:  D0 90-9F ('А'-'П') → D0 B0-BF ('а'-'п') : lead unchanged, second +0x20
     //   - Basic Er-Ya: D0 A0-AF ('Р'-'Я') → D1 80-8F ('р'-'я') : lead D0→D1, second -0x20
-
     __mmask64 is_lead_d0_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_d0_zmm);
     __mmask64 is_after_d0_mask = is_lead_d0_mask << 1;
 
@@ -5865,10 +6015,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(     //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
+    // Unified loop - handles both full 64-byte chunks and the tail with a single code path
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;
-
-    // Unified loop - handles both full 64-byte chunks and the tail with a single code path
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -6076,6 +6225,55 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_armenian_fold_efficiently_
 }
 
 /**
+ *  @brief Naive alarm function for Armenian danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - D6 87: 'և' (U+0587 Ech-Yiwn ligature) → "եdelays" (2 bytes → 4 bytes)
+ *  - EF AC xx: Armenian ligatures (FB13-FB17) and other Alphabetic Presentation Forms
+ *
+ *  Uses 4 CMPEQ operations (2 lead + 2 second byte checks).
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_armenian_alarm_naively_zmm_(__m512i h_zmm) {
+    // Lead byte constants
+    __m512i const x_d6_zmm = _mm512_set1_epi8((char)0xD6); // for Ech-Yiwn
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF); // for ligatures
+
+    // Second byte constants
+    __m512i const x_87_zmm = _mm512_set1_epi8((char)0x87); // 2nd byte of Ech-Yiwn
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC); // 2nd byte of ligatures
+
+    // Lead bytes (2 CMPEQ)
+    __mmask64 is_d6_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_d6_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+
+    // Second bytes (2 CMPEQ)
+    __mmask64 is_87_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_87_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+
+    // Danger mask construction
+    __mmask64 ech_yiwn_mask = (is_d6_mask << 1) & is_87_mask; // Ech-Yiwn (D6 87)
+    __mmask64 ef_ac_mask = (is_ef_mask << 1) & is_ac_mask;    // Ligatures (EF AC)
+    return ech_yiwn_mask | ef_ac_mask;
+}
+
+/**
+ *  @brief Optimized alarm function for Armenian danger zone detection.
+ *
+ *  Currently delegates to the naive implementation.
+ *  Armenian has only 4 CMPEQ ops, so optimization overhead may not be worthwhile.
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_armenian_alarm_efficiently_zmm_(__m512i h_zmm) {
+    // Only 4 CMPEQ operations - optimization overhead likely not worth it
+    return sz_utf8_case_insensitive_find_ice_armenian_alarm_naively_zmm_(h_zmm);
+}
+
+/**
  *  @brief Armenian case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_armenian_k
  *
@@ -6117,21 +6315,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
-    // Constants for anomaly detection (characters that we don't handle or handle differently than simple folding):
-    // - D6 87: 'և' (Ech-Yiwn ligature) -> "եւ" (D5 A5 D6 82) - 2 bytes -> 4 bytes
-    // - FB 13-17 (EF AC 93-97): Men-Now, Men-Ech, Men-Ini, Vew-Now, Men-Xeh ligatures
-    //   Actually we catch all EF AC xx sequences (U+FB00-FB4F are Alphabetic Presentation Forms, mostly ligatures)
-    sz_u512_vec_t x_d6_vec, x_ef_vec, x_ac_vec;
-    sz_u512_vec_t x_87_vec;
-
-    x_d6_vec.zmm = _mm512_set1_epi8((char)0xD6);
-    x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
-    x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
-    x_87_vec.zmm = _mm512_set1_epi8((char)0x87);
-
-    sz_u512_vec_t haystack_vec;
-    sz_cptr_t haystack_ptr = haystack;
-
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
@@ -6139,7 +6322,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
 
-    // Unified loop
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -6155,18 +6339,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
 
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies
-        __mmask64 x_d6_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_d6_vec.zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
-
-        // Flattened: D6 is common in Armenian text (letters ր-ֆ)
-        __mmask64 x_87_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_87_vec.zmm);
-        __mmask64 x_ech_yiwn = (x_d6_mask << 1) & x_87_mask; // D6 87
-
-        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-        __mmask64 x_ef_ac = (x_ef_mask << 1) & x_ac_mask; // EF AC
-
-        __mmask64 danger_mask = x_ech_yiwn | x_ef_ac;
+        // Check for anomalies using the alarm function
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_ice_armenian_alarm_efficiently_zmm_(haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
@@ -6476,6 +6650,155 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_efficiently_zmm
 }
 
 /**
+ *  @brief Detect danger zone positions in a ZMM register for Greek text.
+ *
+ *  Danger characters are those that expand during case folding or have alternative representations:
+ *  - CE 90: 'ΐ' (U+0390) expands to 3 codepoints
+ *  - CE B0: 'ΰ' (U+03B0) expands to 3 codepoints
+ *  - CF 90,91,95,96: Greek symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ'
+ *  - CF B0,B1,B5: Greek symbols 'ϰ', 'ϱ', 'ϵ'
+ *  - E2 84: Ohm sign 'Ω' prefix
+ *  - E1: Polytonic Greek / Extensions
+ *  - CD: Combining Diacritical Marks
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_naively_zmm_(__m512i h_zmm) {
+    // All constants local to function
+    __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
+    __m512i const x_cf_zmm = _mm512_set1_epi8((char)0xCF);
+    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2);
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_cd_zmm = _mm512_set1_epi8((char)0xCD);
+    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);
+    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0);
+    __m512i const x_91_zmm = _mm512_set1_epi8((char)0x91);
+    __m512i const x_95_zmm = _mm512_set1_epi8((char)0x95);
+    __m512i const x_96_zmm = _mm512_set1_epi8((char)0x96);
+    __m512i const x_b1_zmm = _mm512_set1_epi8((char)0xB1);
+    __m512i const x_b5_zmm = _mm512_set1_epi8((char)0xB5);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+
+    // Lead bytes (5 CMPEQ)
+    __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ce_zmm);
+    __mmask64 is_cf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_cf_zmm);
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e2_zmm);
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e1_zmm);
+    __mmask64 is_cd_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_cd_zmm);
+
+    // Second bytes (8 CMPEQ)
+    __mmask64 is_90_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_90_zmm);
+    __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_b0_zmm);
+    __mmask64 is_9x_mask = is_90_mask | _mm512_cmpeq_epi8_mask(h_zmm, x_91_zmm) | //
+                           _mm512_cmpeq_epi8_mask(h_zmm, x_95_zmm) | _mm512_cmpeq_epi8_mask(h_zmm, x_96_zmm);
+    __mmask64 is_bx_mask =
+        is_b0_mask | _mm512_cmpeq_epi8_mask(h_zmm, x_b1_zmm) | _mm512_cmpeq_epi8_mask(h_zmm, x_b5_zmm);
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+
+    // Danger mask construction
+    __mmask64 ce_danger_mask = (is_ce_mask << 1) & (is_90_mask | is_b0_mask);
+    __mmask64 cf_danger_mask = (is_cf_mask << 1) & (is_9x_mask | is_bx_mask);
+    __mmask64 e2_danger_mask = (is_e2_mask << 1) & is_84_mask;
+    return ce_danger_mask | cf_danger_mask | e2_danger_mask | is_e1_mask | is_cd_mask;
+}
+
+/**
+ *  @brief Optimized danger zone detection for Greek text using Range+LUT technique.
+ *  @sa sz_utf8_case_insensitive_find_ice_greek_alarm_naively_zmm_
+ *
+ *  Reduces port 5 pressure from 13 to 8 operations by:
+ *  - Lead bytes CE/CF and E1/E2: 4 CMPEQ -> 2 CMPLT + 2 VPTESTNMB (p0)
+ *  - CF 9x set {90,91,95,96}: 4 CMPEQ -> 1 CMPLT + 1 VPSHUFB + 1 VPTESTMB (p0)
+ *  - CF Bx set {B0,B1,B5}: 3 CMPEQ -> 1 CMPLT + 1 VPSHUFB + 1 VPTESTMB (p0)
+ *  - CE 90/B0 derived from range checks using VPTESTNMB (p0)
+ *
+ *  Port summary: 8 p5 ops + 6 p0 ops (vs 13 p5 originally)
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @return Bitmask of positions where danger characters are detected.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_greek_alarm_efficiently_zmm_(__m512i h_zmm) {
+    // Range constants
+    __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_cd_zmm = _mm512_set1_epi8((char)0xCD);
+    __m512i const x_90_zmm = _mm512_set1_epi8((char)0x90);
+    __m512i const x_b0_zmm = _mm512_set1_epi8((char)0xB0);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
+    __m512i const x_07_zmm = _mm512_set1_epi8(0x07);
+    __m512i const x_06_zmm = _mm512_set1_epi8(0x06);
+
+    // LUT for 9x set {90,91,95,96}: positions 0,1,5,6 are 0xFF (valid)
+    // VPSHUFB uses low 4 bits as index; high bit set -> output 0
+    __m512i const lut_9x_zmm = _mm512_set_epi8(              //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1,  // lane 3: [15..0]
+        0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1,  // lane 2
+        0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1,  // lane 1
+        0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, -1, -1); // lane 0
+
+    // LUT for Bx set {B0,B1,B5}: positions 0,1,5 are 0xFF (valid)
+    __m512i const lut_bx_zmm = _mm512_set_epi8(             //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 3: [15..0]
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 2
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1,  // lane 1
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, -1, -1); // lane 0
+
+    // Lead byte detection using range compression
+    // Check for CE/CF range: (byte - 0xCE) < 2  [1 CMPLT on p5]
+    __m512i off_ce_zmm = _mm512_sub_epi8(h_zmm, x_ce_zmm);
+    __mmask64 is_ce_or_cf_mask = _mm512_cmplt_epu8_mask(off_ce_zmm, x_02_zmm);
+    __mmask64 is_ce_mask = is_ce_or_cf_mask & _mm512_testn_epi8_mask(off_ce_zmm, off_ce_zmm); // offset==0 [p0]
+    __mmask64 is_cf_mask = is_ce_or_cf_mask & ~is_ce_mask;
+
+    // Check for E1/E2 range: (byte - 0xE1) < 2  [1 CMPLT on p5]
+    __m512i off_e1_zmm = _mm512_sub_epi8(h_zmm, x_e1_zmm);
+    __mmask64 is_e1_or_e2_mask = _mm512_cmplt_epu8_mask(off_e1_zmm, x_02_zmm);
+    __mmask64 is_e1_mask = is_e1_or_e2_mask & _mm512_testn_epi8_mask(off_e1_zmm, off_e1_zmm); // offset==0 [p0]
+    __mmask64 is_e2_mask = is_e1_or_e2_mask & ~is_e1_mask;
+
+    // Check for CD (no adjacent partner)  [1 CMPEQ on p5]
+    __mmask64 is_cd_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_cd_zmm);
+
+    // Second byte detection using Range+LUT
+    // Check for 9x range [90-96]: compute offsets  [1 CMPLT on p5]
+    __m512i off_9x_zmm = _mm512_sub_epi8(h_zmm, x_90_zmm);
+    __mmask64 in_9x_range_mask = _mm512_cmplt_epu8_mask(off_9x_zmm, x_07_zmm);
+
+    // Validate 9x set {90,91,95,96} using LUT  [1 VPSHUFB on p5, 1 VPTESTMB on p0]
+    __m512i shuffled_9x_zmm = _mm512_shuffle_epi8(lut_9x_zmm, off_9x_zmm);
+    __mmask64 valid_9x_mask = in_9x_range_mask & _mm512_test_epi8_mask(shuffled_9x_zmm, shuffled_9x_zmm);
+
+    // Derive is_90 (offset == 0 within range)  [1 VPTESTNMB on p0]
+    __mmask64 is_90_mask = in_9x_range_mask & _mm512_testn_epi8_mask(off_9x_zmm, off_9x_zmm);
+
+    // Check for Bx range [B0-B5]: compute offsets  [1 CMPLT on p5]
+    __m512i off_bx_zmm = _mm512_sub_epi8(h_zmm, x_b0_zmm);
+    __mmask64 in_bx_range_mask = _mm512_cmplt_epu8_mask(off_bx_zmm, x_06_zmm);
+
+    // Validate Bx set {B0,B1,B5} using LUT  [1 VPSHUFB on p5, 1 VPTESTMB on p0]
+    __m512i shuffled_bx_zmm = _mm512_shuffle_epi8(lut_bx_zmm, off_bx_zmm);
+    __mmask64 valid_bx_mask = in_bx_range_mask & _mm512_test_epi8_mask(shuffled_bx_zmm, shuffled_bx_zmm);
+
+    // Derive is_b0 (offset == 0 within range)  [1 VPTESTNMB on p0]
+    __mmask64 is_b0_mask = in_bx_range_mask & _mm512_testn_epi8_mask(off_bx_zmm, off_bx_zmm);
+
+    // Check for E2 84  [1 CMPEQ on p5]
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+
+    // Danger mask construction
+    __mmask64 ce_danger_mask = (is_ce_mask << 1) & (is_90_mask | is_b0_mask);
+    __mmask64 cf_danger_mask = (is_cf_mask << 1) & (valid_9x_mask | valid_bx_mask);
+    __mmask64 e2_danger_mask = (is_e2_mask << 1) & is_84_mask;
+    __mmask64 danger_mask = ce_danger_mask | cf_danger_mask | e2_danger_mask | is_e1_mask | is_cd_mask;
+
+    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_greek_alarm_naively_zmm_(h_zmm) &&
+               "Efficient Greek alarm must match naive implementation");
+    return danger_mask;
+}
+
+/**
  *  @brief Greek case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_greek_k
  *
@@ -6518,36 +6841,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
-    // Constants for anomaly detection (characters that we don't handle or handle differently than simple folding):
-    // - CE 90: 'ΐ' -> "ΐ" (3 bytes)
-    // - CE B0: 'ΰ' -> "ΰ" (3 bytes)
-    // - CF 90, 91, 95, 96: Greek Symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ'
-    // - CF B0, B1, B5: Greek Symbols 'ϰ', 'ϱ', 'ϵ'
-    // - E2 84 A6: Ohm Sign 'Ω' -> 'ω' (CF 89) (detect E2 84 prefix)
-    // - E1 xx xx: Polytonic Greek (excluded by safety profile, but just in case)
-    sz_u512_vec_t x_ce_zmm, x_cf_zmm, x_e1_zmm, x_e2_zmm, x_cd_zmm;
-    sz_u512_vec_t x_90_zmm, x_b0_zmm, x_84_zmm;
-    sz_u512_vec_t x_91_zmm, x_95_zmm, x_96_zmm, x_b1_zmm, x_b5_zmm;
-
-    x_ce_zmm.zmm = _mm512_set1_epi8((char)0xCE);
-    x_cf_zmm.zmm = _mm512_set1_epi8((char)0xCF);
-    x_e1_zmm.zmm = _mm512_set1_epi8((char)0xE1); // E1 lead byte (Polytonic Greek)
-    x_e2_zmm.zmm = _mm512_set1_epi8((char)0xE2);
-    x_cd_zmm.zmm = _mm512_set1_epi8((char)0xCD); // CD lead byte (Combining Diacritical Marks)
-
-    x_90_zmm.zmm = _mm512_set1_epi8((char)0x90);
-    x_b0_zmm.zmm = _mm512_set1_epi8((char)0xB0);
-    x_84_zmm.zmm = _mm512_set1_epi8((char)0x84);
-
-    x_91_zmm.zmm = _mm512_set1_epi8((char)0x91); // cf 91
-    x_95_zmm.zmm = _mm512_set1_epi8((char)0x95); // cf 95
-    x_96_zmm.zmm = _mm512_set1_epi8((char)0x96); // cf 96
-    x_b1_zmm.zmm = _mm512_set1_epi8((char)0xB1); // cf b1
-    x_b5_zmm.zmm = _mm512_set1_epi8((char)0xB5); // cf b5
-
-    sz_u512_vec_t haystack_vec;
-    sz_cptr_t haystack_ptr = haystack;
-
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
@@ -6555,7 +6848,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
 
-    // Unified loop
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -6571,36 +6865,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
 
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies
-        __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ce_zmm.zmm);
-        __mmask64 is_cf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_cf_zmm.zmm);
-        __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_zmm.zmm);
-        __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_zmm.zmm);
-        __mmask64 is_cd_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_cd_zmm.zmm);
-
-        // Flattened: CE/CF are ubiquitous in Greek text
-        __mmask64 is_90_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_90_zmm.zmm);
-        __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_zmm.zmm);
-        __mmask64 is_ce_90_b0_mask =
-            (is_ce_mask << 1) & (is_90_mask | is_b0_mask); // CE 90 or CE B0: 'ΐ' (U+0390) and 'ΰ' (U+03B0)
-
-        __mmask64 is_9x_mask = is_90_mask |                                             // 'ϐ' (CF 90)
-                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_91_zmm.zmm) | // 'ϑ' (CF 91)
-                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_95_zmm.zmm) | // 'ϕ' (CF 95)
-                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_96_zmm.zmm);  // 'ϖ' (CF 96)
-
-        __mmask64 is_bx_mask = is_b0_mask |                                             // 'ϰ' (CF B0)
-                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b1_zmm.zmm) | // 'ϱ' (CF B1)
-                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b5_zmm.zmm);  // 'ϵ' (CF B5)
-
-        __mmask64 is_cf_symbol_mask =
-            (is_cf_mask << 1) & (is_9x_mask | is_bx_mask); // Greek Symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ', 'ϰ', 'ϱ', 'ϵ'
-
-        __mmask64 is_ohm_sign_mask =
-            (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_zmm.zmm); // Ohm Sign 'Ω'
-        // E1 is always dangerous in Greek path (Polytonic/Extensions)
-        // CD is dangerous (Combining Diacritical Marks)
-        __mmask64 danger_mask = is_ce_90_b0_mask | is_cf_symbol_mask | is_ohm_sign_mask | is_e1_mask | is_cd_mask;
+        // Check for anomalies using the alarm function
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_ice_greek_alarm_efficiently_zmm_(haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
@@ -6897,6 +7163,138 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_efficientl
 }
 
 /**
+ *  @brief Naive alarm function for Vietnamese danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - E1 BA 96-9F: Latin Extended Additional excluded characters (includes ẞ U+1E9E)
+ *  - C3 9F: 'ß' (U+00DF Sharp S) → "ss"
+ *  - C5 BF: 'ſ' (U+017F Long S) → 's'
+ *  - EF AC xx: Ligatures (U+FB00-FB06)
+ *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k'
+ *
+ *  Uses ~11 CMPEQ + 2 range operations.
+ *  Note: Returns danger positions shifted to the START of multi-byte sequences.
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @param[in] load_mask Mask of valid bytes in the ZMM register.
+ *  @return Bitmask of positions where danger characters are detected (at sequence start).
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_vietnamese_alarm_naively_zmm_(__m512i h_zmm,
+                                                                                      __mmask64 load_mask) {
+    // Lead byte constants
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
+    __m512i const x_e2_zmm = _mm512_set1_epi8((char)0xE2);
+
+    // Second byte constants
+    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_96_zmm = _mm512_set1_epi8((char)0x96);
+
+    // Lead bytes (5 CMPEQ)
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e1_zmm);
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_e2_zmm);
+
+    // Early exit if no lead bytes
+    if (!(is_e1_mask | is_c3_mask | is_c5_mask | is_ef_mask | is_e2_mask)) return 0;
+
+    // Check for Latin Extended Additional exclusions (E1 BA 96-9F)
+    __mmask64 ba_second_mask = (is_e1_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_ba_zmm);
+    __mmask64 bad_third_mask = (ba_second_mask << 1) & _mm512_mask_cmpge_epu8_mask(load_mask, h_zmm, x_96_zmm) &
+                               _mm512_mask_cmple_epu8_mask(load_mask, h_zmm, x_9f_zmm);
+
+    // Check for Sharp S (C3 9F)
+    __mmask64 sharp_s_mask = (is_c3_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+
+    // Check for Long S (C5 BF)
+    __mmask64 long_s_mask = (is_c5_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+
+    // Check for Ligatures (EF AC)
+    __mmask64 ligature_mask = (is_ef_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+
+    // Check for Kelvin (E2 84)
+    __mmask64 kelvin_mask = (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+
+    // Shift back to sequence start positions
+    return (bad_third_mask >> 2) | (sharp_s_mask >> 1) | (long_s_mask >> 1) | (ligature_mask >> 1) | (kelvin_mask >> 1);
+}
+
+/**
+ *  @brief Optimized alarm function for Vietnamese danger zone detection.
+ *
+ *  Reduces port 5 pressure from ~12 to ~11 operations by:
+ *  - E1/E2 consecutive: 2 CMPEQ -> 1 CMPLT + 1 VPTESTNMB (p0)
+ *
+ *  Port summary: 11 p5 ops + 1 p0 op (vs 12 p5 originally)
+ *
+ *  @param[in] h The haystack ZMM register.
+ *  @param[in] load_mask Mask of valid bytes in the ZMM register.
+ *  @return Bitmask of positions where danger characters are detected (at sequence start).
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_vietnamese_alarm_efficiently_zmm_(__m512i h_zmm,
+                                                                                          __mmask64 load_mask) {
+    // Range constants
+    __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
+    __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
+    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
+    __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
+    __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
+    __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
+    __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
+    __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
+    __m512i const x_96_zmm = _mm512_set1_epi8((char)0x96);
+    __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
+
+    // Check for E1/E2 range: (byte - 0xE1) < 2  [1 CMPLT on p5]
+    __m512i off_e1_zmm = _mm512_sub_epi8(h_zmm, x_e1_zmm);
+    __mmask64 is_e1_or_e2_mask = _mm512_cmplt_epu8_mask(off_e1_zmm, x_02_zmm);
+    __mmask64 is_e1_mask = is_e1_or_e2_mask & _mm512_testn_epi8_mask(off_e1_zmm, off_e1_zmm); // offset==0 [p0]
+    __mmask64 is_e2_mask = is_e1_or_e2_mask & ~is_e1_mask;
+
+    // Other lead bytes (3 CMPEQ on p5)
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
+
+    // Early exit if no lead bytes
+    if (!(is_e1_or_e2_mask | is_c3_mask | is_c5_mask | is_ef_mask)) return 0;
+
+    // Check for Latin Extended Additional exclusions (E1 BA 96-9F)
+    __mmask64 ba_second_mask = (is_e1_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_ba_zmm);
+    __mmask64 bad_third_mask = (ba_second_mask << 1) & _mm512_mask_cmpge_epu8_mask(load_mask, h_zmm, x_96_zmm) &
+                               _mm512_mask_cmple_epu8_mask(load_mask, h_zmm, x_9f_zmm);
+
+    // Check for Sharp S (C3 9F)
+    __mmask64 sharp_s_mask = (is_c3_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+
+    // Check for Long S (C5 BF)
+    __mmask64 long_s_mask = (is_c5_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
+
+    // Check for Ligatures (EF AC)
+    __mmask64 ligature_mask = (is_ef_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
+
+    // Check for Kelvin (E2 84)
+    __mmask64 kelvin_mask = (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
+
+    // Shift back to sequence start positions
+    __mmask64 danger_mask =
+        (bad_third_mask >> 2) | (sharp_s_mask >> 1) | (long_s_mask >> 1) | (ligature_mask >> 1) | (kelvin_mask >> 1);
+
+    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_vietnamese_alarm_naively_zmm_(h_zmm, load_mask) &&
+               "Efficient Vietnamese alarm must match naive implementation");
+    return danger_mask;
+}
+
+/**
  *  @brief Vietnamese case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_vietnamese_k
  *
@@ -6939,41 +7337,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
     probe_third.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
     probe_last.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
 
-    // Anomaly checks
-    // E1 BA 96-9F are excluded in safety profile, so their presence triggers anomaly.
-    // Also "Sharp S" (C3 9F) maps to "ss".
-    // 1E 9E (ẞ) is in the 96-9F range, so covered.
-    // EF AC 80-86: Ligatures (ﬀ-ﬆ) that expand when folded.
-    // E2 84 AA: Kelvin sign K folds to 'k'.
-    // C5 BF: Long S 'ſ' folds to 's'.
-
-    sz_u512_vec_t x_e1_vec, x_ba_vec, x_96_vec;
-    sz_u512_vec_t x_c3_vec, x_9f_vec;
-    sz_u512_vec_t x_c5_vec, x_bf_vec;
-    sz_u512_vec_t x_ef_vec, x_ac_vec;
-    sz_u512_vec_t x_e2_vec, x_84_vec;
-
-    x_e1_vec.zmm = _mm512_set1_epi8((char)0xE1);
-    x_ba_vec.zmm = _mm512_set1_epi8((char)0xBA);
-    x_96_vec.zmm = _mm512_set1_epi8((char)0x96);
-    x_9f_vec.zmm = _mm512_set1_epi8((char)0x9F);
-    x_c3_vec.zmm = _mm512_set1_epi8((char)0xC3);
-    x_c5_vec.zmm = _mm512_set1_epi8((char)0xC5);
-    x_bf_vec.zmm = _mm512_set1_epi8((char)0xBF);
-    x_ef_vec.zmm = _mm512_set1_epi8((char)0xEF);
-    x_ac_vec.zmm = _mm512_set1_epi8((char)0xAC);
-    x_e2_vec.zmm = _mm512_set1_epi8((char)0xE2);
-    x_84_vec.zmm = _mm512_set1_epi8((char)0x84);
-
-    sz_u512_vec_t haystack_vec;
-    sz_cptr_t haystack_ptr = haystack;
-
     sz_rune_t needle_first_safe_folded_rune;
     {
         sz_rune_length_t dummy;
         sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
     }
 
+    sz_u512_vec_t haystack_vec;
+    sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {
         sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
         if (available < folded_window_length) break;
@@ -6989,62 +7360,25 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
 
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
-        // Check for anomalies
-        __mmask64 x_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_vec.zmm);
-        __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
-        __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
-        __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e2_vec.zmm);
-
-        if (x_e1_mask | x_c3_mask | x_c5_mask | x_ef_mask | x_e2_mask) {
-            // Check E1 BA 96-9F
-            __mmask64 x_ba_second = (x_e1_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
-            __mmask64 x_bad_third = (x_ba_second << 1) &
-                                    _mm512_mask_cmpge_epu8_mask(load_mask, haystack_vec.zmm, x_96_vec.zmm) &
-                                    _mm512_mask_cmple_epu8_mask(load_mask, haystack_vec.zmm, x_9f_vec.zmm);
-
-            // Check C3 9F (Sharp S)
-            __mmask64 x_sharp_s = (x_c3_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
-
-            // Check C5 BF (Long S)
-            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
-            __mmask64 x_long_s = (x_c5_mask << 1) & x_bf_mask;
-
-            // Check EF AC (Ligatures: ﬀ-ﬆ, U+FB00-FB06)
-            __mmask64 x_ligature = (x_ef_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-
-            // Check E2 84 (Kelvin K, U+212A -> 'k')
-            __mmask64 x_kelvin = (x_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
-
-            // Alignment: these masks show the position of the *last* byte of the anomaly.
-            // We need to shift back to the start byte to check against valid_starts?
-            // "valid_starts" is a mask of valid *start* positions.
-            // If the start of a multi-byte sequence is valid, we encounter it.
-            // x_bad_third marks the 3rd byte. Shift right 2.
-            // x_sharp_s marks 2nd byte. Shift right 1.
-            // x_ligature marks 2nd byte. Shift right 1.
-            // x_kelvin marks 2nd byte. Shift right 1.
-
-            __mmask64 danger_mask =
-                (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_long_s >> 1) | (x_ligature >> 1) | (x_kelvin >> 1);
-
-            if (danger_mask) {
-                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
-                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
-                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-                sz_size_t danger_scan_length =
-                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
-                    haystack, haystack_length,                                   //
-                    needle, needle_length,                                       //
-                    haystack_ptr, danger_scan_length,                            // extended danger zone
-                    needle_first_safe_folded_rune,                               // pivot point
-                    needle_metadata->offset_in_unfolded,                         // its location in the needle
-                    matched_length);
-                if (match) return match;
-                haystack_ptr += step;
-                continue;
-            }
+        // Check for anomalies using alarm function
+        __mmask64 danger_mask =
+            sz_utf8_case_insensitive_find_ice_vietnamese_alarm_efficiently_zmm_(haystack_vec.zmm, load_mask);
+        if (danger_mask) {
+            // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+            // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+            // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            // extended danger zone
+                needle_first_safe_folded_rune,                               // pivot point
+                needle_metadata->offset_in_unfolded,                         // its location in the needle
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
         }
 
         haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_vietnamese_fold_efficiently_zmm_(haystack_vec.zmm);
