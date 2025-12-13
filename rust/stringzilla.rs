@@ -137,29 +137,27 @@ impl IndexSpan {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Utf8CaseInsensitiveNeedleMetadata {
-    // sz_utf8_string_slice_t safe_window (5 x usize = 40 bytes on 64-bit)
-    safe_window_offset: usize,
-    safe_window_length: usize,
-    safe_window_runes_before: usize,
-    safe_window_runes_within: usize,
-    safe_window_runes_after: usize,
+    // sz_size_t offset_in_unfolded
+    offset_in_unfolded: usize,
+    // sz_size_t length_in_unfolded
+    length_in_unfolded: usize,
     // sz_u8_t folded_slice[16]
     folded_slice: [u8; 16],
-    // 4 x sz_u8_t fields
+    // sz_u8_t folded_slice_length
     folded_slice_length: u8,
+    // sz_u8_t probe_second
     probe_second: u8,
+    // sz_u8_t probe_third
     probe_third: u8,
+    // sz_u8_t kernel_id
     kernel_id: u8,
 }
 
 impl Default for Utf8CaseInsensitiveNeedleMetadata {
     fn default() -> Self {
         Self {
-            safe_window_offset: 0,
-            safe_window_length: 0,
-            safe_window_runes_before: 0,
-            safe_window_runes_within: 0,
-            safe_window_runes_after: 0,
+            offset_in_unfolded: 0,
+            length_in_unfolded: 0,
             folded_slice: [0; 16],
             folded_slice_length: 0,
             probe_second: 0,

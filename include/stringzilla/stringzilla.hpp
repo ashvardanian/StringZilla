@@ -2326,7 +2326,7 @@ class basic_string_slice {
         sz_utf8_case_insensitive_needle_metadata_t metadata = {};
         sz_size_t match_length = 0;
         auto ptr = sz_utf8_case_insensitive_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
-        if (!ptr) return {npos, 0};
+        if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
 
