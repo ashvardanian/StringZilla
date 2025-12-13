@@ -729,7 +729,7 @@ jobs:
     steps:
       - name: Install Git for checkout
         run: |
-          apk add --no-cache git openssh ca-certificates
+          apk add --no-cache git openssh ca-certificates bash # bash is required by dtolnay/rust-toolchain
           git --version
       - name: Log Alpine and Git versions
         run: |
