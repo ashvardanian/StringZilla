@@ -51,7 +51,7 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
                         f.write(xml_content)
             print(f"Cached to {cache_path}")
         except Exception as e:
-            raise RuntimeError(f"Could not download UCD XML from {url}: {e}")
+            raise UnicodeDataDownloadError(f"Could not download UCD XML from {url}: {e}")
     else:
         print(f"Using cached Unicode {version} UCD XML: {cache_path}")
 
@@ -195,7 +195,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
             urllib.request.urlretrieve(url, cache_path)
             print(f"Cached to {cache_path}")
         except Exception as e:
-            raise RuntimeError(
+            raise UnicodeDataDownloadError(
                 f"Could not download DerivedNormalizationProps.txt from {url}: {e}"
             )
     else:
