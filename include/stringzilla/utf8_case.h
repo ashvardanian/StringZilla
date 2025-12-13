@@ -2999,6 +2999,15 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                         folded = _mm512_mask_add_epi8(folded, sz_ice_is_ascii_upper_(source_vec.zmm) & prefix_mask,
                                                       folded, ascii_case_offset);
 
+                        // Fold Micro Sign: C2 B5 → CE BC (U+00B5 → U+03BC)
+                        __mmask64 c2_in_prefix = is_c2_lead & prefix_mask;
+                        __mmask64 c2_second_pos = c2_in_prefix << 1;
+                        __mmask64 is_micro_second =
+                            c2_second_pos & _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB5));
+                        __mmask64 is_micro_lead = is_micro_second >> 1;
+                        folded = _mm512_mask_blend_epi8(is_micro_lead, folded, _mm512_set1_epi8((char)0xCE));
+                        folded = _mm512_mask_blend_epi8(is_micro_second, folded, _mm512_set1_epi8((char)0xBC));
+
                         _mm512_mask_storeu_epi8(target, prefix_mask, folded);
                         target += georgian_length, source += georgian_length, source_length -= georgian_length;
                         continue;
