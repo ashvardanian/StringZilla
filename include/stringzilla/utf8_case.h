@@ -5280,40 +5280,39 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
         __mmask64 x_c3_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c3_vec.zmm);
 
-        if (x_e1_mask | x_e2_mask | x_ef_mask | x_c5_mask | x_c3_mask) {
-            __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
-            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
-            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
-            __mmask64 x_aa_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_aa_vec.zmm);
-            __mmask64 x_ab_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ab_vec.zmm);
-            __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
+        // Flattened: C3 is common (~10-20%) in Western European text
+        __mmask64 x_ba_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ba_vec.zmm);
+        __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
+        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
+        __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
+        __mmask64 x_aa_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_aa_vec.zmm);
+        __mmask64 x_ab_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ab_vec.zmm);
+        __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
 
-            // For E1 BA and E2 84, we must also check the third byte to avoid false positives.
-            // E.g., ẗ (U+1E97 = E1 BA 97) is NOT a danger character, only ẞ (U+1E9E = E1 BA 9E) is.
-            __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) |                                  // ẞ (E1 BA 9E)
-                                    ((x_e2_mask << 1) & x_84_mask & ((x_aa_mask | x_ab_mask) >> 1)) | // K (E2 84 AA)
-                                    ((x_ef_mask << 1) & x_ac_mask) |                                  // ﬁ, ﬂ (EF AC xx)
-                                    ((x_c5_mask << 1) & x_bf_mask) |                                  // ſ (C5 BF)
-                                    ((x_c3_mask << 1) & x_9f_mask); // Sharp S (C3 9F -> ss)
+        // For E1 BA and E2 84, we must also check the third byte to avoid false positives.
+        // E.g., ẗ (U+1E97 = E1 BA 97) is NOT a danger character, only ẞ (U+1E9E = E1 BA 9E) is.
+        __mmask64 danger_mask = ((x_e1_mask << 1) & x_ba_mask) |                                  // ẞ (E1 BA 9E)
+                                ((x_e2_mask << 1) & x_84_mask & ((x_aa_mask | x_ab_mask) >> 1)) | // K (E2 84 AA)
+                                ((x_ef_mask << 1) & x_ac_mask) |                                  // ﬁ, ﬂ (EF AC xx)
+                                ((x_c5_mask << 1) & x_bf_mask) |                                  // ſ (C5 BF)
+                                ((x_c3_mask << 1) & x_9f_mask); // Sharp S (C3 9F -> ss)
 
-            if (danger_mask) {
-                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
-                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
-                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-                sz_size_t danger_scan_length =
-                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
-                    haystack, haystack_length,                                   //
-                    needle, needle_length,                                       //
-                    haystack_ptr, danger_scan_length,                            // extended danger zone
-                    needle_first_safe_folded_rune,                               // pivot point
-                    needle_metadata->offset_in_unfolded,                         // its location in the needle
-                    matched_length);
-                if (match) return match;
-                haystack_ptr += step;
-                continue;
-            }
+        if (danger_mask) {
+            // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+            // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+            // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            // extended danger zone
+                needle_first_safe_folded_rune,                               // pivot point
+                needle_metadata->offset_in_unfolded,                         // its location in the needle
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
         }
 
         // Fold and 4-way probe filter
@@ -5613,36 +5612,35 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
         __mmask64 x_c5_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_c5_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
 
-        if (x_e2_mask | x_c3_mask | x_c4_mask | x_c5_mask | x_ef_mask) {
-            __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
-            __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
-            __mmask64 x_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_vec.zmm);
-            __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
-            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
+        // Flattened: C3/C4/C5 are common (~15-20%) in Central European text
+        __mmask64 x_84_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_vec.zmm);
+        __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_9f_vec.zmm);
+        __mmask64 x_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_vec.zmm);
+        __mmask64 x_bf_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_bf_vec.zmm);
+        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
 
-            __mmask64 danger_mask = ((x_e2_mask << 1) & x_84_mask) | // K
-                                    ((x_c3_mask << 1) & x_9f_mask) | // ß
-                                    ((x_c4_mask << 1) & x_b0_mask) | // İ
-                                    ((x_c5_mask << 1) & x_bf_mask) | // ſ
-                                    ((x_ef_mask << 1) & x_ac_mask);  // Ligatures
+        __mmask64 danger_mask = ((x_e2_mask << 1) & x_84_mask) | // K
+                                ((x_c3_mask << 1) & x_9f_mask) | // ß
+                                ((x_c4_mask << 1) & x_b0_mask) | // İ
+                                ((x_c5_mask << 1) & x_bf_mask) | // ſ
+                                ((x_ef_mask << 1) & x_ac_mask);  // Ligatures
 
-            if (danger_mask) {
-                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
-                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
-                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-                sz_size_t danger_scan_length =
-                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
-                    haystack, haystack_length,                                   //
-                    needle, needle_length,                                       //
-                    haystack_ptr, danger_scan_length,                            // extended danger zone
-                    needle_first_safe_folded_rune,                               // pivot point
-                    needle_metadata->offset_in_unfolded,                         // its location in the needle
-                    matched_length);
-                if (match) return match;
-                haystack_ptr += step;
-                continue;
-            }
+        if (danger_mask) {
+            // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+            // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+            // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            // extended danger zone
+                needle_first_safe_folded_rune,                               // pivot point
+                needle_metadata->offset_in_unfolded,                         // its location in the needle
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
         }
 
         // Fold and Probe
@@ -6161,32 +6159,31 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
         __mmask64 x_d6_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_d6_vec.zmm);
         __mmask64 x_ef_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ef_vec.zmm);
 
-        if (x_d6_mask | x_ef_mask) {
-            __mmask64 x_87_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_87_vec.zmm);
-            __mmask64 x_ech_yiwn = (x_d6_mask << 1) & x_87_mask; // D6 87
+        // Flattened: D6 is common in Armenian text (letters ր-ֆ)
+        __mmask64 x_87_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_87_vec.zmm);
+        __mmask64 x_ech_yiwn = (x_d6_mask << 1) & x_87_mask; // D6 87
 
-            __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
-            __mmask64 x_ef_ac = (x_ef_mask << 1) & x_ac_mask; // EF AC
+        __mmask64 x_ac_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_ac_vec.zmm);
+        __mmask64 x_ef_ac = (x_ef_mask << 1) & x_ac_mask; // EF AC
 
-            __mmask64 danger_mask = x_ech_yiwn | x_ef_ac;
+        __mmask64 danger_mask = x_ech_yiwn | x_ef_ac;
 
-            if (danger_mask) {
-                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
-                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
-                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-                sz_size_t danger_scan_length =
-                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
-                    haystack, haystack_length,                                   //
-                    needle, needle_length,                                       //
-                    haystack_ptr, danger_scan_length,                            // extended danger zone
-                    needle_first_safe_folded_rune,                               // pivot point
-                    needle_metadata->offset_in_unfolded,                         // its location in the needle
-                    matched_length);
-                if (match) return match;
-                haystack_ptr += step;
-                continue;
-            }
+        if (danger_mask) {
+            // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+            // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+            // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            // extended danger zone
+                needle_first_safe_folded_rune,                               // pivot point
+                needle_metadata->offset_in_unfolded,                         // its location in the needle
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
         }
 
         // Fold and Probe
@@ -6581,47 +6578,46 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
         __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_e1_zmm.zmm);
         __mmask64 is_cd_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_cd_zmm.zmm);
 
-        if (is_ce_mask | is_cf_mask | is_e2_mask | is_e1_mask | is_cd_mask) {
-            __mmask64 is_90_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_90_zmm.zmm);
-            __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_zmm.zmm);
-            __mmask64 is_ce_90_b0_mask =
-                (is_ce_mask << 1) & (is_90_mask | is_b0_mask); // CE 90 or CE B0: 'ΐ' (U+0390) and 'ΰ' (U+03B0)
+        // Flattened: CE/CF are ubiquitous in Greek text
+        __mmask64 is_90_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_90_zmm.zmm);
+        __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b0_zmm.zmm);
+        __mmask64 is_ce_90_b0_mask =
+            (is_ce_mask << 1) & (is_90_mask | is_b0_mask); // CE 90 or CE B0: 'ΐ' (U+0390) and 'ΰ' (U+03B0)
 
-            __mmask64 is_9x_mask = is_90_mask |                                             // 'ϐ' (CF 90)
-                                   _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_91_zmm.zmm) | // 'ϑ' (CF 91)
-                                   _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_95_zmm.zmm) | // 'ϕ' (CF 95)
-                                   _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_96_zmm.zmm);  // 'ϖ' (CF 96)
+        __mmask64 is_9x_mask = is_90_mask |                                             // 'ϐ' (CF 90)
+                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_91_zmm.zmm) | // 'ϑ' (CF 91)
+                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_95_zmm.zmm) | // 'ϕ' (CF 95)
+                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_96_zmm.zmm);  // 'ϖ' (CF 96)
 
-            __mmask64 is_bx_mask = is_b0_mask |                                             // 'ϰ' (CF B0)
-                                   _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b1_zmm.zmm) | // 'ϱ' (CF B1)
-                                   _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b5_zmm.zmm);  // 'ϵ' (CF B5)
+        __mmask64 is_bx_mask = is_b0_mask |                                             // 'ϰ' (CF B0)
+                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b1_zmm.zmm) | // 'ϱ' (CF B1)
+                               _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_b5_zmm.zmm);  // 'ϵ' (CF B5)
 
-            __mmask64 is_cf_symbol_mask =
-                (is_cf_mask << 1) & (is_9x_mask | is_bx_mask); // Greek Symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ', 'ϰ', 'ϱ', 'ϵ'
+        __mmask64 is_cf_symbol_mask =
+            (is_cf_mask << 1) & (is_9x_mask | is_bx_mask); // Greek Symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ', 'ϰ', 'ϱ', 'ϵ'
 
-            __mmask64 is_ohm_sign_mask =
-                (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_zmm.zmm); // Ohm Sign 'Ω'
-            // E1 is always dangerous in Greek path (Polytonic/Extensions)
-            // CD is dangerous (Combining Diacritical Marks)
-            __mmask64 danger_mask = is_ce_90_b0_mask | is_cf_symbol_mask | is_ohm_sign_mask | is_e1_mask | is_cd_mask;
+        __mmask64 is_ohm_sign_mask =
+            (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(haystack_vec.zmm, x_84_zmm.zmm); // Ohm Sign 'Ω'
+        // E1 is always dangerous in Greek path (Polytonic/Extensions)
+        // CD is dangerous (Combining Diacritical Marks)
+        __mmask64 danger_mask = is_ce_90_b0_mask | is_cf_symbol_mask | is_ohm_sign_mask | is_e1_mask | is_cd_mask;
 
-            if (danger_mask) {
-                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
-                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
-                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-                sz_size_t danger_scan_length =
-                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
-                sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
-                    haystack, haystack_length,                                   //
-                    needle, needle_length,                                       //
-                    haystack_ptr, danger_scan_length,                            // extended danger zone
-                    needle_first_safe_folded_rune,                               // pivot point
-                    needle_metadata->offset_in_unfolded,                         // its location in the needle
-                    matched_length);
-                if (match) return match;
-                haystack_ptr += step;
-                continue;
-            }
+        if (danger_mask) {
+            // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+            // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+            // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            // extended danger zone
+                needle_first_safe_folded_rune,                               // pivot point
+                needle_metadata->offset_in_unfolded,                         // its location in the needle
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
         }
 
         // Fold and Probe
