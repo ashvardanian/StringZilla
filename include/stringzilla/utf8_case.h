@@ -4513,11 +4513,11 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
         // Output safety and determine primary script for 2-byte runes
         *safety_profiles = safety;
-        if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k;  // Latin-1 Supplement
-        if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k;  // Latin Extended-A/B
-        if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;           // Greek
-        if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;        // Cyrillic
-        if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;        // Armenian
+        if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k; // Latin-1 Supplement
+        if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k; // Latin Extended-A/B
+        if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;          // Greek
+        if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;       // Cyrillic
+        if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;       // Armenian
         return sz_utf8_case_rune_case_agnostic_k;
     }
 
@@ -4540,7 +4540,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
         // Output safety and determine primary script for 3-byte runes
         *safety_profiles = safety;
-        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k;  // Latin Extended Additional
+        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k; // Latin Extended Additional
         return sz_utf8_case_rune_case_agnostic_k;
     }
 
@@ -4773,8 +4773,8 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
             if (!current[script].applicable || current[script].folded_length == 0) continue;
 
             // Compute diversity score
-            current[script].diversity = sz_utf8_probe_diversity_score_(current[script].folded_bytes,
-                                                                        current[script].folded_length);
+            current[script].diversity =
+                sz_utf8_probe_diversity_score_(current[script].folded_bytes, current[script].folded_length);
 
             // Update best if this is better (prefer higher diversity, then longer length)
             if (current[script].diversity > best[script].diversity ||
@@ -4797,8 +4797,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     sz_size_t best_diversity = 0;
 
     // Check ASCII preference
-    if (best[sz_utf8_case_rune_safe_ascii_k].applicable &&
-        best[sz_utf8_case_rune_safe_ascii_k].folded_length >= 4 &&
+    if (best[sz_utf8_case_rune_safe_ascii_k].applicable && best[sz_utf8_case_rune_safe_ascii_k].folded_length >= 4 &&
         best[sz_utf8_case_rune_safe_ascii_k].diversity >= 4) {
         chosen_script = sz_utf8_case_rune_safe_ascii_k;
     }
@@ -4848,7 +4847,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     sz_size_t char_count = 0;
     for (sz_size_t i = 0; i < folded_len; ++i) {
         sz_u8_t next = (i + 1 < folded_len) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
-        if ((next & 0xC0) != 0x80) { // Next is not a continuation byte
+        if ((next & 0xC0) != 0x80) {                                               // Next is not a continuation byte
             if (char_count < 16) char_ends[char_count++] = i;
         }
     }
@@ -5201,6 +5200,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
 
         sz_size_t const chunk_size = available < 64 ? available : 64;
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
+        // For danger detection across chunk boundaries, reduce step size to ensure
+        // 3-byte patterns at chunk end are fully visible in the next chunk.
+        // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
         __mmask64 const load_mask = sz_u64_mask_until_(chunk_size);
         __mmask64 const valid_mask = sz_u64_mask_until_(valid_starts);
 
@@ -5244,7 +5247,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
                 if (match) return match;
-                haystack_ptr += valid_starts;
+                haystack_ptr += step;
                 continue;
             }
         }
@@ -5284,7 +5287,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 return match;
             }
         }
-        haystack_ptr += valid_starts;
+        haystack_ptr += step;
     }
 
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
@@ -5457,6 +5460,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
 
         sz_size_t const chunk_size = available < 64 ? available : 64;
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
+        // For danger detection across chunk boundaries, reduce step size to ensure
+        // 3-byte patterns at chunk end are fully visible in the next chunk.
+        // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
         __mmask64 const load_mask = sz_u64_mask_until_(chunk_size);
         __mmask64 const valid_mask = sz_u64_mask_until_(valid_starts);
 
@@ -5496,7 +5503,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
                 if (match) return match;
-                haystack_ptr += valid_starts;
+                haystack_ptr += step;
                 continue;
             }
         }
@@ -5537,7 +5544,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
                 return match;
             }
         }
-        haystack_ptr += valid_starts;
+        haystack_ptr += step;
     }
 
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
@@ -5852,6 +5859,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
 
         sz_size_t const chunk_size = available < 64 ? available : 64;
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
+        // For danger detection across chunk boundaries, reduce step size to ensure
+        // 3-byte patterns at chunk end are fully visible in the next chunk.
+        // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
         __mmask64 const load_mask = sz_u64_mask_until_(chunk_size);
         __mmask64 const valid_mask = sz_u64_mask_until_(valid_starts);
 
@@ -5884,7 +5895,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
                 if (match) return match;
-                haystack_ptr += valid_starts;
+                haystack_ptr += step;
                 continue;
             }
         }
@@ -5924,7 +5935,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
                 return match;
             }
         }
-        haystack_ptr += valid_starts;
+        haystack_ptr += step;
     }
 
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
@@ -6150,6 +6161,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
 
         sz_size_t const chunk_size = available < 64 ? available : 64;
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
+        // For danger detection across chunk boundaries, reduce step size to ensure
+        // 3-byte patterns at chunk end are fully visible in the next chunk.
+        // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
         __mmask64 const load_mask = sz_u64_mask_until_(chunk_size);
         __mmask64 const valid_mask = sz_u64_mask_until_(valid_starts);
 
@@ -6197,7 +6212,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
                 if (match) return match;
-                haystack_ptr += valid_starts;
+                haystack_ptr += step;
                 continue;
             }
         }
@@ -6237,7 +6252,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
                 return match;
             }
         }
-        haystack_ptr += valid_starts;
+        haystack_ptr += step;
     }
 
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
@@ -6439,6 +6454,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
 
         sz_size_t const chunk_size = available < 64 ? available : 64;
         sz_size_t const valid_starts = chunk_size - folded_window_length + 1;
+        // For danger detection across chunk boundaries, reduce step size to ensure
+        // 3-byte patterns at chunk end are fully visible in the next chunk.
+        // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
         __mmask64 const load_mask = sz_u64_mask_until_(chunk_size);
         __mmask64 const valid_mask = sz_u64_mask_until_(valid_starts);
 
@@ -6497,7 +6516,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
                 if (match) return match;
-                haystack_ptr += valid_starts;
+                haystack_ptr += step;
                 continue;
             }
         }
@@ -6536,7 +6555,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                 return match;
             }
         }
-        haystack_ptr += valid_starts;
+        haystack_ptr += step;
     }
 
     sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
