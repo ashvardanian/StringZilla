@@ -246,11 +246,18 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
 /**
  *  @brief  Check if a UTF-8 string contains only case-agnostic (caseless) codepoints.
  *
- *  Case-agnostic codepoints are those that don't participate in Unicode case folding:
- *  - They fold to themselves (no case transformation needed)
- *  - They are not targets of any case folding from other codepoints
+ *  A codepoint is case-agnostic if ALL three conditions are true:
+ *  1. **Self-folding**: Case folding produces exactly the original codepoint
+ *  2. **Not bicameral**: It does not belong to any script with case distinctions
+ *  3. **Not expansion target**: It does NOT appear in any multi-rune case fold expansion
  *
- *  This includes: CJK ideographs, Hangul, digits, punctuation, most symbols,
+ *  The third condition is subtle but critical. Consider ʾ (U+02BE MODIFIER LETTER):
+ *  - It has no case variant and folds to itself
+ *  - However, ẚ (U+1E9A) folds to "aʾ" (two runes: U+0061 U+02BE)
+ *  - A needle "ʾ" must match at position 1 of the folded expansion of ẚ
+ *  - Binary search cannot handle this, so ʾ must NOT be case-agnostic
+ *
+ *  Case-agnostic scripts include: CJK ideographs, Hangul, digits, punctuation, most symbols,
  *  Hebrew, Arabic, Thai, Hindi (Devanagari), and many other scripts without case distinctions.
  *
  *  @section utf8_case_agnostic_usage Use Case
@@ -1293,6 +1300,31 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_validate_(                 //
     return haystack_ptr + haystack_matched_offset - head_match_length;
 }
 
+/**
+ *  @brief  Internal helper: checks if a single Unicode codepoint is case-agnostic.
+ *
+ *  A codepoint is case-agnostic if ALL of the following are true:
+ *  1. It folds to exactly itself (no transformation, no expansion)
+ *  2. It does NOT belong to any bicameral (cased) script
+ *  3. It does NOT appear in any case fold expansion as a target character
+ *
+ *  The third condition is critical. Consider ʾ (U+02BE MODIFIER LETTER RIGHT HALF RING):
+ *  - It has no case variant and folds to itself
+ *  - However, ẚ (U+1E9A) folds to "aʾ" (two runes: U+0061 U+02BE)
+ *  - A needle "ʾ" must match at position 1 of the folded expansion of ẚ
+ *  - Binary search cannot handle this - it only sees ẚ as a 3-byte sequence (E1 BA 9A)
+ *  - Therefore ʾ must NOT be treated as case-agnostic
+ *
+ *  This function implements the check via explicit range exclusions for all bicameral
+ *  scripts and all Unicode blocks containing case fold expansion target characters.
+ *
+ *  @param[in] rune Unicode codepoint to check
+ *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise
+ *
+ *  @warning This is an internal function. Use sz_utf8_case_agnostic_serial() for string checking.
+ *  @see sz_utf8_case_agnostic_serial
+ *  @see sz_unicode_fold_codepoint_
+ */
 SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
 
     // Check if this rune participates in case folding
@@ -1322,6 +1354,7 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
     if (rune >= 0x00C0 && rune <= 0x00FF) return sz_false_k; // Latin-1 Supplement (À-ÿ)
     if (rune >= 0x0100 && rune <= 0x024F) return sz_false_k; // Latin Extended-A/B
     if (rune >= 0x0250 && rune <= 0x02AF) return sz_false_k; // IPA Extensions
+    if (rune >= 0x02B0 && rune <= 0x02FF) return sz_false_k; // Spacing Modifier Letters (ʾ U+02BE appears in ẚ→aʾ)
     if (rune >= 0x0300 && rune <= 0x036F) return sz_false_k; // Combining Diacritical Marks (can appear in expansions!)
     if (rune >= 0x0370 && rune <= 0x03FF) return sz_false_k; // Greek and Coptic
     if (rune >= 0x0400 && rune <= 0x04FF) return sz_false_k; // Cyrillic
@@ -3374,16 +3407,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
                     if (c2_sec & is_b5) return sz_false_k;
                 }
 
-                // Exclude CA B0-BF (Spacing Modifier Letters U+02B0-02BF) from bicameral
-                // CA 80-AF = IPA Extensions (bicameral), CA B0-BF = Spacing Modifier Letters (not bicameral)
-                __mmask64 is_ca = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xCA)) & is_two;
-                if (is_ca) {
-                    __mmask64 ca_sec = is_ca << 1; // positions of second bytes after CA
-                    __mmask64 is_ge_b0 = _mm512_cmpge_epu8_mask(data, _mm512_set1_epi8((char)0xB0));
-                    // If second byte >= B0, exclude this CA from bicameral
-                    __mmask64 exclude_ca = ((ca_sec & is_ge_b0) >> 1) & is_ca;
-                    is_bicameral &= ~exclude_ca;
-                }
+                // NOTE: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
+                // (U+02B0-02BF). Spacing Modifier Letters CAN appear in case fold expansions:
+                // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
+                // So we must NOT exclude this range from bicameral check.
 
                 if (is_bicameral & is_two) return sz_false_k;
             }
