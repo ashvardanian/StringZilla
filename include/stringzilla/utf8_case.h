@@ -6244,14 +6244,29 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_zmm_(__m51
 
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_c3_target, result_zmm, x_20_zmm);
 
-    // 2. Latin Extended-A (C4/C5): Even -> Odd (+1)
-    // Covers most chars including Đ (C4 90) -> đ (C4 91)
-    // Target is any byte following C4 or C5 which is even
+    // 2. Latin Extended-A (C4/C5): Even -> Odd (+1) for MOST characters
+    // Standard pattern (U+0100-U+0138, U+014A-U+017F): Even=uppercase, Odd=lowercase
+    // INVERTED pattern (U+0139-U+0148): Odd=uppercase, Even=lowercase
+    //   - After C4: B9,BB,BD,BF are uppercase (odd), BA,BC,BE are lowercase (even)
+    //   - After C5: 81,83,85,87 are uppercase (odd), 80,82,84,86,88 are lowercase (even)
+    // Note: C4 BF (Ŀ) -> C5 80 (ŀ) crosses lead bytes, handled specially by safety profile
     __mmask64 is_c4_c5_target = is_after_c4 | is_after_c5;
-    // Check evenness: (val & 1) == 0
     __mmask64 is_even = _mm512_cmpeq_epi8_mask(_mm512_and_si512(result_zmm, x_01_zmm), _mm512_setzero_si512());
+    __mmask64 is_odd = ~is_even;
 
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c4_c5_target & is_even, result_zmm, x_01_zmm);
+    // Identify the inverted range where Even=lowercase (should NOT be transformed +1)
+    // After C4: B9-BE (U+0139-U+013E: Ĺ-ľ inverted pattern)
+    // Note: BF (Ŀ U+013F) excluded - its lowercase ŀ (U+0140) is C5 80 (different lead byte)
+    __mmask64 is_c4_inverted_range = is_after_c4 & _mm512_cmpge_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xB9)) &
+                                     _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xBE));
+    // After C5: 80-88 (even bytes 80, 82, 84, 86, 88 are lowercase)
+    __mmask64 is_c5_inverted_range = is_after_c5 & _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0x88));
+    __mmask64 is_inverted_range = is_c4_inverted_range | is_c5_inverted_range;
+
+    // Standard range: apply +1 to even bytes (uppercase -> lowercase)
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c4_c5_target & is_even & ~is_inverted_range, result_zmm, x_01_zmm);
+    // Inverted range: apply +1 to odd bytes (uppercase -> lowercase)
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_inverted_range & is_odd, result_zmm, x_01_zmm);
 
     // 3. Latin Extended-B (C6): Specific Vietnamese chars
     // Ơ (C6 A0) -> ơ (C6 A1). Even->Odd.
