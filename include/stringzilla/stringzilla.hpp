@@ -2309,6 +2309,9 @@ class basic_string_slice {
         size_type offset {};
         size_type length {};
 
+        sized_match_t() noexcept = default;
+        sized_match_t(size_type o, size_type l) noexcept : offset(o), length(l) {}
+
         operator bool() const noexcept { return offset != npos; }
         bool operator==(sized_match_t const &other) const noexcept {
             return offset == other.offset && length == other.length;
