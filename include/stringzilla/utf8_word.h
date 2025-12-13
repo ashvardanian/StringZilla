@@ -942,7 +942,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     // Skip ignorables after position to get effective "after" property
     if (sz_wb_is_ignorable_(after_prop)) {
         sz_size_t skip_pos = pos;
-        after_prop = sz_wb_get_effective_prop_(text, length, skip_pos, NULL);
+        after_prop = sz_wb_get_effective_prop_(text, length, skip_pos, (sz_size_t *)0);
     }
 
     // WB5: Do not break between AHLetter
