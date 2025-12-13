@@ -167,6 +167,74 @@ impl Default for Utf8CaseInsensitiveNeedleMetadata {
     }
 }
 
+/// Pre-compiled case-insensitive search pattern for UTF-8 strings.
+///
+/// Caches metadata for efficient repeated searches with the same needle.
+/// Useful when searching multiple haystacks for the same pattern.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+///
+/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+/// let haystack1 = b"Hello World";
+/// let haystack2 = b"HELLO there";
+///
+/// // Metadata is computed once on first search, reused for subsequent searches
+/// let result1 = utf8_case_insensitive_find(haystack1, &needle);
+/// let result2 = utf8_case_insensitive_find(haystack2, &needle);
+///
+/// assert!(result1.is_some());
+/// assert!(result2.is_some());
+/// ```
+pub struct Utf8CaseInsensitiveNeedle<'a> {
+    needle: &'a [u8],
+    metadata: UnsafeCell<Utf8CaseInsensitiveNeedleMetadata>,
+}
+
+impl<'a> Utf8CaseInsensitiveNeedle<'a> {
+    /// Creates a new pre-compiled case-insensitive needle.
+    ///
+    /// The metadata will be computed lazily on first use.
+    #[inline]
+    pub fn new(needle: &'a [u8]) -> Self {
+        Self {
+            needle,
+            metadata: UnsafeCell::new(Utf8CaseInsensitiveNeedleMetadata::default()),
+        }
+    }
+
+    /// Returns the needle bytes.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.needle
+    }
+
+    /// Returns the length of the needle in bytes.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.needle.len()
+    }
+
+    /// Returns true if the needle is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.needle.is_empty()
+    }
+
+    /// Internal: returns a mutable pointer to the metadata for FFI calls.
+    #[inline]
+    pub(crate) fn metadata_ptr(&self) -> *mut Utf8CaseInsensitiveNeedleMetadata {
+        self.metadata.get()
+    }
+}
+
+// Safety: The metadata is only mutated through FFI during search operations,
+// which internally synchronize access. The needle reference is immutable.
+unsafe impl<'a> Send for Utf8CaseInsensitiveNeedle<'a> {}
+unsafe impl<'a> Sync for Utf8CaseInsensitiveNeedle<'a> {}
+
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
 /// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
@@ -319,6 +387,7 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
     }
 }
 
+use core::cell::UnsafeCell;
 use core::cmp::Ordering;
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
@@ -994,6 +1063,8 @@ where
 ///
 /// # Examples
 ///
+/// Basic usage with string slices:
+///
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let haystack = "Hello WORLD";
@@ -1003,32 +1074,87 @@ where
 /// }
 /// ```
 ///
+/// With a pre-compiled needle for repeated searches:
+///
+/// ```
+/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+///
+/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+///
+/// // Metadata is computed once, reused for subsequent searches
+/// let result1 = utf8_case_insensitive_find(b"Hello World", &needle);
+/// let result2 = utf8_case_insensitive_find(b"HELLO there", &needle);
+///
+/// assert_eq!(result1, Some((0, 5)));
+/// assert_eq!(result2, Some((0, 5)));
+/// ```
+///
 pub fn utf8_case_insensitive_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
 where
     H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    N: Utf8CaseInsensitiveNeedleArg,
 {
-    let haystack_ref = haystack.as_ref();
-    let needle_ref = needle.as_ref();
-    let mut matched_length: usize = 0;
+    needle.find_case_insensitive_in(haystack.as_ref())
+}
 
-    let mut needle_metadata = Utf8CaseInsensitiveNeedleMetadata::default();
-    let result = unsafe {
-        sz_utf8_case_insensitive_find(
-            haystack_ref.as_ptr() as *const c_void,
-            haystack_ref.len(),
-            needle_ref.as_ptr() as *const c_void,
-            needle_ref.len(),
-            &mut needle_metadata,
-            &mut matched_length,
-        )
-    };
+/// Trait for types that can be used as a case-insensitive search needle.
+///
+/// This trait is implemented for:
+/// - Any type implementing `AsRef<[u8]>` (strings, byte slices, etc.)
+/// - [`Utf8CaseInsensitiveNeedle`] references for efficient repeated searches
+pub trait Utf8CaseInsensitiveNeedleArg {
+    /// Performs the case-insensitive search in the given haystack.
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)>;
+}
 
-    if result.is_null() {
-        None
-    } else {
-        let offset = unsafe { result.offset_from(haystack_ref.as_ptr() as *const c_void) };
-        Some((offset as usize, matched_length))
+impl<T: AsRef<[u8]>> Utf8CaseInsensitiveNeedleArg for T {
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+        let needle_ref = self.as_ref();
+        let mut matched_length: usize = 0;
+        let mut needle_metadata = Utf8CaseInsensitiveNeedleMetadata::default();
+
+        let result = unsafe {
+            sz_utf8_case_insensitive_find(
+                haystack.as_ptr() as *const c_void,
+                haystack.len(),
+                needle_ref.as_ptr() as *const c_void,
+                needle_ref.len(),
+                &mut needle_metadata,
+                &mut matched_length,
+            )
+        };
+
+        if result.is_null() {
+            None
+        } else {
+            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
+            Some((offset as usize, matched_length))
+        }
+    }
+}
+
+impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> {
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+        let needle_bytes = self.as_bytes();
+        let mut matched_length: usize = 0;
+
+        let result = unsafe {
+            sz_utf8_case_insensitive_find(
+                haystack.as_ptr() as *const c_void,
+                haystack.len(),
+                needle_bytes.as_ptr() as *const c_void,
+                needle_bytes.len(),
+                &mut *self.metadata_ptr(),
+                &mut matched_length,
+            )
+        };
+
+        if result.is_null() {
+            None
+        } else {
+            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
+            Some((offset as usize, matched_length))
+        }
     }
 }
 

@@ -61,6 +61,8 @@ template <typename>
 class basic_string_slice;
 template <typename, typename>
 class basic_string;
+template <typename>
+class utf8_case_insensitive_needle;
 
 using string_span = basic_string_slice<char>;
 using string_view = basic_string_slice<char const>;
@@ -1664,6 +1666,52 @@ struct concatenation {
 
 #pragma endregion
 
+#pragma region Case-Insensitive Search Pattern
+
+/**
+ *  @brief  Pre-compiled case-insensitive search pattern for UTF-8 strings.
+ *
+ *  Caches metadata for efficient repeated searches with the same needle.
+ *  Useful when searching multiple haystacks for the same pattern.
+ *
+ *  @code{.cpp}
+ *  sz::utf8_case_insensitive_needle pattern("hello");
+ *  for (auto const& haystack : haystacks) {
+ *      auto match = haystack.utf8_case_insensitive_find(pattern);
+ *      if (match) { ... }
+ *  }
+ *  @endcode
+ *
+ *  @tparam char_type_ The character type, usually `char const` or `char`.
+ */
+template <typename char_type_ = char const>
+class utf8_case_insensitive_needle {
+    static_assert(sizeof(char_type_) == 1, "Characters must be a single byte long");
+
+    using char_type = char_type_;
+
+    char_type *needle_;
+    std::size_t length_;
+    mutable sz_utf8_case_insensitive_needle_metadata_t metadata_;
+
+  public:
+    utf8_case_insensitive_needle(char_type *needle, std::size_t length) noexcept
+        : needle_(needle), length_(length), metadata_ {} {}
+
+    utf8_case_insensitive_needle(basic_string_slice<char_type> needle) noexcept
+        : needle_(needle.data()), length_(needle.size()), metadata_ {} {}
+
+    template <std::size_t length_>
+    utf8_case_insensitive_needle(char_type (&needle)[length_]) noexcept
+        : needle_(needle), length_(length_ - 1), metadata_ {} {}
+
+    char_type *data() const noexcept { return needle_; }
+    std::size_t size() const noexcept { return length_; }
+    sz_utf8_case_insensitive_needle_metadata_t const &metadata_ref() const noexcept { return metadata_; }
+};
+
+#pragma endregion
+
 #pragma region String Views and Spans
 
 /**
@@ -2329,6 +2377,21 @@ class basic_string_slice {
         sz_utf8_case_insensitive_needle_metadata_t metadata = {};
         sz_size_t match_length = 0;
         auto ptr = sz_utf8_case_insensitive_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        if (!ptr) return {npos, static_cast<size_type>(0)};
+        return {static_cast<size_type>(ptr - start_), match_length};
+    }
+
+    /**
+     *  @brief Find the byte offset of the first occurrence of a pre-compiled case-insensitive pattern.
+     *  @param[in] needle A pre-compiled pattern with cached metadata for efficient repeated searches.
+     *  @return Match info with offset and length, or @c npos offset if not found.
+     */
+    template <typename needle_char_type_>
+    sized_match_t utf8_case_insensitive_find(
+        utf8_case_insensitive_needle<needle_char_type_> const &needle) const noexcept {
+        sz_size_t match_length = 0;
+        auto ptr = sz_utf8_case_insensitive_find(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
+                                                 &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
