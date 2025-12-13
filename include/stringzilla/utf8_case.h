@@ -1499,6 +1499,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
     sz_cptr_t const danger_end = sz_min_of_two(danger_ptr + danger_length, haystack_end);
     while (danger_ptr < danger_end) {
 
+        // Skip continuation bytes - they are mid-sequence, not valid rune starts.
+        // Without this check, a continuation byte like 0xBA could be misinterpreted as U+00BA (º),
+        // causing false matches when the danger zone starts mid-character.
+        sz_u8_t lead_byte = *(sz_u8_t const *)danger_ptr;
+        if ((lead_byte & 0xC0) == 0x80) {
+            danger_ptr++;
+            continue;
+        }
+
         // The following part is practically the unpacked variant of `sz_utf8_case_insensitive_find_1folded_serial_`,
         // that finds the first occurrence of the `needle_first_safe_folded_rune` haystack. The issue is that each one
         // `haystack_rune` may unpack into multiple `haystack_folded_runes`.
@@ -1915,7 +1924,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     for (sz_size_t i = 1; i < needle_prefix_count; ++i) hash_multiplier *= 257;
 
     sz_rune_t window_runes[32];
-    sz_cptr_t window_sources[32]; // Byte position of character that produced each window rune
+    sz_cptr_t window_sources[32];     // Byte position of character that produced each window rune
+    sz_size_t window_skip_counts[32]; // Runes to skip from first character's expansion
     sz_size_t ring_head = 0;
     sz_u64_t window_hash = 0;
     sz_utf8_folded_iter_t_ haystack_iter;
@@ -1923,6 +1933,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
 
     sz_cptr_t window_start = haystack;
     sz_cptr_t current_source = haystack;
+    sz_size_t current_skip = 0;
     sz_size_t window_count = 0;
 
     while (window_count < needle_prefix_count) {
@@ -1930,11 +1941,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         sz_rune_t rune;
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &rune)) break;
         window_runes[window_count] = rune;
-        // Update source only when starting a new character (not mid-expansion)
-        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) current_source = before_ptr;
+        // Update source and skip only when starting a new character (not mid-expansion)
+        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
+            current_source = before_ptr;
+            current_skip = 0;
+        }
         window_sources[window_count] = current_source;
+        window_skip_counts[window_count] = current_skip;
         window_hash = window_hash * 257 + rune;
         window_count++;
+        // For next rune from same expansion, increment skip
+        if (haystack_iter.pending_idx > 0 && haystack_iter.pending_idx < haystack_iter.pending_count)
+            current_skip = haystack_iter.pending_idx;
     }
     if (window_count < needle_prefix_count) {
         *match_length = 0;
@@ -1955,17 +1973,36 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             for (sz_size_t i = 0; i < ring_head; ++i) mismatches += window_runes[i] != needle_runes[first_segment + i];
 
             if (!mismatches) {
+                sz_size_t skip_runes = window_skip_counts[ring_head];
                 // Short needle: rune comparison above is sufficient verification
                 if (needle_total_count <= ring_capacity) {
                     *match_length = (sz_size_t)(window_end - window_start);
                     return window_start;
                 }
-                // Long needle: verify FULL needle from window_start (not just tail from window_end).
-                // This handles mid-expansion matches correctly. Example: if window ends mid-way through
-                // ﬃ→"ffi", starting verification from window_start ensures proper rune alignment.
-                if (sz_utf8_case_insensitive_verify_tail_(needle, needle + needle_length, window_start,
-                                                          haystack + haystack_length, match_length))
+                // Long needle: verify FULL needle from window_start, skipping runes if match
+                // starts mid-expansion. Example: ẚ→"aʾ", needle starting with "ʾ" must skip "a".
+                sz_utf8_folded_iter_t_ verify_haystack_iter;
+                sz_utf8_folded_iter_init_(&verify_haystack_iter, window_start,
+                                          (sz_size_t)(haystack + haystack_length - window_start));
+                // Skip runes within first character's expansion
+                sz_rune_t skip_rune;
+                for (sz_size_t i = 0; i < skip_runes; ++i) sz_utf8_folded_iter_next_(&verify_haystack_iter, &skip_rune);
+                // Now verify full needle against remaining haystack
+                sz_utf8_folded_iter_t_ verify_needle_iter;
+                sz_utf8_folded_iter_init_(&verify_needle_iter, needle, needle_length);
+                sz_rune_t needle_rune_v, haystack_rune_v;
+                sz_bool_t match_ok = sz_true_k;
+                while (sz_utf8_folded_iter_next_(&verify_needle_iter, &needle_rune_v)) {
+                    if (!sz_utf8_folded_iter_next_(&verify_haystack_iter, &haystack_rune_v) ||
+                        needle_rune_v != haystack_rune_v) {
+                        match_ok = sz_false_k;
+                        break;
+                    }
+                }
+                if (match_ok) {
+                    *match_length = (sz_size_t)(verify_haystack_iter.ptr - window_start);
                     return window_start;
+                }
             }
         }
 
@@ -1981,9 +2018,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         next_head = next_head == needle_prefix_count ? 0 : next_head;
 
         window_runes[ring_head] = new_rune;
-        // Update source only when starting a new character (not mid-expansion)
-        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) current_source = before_ptr;
+        // Update source and skip only when starting a new character (not mid-expansion)
+        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
+            current_source = before_ptr;
+            current_skip = 0;
+        }
         window_sources[ring_head] = current_source;
+        window_skip_counts[ring_head] = current_skip;
+        // For next rune from same expansion, increment skip
+        if (haystack_iter.pending_idx > 0 && haystack_iter.pending_idx < haystack_iter.pending_count)
+            current_skip = haystack_iter.pending_idx;
 
         ring_head = next_head;
         window_start = window_sources[ring_head];
