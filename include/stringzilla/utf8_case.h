@@ -2131,6 +2131,22 @@ SZ_INTERNAL sz_size_t sz_ice_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mas
 
 #if SZ_DEBUG
 
+#if !SZ_AVOID_LIBC
+SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_hex_(FILE *stream, sz_cptr_t bytes, sz_size_t length) {
+    for (sz_size_t i = 0; i < length; ++i) fprintf(stream, "%02X ", (unsigned char)bytes[i]);
+}
+
+SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_c_array_(FILE *stream, char const *name, sz_cptr_t bytes,
+                                                        sz_size_t length) {
+    fprintf(stream, "static unsigned char %s[%zu] = {", name, (size_t)length);
+    for (sz_size_t i = 0; i < length; ++i) {
+        if ((i % 16) == 0) fprintf(stream, "\n    ");
+        fprintf(stream, "0x%02X,", (unsigned char)bytes[i]);
+    }
+    fprintf(stream, "\n};\n");
+}
+#endif
+
 /**
  *  @brief  Verifies the SIMD result against the serial implementation.
  *          If they differ, dumps diagnostic info and crashes to help debugging.
@@ -2172,11 +2188,18 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
         fprintf(stderr, "\n");
     }
 
-    // Print Needle (First 64 bytes)
+    // Print full needle and haystack to enable copy-pastable deterministic repros.
     fprintf(stderr, "Needle (Hex): ");
-    for (size_t i = 0; i < needle_length && i < 64; ++i) fprintf(stderr, "%02X ", (unsigned char)needle[i]);
-    if (needle_length > 64) fprintf(stderr, "...");
+    sz_utf8_case_debug_dump_bytes_hex_(stderr, needle, needle_length);
     fprintf(stderr, "\n");
+    fprintf(stderr, "Haystack (Hex): ");
+    sz_utf8_case_debug_dump_bytes_hex_(stderr, haystack, haystack_length);
+    fprintf(stderr, "\n");
+
+    fprintf(stderr, "Needle (C Array):\n");
+    sz_utf8_case_debug_dump_bytes_c_array_(stderr, "needle_bytes", needle, needle_length);
+    fprintf(stderr, "Haystack (C Array):\n");
+    sz_utf8_case_debug_dump_bytes_c_array_(stderr, "haystack_bytes", haystack, haystack_length);
 
     // Print Haystack Context (if match found or missed)
     size_t context_padding = 16;
@@ -4659,9 +4682,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
                     current[script].input_length += rune_bytes;
 
                     // Mark as applicable if primary script matches
-                    if (primary_script == script) {
-                        current[script].applicable = sz_true_k;
-                    }
+                    if (primary_script == script) { current[script].applicable = sz_true_k; }
                     any_active = sz_true_k;
                 }
                 else {
@@ -5126,10 +5147,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                                     ((x_c5_mask << 1) & x_bf_mask);  // ſ (C5 BF)
 
             if (danger_mask) {
+                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+                sz_size_t danger_scan_length =
+                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                     haystack, haystack_length,                                   //
                     needle, needle_length,                                       //
-                    haystack_ptr, valid_starts,                                  // danger zone
+                    haystack_ptr, danger_scan_length,                            // extended danger zone
                     needle_first_safe_folded_rune,                               // pivot point
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
@@ -5373,10 +5399,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
                                     ((x_ef_mask << 1) & x_ac_mask);  // Ligatures
 
             if (danger_mask) {
+                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+                sz_size_t danger_scan_length =
+                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                     haystack, haystack_length,                                   //
                     needle, needle_length,                                       //
-                    haystack_ptr, valid_starts,                                  // danger zone
+                    haystack_ptr, danger_scan_length,                            // extended danger zone
                     needle_first_safe_folded_rune,                               // pivot point
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
@@ -5756,10 +5787,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
             __mmask64 danger_mask = x_ech_yiwn | x_ef_ac;
 
             if (danger_mask) {
+                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+                sz_size_t danger_scan_length =
+                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                     haystack, haystack_length,                                   //
                     needle, needle_length,                                       //
-                    haystack_ptr, valid_starts,                                  // danger zone
+                    haystack_ptr, danger_scan_length,                            // extended danger zone
                     needle_first_safe_folded_rune,                               // pivot point
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
@@ -6064,10 +6100,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
             __mmask64 danger_mask = x_be_ce_90_b0 | x_be_cf_sym | x_ohm | x_e1_mask | x_cd_mask;
 
             if (danger_mask) {
+                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+                sz_size_t danger_scan_length =
+                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                     haystack, haystack_length,                                   //
                     needle, needle_length,                                       //
-                    haystack_ptr, valid_starts,                                  // danger zone
+                    haystack_ptr, danger_scan_length,                            // extended danger zone
                     needle_first_safe_folded_rune,                               // pivot point
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
@@ -6344,10 +6385,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                 (x_bad_third >> 2) | (x_sharp_s >> 1) | (x_long_s >> 1) | (x_ligature >> 1) | (x_kelvin >> 1);
 
             if (danger_mask) {
+                // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
+                // To find all matches that start at valid positions (0 to valid_starts-1), we need to
+                // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
+                sz_size_t danger_scan_length =
+                    sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
                 sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                     haystack, haystack_length,                                   //
                     needle, needle_length,                                       //
-                    haystack_ptr, valid_starts,                                  // danger zone
+                    haystack_ptr, danger_scan_length,                            // extended danger zone
                     needle_first_safe_folded_rune,                               // pivot point
                     needle_metadata->offset_in_unfolded,                         // its location in the needle
                     matched_length);
