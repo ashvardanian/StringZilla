@@ -803,6 +803,18 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         "fox",
         "jumps",
 
+        // Folded representations of multi-byte danger chars (ASCII equivalents)
+        // These are what the complex characters fold TO - essential for testing both directions
+        "ss",  // ß (U+00DF, C3 9F) and ẞ (U+1E9E, E1 BA 9E) fold to this
+        "fi",  // ﬁ (U+FB01, EF AC 81) folds to this
+        "fl",  // ﬂ (U+FB02, EF AC 82) folds to this
+        "ff",  // ﬀ (U+FB00, EF AC 80) folds to this
+        "ffi", // ﬃ (U+FB03, EF AC 83) folds to this
+        "ffl", // ﬄ (U+FB04, EF AC 84) folds to this
+        "st",  // ﬅ (U+FB05), ﬆ (U+FB06) fold to this
+        "k",   // K (U+212A, E2 84 AA) Kelvin folds to this
+        "s",   // ſ (U+017F, C5 BF) Long S folds to this
+
         // Latin-1/Extended (Western European)
         "\xC3\x9F", // 'ß' (U+00DF, C3 9F) - Latin Small Letter Sharp S (folds to ss)
         "\xC3\xB6", // 'ö' (U+00F6, C3 B6) - Latin Small Letter O with Diaeresis
@@ -852,6 +864,19 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         "\xCF\x82",                         // 'ς' (U+03C2, CF 82) - Greek Small Letter Final Sigma
         "\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC", // "κόσμ" (Greek kosm) - World
 
+        // Greek symbol forms (fold to normal counterparts - danger zone chars)
+        "\xCF\x90", // 'ϐ' (U+03D0, CF 90) - Greek Beta Symbol -> β
+        "\xCF\x91", // 'ϑ' (U+03D1, CF 91) - Greek Theta Symbol -> θ
+        "\xCF\x95", // 'ϕ' (U+03D5, CF 95) - Greek Phi Symbol -> φ
+        "\xCF\x96", // 'ϖ' (U+03D6, CF 96) - Greek Pi Symbol -> π
+        "\xCF\xB0", // 'ϰ' (U+03F0, CF B0) - Greek Kappa Symbol -> κ
+        "\xCF\xB1", // 'ϱ' (U+03F1, CF B1) - Greek Rho Symbol -> ρ
+        "\xCF\xB5", // 'ϵ' (U+03F5, CF B5) - Greek Lunate Epsilon Symbol -> ε
+
+        // Greek with dialytika + tonos (expand to base + combining marks)
+        "\xCE\x90", // 'ΐ' (U+0390, CE 90) - Greek Small Letter Iota with Dialytika and Tonos
+        "\xCE\xB0", // 'ΰ' (U+03B0, CE B0) - Greek Small Letter Upsilon with Dialytika and Tonos
+
         // Armenian
         "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE", // "բարև" (Armenian barev) - Hello
         "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E", // "ԲԱՐԵՒ" (Armenian BAREV) - HELLO
@@ -877,6 +902,13 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         "\xEF\xAC\x85", // 'ﬅ' (U+FB05, EF AC 85) - Latin Small Ligature Long S T
         "\xEF\xAC\x86", // 'ﬆ' (U+FB06, EF AC 86) - Latin Small Ligature St
 
+        // Armenian ligatures (one-to-many folding)
+        "\xEF\xAC\x93", // 'ﬓ' (U+FB13, EF AC 93) - Armenian Small Ligature Men Now
+        "\xEF\xAC\x94", // 'ﬔ' (U+FB14, EF AC 94) - Armenian Small Ligature Men Ech
+        "\xEF\xAC\x95", // 'ﬕ' (U+FB15, EF AC 95) - Armenian Small Ligature Men Ini
+        "\xEF\xAC\x96", // 'ﬖ' (U+FB16, EF AC 96) - Armenian Small Ligature Vew Now
+        "\xEF\xAC\x97", // 'ﬗ' (U+FB17, EF AC 97) - Armenian Small Ligature Men Xeh
+
         // One-to-many expansions (U+1E96-1E9A)
         "\xE1\xBA\x96", // 'ẖ' (U+1E96, E1 BA 96) - Latin Small Letter H with Line Below
         "\xE1\xBA\x97", // 'ẗ' (U+1E97, E1 BA 97) - Latin Small Letter T with Diaeresis
@@ -886,6 +918,15 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
 
         // Capital Eszett (U+1E9E) - folds to ss
         "\xE1\xBA\x9E", // 'ẞ' (U+1E9E, E1 BA 9E) - Latin Capital Letter Sharp S
+
+        // Lowercase Sharp S (U+00DF) - folds to ss (critical danger char!)
+        "\xC3\x9F", // 'ß' (U+00DF, C3 9F) - Latin Small Letter Sharp S -> ss
+
+        // Long S with dot above (U+1E9B) - folds to 'ṡ'
+        "\xE1\xBA\x9B", // 'ẛ' (U+1E9B, E1 BA 9B) - Latin Small Letter Long S with Dot Above
+
+        // Ohm sign - folds to Greek omega (danger char!)
+        "\xE2\x84\xA6", // 'Ω' (U+2126, E2 84 A6) - Ohm Sign -> ω (U+03C9)
 
         // Afrikaans n-apostrophe (U+0149) -> 'n
         "\xC5\x89", // 'ŉ' (U+0149, C5 89) - Latin Small Letter N Preceded by Apostrophe
@@ -971,6 +1012,16 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
                              simd_off == SZ_SIZE_MAX ? (sz_size_t)-1 : simd_off, simd_matched);
                 std::fprintf(stderr, "  SIMD metadata: kernel=%u offset_in_unfolded=%zu, length_in_unfolded=%zu\n",
                              simd_meta.kernel_id, simd_meta.offset_in_unfolded, simd_meta.length_in_unfolded);
+                // Print haystack bytes around the match
+                std::fprintf(stderr, "  Haystack bytes (offset %zu-20 to offset %zu+20):\n    ",
+                             serial_off == SZ_SIZE_MAX ? 0 : serial_off, serial_off == SZ_SIZE_MAX ? 0 : serial_off);
+                sz_size_t print_start = (serial_off != SZ_SIZE_MAX && serial_off > 20) ? serial_off - 20 : 0;
+                sz_size_t print_end = (serial_off != SZ_SIZE_MAX)
+                                          ? std::min(serial_off + needle_bytes + 20, haystack.size())
+                                          : std::min((sz_size_t)50, haystack.size());
+                for (sz_size_t j = print_start; j < print_end; ++j)
+                    std::fprintf(stderr, "%02X ", (unsigned char)haystack[j]);
+                std::fprintf(stderr, "\n");
                 assert(serial_result == simd_result && "Fuzz offset mismatch");
                 assert(serial_matched == simd_matched && "Fuzz length mismatch");
             }
@@ -2764,6 +2815,61 @@ void test_utf8() {
         assert(case_fold("日本語") == "日本語"); // Japanese (no case)
         assert(case_fold("中文") == "中文");     // Chinese (no case)
     }
+}
+
+/**
+ * @brief Test ligature/expansion matching semantics for UTF-8 case-insensitive search.
+ *
+ * SEMANTIC: fold(needle) should be a substring of fold(haystack).
+ * Offsets are reported in the ORIGINAL (pre-folded) haystack.
+ */
+void test_utf8_ligature_semantics() {
+    using str = sz::string_view;
+
+    // --- Ligature in haystack, ASCII needle ---
+
+    // "fi" in "ﬃ": fold("ﬃ")="ffi", "fi" is suffix of "ffi" → MATCH
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("fi"), m.offset == 0);
+
+    // "ff" in "ﬃ": fold("ﬃ")="ffi", "ff" is prefix of "ffi" → MATCH
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("ff"), m.offset == 0);
+
+    // "ffi" in "ﬃ": exact match → MATCH
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("ffi"), m.offset == 0);
+
+    // "if" in "ﬃf": fold("ﬃf")="ffif", "if" at folded position 2 → MATCH
+    let_assert(auto m = str("\xEF\xAC\x83"
+                            "f")
+                            .utf8_case_insensitive_find("if"),
+               m.offset != str::npos);
+
+    // "lf" in "ﬂﬃ": fold("ﬂﬃ")="flffi", "lf" at folded position 1 → MATCH
+    let_assert(auto m = str("\xEF\xAC\x82\xEF\xAC\x83").utf8_case_insensitive_find("lf"), m.offset != str::npos);
+
+    // "xfi" in "xﬃ": fold("xﬃ")="xffi", "xfi" is NOT a substring → NO MATCH
+    let_assert(auto m = str("x\xEF\xAC\x83").utf8_case_insensitive_find("xfi"), m.offset == str::npos);
+
+    // --- Ligature in needle, ASCII haystack ---
+
+    // "ﬂ" in "ffll": fold("ﬂ")="fl", "fl" at position 1 → MATCH
+    let_assert(auto m = str("ffll").utf8_case_insensitive_find("\xEF\xAC\x82"), m.offset == 1);
+
+    // "ﬁ" in "fil": fold("ﬁ")="fi", "fi" at position 0 → MATCH
+    let_assert(auto m = str("fil").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset == 0);
+
+    // "ﬁ" in "ﬀi": fold("ﬁ")="fi", fold("ﬀi")="ffi", "fi" at folded position 1 → MATCH
+    let_assert(auto m = str("\xEF\xAC\x80i").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset != str::npos);
+
+    // --- Eszett (ß) cases ---
+
+    // "ss" in "ß": fold("ß")="ss" → exact MATCH
+    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("ss"), m.offset == 0);
+
+    // "s" in "ß": fold("ß")="ss", "s" is substring → MATCH
+    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("s"), m.offset == 0);
+
+    // "ß" in "ss": fold("ß")="ss", exact match → MATCH
+    let_assert(auto m = str("ss").utf8_case_insensitive_find("\xC3\x9F"), m.offset == 0);
 }
 
 void test_utf8_case() {
