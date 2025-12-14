@@ -5236,50 +5236,64 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_nai
 /**
  *  @brief Optimized alarm function for Western Europe danger zone detection.
  *
- *  Reduces port 5 pressure from 12 to 10 operations by:
+ *  Reduces port 5 pressure from 12 to 8 operations by:
  *  - E1/E2 consecutive: 2 CMPEQ -> 1 CMPLT + 1 VPTESTNMB (p0)
  *  - AA/AB consecutive: 2 CMPEQ -> 1 CMPLT
+ *  - C3/C5 range: 2 CMPEQ -> 1 CMPLT + 2 VPTESTNMB (p0)
+ *  - 9F/BF bit masking: 2 CMPEQ -> 1 CMPEQ + 1 VPTESTMB (p0)
  *
- *  Port summary: 10 p5 ops + 1 p0 op (vs 12 p5 originally)
+ *  Port summary: 8 p5 ops + 4 p0 ops (vs 12 p5 originally)
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param[in] text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_efficiently_zmm_(__m512i h_zmm) {
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_efficiently_zmm_(__m512i text_zmm) {
     // Range constants
     __m512i const x_e1_zmm = _mm512_set1_epi8((char)0xE1);
     __m512i const x_ef_zmm = _mm512_set1_epi8((char)0xEF);
-    __m512i const x_c5_zmm = _mm512_set1_epi8((char)0xC5);
     __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3);
     __m512i const x_ba_zmm = _mm512_set1_epi8((char)0xBA);
     __m512i const x_84_zmm = _mm512_set1_epi8((char)0x84);
     __m512i const x_ac_zmm = _mm512_set1_epi8((char)0xAC);
     __m512i const x_bf_zmm = _mm512_set1_epi8((char)0xBF);
-    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F);
     __m512i const x_aa_zmm = _mm512_set1_epi8((char)0xAA);
+    __m512i const x_20_zmm = _mm512_set1_epi8(0x20);
     __m512i const x_02_zmm = _mm512_set1_epi8(0x02);
+    __m512i const x_03_zmm = _mm512_set1_epi8(0x03);
 
     // Check for E1/E2 range: (byte - 0xE1) < 2  [1 CMPLT on p5]
-    __m512i off_e1_zmm = _mm512_sub_epi8(h_zmm, x_e1_zmm);
+    __m512i off_e1_zmm = _mm512_sub_epi8(text_zmm, x_e1_zmm);
     __mmask64 is_e1_or_e2_mask = _mm512_cmplt_epu8_mask(off_e1_zmm, x_02_zmm);
     __mmask64 is_e1_mask = is_e1_or_e2_mask & _mm512_testn_epi8_mask(off_e1_zmm, off_e1_zmm); // offset==0 [p0]
     __mmask64 is_e2_mask = is_e1_or_e2_mask & ~is_e1_mask;
 
     // Check for AA/AB range: (byte - 0xAA) < 2  [1 CMPLT on p5]
-    __m512i off_aa_zmm = _mm512_sub_epi8(h_zmm, x_aa_zmm);
+    __m512i off_aa_zmm = _mm512_sub_epi8(text_zmm, x_aa_zmm);
     __mmask64 is_aa_or_ab_mask = _mm512_cmplt_epu8_mask(off_aa_zmm, x_02_zmm);
 
-    // Other lead bytes (3 CMPEQ on p5)
-    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ef_zmm);
-    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c5_zmm);
-    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_c3_zmm);
+    // Check for C3/C4/C5 range: (byte - 0xC3) < 3  [1 CMPLT on p5]
+    // We only need C3 and C5; C4 is captured but unused
+    __m512i off_c3_zmm = _mm512_sub_epi8(text_zmm, x_c3_zmm);
+    __mmask64 is_c3_c4_c5_mask = _mm512_cmplt_epu8_mask(off_c3_zmm, x_03_zmm);
+    __mmask64 is_c3_mask = is_c3_c4_c5_mask & _mm512_testn_epi8_mask(off_c3_zmm, off_c3_zmm); // offset==0 [p0]
+    __m512i off_xor_2_zmm = _mm512_xor_si512(off_c3_zmm, x_02_zmm);
+    __mmask64 is_c5_mask = is_c3_c4_c5_mask & _mm512_testn_epi8_mask(off_xor_2_zmm, off_xor_2_zmm); // offset==2 [p0]
 
-    // Other second bytes (5 CMPEQ on p5)
-    __mmask64 is_ba_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ba_zmm);
-    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_84_zmm);
-    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_ac_zmm);
-    __mmask64 is_bf_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_bf_zmm);
-    __mmask64 is_9f_mask = _mm512_cmpeq_epi8_mask(h_zmm, x_9f_zmm);
+    // Other lead byte (1 CMPEQ on p5)
+    __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_ef_zmm);
+
+    // Second bytes: BA, 84, AC (3 CMPEQ on p5)
+    __mmask64 is_ba_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_ba_zmm);
+    __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_84_zmm);
+    __mmask64 is_ac_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_ac_zmm);
+
+    // 9F/BF bit masking: (byte | 0x20) == 0xBF catches exactly {0x9F, 0xBF}  [1 CMPEQ on p5]
+    // 0x9F = 1001_1111, 0xBF = 1011_1111, differ only in bit 5
+    __m512i masked_zmm = _mm512_or_si512(text_zmm, x_20_zmm);
+    __mmask64 is_9f_or_bf_mask = _mm512_cmpeq_epi8_mask(masked_zmm, x_bf_zmm);
+    __mmask64 has_bit5_mask = _mm512_test_epi8_mask(text_zmm, x_20_zmm); // VPTESTMB [p0]
+    __mmask64 is_bf_mask = is_9f_or_bf_mask & has_bit5_mask;
+    __mmask64 is_9f_mask = is_9f_or_bf_mask & ~has_bit5_mask;
 
     // Danger mask construction
     __mmask64 danger_mask =
@@ -5289,7 +5303,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_eff
         ((is_c5_mask << 1) & is_bf_mask) |                           // Long S (C5 BF)
         ((is_c3_mask << 1) & is_9f_mask);                            // Sharp S (C3 9F)
 
-    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_western_europe_alarm_naively_zmm_(h_zmm) &&
+    sz_assert_(danger_mask == sz_utf8_case_insensitive_find_ice_western_europe_alarm_naively_zmm_(text_zmm) &&
                "Efficient Western Europe alarm must match naive implementation");
     return danger_mask;
 }
