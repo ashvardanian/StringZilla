@@ -1701,9 +1701,9 @@ class utf8_case_insensitive_needle {
     utf8_case_insensitive_needle(basic_string_slice<char_type> needle) noexcept
         : needle_(needle.data()), length_(needle.size()), metadata_ {} {}
 
-    template <std::size_t length_>
-    utf8_case_insensitive_needle(char_type (&needle)[length_]) noexcept
-        : needle_(needle), length_(length_ - 1), metadata_ {} {}
+    template <std::size_t array_length_>
+    utf8_case_insensitive_needle(char_type (&needle)[array_length_]) noexcept
+        : needle_(needle), length_(array_length_ - 1), metadata_ {} {}
 
     char_type *data() const noexcept { return needle_; }
     std::size_t size() const noexcept { return length_; }
