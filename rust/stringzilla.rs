@@ -1226,14 +1226,33 @@ where
 ///
 /// # Examples
 ///
+/// Processing pure ASCII text (most common case, single chunk):
 /// ```
 /// use stringzilla::stringzilla as sz;
-/// let text = "Hello 世界";
+/// let text = "Hello World!";
 /// let mut runes = [0u32; 16];
 /// let (bytes, count) = sz::utf8_unpack_chunk(text.as_bytes(), &mut runes);
-/// assert_eq!(count, 8); // 6 ASCII + 2 CJK characters
+/// assert_eq!(count, 12);  // All 12 ASCII characters
+/// assert_eq!(bytes, 12);  // 12 bytes consumed
 /// assert_eq!(runes[0], 'H' as u32);
-/// assert_eq!(runes[6], '世' as u32);
+/// assert_eq!(runes[11], '!' as u32);
+/// ```
+///
+/// For mixed ASCII/multibyte text, SIMD implementations may process homogeneous
+/// chunks separately. Call repeatedly to process the entire string:
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let text = "Hi世界";  // 2 ASCII + 2 CJK
+/// let bytes = text.as_bytes();
+/// let mut runes = [0u32; 16];
+/// let mut all_runes = Vec::new();
+/// let mut offset = 0;
+/// while offset < bytes.len() {
+///     let (consumed, count) = sz::utf8_unpack_chunk(&bytes[offset..], &mut runes);
+///     all_runes.extend_from_slice(&runes[..count]);
+///     offset += consumed;
+/// }
+/// assert_eq!(all_runes.len(), 4);  // 2 ASCII + 2 CJK = 4 codepoints
 /// ```
 ///
 pub fn utf8_unpack_chunk(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
