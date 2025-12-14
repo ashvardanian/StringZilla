@@ -727,9 +727,10 @@ jobs:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
+      # bash and curl are required by dtolnay/rust-toolchain
       - name: Install Git for checkout
         run: |
-          apk add --no-cache git openssh ca-certificates bash # bash is required by dtolnay/rust-toolchain
+          apk add --no-cache git openssh ca-certificates bash curl
           git --version
       - name: Log Alpine and Git versions
         run: |
