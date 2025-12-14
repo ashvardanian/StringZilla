@@ -2401,6 +2401,13 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
     __m512i const utf8_4byte_test_mask = _mm512_set1_epi8((char)0xF8);
 
     while (source_length) {
+        // Prefetch ahead to hide memory latency on large datasets.
+        // This helps when processing multi-GB files that don't fit in cache.
+        _mm_prefetch(source + 1024, _MM_HINT_T1); // To L2: 16 cache lines ahead
+        _mm_prefetch(source + 512, _MM_HINT_T0);  // To L1: 8 cache lines ahead
+        _mm_prefetch(source + 576, _MM_HINT_T0);  // To L1: 9 cache lines ahead
+        _mm_prefetch(source + 640, _MM_HINT_T0);  // To L1: 10 cache lines ahead
+
         sz_size_t chunk_size = sz_min_of_two(source_length, 64);
         __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
         source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source);
