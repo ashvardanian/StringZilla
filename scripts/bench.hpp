@@ -304,6 +304,8 @@ struct environment_t {
     std::uint64_t seed = 0;
     /** @brief Upper bound on the number of stress test failures on a callable. */
     std::size_t stress_limit = 1;
+    /** @brief Whether to deduplicate tokens before benchmarking. */
+    bool unique = false;
 
     /** @brief Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
@@ -415,6 +417,12 @@ inline environment_t build_environment(                                        /
     }
     else { env.stress_limit = default_stress_limit; }
 
+    // Use `STRINGWARS_UNIQUE` to deduplicate tokens
+    if (char const *env_var = std::getenv("STRINGWARS_UNIQUE")) {
+        bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
+        env.unique = is_one;
+    }
+
     env.dataset = read_file(env.path);
     env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
 
@@ -428,6 +436,14 @@ inline environment_t build_environment(                                        /
         std::size_t n = static_cast<std::size_t>(env.tokenization);
         env.tokens = filter_by_length<token_view_t>(tokenize(env.dataset), n, std::equal_to<std::size_t>());
     }
+
+    // Deduplicate tokens if requested
+    if (env.unique) {
+        std::sort(env.tokens.begin(), env.tokens.end());
+        auto last = std::unique(env.tokens.begin(), env.tokens.end());
+        env.tokens.erase(last, env.tokens.end());
+    }
+
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
@@ -460,6 +476,7 @@ inline environment_t build_environment(                                        /
     }
     std::printf(" - Seed: %zu%s\n", static_cast<std::size_t>(env.seed), seed_message);
     std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
+    std::printf(" - Unique tokens: %s\n", env.unique ? "yes" : "no");
     std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
