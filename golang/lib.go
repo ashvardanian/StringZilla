@@ -202,7 +202,7 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 	srcPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	srcLen := C.ulong(len(str))
 	dst := make([]byte, len(str)*3)
-	outLen := int(C.sz_utf8_case_fold(srcPtr, srcLen, unsafe.Pointer(&dst[0])))
+	outLen := int(C.sz_utf8_case_fold(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0]))))
 	return string(dst[:outLen]), nil
 }
 
