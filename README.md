@@ -2027,6 +2027,30 @@ s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
 ```
 
+### Unicode Case-Folding and Case-Insensitive Search
+
+```swift
+import StringZilla
+
+let folded = "Straße".utf8CaseFoldedBytes()
+print(String(decoding: folded, as: UTF8.self)) // "strasse"
+
+let haystack =
+    "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n"
+    + "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+let needle = "EIN MASS VON ETWA 20 μK"
+
+if let range = haystack.utf8CaseInsensitiveFind(substring: needle) {
+    print(haystack[range]) // "ein Maß von etwa 20 µK"
+}
+
+// Reuse the same needle efficiently
+let compiledNeedle = Utf8CaseInsensitiveNeedle(needle)
+if let range = compiledNeedle.findFirst(in: haystack) {
+    print(haystack[range])
+}
+```
+
 ### Hash
 
 StringZilla provides high-performance hashing for Swift strings:

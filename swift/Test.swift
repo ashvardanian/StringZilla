@@ -55,6 +55,28 @@ class StringZillaTests: XCTestCase {
         XCTAssertNil(index)
     }
 
+    func testUtf8CaseFoldedBytes() {
+        let folded = "Straße".utf8CaseFoldedBytes()
+        XCTAssertEqual(String(decoding: folded, as: UTF8.self), "strasse")
+    }
+
+    func testUtf8CaseInsensitiveFind() {
+        let haystack =
+            "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n"
+            + "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+        let needle = "EIN MASS VON ETWA 20 μK"
+
+        let firstMatchRange = haystack.utf8CaseInsensitiveFind(substring: needle)
+        XCTAssertNotNil(firstMatchRange)
+        XCTAssertEqual(String(haystack[firstMatchRange!]), "ein Maß von etwa 20 µK")
+
+        let compiledNeedle = Utf8CaseInsensitiveNeedle(needle)
+        let remainingHaystack = String(haystack[firstMatchRange!.upperBound...])
+        let secondMatchRange = compiledNeedle.findFirst(in: remainingHaystack)
+        XCTAssertNotNil(secondMatchRange)
+        XCTAssertEqual(String(remainingHaystack[secondMatchRange!]), "ein Maß von etwa 20 μK")
+    }
+
     // MARK: - Hash Function Tests
 
     func testHashBasic() {
