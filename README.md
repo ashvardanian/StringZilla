@@ -1941,6 +1941,34 @@ const order = sz.compare(Buffer.from('a'), Buffer.from('b')); // -1, 0, or 1
 const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
 ```
 
+### Unicode Case-Folding and Case-Insensitive Search
+
+StringZilla provides full Unicode case folding (including expansions like `ß → ss`, ligatures like `ﬁ → fi`, and special folds like `µ → μ`, `K → k`)
+and a case-insensitive substring search that accounts for those expansions.
+
+```js
+import sz from "stringzilla";
+
+// Case folding (returns a UTF-8 Buffer)
+console.log(sz.utf8CaseFold(Buffer.from("Straße")).toString("utf8")); // "strasse"
+console.log(sz.utf8CaseFold(Buffer.from("ofﬁce")).toString("utf8"));  // "office" (U+FB01 ligature)
+
+// Case-insensitive substring search (full Unicode case folding)
+const text = Buffer.from(
+    "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+    "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+);
+const patternBytes = Buffer.from("EIN MASS VON ETWA 20 μK");
+
+const first = sz.utf8CaseInsensitiveFind(text, patternBytes);
+console.log(first); // { index: 69n, length: ... } (byte offsets)
+
+// Reuse the same needle efficiently
+const pattern = new sz.Utf8CaseInsensitiveNeedle(patternBytes);
+const again = pattern.findIn(text);
+console.log(again.index === first.index);
+```
+
 ### Hash
 
 Single-shot and incremental hashing are both supported:

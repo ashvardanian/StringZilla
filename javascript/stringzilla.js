@@ -3,7 +3,6 @@ import bindings from "bindings";
 const compiled = bindings("stringzilla");
 
 export default {
-
     /**
      *  Searches for a short buffer in a long one (zero-copy).
      *
@@ -58,7 +57,6 @@ export default {
      */
     findLastByteFrom: compiled.findLastByteFrom,
 
-
     /**
      *  Counts occurrences of a buffer in a larger buffer (zero-copy).
      *
@@ -68,7 +66,6 @@ export default {
      *  @returns {bigint} Number of matches found
      */
     count: compiled.count,
-
 
     /**
      *  Computes hash of a buffer using StringZilla's fast hash algorithm (zero-copy).
@@ -117,7 +114,6 @@ export default {
      */
     compare: compiled.compare,
 
-
     /**
      *  Computes the sum of all byte values in a buffer (zero-copy).
      *
@@ -127,9 +123,35 @@ export default {
     byteSum: compiled.byteSum,
 
     /**
-     * Returns a comma-separated string of backend capabilities, e.g. "serial,haswell".
-     * Use this to inspect which SIMD/GPU backends are active.
-     * @returns {string}
+     *  Returns a comma-separated string of backend capabilities, e.g. "serial,haswell".
+     *  Use this to inspect which SIMD/GPU backends are active.
+     *  @returns {string}
      */
     capabilities: compiled.capabilities,
+
+    /**
+     *  Applies full Unicode case folding to a UTF-8 buffer.
+     *
+     *  @param {Buffer} buffer - UTF-8 encoded input
+     *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
+     *  @returns {Buffer} Case-folded UTF-8 bytes (may be longer than input due to expansions)
+     */
+    utf8CaseFold: compiled.utf8CaseFold,
+
+    /**
+     *  Finds the first case-insensitive occurrence of `needle` in `haystack` using full Unicode case folding.
+     *
+     *  @param {Buffer} haystack - UTF-8 encoded haystack
+     *  @param {Buffer} needle - UTF-8 encoded needle
+     *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
+     *  @returns {{index: bigint, length: bigint}} Object with byte index and matched byte length; `index` is -1n if not found
+     */
+    utf8CaseInsensitiveFind: compiled.utf8CaseInsensitiveFind,
+
+    /**
+     *  Precompiled case-insensitive UTF-8 needle for repeated searches.
+     *
+     *  Construct with `new`, then call `findIn(haystack, validate?)`.
+     */
+    Utf8CaseInsensitiveNeedle: compiled.Utf8CaseInsensitiveNeedle,
 };

@@ -221,7 +221,10 @@ test("Edge Cases - Empty Buffers", () => {
 
     // Finding empty in non-empty should return 0
     assert.strictEqual(stringzilla.find(haystack, empty), 0n);
-    assert.strictEqual(stringzilla.findLast(haystack, empty), BigInt(haystack.length));
+    assert.strictEqual(
+        stringzilla.findLast(haystack, empty),
+        BigInt(haystack.length)
+    );
 
     // Finding non-empty in empty should return -1
     assert.strictEqual(stringzilla.find(empty, haystack), -1n);
@@ -257,6 +260,69 @@ test("UTF-8 Multi-byte Character Handling", () => {
     const emojiBuffer = Buffer.from("Hello 👋 World");
     const emoji = Buffer.from("👋");
     assert(stringzilla.find(emojiBuffer, emoji) > 0n);
+});
+
+test("UTF-8 Case Fold - Sharp S and Ligature", () => {
+    const folded1 = stringzilla.utf8CaseFold(Buffer.from("Straße"));
+    assert.strictEqual(folded1.toString("utf8"), "strasse");
+
+    const folded2 = stringzilla.utf8CaseFold(Buffer.from("ofﬁce")); // contains U+FB01
+    assert.strictEqual(folded2.toString("utf8"), "office");
+});
+
+test("UTF-8 Case-Insensitive Find - Full Case Folding", () => {
+    const haystack = Buffer.from(
+        "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+        "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+    );
+    const needle = Buffer.from("EIN MASS VON ETWA 20 μK");
+
+    const firstResult = stringzilla.utf8CaseInsensitiveFind(haystack, needle);
+    assert.notStrictEqual(firstResult.index, -1n);
+    assert(firstResult.length > 0n);
+    const firstStart = Number(firstResult.index);
+    const firstEnd = Number(firstResult.index + firstResult.length);
+    assert.strictEqual(
+        haystack.subarray(firstStart, firstEnd).toString("utf8"),
+        "ein Maß von etwa 20 µK"
+    );
+
+    // Find the second match after the first one
+    const remainingHaystack = haystack.subarray(firstEnd);
+    const secondResult = stringzilla.utf8CaseInsensitiveFind(
+        remainingHaystack,
+        needle
+    );
+    assert.notStrictEqual(secondResult.index, -1n);
+    const secondStart = firstEnd + Number(secondResult.index);
+    const secondEnd = secondStart + Number(secondResult.length);
+    assert.strictEqual(
+        haystack.subarray(secondStart, secondEnd).toString("utf8"),
+        "ein Maß von etwa 20 μK"
+    );
+});
+
+test("UTF-8 Case-Insensitive Needle - Reuse Metadata", () => {
+    const haystack = Buffer.from(
+        "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+        "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+    );
+    const needleBytes = Buffer.from("EIN MASS VON ETWA 20 μK");
+    const compiledNeedle = new stringzilla.Utf8CaseInsensitiveNeedle(
+        needleBytes
+    );
+
+    const firstResult = compiledNeedle.findIn(haystack);
+    assert.notStrictEqual(firstResult.index, -1n);
+    const firstStart = Number(firstResult.index);
+    const firstEnd = Number(firstResult.index + firstResult.length);
+    assert.strictEqual(
+        haystack.subarray(firstStart, firstEnd).toString("utf8"),
+        "ein Maß von etwa 20 µK"
+    );
+
+    const secondResult = compiledNeedle.findIn(haystack.subarray(firstEnd));
+    assert.notStrictEqual(secondResult.index, -1n);
 });
 
 test("Pattern at Buffer Boundaries", () => {
@@ -373,7 +439,10 @@ test("Compare - Special Cases", () => {
     assert(stringzilla.compare(Buffer.from("aa"), Buffer.from("a")) > 0);
 
     // Empty buffers
-    assert.strictEqual(stringzilla.compare(Buffer.alloc(0), Buffer.alloc(0)), 0);
+    assert.strictEqual(
+        stringzilla.compare(Buffer.alloc(0), Buffer.alloc(0)),
+        0
+    );
     assert(stringzilla.compare(Buffer.alloc(0), Buffer.from("a")) < 0);
     assert(stringzilla.compare(Buffer.from("a"), Buffer.alloc(0)) > 0);
 
@@ -385,10 +454,14 @@ test("Compare - Special Cases", () => {
 
 test("SHA-256 - Test Vectors", () => {
     // NIST test vectors
-    assert.strictEqual(stringzilla.sha256(Buffer.from("")).toString("hex"),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    assert.strictEqual(stringzilla.sha256(Buffer.from("abc")).toString("hex"),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert.strictEqual(
+        stringzilla.sha256(Buffer.from("")).toString("hex"),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert.strictEqual(
+        stringzilla.sha256(Buffer.from("abc")).toString("hex"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 });
 
 test("Sha256 Class - Streaming", () => {
