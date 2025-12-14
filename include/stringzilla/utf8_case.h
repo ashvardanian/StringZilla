@@ -7807,6 +7807,37 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 
 /**
  *  NEON kernels for Unicode case-folding and case-insensitive search.
+ *
+ *  On modern Arm CPUs (Apple M-series, Neoverse N1/N2/V1/V2), instructions like `vextq_u8` (extract/shift),
+ *  `vbslq_u8` (bitwise select), and `vandq_u8` (bitwise AND) are extremely cheap, often with 1-2 cycle latencies
+ *  and high throughput (0.25-0.5 CPI). `vld1q_u8_x4` efficiently loads 64 bytes into 4 registers, decomposing
+ *  into 4 `LDR Q` operations with high throughput. `vqtbl1q_u8` (table lookup) is relatively fast (2 cycles) but
+ *  uses limited shuffle ports, so it should be used judiciously. `vcgtq_u8` (compare greater) is also efficient
+ *  for range checks.
+ *
+ *  | Instr         | Latency | CPI  | Notes                                |
+ *  | :------------ | :------ | :--- | :----------------------------------- |
+ *  | `vld1q_u8_x4` | ~5-7    | ~0.5 | Decomposes to 4 LDR Q. High throughput. |
+ *  | `vextq_u8`    | 1-2     | 0.5  | Cheap. Ideal for Shift Chains.       |
+ *  | `vqtbl1q_u8`  | 2       | 1    | Uses limited Shuffle ports.          |
+ *  | `vbslq_u8`    | 1       | 0.25 | Free (4/cycle on Apple/Neoverse).    |
+ *  | `vandq_u8`    | 1       | 0.25 | Free (4/cycle on Apple/Neoverse).    |
+ *  | `vcgtq_u8`    | 1-2     | ~0.5 | Efficient for range checks.          |
+ *
+ *  To maximize performance, process data in 64-byte blocks (4x 16-byte NEON registers) per iteration to saturate
+ *  execution units. Use `vld1q_u8_x4` for sequential loads instead of slower interleaved `ld4` variants. For multi-byte
+ *  sequences spanning register boundaries, create "shifted" views using `vextq_u8` to handle dependencies entirely
+ *  within SIMD.
+ *
+ *  For case-folding, prefer `vaddq_u8` with masks from comparisons and bitwise logic for simple ranges like ASCII.
+ *  Use `vqtbl1q_u8` for complex mappings, and `vbslq_u8` for conditional updates without branches. Detect "danger
+ * zones" (multi-rune expansions or length changes) using bitwise masks; if a block contains any, fall back to a robust
+ * serial handler for that specific region.
+ *
+ *  For match detection, compare processed registers against the needle using `vceqq_u8`, convert the 16-bit match
+ *  masks to 64-bit using the `sz_find_vreinterpretq_u8_u4_` pattern, combine them with bitwise OR, and use `ctz`
+ *  to find the first match offset. This balances NEON's high ALU throughput with its lack of a direct `movemask`
+ *  instruction.
  */
 
 #pragma region NEON Implementation
