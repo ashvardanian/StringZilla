@@ -8,7 +8,7 @@
  *  - `sz_utf8_case_fold` - Unicode case folding for codepoints
  *  - `sz_utf8_case_insensitive_find` - case-insensitive substring search in UTF-8 strings
  *  - `sz_utf8_case_insensitive_order` - case-insensitive lexicographical comparison of UTF-8 strings
- *  - `sz_utf8_case_agnostic` - check if a string contains only case-agnostic (caseless) codepoints
+ *  - `sz_utf8_case_invariant` - check if a string contains only case-agnostic (caseless) codepoints
  *
  *  It's important to remember that UTF-8 is just one of many possible Unicode encodings.
  *  Unicode is a versioned standard and we implement its locale-independent specification v17.
@@ -280,8 +280,8 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *      sz_cptr_t haystack = "价格：¥1234";  // Chinese + punctuation + digits
  *      sz_cptr_t needle = "¥1234";
  *
- *      if (sz_utf8_case_agnostic(haystack, haystack_len) &&
- *          sz_utf8_case_agnostic(needle, needle_len)) {
+ *      if (sz_utf8_case_invariant(haystack, haystack_len) &&
+ *          sz_utf8_case_invariant(needle, needle_len)) {
  *          // Fast path: use binary search
  *          result = sz_find(haystack, haystack_len, needle, needle_len);
  *      } else {
@@ -295,7 +295,7 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *        participates in case folding, even if the specific instance wouldn't change.
  *        For example, lowercase 'a' returns false because it's a case-folding target.
  */
-SZ_DYNAMIC sz_bool_t sz_utf8_case_agnostic(sz_cptr_t str, sz_size_t length);
+SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length);
 
 #pragma endregion
 
@@ -316,8 +316,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_agnostic */
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_case_invariant */
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length);
 
 #if SZ_USE_ICE
 
@@ -335,8 +335,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_ice( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_agnostic */
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_case_invariant */
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length);
 
 #endif
 
@@ -356,8 +356,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_agnostic */
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_neon(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_case_invariant */
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length);
 
 #endif
 
@@ -1249,9 +1249,9 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_tail_(sz_cptr_t needle_sta
 }
 
 /**
- *  @brief Validate a complete match around a SIMD-detected window.
+ *  @brief Verify a complete match around a SIMD-detected window.
  *
- *  Validates two regions: "head" (before window) and "tail" (after window).
+ *  Verifies two regions: "head" (before window) and "tail" (after window).
  *  It's important to note that the middle part may still be in part unprocessed, if its larger
  *  than the "folded slice" of the needle. We handle it as part of the "tail" and the `needle_tail_bytes`
  *  must be calculated accordingly.
@@ -1264,10 +1264,10 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_tail_(sz_cptr_t needle_sta
  *  @param[in] haystack_matched_length Length of matched safe window in haystack in bytes
  *  @param[in] needle_head_bytes Start of matched safe window in needle in bytes
  *  @param[in] needle_tail_bytes Number of bytes in the needle remaining after the matched part
- *  @param[out] match_length Total length of the validated match in haystack bytes
+ *  @param[out] match_length Total length of the verified match in haystack bytes
  *  @return Match start pointer, or SZ_NULL_CHAR if validation fails
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_validate_(                 //
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_verify_match_(             //
     sz_cptr_t haystack_ptr, sz_size_t haystack_length,                    //
     sz_cptr_t needle_ptr, sz_size_t needle_length,                        //
     sz_size_t haystack_matched_offset, sz_size_t haystack_matched_length, //
@@ -1321,11 +1321,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_validate_(                 //
  *  @param[in] rune Unicode codepoint to check
  *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise
  *
- *  @warning This is an internal function. Use sz_utf8_case_agnostic_serial() for string checking.
- *  @see sz_utf8_case_agnostic_serial
+ *  @warning This is an internal function. Use sz_utf8_case_invariant_serial() for string checking.
+ *  @see sz_utf8_case_invariant_serial
  *  @see sz_unicode_fold_codepoint_
  */
-SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
+SZ_INTERNAL sz_bool_t sz_rune_is_case_invariant_(sz_rune_t rune) {
 
     // Check if this rune participates in case folding
     sz_rune_t folded_runes[3];
@@ -1397,7 +1397,7 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_agnostic_(sz_rune_t rune) {
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length) {
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *ptr = (sz_u8_t const *)str;
     sz_u8_t const *end = ptr + length;
 
@@ -1416,7 +1416,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_serial(sz_cptr_t str, sz_size_t length
         sz_rune_t rune;
         sz_rune_length_t rune_len;
         sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_len);
-        if (sz_rune_is_case_agnostic_(rune) == sz_false_k) return sz_false_k;
+        if (sz_rune_is_case_invariant_(rune) == sz_false_k) return sz_false_k;
         ptr += rune_len;
     }
 
@@ -1520,10 +1520,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
         // The simplest case is when the very first in `haystack_folded_runes` is our target:
         if (haystack_folded_runes[0] == needle_first_safe_folded_rune) {
             // Validate the full match using the unified validator
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_( //
-                haystack_ptr, haystack_length,                    //
-                needle_ptr, needle_length,                        //
-                danger_ptr - haystack_ptr, 0,                     // No pre-matched middle
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_( //
+                haystack_ptr, haystack_length,                        //
+                needle_ptr, needle_length,                            //
+                danger_ptr - haystack_ptr, 0,                         // No pre-matched middle
                 needle_first_safe_folded_rune_offset,
                 needle_length - needle_first_safe_folded_rune_offset, // Verify everything after head serially
                 match_length);
@@ -1860,7 +1860,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         return haystack;
     }
 
-    if (sz_utf8_case_agnostic_serial(needle, needle_length)) {
+    if (sz_utf8_case_invariant_serial(needle, needle_length)) {
         sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
@@ -2228,7 +2228,7 @@ SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_c_array_(FILE *stream, char const
  *  @brief  Verifies the SIMD result against the serial implementation.
  *          If they differ, dumps diagnostic info and crashes to help debugging.
  */
-SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
+SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
     sz_cptr_t result, sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
     sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, char const *file, int line) {
 
@@ -2309,13 +2309,13 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_verify_and_crash_( //
 #endif
 }
 
-#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length,       \
+#define sz_utf8_case_insensitive_find_assert_(result, haystack, haystack_length, needle, needle_length,       \
                                               needle_metadata)                                                \
-    sz_utf8_case_insensitive_find_verify_and_crash_(result, haystack, haystack_length, needle, needle_length, \
+    sz_utf8_case_insensitive_find_assert_and_crash_(result, haystack, haystack_length, needle, needle_length, \
                                                     needle_metadata, __FILE__, __LINE__)
 
 #else
-#define sz_utf8_case_insensitive_find_verify_(result, haystack, haystack_length, needle, needle_length, needle_metadata)
+#define sz_utf8_case_insensitive_find_assert_(result, haystack, haystack_length, needle, needle_length, needle_metadata)
 #endif
 
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
@@ -3400,7 +3400,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 #undef sz_ice_fold_ascii_in_prefix_
 #undef sz_ice_transform_georgian_
 
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_ice(sz_cptr_t str, sz_size_t length) {
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *ptr = (sz_u8_t const *)str;
 
     // Pre-computed constants
@@ -3572,14 +3572,14 @@ typedef enum {
      *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_ascii_k = 1,
+    sz_utf8_case_rune_ascii_invariant_k = 1,
 
     /**
      *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 Supplements designed mostly
      *          for Western European languages (like French, German, Spanish, & Portuguese) with a mixture of
      *          single-byte and double-byte UTF-8 character sequences.
      *
-     *  @sa sz_utf8_case_rune_safe_ascii_k for a simpler variant.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -3591,7 +3591,7 @@ typedef enum {
      *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
      *
      *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
-     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_safe_ascii_k`, but not all!
+     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_ascii_invariant_k`, but not all!
      *
      *  The lowercase 'ß' (U+00DF, C3 9F) folds to "ss" (73 73) in-place (2 bytes → 2 bytes). This creates a
      *  mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find a match
@@ -3624,7 +3624,7 @@ typedef enum {
      *  It's archaic in modern languages but theoretically possible in historical texts.
      *
      *  So we allow 'k' unconditionally and inherit/extend the following limitations from
-     * `sz_utf8_case_rune_safe_ascii_k`:
+     * `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
      *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87).
@@ -3668,7 +3668,7 @@ typedef enum {
      *          mostly for Central European languages (like Polish, Czech, & Hungarian) and Turkish with a mixture of
      *          single-byte, double-byte, and rare triple-byte UTF-8 character sequences.
      *
-     *  @sa sz_utf8_case_rune_safe_ascii_k for a simpler variant.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -3712,7 +3712,8 @@ typedef enum {
      *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
      *  frequently encounter in Turkish text.
      *
-     *  We inherit most contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit most contextual limitations for some of the ASCII characters from
+     * `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -3769,7 +3770,7 @@ typedef enum {
      *          for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
      *          (like Serbian, Bulgarian, & Macedonian), but excluding Cyrillic Extensions.
      *
-     *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -3808,7 +3809,7 @@ typedef enum {
      *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
      *  By omitting those extensions we can make our folding kernel much lighter.
      *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -3866,7 +3867,7 @@ typedef enum {
      *          for Modern Greek (Demotic) text with a mixture of single-byte and double-byte UTF-8
      *          character sequences.
      *
-     *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -3922,7 +3923,7 @@ typedef enum {
      *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
      *  only handles characters that originate in the Greek block.
      *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -3977,7 +3978,7 @@ typedef enum {
 
     /**
      *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
-     *  @sa sz_utf8_case_rune_safe_ascii_k for the inherited ASCII rules.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  These kernels fold:
      *  - 26x ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -3991,7 +3992,7 @@ typedef enum {
      *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
      *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
      *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -4095,7 +4096,8 @@ typedef enum {
      *  That sign is extremely rare, while the lowercase 'k' is common in Vietnamese (e.g. "kem", "kéo").
      *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
      *
-     *  We inherit most contextual limitations for some of the ASCII characters from `sz_utf8_case_rune_safe_ascii_k`:
+     *  We inherit most contextual limitations for some of the ASCII characters from
+     * `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
@@ -4146,7 +4148,7 @@ typedef enum {
      */
     sz_utf8_case_rune_safe_vietnamese_k = 7,
 
-    sz_utf8_case_rune_case_agnostic_k = 8,
+    sz_utf8_case_rune_case_invariant_k = 8,
     sz_utf8_case_rune_fallback_serial_k = 255,
 } sz_utf8_case_rune_safety_profile_t_;
 
@@ -4189,10 +4191,10 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
     unsigned int central_viet_group =                    //
         (1 << sz_utf8_case_rune_safe_central_europe_k) | //
         (1 << sz_utf8_case_rune_safe_vietnamese_k);
-    unsigned int strict_ascii_group =              //
-        (1 << sz_utf8_case_rune_safe_ascii_k) |    //
-        (1 << sz_utf8_case_rune_safe_cyrillic_k) | //
-        (1 << sz_utf8_case_rune_safe_greek_k) |    //
+    unsigned int strict_ascii_group =                //
+        (1 << sz_utf8_case_rune_ascii_invariant_k) | //
+        (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
+        (1 << sz_utf8_case_rune_safe_greek_k) |      //
         (1 << sz_utf8_case_rune_safe_armenian_k);
 
     // Helper: lowercase ASCII
@@ -4289,9 +4291,9 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
             case 'n':
                 // Exclude Armenian - it cannot handle ŉ → ʼn one-to-many expansion
                 if (at_start == sz_false_k && prev_ascii) {
-                    safety |= (1 << sz_utf8_case_rune_safe_ascii_k) |    //
-                              (1 << sz_utf8_case_rune_safe_cyrillic_k) | //
-                              (1 << sz_utf8_case_rune_safe_greek_k);     //
+                    safety |= (1 << sz_utf8_case_rune_ascii_invariant_k) | //
+                              (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
+                              (1 << sz_utf8_case_rune_safe_greek_k);       //
                     // Armenian EXCLUDED: sz_utf8_case_rune_safe_armenian_k
                     safety |= central_viet_group | western_group;
                 }
@@ -4371,7 +4373,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         }
 
         *safety_profiles = safety;
-        return sz_utf8_case_rune_safe_ascii_k;
+        return sz_utf8_case_rune_ascii_invariant_k;
     }
 
     // 2-byte UTF-8 (U+0080 to U+07FF)
@@ -4521,13 +4523,17 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         }
 
         // Output safety and determine primary script for 2-byte runes
+        // For case-invariant non-ASCII runes, add the ASCII-invariant bit.
+        // This enables fast ASCII kernel for needles like "中文字" that contain no cased characters.
+        // ASCII fold only affects bytes 0x41-0x5A (A-Z), so all other bytes pass through unchanged.
+        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
         *safety_profiles = safety;
         if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k; // Latin-1 Supplement
         if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k; // Latin Extended-A/B
         if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;          // Greek
         if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;       // Cyrillic
         if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;       // Armenian
-        return sz_utf8_case_rune_case_agnostic_k;
+        return sz_utf8_case_rune_case_invariant_k;
     }
 
     // 3-byte UTF-8 (U+0800 to U+FFFF)
@@ -4548,14 +4554,17 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         }
 
         // Output safety and determine primary script for 3-byte runes
+        // For case-invariant non-ASCII runes (like CJK), add the ASCII-invariant bit.
+        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
         *safety_profiles = safety;
         if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k; // Latin Extended Additional
-        return sz_utf8_case_rune_case_agnostic_k;
+        return sz_utf8_case_rune_case_invariant_k;
     }
 
-    // 4-byte UTF-8 - currently no fast paths
+    // 4-byte UTF-8 - currently no fast paths, but case-invariant 4-byte runes can use ASCII kernel
+    if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
     *safety_profiles = safety;
-    return sz_utf8_case_rune_case_agnostic_k;
+    return sz_utf8_case_rune_case_invariant_k;
 }
 
 /**
@@ -4806,9 +4815,10 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     sz_size_t best_diversity = 0;
 
     // Check ASCII preference
-    if (best[sz_utf8_case_rune_safe_ascii_k].applicable && best[sz_utf8_case_rune_safe_ascii_k].folded_length >= 4 &&
-        best[sz_utf8_case_rune_safe_ascii_k].diversity >= 4) {
-        chosen_script = sz_utf8_case_rune_safe_ascii_k;
+    if (best[sz_utf8_case_rune_ascii_invariant_k].applicable &&
+        best[sz_utf8_case_rune_ascii_invariant_k].folded_length >= 4 &&
+        best[sz_utf8_case_rune_ascii_invariant_k].diversity >= 4) {
+        chosen_script = sz_utf8_case_rune_ascii_invariant_k;
     }
     else {
         // Find most diverse applicable script
@@ -4912,7 +4922,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
 
 /**
  *  @brief Fold a ZMM register using ASCII case folding rules.
- *  @sa sz_utf8_case_rune_safe_ascii_k
+ *  @sa sz_utf8_case_rune_ascii_invariant_k
  *
  *  @param[in] text_zmm The text ZMM register.
  *  @return The folded ZMM register.
@@ -5001,7 +5011,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             if (window_mismatch_mask) continue;
 
             // Validate the full match using the unified validator
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -5009,7 +5019,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -5046,7 +5056,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
             if (window_mismatch_mask) continue;
 
             // Validate the full match using the unified validator
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -5054,14 +5064,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_(        //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
         }
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -5125,7 +5135,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_3probe_( //
 
             // No window verification needed - probes cover all positions
             // Go directly to head/tail validation
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                                          //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
                 haystack, haystack_length,                                                                 //
                 needle, needle_length,                                                                     //
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
@@ -5133,7 +5143,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_3probe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -5170,7 +5180,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_3probe_( //
             sz_size_t candidate_offset = sz_u64_ctz(matches_mask);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                                          //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
                 haystack, haystack_length,                                                                 //
                 needle, needle_length,                                                                     //
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
@@ -5178,14 +5188,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_3probe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
         }
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -5267,7 +5277,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_4probe_( //
             if (window_mismatch_mask) continue;
 
             // Window matched - validate head/tail
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                                          //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
                 haystack, haystack_length,                                                                 //
                 needle, needle_length,                                                                     //
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
@@ -5275,7 +5285,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_4probe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -5326,7 +5336,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_4probe_( //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                                          //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
                 haystack, haystack_length,                                                                 //
                 needle, needle_length,                                                                     //
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
@@ -5334,14 +5344,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_ascii_4probe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
         }
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -5524,7 +5534,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_nai
  *
  *  Port summary: 8 p5 ops + 4 p0 ops (vs 12 p5 originally)
  *
- *  @param[in] text_zmm The haystack ZMM register.
+ *  @param[in] text_zmm The text ZMM register to scan for danger bytes.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_efficiently_zmm_(__m512i text_zmm) {
@@ -5702,7 +5712,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -5710,7 +5720,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -5718,7 +5728,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_western_europe_( //
         haystack_ptr += step;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -6104,7 +6114,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -6112,7 +6122,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -6120,7 +6130,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_central_europe_( //
         haystack_ptr += step;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -6345,7 +6355,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(     //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -6353,7 +6363,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(     //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -6361,7 +6371,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_cyrillic_(     //
         haystack_ptr += valid_starts;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -6670,7 +6680,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -6678,7 +6688,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -6686,7 +6696,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_armenian_(     //
         haystack_ptr += step;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -7197,7 +7207,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -7205,7 +7215,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -7213,7 +7223,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_greek_(        //
         haystack_ptr += step;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -7691,7 +7701,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                 _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
-            sz_cptr_t match = sz_utf8_case_insensitive_validate_(                        //
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
                 haystack, haystack_length,                                               //
                 needle, needle_length,                                                   //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
@@ -7699,7 +7709,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
             if (match) {
-                sz_utf8_case_insensitive_find_verify_(match, haystack, haystack_length, needle, needle_length,
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
                                                       needle_metadata);
                 return match;
             }
@@ -7707,7 +7717,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
         haystack_ptr += step;
     }
 
-    sz_utf8_case_insensitive_find_verify_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
                                           needle_metadata);
     return SZ_NULL_CHAR;
 }
@@ -7727,8 +7737,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 
     // If the needle is entirely made of case-less characters - perform direct substring search
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_case_rune_unknown_k;
-    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_case_rune_case_agnostic_k;
-    if (known_agnostic || (is_unknown && sz_utf8_case_agnostic_ice(needle, needle_length))) {
+    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_case_rune_case_invariant_k;
+    if (known_agnostic || (is_unknown && sz_utf8_case_invariant_ice(needle, needle_length))) {
         sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
         if (result) *matched_length = needle_length;
         return result;
@@ -7744,7 +7754,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     }
 
     // Dispatch to appropriate kernel
-    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_ascii_k) {
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_ascii_invariant_k) {
         // Use XOR+VPTERNLOG+VPTESTNMB variants for better port distribution
         if (needle_metadata->folded_slice_length <= 3)
             return sz_utf8_case_insensitive_find_ice_ascii_3probe_( //
@@ -7795,7 +7805,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 #pragma endregion // Shared Helpers Case-Insensitive Find
 #pragma endregion // Ice Lake Implementation
 
+/**
+ *  NEON kernels for Unicode case-folding and case-insensitive search.
+ */
+
 #pragma region NEON Implementation
+#if SZ_USE_NEON
 
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     sz_cptr_t text, sz_size_t length,           //
@@ -7816,10 +7831,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
                                                 matched_length);
 }
 
-SZ_PUBLIC sz_bool_t sz_utf8_case_agnostic_neon(sz_cptr_t str, sz_size_t length) {
-    return sz_utf8_case_agnostic_serial(str, length);
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length) {
+    return sz_utf8_case_invariant_serial(str, length);
 }
 
+#endif            // SZ_USE_NEON
 #pragma endregion // NEON Implementation
 
 #pragma region Dynamic Dispatch
@@ -7861,11 +7877,11 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
     return sz_utf8_case_insensitive_order_serial(a, a_length, b, b_length);
 }
 
-SZ_DYNAMIC sz_bool_t sz_utf8_case_agnostic(sz_cptr_t str, sz_size_t length) {
+SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
 #if SZ_USE_ICE
-    return sz_utf8_case_agnostic_ice(str, length);
+    return sz_utf8_case_invariant_ice(str, length);
 #else
-    return sz_utf8_case_agnostic_serial(str, length);
+    return sz_utf8_case_invariant_serial(str, length);
 #endif
 }
 
