@@ -6,19 +6,22 @@ Strings are the first fundamental data type every programming language implement
 That's why most languages lean on the C standard library (libc) for their string operations, which, despite its name, ships its hottest code in hand-tuned assembly.
 It does exploit SIMD, but it isn't perfect.
 1️⃣ Even on ubiquitous hardware - over a billion 64-bit ARM CPUs - routines such as `strstr` and `memmem` top out at roughly one-third of available throughput.
-2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches.
+2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches, hashing and case-mapping is not even part of the standard.
 3️⃣ Many higher-level languages can't rely on libc at all because their strings aren't NUL-terminated - or may even contain embedded zeroes.
 That's why StringZilla exists: predictable, high performance on every modern platform, OS, and programming language.
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
+![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+
+<!-- Those badges often stay in stale state - greyed out. Consider enabling them later.
 [![Ubuntu status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Linux%20CI&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![Windows status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Windows%20CI&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+-->
 
-StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs and GPUs.
-It delivers up to __10x higher CPU throughput in C, C++, and Python__ and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
+StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate binary and UTF-8 string operations on modern CPUs and GPUs.
+It delivers up to __10x higher CPU throughput in C, C++, Rust, Python__, and other languages, and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
 It __accelerates exact and fuzzy string matching, hashing, edit distance computations, sorting, provides allocation-free lazily-evaluated smart-iterators, and even random-string generators__.
 
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
@@ -32,13 +35,13 @@ It __accelerates exact and fuzzy string matching, hashing, edit distance computa
 - 🦫 __[Go](#quick-start-golang):__ Use the `StringZilla` cGo module
 - 🍎 __[Swift](#quick-start-swift):__ Use the `String+StringZilla` extension
 - 🟨 __[JavaScript](#quick-start-javascript):__ Use the `StringZilla` library
-- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
+- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz-` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
 - 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
-[faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
+[faq-shell]: https://github.com/ashvardanian/StringZilla-CLI
 [first-issues]: https://github.com/ashvardanian/StringZilla/issues
 
 __Who is this for?__
@@ -1910,7 +1913,7 @@ Install the Node.js package and use zero-copy `Buffer` APIs.
 
 ```bash
 npm install stringzilla
-node -p "require('stringzilla').capabilities" # for CommonJS
+node -p "require('stringzilla').default.capabilities" # for CommonJS
 node -e "import('stringzilla').then(m=>console.log(m.default.capabilities)).catch(console.error)" # for ESM
 ```
 
@@ -2080,7 +2083,7 @@ import StringZilla
 let digest = "Hello, world!".sha256() // returns [UInt8] (32 bytes)
 
 // Incremental SHA-256
-var hasher = StringZillaSha256Hasher()
+var hasher = StringZillaSha256()
 hasher.update("Hello, ")
 hasher.update("world!")
 let digestBytes = hasher.digest()     // [UInt8] (32 bytes)
