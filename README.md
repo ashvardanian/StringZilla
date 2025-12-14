@@ -2113,6 +2113,36 @@ func main() {
 }
 ```
 
+### Unicode Case-Folding and Case-Insensitive Search
+
+```go
+package main
+
+import (
+    "fmt"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+func main() {
+    folded, _ := sz.Utf8CaseFold("Straße", true)
+    fmt.Println(folded) // "strasse"
+
+    haystack := "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+        "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+    needle := "EIN MASS VON ETWA 20 μK"
+
+    start64, len64, _ := sz.Utf8CaseInsensitiveFind(haystack, needle, true)
+    start, end := int(start64), int(start64+len64)
+    fmt.Println(haystack[start:end]) // "ein Maß von etwa 20 µK"
+
+    // Reuse the same needle efficiently
+    compiled, _ := sz.NewUtf8CaseInsensitiveNeedle(needle, true)
+    start64, len64, _ = compiled.FindIn(haystack, true)
+    start, end = int(start64), int(start64+len64)
+    fmt.Println(haystack[start:end])
+}
+```
+
 ### Hash
 
 Single-shot and incremental hashing are both supported.

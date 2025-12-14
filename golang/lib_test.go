@@ -228,3 +228,49 @@ func TestHashing(t *testing.T) {
 		t.Fatalf("Bytesum not increasing with appended byte")
 	}
 }
+
+func TestUtf8CaseFold(t *testing.T) {
+	folded, err := sz.Utf8CaseFold("Straße", true)
+	if err != nil {
+		t.Fatalf("Utf8CaseFold returned error: %v", err)
+	}
+	if folded != "strasse" {
+		t.Fatalf("Utf8CaseFold(\"Straße\") = %q, want %q", folded, "strasse")
+	}
+}
+
+func TestUtf8CaseInsensitiveFind(t *testing.T) {
+	haystack := "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+		"Typografisch sieht man auch: ein Maß von etwa 20 μK."
+	needle := "EIN MASS VON ETWA 20 μK"
+
+	firstIndex, firstLength, err := sz.Utf8CaseInsensitiveFind(haystack, needle, true)
+	if err != nil {
+		t.Fatalf("Utf8CaseInsensitiveFind returned error: %v", err)
+	}
+	if firstIndex < 0 || firstLength <= 0 {
+		t.Fatalf("Utf8CaseInsensitiveFind failed: index=%d length=%d", firstIndex, firstLength)
+	}
+	firstMatch := haystack[firstIndex : firstIndex+firstLength]
+	if firstMatch != "ein Maß von etwa 20 µK" {
+		t.Fatalf("first match = %q, want %q", firstMatch, "ein Maß von etwa 20 µK")
+	}
+
+	compiledNeedle, err := sz.NewUtf8CaseInsensitiveNeedle(needle, true)
+	if err != nil {
+		t.Fatalf("NewUtf8CaseInsensitiveNeedle returned error: %v", err)
+	}
+
+	remainingHaystack := haystack[firstIndex+firstLength:]
+	secondIndex, secondLength, err := compiledNeedle.FindIn(remainingHaystack, true)
+	if err != nil {
+		t.Fatalf("Utf8CaseInsensitiveNeedle.FindIn returned error: %v", err)
+	}
+	if secondIndex < 0 || secondLength <= 0 {
+		t.Fatalf("Utf8CaseInsensitiveNeedle.FindIn failed: index=%d length=%d", secondIndex, secondLength)
+	}
+	secondMatch := remainingHaystack[secondIndex : secondIndex+secondLength]
+	if secondMatch != "ein Maß von etwa 20 μK" {
+		t.Fatalf("second match = %q, want %q", secondMatch, "ein Maß von etwa 20 μK")
+	}
+}
