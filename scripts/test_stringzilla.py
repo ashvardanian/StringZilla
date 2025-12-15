@@ -1903,6 +1903,44 @@ def test_utf8_case_insensitive_find_slicing():
     assert text_bytes[idx : idx + 2].lower() == b"au"
 
 
+@pytest.mark.parametrize(
+    "haystack, needle, expected_matches",
+    [
+        # ASCII - multiple matches
+        ("Hello HELLO hello HeLLo", "hello", ["Hello", "HELLO", "hello", "HeLLo"]),
+        ("Hello World", "world", ["World"]),
+        ("Hello World", "xyz", []),
+        # German ß/ss expansion
+        ("Straße STRASSE strasse", "strasse", ["Straße", "STRASSE", "strasse"]),
+        ("groß GROSS", "gross", ["groß", "GROSS"]),
+        # Cyrillic
+        ("ПРИВЕТ привет Привет", "привет", ["ПРИВЕТ", "привет", "Привет"]),
+        # Greek
+        ("ΑΒΓΔ αβγδ", "αβγδ", ["ΑΒΓΔ", "αβγδ"]),
+        # Edge cases
+        ("", "hello", []),
+        ("hello", "xyz", []),
+    ],
+)
+def test_utf8_case_insensitive_find_iter(haystack, needle, expected_matches):
+    """Parametrized test for case-insensitive find iterator."""
+    matches = [str(m) for m in sz.utf8_case_insensitive_find_iter(haystack, needle)]
+    assert matches == expected_matches
+    # Also test method form
+    matches_method = [str(m) for m in sz.Str(haystack).utf8_case_insensitive_find_iter(needle)]
+    assert matches_method == expected_matches
+
+
+def test_utf8_case_insensitive_find_iter_overlapping():
+    """Test overlapping vs non-overlapping modes and bytes input."""
+    # Non-overlapping (default)
+    assert len(list(sz.utf8_case_insensitive_find_iter("aaaa", "aa"))) == 2
+    # Overlapping
+    assert len(list(sz.utf8_case_insensitive_find_iter("aaaa", "aa", include_overlapping=True))) == 3
+    # Bytes input
+    assert len(list(sz.utf8_case_insensitive_find_iter(b"Hello HELLO", b"hello"))) == 2
+
+
 def test_utf8_case_insensitive_order():
     """Test case-insensitive UTF-8 comparison."""
     # Equal strings
