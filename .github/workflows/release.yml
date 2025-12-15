@@ -534,10 +534,8 @@ jobs:
       - name: Hide submodule Crates
         run: |
           mv fork_union/Cargo.toml fork_union/Cargo.toml.bak
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
       - uses: katyo/publish-crates@v2
         with:
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -206,7 +206,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, 
 #endif
 
 /**
- *  @brief  Finds the first occurence of a UTF-8 whitespace or punctuation character in a string.
+ *  @brief  Finds the first occurrence of a UTF-8 whitespace or punctuation character in a string.
  *
  *  Delimiters include all of the above, plus common "punctuation" characters, "symbols", and "separators",
  *  as defined by the "Unicode UAX #29" word segmentation standard and implemented in the ICU.
@@ -285,7 +285,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t h, sz_size_t h_length, sz_c
  *  Say the needle is "aXaYa", and we are comparing the first, second, and last character.
  *  If we use SIMD and compare many offsets at a time, comparing against "a" in every register is a waste.
  *
- *  Similarly, dealing with UTF8 inputs, we know that the lower bits of each character code carry more information.
+ *  Similarly, dealing with UTF-8 inputs, we know that the lower bits of each character code carry more information.
  *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
  *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
  *  bytes will carry absolutely no value and will be equal to 0x04.
@@ -315,7 +315,7 @@ SZ_INTERNAL void sz_locate_needle_anomalies_( //
 
     // TODO: Investigate alternative strategies for long needles.
     // On very long needles we have the luxury to choose!
-    // Often dealing with UTF8, we will likely benefit from shifting the first and second characters
+    // Often dealing with UTF-8, we will likely benefit from shifting the first and second characters
     // further to the right, to achieve not only uniqueness within the needle, but also avoid common
     // rune prefixes of 2-, 3-, and 4-byte codes.
     if (length > 8) {
@@ -330,7 +330,7 @@ SZ_INTERNAL void sz_locate_needle_anomalies_( //
         sz_u8_t const *start_u8 = (sz_u8_t const *)start;
         sz_size_t vibrant_first = *first, vibrant_second = *second, vibrant_third = *third;
 
-        // Let's begin with the seccond character, as the termination criteria there is more obvious
+        // Let's begin with the second character, as the termination criteria there is more obvious
         // and we may end up with more variants to check for the first candidate.
         while ((start_u8[vibrant_second] > 191 || start_u8[vibrant_second] == start_u8[vibrant_third]) &&
                (vibrant_second + 1 < vibrant_third))
@@ -1669,7 +1669,7 @@ SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
     uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
     uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
     // The table lookup instruction in NEON replies to out-of-bound requests with zeros.
-    // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, substracting 16 will underflow
+    // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, subtracting 16 will underflow
     // and map into interval [240, 256). Meaning that those will be populated with zeros and we can safely
     // merge `matches_top_vec` and `matches_bottom_vec` with a bitwise OR.
     uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));

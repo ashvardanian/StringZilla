@@ -76,6 +76,7 @@
 #include "find.h"         // `sz_find`, `sz_find_byteset`, `sz_rfind`
 #include "utf8.h"         // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
 #include "utf8_case.h"    // `sz_utf8_case_insensitive_find`, `sz_utf8_unpack_chunk`
+#include "utf8_word.h"    // `sz_rune_word_break_property`, `sz_rune_is_word_char`
 #include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
 #include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`
 #include "intersect.h"    // `sz_sequence_intersect`

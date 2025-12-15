@@ -264,6 +264,106 @@ extension StringZillaViewable {
         }
         return result
     }
+
+    /// Applies full Unicode case folding to the content's UTF-8 bytes.
+    /// The returned bytes are UTF-8 and may be longer than the input (e.g., "ß" -> "ss").
+    public func utf8CaseFoldedBytes() -> [UInt8] {
+        var folded: [UInt8] = []
+        withStringZillaScope { pointer, length in
+            if length == 0 {
+                folded = []
+                return
+            }
+            let capacity = Int(length) * 3
+            var destination = [UInt8](repeating: 0, count: capacity)
+            let outLen: sz_size_t = destination.withUnsafeMutableBufferPointer { bufferPointer in
+                sz_utf8_case_fold(pointer, length, bufferPointer.baseAddress)
+            }
+            let actual = Int(outLen)
+            if actual < destination.count { destination.removeLast(destination.count - actual) }
+            folded = destination
+        }
+        return folded
+    }
+
+    /// Finds the first case-insensitive occurrence of `needle` using full Unicode case folding.
+    /// Returns a byte-accurate range into the receiver.
+    @_specialize(where Self == String, S == String)
+    @_specialize(where Self == String.UTF8View, S == String.UTF8View)
+    public func utf8CaseInsensitiveFind<S: StringZillaViewable>(substring needle: S) -> Range<Index>? {
+        var result: Range<Index>?
+        withStringZillaScope { hPointer, hLength in
+            needle.withStringZillaScope { nPointer, nLength in
+                var metadata = sz_utf8_case_insensitive_needle_metadata_t()
+                var matchedLength: sz_size_t = 0
+                if let matchPointer = sz_utf8_case_insensitive_find(
+                    hPointer,
+                    hLength,
+                    nPointer,
+                    nLength,
+                    &metadata,
+                    &matchedLength
+                ) {
+                    let start = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
+                    let endPointer = matchPointer.advanced(by: Int(matchedLength))
+                    let end = self.stringZillaByteOffset(forByte: endPointer, after: hPointer)
+                    result = start..<end
+                }
+            }
+        }
+        return result
+    }
+}
+
+/// Pre-compiled case-insensitive search pattern for UTF-8 strings.
+/// Caches metadata for efficient repeated searches with the same needle.
+public final class Utf8CaseInsensitiveNeedle {
+    private let needleBytes: [UInt8]
+    private var metadata: sz_utf8_case_insensitive_needle_metadata_t
+
+    public init<S: StringZillaViewable>(_ needle: S) {
+        var bytes: [UInt8] = []
+        needle.withStringZillaScope { pointer, length in
+            if length == 0 {
+                bytes = []
+                return
+            }
+            let start = UnsafeRawPointer(pointer).assumingMemoryBound(to: UInt8.self)
+            bytes = Array(UnsafeBufferPointer(start: start, count: Int(length)))
+        }
+        needleBytes = bytes
+        metadata = sz_utf8_case_insensitive_needle_metadata_t()
+    }
+
+    /// Note: not safe for concurrent use. The internal metadata is computed lazily and mutated during searches.
+    public func findFirst<S: StringZillaViewable>(in haystack: S) -> Range<S.Index>? {
+        if needleBytes.isEmpty { return haystack.startIndex..<haystack.startIndex }
+
+        var result: Range<S.Index>?
+        haystack.withStringZillaScope { hPointer, hLength in
+            needleBytes.withUnsafeBufferPointer { needleBuffer in
+                let nPointer = UnsafeRawPointer(needleBuffer.baseAddress!).assumingMemoryBound(to: CChar.self)
+                let nLength = sz_size_t(needleBuffer.count)
+
+                var matchedLength: sz_size_t = 0
+                if let matchPointer = sz_utf8_case_insensitive_find(
+                    hPointer,
+                    hLength,
+                    nPointer,
+                    nLength,
+                    &metadata,
+                    &matchedLength
+                ) {
+                    let start = haystack.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
+                    let endPointer = matchPointer.advanced(by: Int(matchedLength))
+                    let end = haystack.stringZillaByteOffset(forByte: endPointer, after: hPointer)
+                    result = start..<end
+                }
+            }
+        }
+
+        return result
+    }
 }
 
 /// A progressive hasher for computing StringZilla hashes incrementally.

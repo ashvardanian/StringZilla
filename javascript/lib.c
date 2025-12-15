@@ -14,6 +14,26 @@
 
 #include <stringzilla/stringzilla.h> // `sz_*` functions
 
+static void external_buffer_cleanup(napi_env env, void *data, void *hint) { free(data); }
+
+static napi_value makeFindResultObject(napi_env env, int64_t index, uint64_t length) {
+    napi_value js_obj;
+    napi_create_object(env, &js_obj);
+
+    napi_value js_index;
+    if (index < 0) napi_create_bigint_int64(env, -1, &js_index);
+    else
+        napi_create_bigint_uint64(env, (uint64_t)index, &js_index);
+
+    napi_value js_length;
+    napi_create_bigint_uint64(env, (uint64_t)length, &js_length);
+
+    napi_set_named_property(env, js_obj, "index", js_index);
+    napi_set_named_property(env, js_obj, "length", js_length);
+
+    return js_obj;
+}
+
 napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2];
@@ -41,6 +61,203 @@ napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     }
 
     return js_result;
+}
+
+napi_value utf8CaseFoldAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    if (argc < 1) {
+        napi_throw_error(env, NULL, "utf8CaseFold(buffer, validate?) expects at least 1 argument");
+        return NULL;
+    }
+
+    void *source_data;
+    size_t source_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &source_data, &source_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    bool validate = false;
+    if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
+    if (validate && sz_utf8_valid((sz_cptr_t)source_data, source_length) == sz_false_k) {
+        napi_throw_error(env, NULL, "Input is not valid UTF-8");
+        return NULL;
+    }
+
+    // Worst-case expansion is 3x. See `sz_utf8_case_fold` docs.
+    size_t capacity = source_length * 3;
+    void *destination = capacity ? malloc(capacity) : NULL;
+    if (capacity && !destination) {
+        napi_throw_error(env, NULL, "Memory allocation failed");
+        return NULL;
+    }
+
+    sz_size_t out_length = 0;
+    if (source_length) out_length = sz_utf8_case_fold((sz_cptr_t)source_data, source_length, (sz_ptr_t)destination);
+
+    if (out_length == 0) {
+        if (destination) free(destination);
+        napi_value js_empty;
+        void *unused;
+        napi_create_buffer(env, 0, &unused, &js_empty);
+        return js_empty;
+    }
+
+    // Shrink to the actual size without a second pass or a copy.
+    void *shrunk = realloc(destination, (size_t)out_length);
+    if (shrunk) destination = shrunk;
+
+    napi_value js_result;
+    napi_create_external_buffer(env, (size_t)out_length, destination, external_buffer_cleanup, NULL, &js_result);
+    return js_result;
+}
+
+napi_value utf8CaseInsensitiveFindAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    if (argc < 2) {
+        napi_throw_error(env, NULL,
+                         "utf8CaseInsensitiveFind(haystack, needle, validate?) expects at least 2 arguments");
+        return NULL;
+    }
+
+    void *haystack_data, *needle_data;
+    size_t haystack_length, needle_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &haystack_data, &haystack_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+    status = napi_get_buffer_info(env, args[1], &needle_data, &needle_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Second argument must be a Buffer");
+        return NULL;
+    }
+
+    bool validate = false;
+    if (argc > 2) { napi_get_value_bool(env, args[2], &validate); }
+    if (validate && (sz_utf8_valid((sz_cptr_t)haystack_data, haystack_length) == sz_false_k ||
+                     sz_utf8_valid((sz_cptr_t)needle_data, needle_length) == sz_false_k)) {
+        napi_throw_error(env, NULL, "Input is not valid UTF-8");
+        return NULL;
+    }
+
+    sz_utf8_case_insensitive_needle_metadata_t metadata = {0};
+    sz_size_t matched_length = 0;
+    sz_cptr_t match = sz_utf8_case_insensitive_find((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle_data,
+                                                    needle_length, &metadata, &matched_length);
+
+    if (!match) return makeFindResultObject(env, -1, 0);
+    return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
+}
+
+typedef struct {
+    sz_u8_t *needle_data;
+    size_t needle_length;
+    sz_utf8_case_insensitive_needle_metadata_t metadata;
+} utf8_case_insensitive_needle_t;
+
+static void utf8_case_insensitive_needle_cleanup(napi_env env, void *data, void *hint) {
+    utf8_case_insensitive_needle_t *needle = (utf8_case_insensitive_needle_t *)data;
+    if (!needle) return;
+    if (needle->needle_data) free(needle->needle_data);
+    free(needle);
+}
+
+napi_value utf8CaseInsensitiveNeedleConstructor(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_value js_this;
+    napi_get_cb_info(env, info, &argc, args, &js_this, NULL);
+
+    if (argc < 1) {
+        napi_throw_error(env, NULL, "Utf8CaseInsensitiveNeedle(needle, validate?) expects at least 1 argument");
+        return NULL;
+    }
+
+    void *needle_data;
+    size_t needle_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &needle_data, &needle_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    bool validate = false;
+    if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
+    if (validate && sz_utf8_valid((sz_cptr_t)needle_data, needle_length) == sz_false_k) {
+        napi_throw_error(env, NULL, "Needle is not valid UTF-8");
+        return NULL;
+    }
+
+    utf8_case_insensitive_needle_t *needle = (utf8_case_insensitive_needle_t *)malloc(sizeof(*needle));
+    if (!needle) {
+        napi_throw_error(env, NULL, "Memory allocation failed");
+        return NULL;
+    }
+    needle->needle_length = needle_length;
+    needle->metadata = (sz_utf8_case_insensitive_needle_metadata_t) {0};
+    needle->needle_data = NULL;
+
+    if (needle_length) {
+        needle->needle_data = (sz_u8_t *)malloc(needle_length);
+        if (!needle->needle_data) {
+            free(needle);
+            napi_throw_error(env, NULL, "Memory allocation failed");
+            return NULL;
+        }
+        sz_copy((sz_ptr_t)needle->needle_data, (sz_cptr_t)needle_data, needle_length);
+    }
+
+    napi_wrap(env, js_this, needle, utf8_case_insensitive_needle_cleanup, NULL, NULL);
+    return js_this;
+}
+
+napi_value utf8CaseInsensitiveNeedleFindIn(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_value js_this;
+    napi_get_cb_info(env, info, &argc, args, &js_this, NULL);
+
+    if (argc < 1) {
+        napi_throw_error(env, NULL, "findIn(haystack, validate?) expects at least 1 argument");
+        return NULL;
+    }
+
+    utf8_case_insensitive_needle_t *needle;
+    napi_unwrap(env, js_this, (void **)&needle);
+    if (!needle) {
+        napi_throw_error(env, NULL, "Internal error: missing needle");
+        return NULL;
+    }
+
+    void *haystack_data;
+    size_t haystack_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &haystack_data, &haystack_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    bool validate = false;
+    if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
+    if (validate && sz_utf8_valid((sz_cptr_t)haystack_data, haystack_length) == sz_false_k) {
+        napi_throw_error(env, NULL, "Haystack is not valid UTF-8");
+        return NULL;
+    }
+
+    sz_size_t matched_length = 0;
+    sz_cptr_t match =
+        sz_utf8_case_insensitive_find((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle->needle_data,
+                                      needle->needle_length, &needle->metadata, &matched_length);
+    if (!match) return makeFindResultObject(env, -1, 0);
+    return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
 }
 
 napi_value countAPI(napi_env env, napi_callback_info info) {
@@ -620,6 +837,14 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_define_class(env, "Sha256", NAPI_AUTO_LENGTH, sha256HasherConstructor, NULL,
                       sizeof(sha256HasherProps) / sizeof(sha256HasherProps[0]), sha256HasherProps, &sha256HasherClass);
 
+    // Create Utf8CaseInsensitiveNeedle class constructor
+    napi_value utf8NeedleClass;
+    napi_property_descriptor utf8NeedleProps[] = {
+        {"findIn", 0, utf8CaseInsensitiveNeedleFindIn, 0, 0, 0, napi_default, 0},
+    };
+    napi_define_class(env, "Utf8CaseInsensitiveNeedle", NAPI_AUTO_LENGTH, utf8CaseInsensitiveNeedleConstructor, NULL,
+                      sizeof(utf8NeedleProps) / sizeof(utf8NeedleProps[0]), utf8NeedleProps, &utf8NeedleClass);
+
     // Define function exports
     napi_property_descriptor findDesc = {"indexOf", 0, indexOfAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor findLastDesc = {"lastIndexOf", 0, findLastAPI, 0, 0, 0, napi_default, 0};
@@ -634,8 +859,13 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor equalDesc = {"equal", 0, equalAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor compareDesc = {"compare", 0, compareAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8CaseFoldDesc = {"utf8CaseFold", 0, utf8CaseFoldAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8CaseInsensitiveFindDesc = {
+        "utf8CaseInsensitiveFind", 0, utf8CaseInsensitiveFindAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
     napi_property_descriptor sha256HasherDesc = {"Sha256", 0, 0, 0, 0, sha256HasherClass, napi_default, 0};
+    napi_property_descriptor utf8NeedleDesc = {
+        "Utf8CaseInsensitiveNeedle", 0, 0, 0, 0, utf8NeedleClass, napi_default, 0};
 
     // Export the `capabilities` string for debugging
     napi_value caps_str_value;
@@ -644,9 +874,15 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor capabilitiesDesc = {"capabilities", 0, 0, 0, 0, caps_str_value, napi_default, 0};
 
     napi_property_descriptor properties[] = {
-        findDesc,   findLastDesc,     findByteDesc,     findLastByteDesc, findByteFromDesc, findLastByteFromDesc,
-        countDesc,  hashDesc,         sha256Desc,       equalDesc,        compareDesc,      byteSumDesc,
-        hasherDesc, sha256HasherDesc, capabilitiesDesc,
+        findDesc,         findLastDesc,
+        findByteDesc,     findLastByteDesc,
+        findByteFromDesc, findLastByteFromDesc,
+        countDesc,        hashDesc,
+        sha256Desc,       equalDesc,
+        compareDesc,      byteSumDesc,
+        utf8CaseFoldDesc, utf8CaseInsensitiveFindDesc,
+        hasherDesc,       sha256HasherDesc,
+        utf8NeedleDesc,   capabilitiesDesc,
     };
 
     // Define the properties on the `exports` object

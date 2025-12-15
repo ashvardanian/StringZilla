@@ -127,6 +127,114 @@ impl IndexSpan {
     }
 }
 
+/// Internal metadata for case-insensitive UTF-8 search operations.
+///
+/// This structure caches pre-computed information about the needle for reuse
+/// across multiple searches. Zero-initialization (default) triggers automatic
+/// analysis on first use.
+///
+/// Matches C's `sz_utf8_case_insensitive_needle_metadata_t`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Utf8CaseInsensitiveNeedleMetadata {
+    // sz_size_t offset_in_unfolded
+    offset_in_unfolded: usize,
+    // sz_size_t length_in_unfolded
+    length_in_unfolded: usize,
+    // sz_u8_t folded_slice[16]
+    folded_slice: [u8; 16],
+    // sz_u8_t folded_slice_length
+    folded_slice_length: u8,
+    // sz_u8_t probe_second
+    probe_second: u8,
+    // sz_u8_t probe_third
+    probe_third: u8,
+    // sz_u8_t kernel_id
+    kernel_id: u8,
+}
+
+impl Default for Utf8CaseInsensitiveNeedleMetadata {
+    fn default() -> Self {
+        Self {
+            offset_in_unfolded: 0,
+            length_in_unfolded: 0,
+            folded_slice: [0; 16],
+            folded_slice_length: 0,
+            probe_second: 0,
+            probe_third: 0,
+            kernel_id: 0, // sz_utf8_case_rune_unknown_k = 0, triggers analysis
+        }
+    }
+}
+
+/// Pre-compiled case-insensitive search pattern for UTF-8 strings.
+///
+/// Caches metadata for efficient repeated searches with the same needle.
+/// Useful when searching multiple haystacks for the same pattern.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+///
+/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+/// let haystack1 = b"Hello World";
+/// let haystack2 = b"HELLO there";
+///
+/// // Metadata is computed once on first search, reused for subsequent searches
+/// let result1 = utf8_case_insensitive_find(haystack1, &needle);
+/// let result2 = utf8_case_insensitive_find(haystack2, &needle);
+///
+/// assert!(result1.is_some());
+/// assert!(result2.is_some());
+/// ```
+pub struct Utf8CaseInsensitiveNeedle<'a> {
+    needle: &'a [u8],
+    metadata: UnsafeCell<Utf8CaseInsensitiveNeedleMetadata>,
+}
+
+impl<'a> Utf8CaseInsensitiveNeedle<'a> {
+    /// Creates a new pre-compiled case-insensitive needle.
+    ///
+    /// The metadata will be computed lazily on first use.
+    #[inline]
+    pub fn new(needle: &'a [u8]) -> Self {
+        Self {
+            needle,
+            metadata: UnsafeCell::new(Utf8CaseInsensitiveNeedleMetadata::default()),
+        }
+    }
+
+    /// Returns the needle bytes.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.needle
+    }
+
+    /// Returns the length of the needle in bytes.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.needle.len()
+    }
+
+    /// Returns true if the needle is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.needle.is_empty()
+    }
+
+    /// Internal: returns a mutable pointer to the metadata for FFI calls.
+    #[inline]
+    pub(crate) fn metadata_ptr(&self) -> *mut Utf8CaseInsensitiveNeedleMetadata {
+        self.metadata.get()
+    }
+}
+
+// Safety: The metadata is only mutated through FFI during search operations,
+// which internally synchronize access. The needle reference is immutable.
+unsafe impl<'a> Send for Utf8CaseInsensitiveNeedle<'a> {}
+unsafe impl<'a> Sync for Utf8CaseInsensitiveNeedle<'a> {}
+
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
 /// Use `Hasher::new(seed)` to construct, then call `update(&mut self, data)`
@@ -279,6 +387,7 @@ impl<T: AsRef<[u8]>> From<T> for Byteset {
     }
 }
 
+use core::cell::UnsafeCell;
 use core::cmp::Ordering;
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
@@ -351,6 +460,7 @@ extern "C" {
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
+        needle_metadata: *mut Utf8CaseInsensitiveNeedleMetadata,
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_insensitive_order(
@@ -953,6 +1063,8 @@ where
 ///
 /// # Examples
 ///
+/// Basic usage with string slices:
+///
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let haystack = "Hello WORLD";
@@ -962,30 +1074,87 @@ where
 /// }
 /// ```
 ///
+/// With a pre-compiled needle for repeated searches:
+///
+/// ```
+/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+///
+/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+///
+/// // Metadata is computed once, reused for subsequent searches
+/// let result1 = utf8_case_insensitive_find(b"Hello World", &needle);
+/// let result2 = utf8_case_insensitive_find(b"HELLO there", &needle);
+///
+/// assert_eq!(result1, Some((0, 5)));
+/// assert_eq!(result2, Some((0, 5)));
+/// ```
+///
 pub fn utf8_case_insensitive_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
 where
     H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    N: Utf8CaseInsensitiveNeedleArg,
 {
-    let haystack_ref = haystack.as_ref();
-    let needle_ref = needle.as_ref();
-    let mut matched_length: usize = 0;
+    needle.find_case_insensitive_in(haystack.as_ref())
+}
 
-    let result = unsafe {
-        sz_utf8_case_insensitive_find(
-            haystack_ref.as_ptr() as *const c_void,
-            haystack_ref.len(),
-            needle_ref.as_ptr() as *const c_void,
-            needle_ref.len(),
-            &mut matched_length,
-        )
-    };
+/// Trait for types that can be used as a case-insensitive search needle.
+///
+/// This trait is implemented for:
+/// - Any type implementing `AsRef<[u8]>` (strings, byte slices, etc.)
+/// - [`Utf8CaseInsensitiveNeedle`] references for efficient repeated searches
+pub trait Utf8CaseInsensitiveNeedleArg {
+    /// Performs the case-insensitive search in the given haystack.
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)>;
+}
 
-    if result.is_null() {
-        None
-    } else {
-        let offset = unsafe { result.offset_from(haystack_ref.as_ptr() as *const c_void) };
-        Some((offset as usize, matched_length))
+impl<T: AsRef<[u8]>> Utf8CaseInsensitiveNeedleArg for T {
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+        let needle_ref = self.as_ref();
+        let mut matched_length: usize = 0;
+        let mut needle_metadata = Utf8CaseInsensitiveNeedleMetadata::default();
+
+        let result = unsafe {
+            sz_utf8_case_insensitive_find(
+                haystack.as_ptr() as *const c_void,
+                haystack.len(),
+                needle_ref.as_ptr() as *const c_void,
+                needle_ref.len(),
+                &mut needle_metadata,
+                &mut matched_length,
+            )
+        };
+
+        if result.is_null() {
+            None
+        } else {
+            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
+            Some((offset as usize, matched_length))
+        }
+    }
+}
+
+impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> {
+    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+        let needle_bytes = self.as_bytes();
+        let mut matched_length: usize = 0;
+
+        let result = unsafe {
+            sz_utf8_case_insensitive_find(
+                haystack.as_ptr() as *const c_void,
+                haystack.len(),
+                needle_bytes.as_ptr() as *const c_void,
+                needle_bytes.len(),
+                &mut *self.metadata_ptr(),
+                &mut matched_length,
+            )
+        };
+
+        if result.is_null() {
+            None
+        } else {
+            let offset = unsafe { result.offset_from(haystack.as_ptr() as *const c_void) };
+            Some((offset as usize, matched_length))
+        }
     }
 }
 
@@ -1057,14 +1226,33 @@ where
 ///
 /// # Examples
 ///
+/// Processing pure ASCII text (most common case, single chunk):
 /// ```
 /// use stringzilla::stringzilla as sz;
-/// let text = "Hello 世界";
+/// let text = "Hello World!";
 /// let mut runes = [0u32; 16];
 /// let (bytes, count) = sz::utf8_unpack_chunk(text.as_bytes(), &mut runes);
-/// assert_eq!(count, 8); // 6 ASCII + 2 CJK characters
+/// assert_eq!(count, 12);  // All 12 ASCII characters
+/// assert_eq!(bytes, 12);  // 12 bytes consumed
 /// assert_eq!(runes[0], 'H' as u32);
-/// assert_eq!(runes[6], '世' as u32);
+/// assert_eq!(runes[11], '!' as u32);
+/// ```
+///
+/// For mixed ASCII/multibyte text, SIMD implementations may process homogeneous
+/// chunks separately. Call repeatedly to process the entire string:
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let text = "Hi世界";  // 2 ASCII + 2 CJK
+/// let bytes = text.as_bytes();
+/// let mut runes = [0u32; 16];
+/// let mut all_runes = Vec::new();
+/// let mut offset = 0;
+/// while offset < bytes.len() {
+///     let (consumed, count) = sz::utf8_unpack_chunk(&bytes[offset..], &mut runes);
+///     all_runes.extend_from_slice(&runes[..count]);
+///     offset += consumed;
+/// }
+/// assert_eq!(all_runes.len(), 4);  // 2 ASCII + 2 CJK = 4 codepoints
 /// ```
 ///
 pub fn utf8_unpack_chunk(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
@@ -2514,19 +2702,19 @@ impl<'a> Iterator for RangeRSplits<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeNewlineUtf8Splits};
+/// use stringzilla::stringzilla::{RangeUtf8NewlineSplits};
 ///
 /// let text = b"Hello\nWorld\r\nRust";
-/// let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+/// let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
 /// assert_eq!(lines, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
-pub struct RangeNewlineUtf8Splits<'a> {
+pub struct RangeUtf8NewlineSplits<'a> {
     text: &'a [u8],
     position: usize,
     finished: bool,
 }
 
-impl<'a> RangeNewlineUtf8Splits<'a> {
+impl<'a> RangeUtf8NewlineSplits<'a> {
     pub fn new(text: &'a [u8]) -> Self {
         Self {
             text,
@@ -2536,7 +2724,7 @@ impl<'a> RangeNewlineUtf8Splits<'a> {
     }
 }
 
-impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
+impl<'a> Iterator for RangeUtf8NewlineSplits<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -2569,6 +2757,10 @@ impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
     }
 }
 
+/// Backwards compatibility alias for [`RangeUtf8NewlineSplits`].
+#[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8NewlineSplits")]
+pub type RangeNewlineUtf8Splits<'a> = RangeUtf8NewlineSplits<'a>;
+
 /// An iterator over words in UTF-8 text split by whitespace characters.
 ///
 /// This iterator yields non-empty slices between whitespace characters. The whitespace
@@ -2577,24 +2769,24 @@ impl<'a> Iterator for RangeNewlineUtf8Splits<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeWhitespaceUtf8Splits};
+/// use stringzilla::stringzilla::{RangeUtf8WhitespaceSplits};
 ///
 /// let text = b"Hello  World\tRust";
-/// let words: Vec<&[u8]> = RangeWhitespaceUtf8Splits::new(text).collect();
+/// let words: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).collect();
 /// assert_eq!(words, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
-pub struct RangeWhitespaceUtf8Splits<'a> {
+pub struct RangeUtf8WhitespaceSplits<'a> {
     text: &'a [u8],
     position: usize,
 }
 
-impl<'a> RangeWhitespaceUtf8Splits<'a> {
+impl<'a> RangeUtf8WhitespaceSplits<'a> {
     pub fn new(text: &'a [u8]) -> Self {
         Self { text, position: 0 }
     }
 }
 
-impl<'a> Iterator for RangeWhitespaceUtf8Splits<'a> {
+impl<'a> Iterator for RangeUtf8WhitespaceSplits<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -2631,6 +2823,112 @@ impl<'a> Iterator for RangeWhitespaceUtf8Splits<'a> {
             // No more whitespace, return rest of text
             self.position = self.text.len();
             Some(&self.text[start..])
+        }
+    }
+}
+
+/// Backwards compatibility alias for [`RangeUtf8WhitespaceSplits`].
+#[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8WhitespaceSplits")]
+pub type RangeWhitespaceUtf8Splits<'a> = RangeUtf8WhitespaceSplits<'a>;
+
+/// An iterator over case-insensitive matches of a UTF-8 pattern in a string.
+///
+/// This iterator yields `IndexSpan` values representing the byte offset and length
+/// of each match. The match length may differ from the needle length due to Unicode
+/// case folding (e.g., "ß" matches "SS", German eszett expands to two characters).
+///
+/// The iterator caches needle metadata internally for efficient repeated searches.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeUtf8CaseInsensitiveMatches, IndexSpan};
+///
+/// let haystack = b"Hello WORLD, hello world";
+/// let matches: Vec<IndexSpan> = RangeUtf8CaseInsensitiveMatches::new(haystack, b"hello").collect();
+/// assert_eq!(matches.len(), 2);
+/// assert_eq!(matches[0], IndexSpan::new(0, 5));
+/// assert_eq!(matches[1], IndexSpan::new(13, 5));
+/// ```
+///
+/// With overlapping matches:
+///
+/// ```
+/// use stringzilla::stringzilla::{RangeUtf8CaseInsensitiveMatches, IndexSpan};
+///
+/// let haystack = b"aAaAa";
+/// let matches: Vec<IndexSpan> = RangeUtf8CaseInsensitiveMatches::with_overlaps(haystack, b"aA", true).collect();
+/// assert_eq!(matches.len(), 4); // Overlapping matches
+/// ```
+pub struct RangeUtf8CaseInsensitiveMatches<'a> {
+    haystack: &'a [u8],
+    needle: &'a [u8],
+    metadata: Utf8CaseInsensitiveNeedleMetadata,
+    position: usize,
+    include_overlaps: bool,
+}
+
+impl<'a> RangeUtf8CaseInsensitiveMatches<'a> {
+    /// Creates a new iterator for non-overlapping case-insensitive matches.
+    pub fn new(haystack: &'a [u8], needle: &'a [u8]) -> Self {
+        Self {
+            haystack,
+            needle,
+            metadata: Utf8CaseInsensitiveNeedleMetadata::default(),
+            position: 0,
+            include_overlaps: false,
+        }
+    }
+
+    /// Creates a new iterator with configurable overlap behavior.
+    pub fn with_overlaps(haystack: &'a [u8], needle: &'a [u8], include_overlaps: bool) -> Self {
+        Self {
+            haystack,
+            needle,
+            metadata: Utf8CaseInsensitiveNeedleMetadata::default(),
+            position: 0,
+            include_overlaps,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeUtf8CaseInsensitiveMatches<'a> {
+    type Item = IndexSpan;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.haystack.len() {
+            return None;
+        }
+
+        let remaining = &self.haystack[self.position..];
+        let mut matched_length: usize = 0;
+
+        let result = unsafe {
+            sz_utf8_case_insensitive_find(
+                remaining.as_ptr() as *const c_void,
+                remaining.len(),
+                self.needle.as_ptr() as *const c_void,
+                self.needle.len(),
+                &mut self.metadata,
+                &mut matched_length,
+            )
+        };
+
+        if result.is_null() {
+            self.position = self.haystack.len();
+            None
+        } else {
+            let offset_in_remaining = unsafe { result.offset_from(remaining.as_ptr() as *const c_void) } as usize;
+            let absolute_offset = self.position + offset_in_remaining;
+
+            // Advance position for next search
+            if self.include_overlaps {
+                self.position = absolute_offset + 1;
+            } else {
+                self.position = absolute_offset + matched_length;
+            }
+
+            Some(IndexSpan::new(absolute_offset, matched_length))
         }
     }
 }
@@ -2759,7 +3057,7 @@ pub trait StringZillableUnary {
     ///     .collect();
     /// assert_eq!(lines, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_>;
+    fn sz_utf8_newline_splits(&self) -> RangeUtf8NewlineSplits<'_>;
 
     /// Returns an iterator over words split by UTF-8 whitespace characters.
     ///
@@ -2777,7 +3075,7 @@ pub trait StringZillableUnary {
     ///     .collect();
     /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_>;
+    fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -3038,12 +3336,12 @@ where
         Utf8View::new(self.as_ref())
     }
 
-    fn sz_utf8_newline_splits(&self) -> RangeNewlineUtf8Splits<'_> {
-        RangeNewlineUtf8Splits::new(self.as_ref())
+    fn sz_utf8_newline_splits(&self) -> RangeUtf8NewlineSplits<'_> {
+        RangeUtf8NewlineSplits::new(self.as_ref())
     }
 
-    fn sz_utf8_whitespace_splits(&self) -> RangeWhitespaceUtf8Splits<'_> {
-        RangeWhitespaceUtf8Splits::new(self.as_ref())
+    fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_> {
+        RangeUtf8WhitespaceSplits::new(self.as_ref())
     }
 }
 
@@ -3964,28 +4262,28 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits() {
         let text = b"a\nb\r\nc\n\nd";
-        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines, vec![b"a", b"b", b"c", &b""[..], b"d"]);
     }
 
     #[test]
     fn iter_newline_utf8_splits_unicode() {
         let text = "Hello\u{2028}World".as_bytes(); // LINE SEPARATOR
-        let lines: Vec<_> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines, vec!["Hello".as_bytes(), "World".as_bytes()]);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits() {
         let text = b"  a \t b\n\nc  ";
-        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        let words: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
         assert_eq!(words, vec![b"a", b"b", b"c"]);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits_unicode() {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
-        let words: Vec<_> = RangeWhitespaceUtf8Splits::new(text).collect();
+        let words: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
         assert_eq!(words, vec![b"a", b"b", b"c"]);
     }
 
@@ -3993,7 +4291,7 @@ mod tests {
     fn iter_newline_utf8_splits_trailing_newline() {
         // "\r\na\r\n\r\nb\r\n" should produce ["", "a", "", "b", ""]
         let text = b"\r\na\r\n\r\nb\r\n";
-        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 5, "Expected 5 lines");
         let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b""];
         assert_eq!(lines, expected);
@@ -4002,7 +4300,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_no_trailing() {
         let text = b"a\nb\nc";
-        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines, vec![b"a", b"b", b"c"]);
     }
@@ -4010,7 +4308,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_empty_string() {
         let text = b"";
-        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines, vec![b""]);
     }
@@ -4018,7 +4316,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_single_newline() {
         let text = b"\n";
-        let lines: Vec<&[u8]> = RangeNewlineUtf8Splits::new(text).collect();
+        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines, vec![b"", b""]);
     }

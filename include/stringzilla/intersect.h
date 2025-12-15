@@ -771,7 +771,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
 SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
                                              sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
                                              sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-#if SZ_USE_SKYLAKE
+#if SZ_USE_ICE
     return sz_sequence_intersect_ice(    //
         first_sequence, second_sequence, //
         alloc, seed, intersection_size,  //

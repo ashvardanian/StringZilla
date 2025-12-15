@@ -34,7 +34,7 @@ SZ_INTERNAL sz_cptr_t sz_find_bitap_upto_8bytes_serial_(sz_cptr_t h, sz_size_t h
     //      }
     //
     // On very short patterns, however, every tiny condition may have a huge affect on performance.
-    // 1. Let's replace byte-level intialization of `character_position_masks` with 64-bit ops.
+    // 1. Let's replace byte-level initialization of `character_position_masks` with 64-bit ops.
     // 2. Let's combine the first `n_length - 1` passes of the last loop into the previous loop.
     typedef sz_u8_t offset_mask_t;
 

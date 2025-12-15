@@ -1,17 +1,11 @@
-# Primary build folders
-build/
-build_debug/
-build_release/
-build_relwithdebinfo/
-build_go/
-build_golang/
-build_test/
-build_artifacts*
+# Primary root-level build folders
+/build*/
 
 # Yes, everyone loves keeping this file in the history.
-# But with a very minimalistic binding and just a couple of dependencies 
+# But with a very minimalistic binding and just a couple of dependencies
 # it brings 7000 lines of text polluting the entire repo.
 package-lock.json
+uv.lock
 
 # Temporary files
 .DS_Store
@@ -34,6 +28,7 @@ CMakeFiles
 node_modules/
 .vs/
 *.tar.gz
+.tmp/
 
 # Recommended datasets
 utf8.txt

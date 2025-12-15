@@ -61,6 +61,8 @@ template <typename>
 class basic_string_slice;
 template <typename, typename>
 class basic_string;
+template <typename>
+class utf8_case_insensitive_needle;
 
 using string_span = basic_string_slice<char>;
 using string_view = basic_string_slice<char const>;
@@ -1664,6 +1666,52 @@ struct concatenation {
 
 #pragma endregion
 
+#pragma region Case-Insensitive Search Pattern
+
+/**
+ *  @brief  Pre-compiled case-insensitive search pattern for UTF-8 strings.
+ *
+ *  Caches metadata for efficient repeated searches with the same needle.
+ *  Useful when searching multiple haystacks for the same pattern.
+ *
+ *  @code{.cpp}
+ *  sz::utf8_case_insensitive_needle pattern("hello");
+ *  for (auto const& haystack : haystacks) {
+ *      auto match = haystack.utf8_case_insensitive_find(pattern);
+ *      if (match) { ... }
+ *  }
+ *  @endcode
+ *
+ *  @tparam char_type_ The character type, usually `char const` or `char`.
+ */
+template <typename char_type_ = char const>
+class utf8_case_insensitive_needle {
+    static_assert(sizeof(char_type_) == 1, "Characters must be a single byte long");
+
+    using char_type = char_type_;
+
+    char_type *needle_;
+    std::size_t length_;
+    mutable sz_utf8_case_insensitive_needle_metadata_t metadata_;
+
+  public:
+    utf8_case_insensitive_needle(char_type *needle, std::size_t length) noexcept
+        : needle_(needle), length_(length), metadata_ {} {}
+
+    utf8_case_insensitive_needle(basic_string_slice<char_type> needle) noexcept
+        : needle_(needle.data()), length_(needle.size()), metadata_ {} {}
+
+    template <std::size_t array_length_>
+    utf8_case_insensitive_needle(char_type (&needle)[array_length_]) noexcept
+        : needle_(needle), length_(array_length_ - 1), metadata_ {} {}
+
+    char_type *data() const noexcept { return needle_; }
+    std::size_t size() const noexcept { return length_; }
+    sz_utf8_case_insensitive_needle_metadata_t const &metadata_ref() const noexcept { return metadata_; }
+};
+
+#pragma endregion
+
 #pragma region String Views and Spans
 
 /**
@@ -2298,6 +2346,57 @@ class basic_string_slice {
     }
 
     /**
+     *  @brief Compares two strings lexicographically, ignoring case. If prefix matches, lengths are compared.
+     *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     */
+    int utf8_case_insensitive_order(string_view other) const noexcept {
+        return (int)sz_utf8_case_insensitive_order(start_, length_, other.data(), other.size());
+    }
+
+    struct sized_match_t {
+        size_type offset {};
+        size_type length {};
+
+        sized_match_t() noexcept = default;
+        sized_match_t(size_type o, size_type l) noexcept : offset(o), length(l) {}
+
+        operator bool() const noexcept { return offset != npos; }
+        bool operator==(sized_match_t const &other) const noexcept {
+            return offset == other.offset && length == other.length;
+        }
+        bool operator!=(sized_match_t const &other) const noexcept {
+            return offset != other.offset || length != other.length;
+        }
+    };
+
+    /**
+     *  @brief Find the byte offset of the first occurrence of a substring.
+     *  @return Offset of the first occurrence or @c npos if not found.
+     */
+    sized_match_t utf8_case_insensitive_find(string_view other) const noexcept {
+        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+        sz_size_t match_length = 0;
+        auto ptr = sz_utf8_case_insensitive_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        if (!ptr) return {npos, static_cast<size_type>(0)};
+        return {static_cast<size_type>(ptr - start_), match_length};
+    }
+
+    /**
+     *  @brief Find the byte offset of the first occurrence of a pre-compiled case-insensitive pattern.
+     *  @param[in] needle A pre-compiled pattern with cached metadata for efficient repeated searches.
+     *  @return Match info with offset and length, or @c npos offset if not found.
+     */
+    template <typename needle_char_type_>
+    sized_match_t utf8_case_insensitive_find(
+        utf8_case_insensitive_needle<needle_char_type_> const &needle) const noexcept {
+        sz_size_t match_length = 0;
+        auto ptr = sz_utf8_case_insensitive_find(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
+                                                 &match_length);
+        if (!ptr) return {npos, static_cast<size_type>(0)};
+        return {static_cast<size_type>(ptr - start_), match_length};
+    }
+
+    /**
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
@@ -2830,10 +2929,10 @@ class basic_string {
 #endif // !SZ_AVOID_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
-    size_type size() const noexcept { return view().size(); }
+    size_type size() const noexcept { return sz_string_length(&string_); }
     size_type length() const noexcept { return size(); }
     size_type max_size() const noexcept { return npos - 1; }
-    bool empty() const noexcept { return string_.external.length == 0; }
+    bool empty() const noexcept { return sz_string_length(&string_) == 0; }
     size_type capacity() const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
@@ -3452,8 +3551,9 @@ class basic_string {
         // Update the string length appropriately
         if (actual_count > string_length) {
             string_start[actual_count] = '\0';
-            // ! Knowing the layout of the string, we can perform this operation safely,
-            // ! even if its located on stack.
+            // Safe for both SSO and heap strings: on little-endian, internal.length
+            // overlaps with LSB of external.length, so += affects only the length byte.
+            // On big-endian, the struct layout places them at matching positions.
             string_.external.length += actual_count - string_length;
         }
         else { sz_string_erase(&string_, actual_count, SZ_SIZE_MAX); }
@@ -4190,8 +4290,9 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
     if (count > string_length) {
         sz_fill(string_start + string_length, count - string_length, character);
         string_start[count] = '\0';
-        // Knowing the layout of the string, we can perform this operation safely,
-        // even if its located on stack.
+        // Safe for both SSO and heap strings: on little-endian, internal.length
+        // overlaps with LSB of external.length, so += affects only the length byte.
+        // On big-endian, the struct layout places them at matching positions.
         string_.external.length += count - string_length;
     }
     else { sz_string_erase(&string_, count, SZ_SIZE_MAX); }

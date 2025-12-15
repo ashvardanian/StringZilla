@@ -179,7 +179,7 @@ std::vector<std::string> rolling_hasher_dna_like_inputs() {
 
     fuzzy_config_t config;
     config.alphabet = "ACGT";
-    config.batch_size = 100;
+    config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
     config.max_string_length = 100 * 1024;
 
@@ -194,7 +194,7 @@ std::vector<std::string> rolling_hasher_inconvenient_inputs() {
 
     fuzzy_config_t config;
     config.alphabet = {reinterpret_cast<char const *>(&inconvenient_chars[0]), 4};
-    config.batch_size = 100;
+    config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
     config.max_string_length = 100 * 1024;
 

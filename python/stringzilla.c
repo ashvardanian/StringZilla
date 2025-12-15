@@ -112,6 +112,7 @@ static PyTypeObject StrsType;
 static PyTypeObject SplitIteratorType;
 static PyTypeObject Utf8SplitLinesIteratorType;
 static PyTypeObject Utf8SplitWhitespaceIteratorType;
+static PyTypeObject Utf8WordBoundaryIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -230,6 +231,26 @@ typedef struct {
     sz_bool_t skip_empty;
 
 } Utf8SplitWhitespaceIterator;
+
+/**
+ *  @brief  Iterator for finding word boundaries in UTF-8 text per Unicode TR29.
+ *
+ *  Uses sz_utf8_word_find_boundary to find boundaries, supporting all TR29 rules.
+ *  Yields words (text segments between consecutive word boundaries).
+ */
+typedef struct {
+    PyObject ob_base;
+
+    PyObject *text_obj; //< For reference counting
+
+    sz_cptr_t start;      //< Start of current word
+    sz_cptr_t end;        //< End of original text (immutable)
+    sz_cptr_t text_start; //< Start of original text (for reverse iteration)
+
+    /// @brief  Should we skip empty segments (consecutive boundaries)?
+    sz_bool_t skip_empty;
+
+} Utf8WordBoundaryIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -1588,17 +1609,64 @@ static char const doc_hmac_sha256[] = //
 static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
     sz_unused_(self);
-    if (positional_args_count != 2 || args_names_tuple) {
-        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly two positional arguments");
+
+    // Parse arguments
+    PyObject *key_obj = NULL;
+    PyObject *message_obj = NULL;
+
+    // Get count of keyword arguments
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+
+    // Validate total argument count
+    if (total_args != 2) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() expects exactly 2 arguments");
+        return NULL;
+    }
+
+    // Handle positional arguments
+    if (positional_args_count >= 1) key_obj = args[0];
+    if (positional_args_count >= 2) message_obj = args[1];
+
+    // Handle keyword arguments
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "key") == 0) {
+                if (key_obj) {
+                    PyErr_SetString(PyExc_TypeError, "key specified twice");
+                    return NULL;
+                }
+                key_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "message") == 0) {
+                if (message_obj) {
+                    PyErr_SetString(PyExc_TypeError, "message specified twice");
+                    return NULL;
+                }
+                message_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Validate all required arguments are provided
+    if (!key_obj || !message_obj) {
+        PyErr_SetString(PyExc_TypeError, "hmac_sha256() missing required arguments");
         return NULL;
     }
 
     sz_string_view_t key, message;
-    if (!sz_py_export_string_like(args[0], &key.start, &key.length)) {
+    if (!sz_py_export_string_like(key_obj, &key.start, &key.length)) {
         wrap_current_exception("Key must be string-like");
         return NULL;
     }
-    if (!sz_py_export_string_like(args[1], &message.start, &message.length)) {
+    if (!sz_py_export_string_like(message_obj, &message.start, &message.length)) {
         wrap_current_exception("Message must be string-like");
         return NULL;
     }
@@ -1775,12 +1843,142 @@ static int Str_in(Str *self, PyObject *needle_obj) {
     return sz_find(self->memory.start, self->memory.length, needle.start, needle.length) != NULL;
 }
 
-static PyObject *Strs_get_tape(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_are_large(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_tape_address(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_address(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_tape_nbytes(Str *self, void *closure) { return NULL; }
-static PyObject *Strs_get_offsets_nbytes(Str *self, void *closure) { return NULL; }
+/**
+ *  @brief  Ensures the Strs is in a tape layout (not fragmented).
+ *          Converts FRAGMENTED to TAPE if necessary.
+ *  @return 1 on success, 0 on failure (sets Python exception).
+ */
+static int Strs_ensure_tape_layout(Strs *self) {
+    if (self->layout != STRS_FRAGMENTED) return 1; // Already in tape layout
+
+    // Get the default allocator
+    sz_memory_allocator_t allocator;
+    sz_memory_allocator_init_default(&allocator);
+
+    // Convert fragmented to tape
+    if (!sz_py_replace_fragmented_allocator(self, &self->data.fragmented.allocator, &allocator)) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to convert fragmented layout to tape");
+        return 0;
+    }
+    return 1;
+}
+
+static PyObject *Strs_get_tape(Strs *self, void *closure) {
+    // Ensure we're in tape layout
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+    // Return self to allow chaining: strs.tape.tape_address
+    Py_INCREF(self);
+    return (PyObject *)self;
+}
+
+static PyObject *Strs_get_offsets_are_large(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    switch (self->layout) {
+    case STRS_U32_TAPE:
+    case STRS_U32_TAPE_VIEW: Py_RETURN_FALSE;
+    case STRS_U64_TAPE:
+    case STRS_U64_TAPE_VIEW: Py_RETURN_TRUE;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+}
+
+static PyObject *Strs_get_tape_address(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_cptr_t tape_ptr = NULL;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: tape_ptr = self->data.u32_tape_view.data; break;
+    case STRS_U32_TAPE: tape_ptr = self->data.u32_tape.data; break;
+    case STRS_U64_TAPE_VIEW: tape_ptr = self->data.u64_tape_view.data; break;
+    case STRS_U64_TAPE: tape_ptr = self->data.u64_tape.data; break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t((sz_size_t)tape_ptr);
+}
+
+static PyObject *Strs_get_offsets_address(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    void *offsets_ptr = NULL;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: offsets_ptr = self->data.u32_tape_view.offsets; break;
+    case STRS_U32_TAPE: offsets_ptr = self->data.u32_tape.offsets; break;
+    case STRS_U64_TAPE_VIEW: offsets_ptr = self->data.u64_tape_view.offsets; break;
+    case STRS_U64_TAPE: offsets_ptr = self->data.u64_tape.offsets; break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t((sz_size_t)offsets_ptr);
+}
+
+static PyObject *Strs_get_tape_nbytes(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_size_t tape_nbytes = 0;
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW: {
+        sz_size_t count = self->data.u32_tape_view.count;
+        sz_u32_t *offsets = self->data.u32_tape_view.offsets;
+        // The tape size is the last offset (offsets[count])
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U32_TAPE: {
+        sz_size_t count = self->data.u32_tape.count;
+        sz_u32_t *offsets = self->data.u32_tape.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U64_TAPE_VIEW: {
+        sz_size_t count = self->data.u64_tape_view.count;
+        sz_u64_t *offsets = self->data.u64_tape_view.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    case STRS_U64_TAPE: {
+        sz_size_t count = self->data.u64_tape.count;
+        sz_u64_t *offsets = self->data.u64_tape.offsets;
+        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        break;
+    }
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    return PyLong_FromSize_t(tape_nbytes);
+}
+
+static PyObject *Strs_get_offsets_nbytes(Strs *self, void *closure) {
+    if (!Strs_ensure_tape_layout(self)) return NULL;
+
+    sz_size_t count = 0;
+    sz_size_t offset_size = 0;
+
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW:
+        count = self->data.u32_tape_view.count;
+        offset_size = sizeof(sz_u32_t);
+        break;
+    case STRS_U32_TAPE:
+        count = self->data.u32_tape.count;
+        offset_size = sizeof(sz_u32_t);
+        break;
+    case STRS_U64_TAPE_VIEW:
+        count = self->data.u64_tape_view.count;
+        offset_size = sizeof(sz_u64_t);
+        break;
+    case STRS_U64_TAPE:
+        count = self->data.u64_tape.count;
+        offset_size = sizeof(sz_u64_t);
+        break;
+    default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
+    }
+
+    // Arrow format uses N+1 offsets for N strings
+    sz_size_t offsets_nbytes = (count + 1) * offset_size;
+    return PyLong_FromSize_t(offsets_nbytes);
+}
 
 static Py_ssize_t Strs_len(Strs *self) {
     switch (self->layout) {
@@ -3206,6 +3404,7 @@ static char const doc_utf8_case_fold[] = //
     "\n"
     "Args:\n"
     "    text (Str or str or bytes): The input UTF-8 string.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    bytes: The case-folded UTF-8 string.\n"
@@ -3220,16 +3419,28 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
                                          PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
+    int validate = 0;                       // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd positional argument(s)", nargs_expected);
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_fold() takes no keyword arguments");
-        return NULL;
+    // Parse optional 'validate' keyword argument
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_fold() got unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
     }
 
     PyObject *str_obj = is_member ? self : args[0];
@@ -3237,6 +3448,12 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
     sz_string_view_t str;
     if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
         wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+
+    // Validate UTF-8 input only if requested
+    if (validate && !sz_utf8_valid(str.start, str.length)) {
+        PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
 
@@ -3270,41 +3487,99 @@ static char const doc_utf8_case_insensitive_find[] = //
     "Performs a case-insensitive search using Unicode case folding rules,\n"
     "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"
     "\n"
+    "IMPORTANT - Type-dependent behavior:\n"
+    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"
+    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"
+    "\n"
     "Args:\n"
     "    haystack (Str or str or bytes): The string to search in.\n"
     "    needle (Str or str or bytes): The substring to find.\n"
+    "    start (int, optional): Starting index (default: 0).\n"
+    "    end (int, optional): Ending index (default: length).\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    int: Index of the first match, or -1 if not found.\n"
     "\n"
     "Example:\n"
-    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')\n"
+    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')  # str: codepoint offset\n"
     "    6\n"
-    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')\n"
+    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"
+    "    0\n"
+    "    >>> sz.utf8_case_insensitive_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"
     "    0";
 
 static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *const *args,
-                                                      Py_ssize_t positional_args_count,
-                                                      PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs_expected = is_member ? 1 : 2; // needle if method, haystack+needle if function
+                                                     Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
-    if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() takes exactly %zd argument(s)", nargs_expected);
+    // Argument objects
+    PyObject *haystack_obj = NULL;
+    PyObject *needle_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+    int validate = 0;
+
+    // Argument count validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // needle required
+    Py_ssize_t const expected_max = expected_min + 3;  // + start + end + validate
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_find() takes no keyword arguments");
-        return NULL;
+    // Extract positional arguments
+    if (is_member) {
+        haystack_obj = self;
+        if (positional_args_count >= 1) needle_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) haystack_obj = args[0];
+        if (positional_args_count >= 2) needle_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
     }
 
-    PyObject *haystack_obj = is_member ? self : args[0];
-    PyObject *needle_obj = is_member ? args[0] : args[1];
+    // Parse keyword arguments
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+        PyObject *val = args[positional_args_count + i];
 
-    sz_string_view_t haystack, needle;
-    if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length)) {
+        if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+            if (start_obj) {
+                PyErr_SetString(PyExc_TypeError, "start specified twice");
+                return NULL;
+            }
+            start_obj = val;
+        }
+        else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+            if (end_obj) {
+                PyErr_SetString(PyExc_TypeError, "end specified twice");
+                return NULL;
+            }
+            end_obj = val;
+        }
+        else if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+            validate = PyObject_IsTrue(val);
+            if (validate < 0) return NULL;
+        }
+        else {
+            PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() got unexpected keyword argument '%U'", key);
+            return NULL;
+        }
+    }
+
+    // Determine if input is Unicode (str) or bytes - affects offset semantics
+    int const is_unicode = PyUnicode_Check(haystack_obj);
+
+    // Extract string views (UTF-8 bytes)
+    sz_string_view_t haystack_full, needle;
+    if (!sz_py_export_string_like(haystack_obj, &haystack_full.start, &haystack_full.length)) {
         wrap_current_exception("First argument (haystack) must be string-like");
         return NULL;
     }
@@ -3313,19 +3588,103 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
         return NULL;
     }
 
-    // Empty needle matches at position 0
-    if (needle.length == 0) { return PyLong_FromSsize_t(0); }
-    // Empty haystack can't contain non-empty needle
+    // Parse start/end (these are codepoint offsets for str, byte offsets for bytes)
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+    if (start_obj) {
+        start = PyLong_AsSsize_t(start_obj);
+        if (start == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "start must be an integer");
+            return NULL;
+        }
+    }
+    if (end_obj) {
+        end = PyLong_AsSsize_t(end_obj);
+        if (end == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "end must be an integer");
+            return NULL;
+        }
+    }
+
+    // Convert offsets and prepare search range
+    sz_size_t byte_offset_start = 0;
+    sz_size_t byte_length = haystack_full.length;
+    sz_size_t codepoint_offset_start = 0; // Only used for str return value
+
+    if (is_unicode) {
+        // For str: start/end are codepoint offsets, convert to byte offsets
+        sz_size_t total_codepoints = sz_utf8_count(haystack_full.start, haystack_full.length);
+
+        // Clamp codepoint offsets
+        sz_size_t cp_start = (start < 0) ? 0 : (sz_size_t)start;
+        sz_size_t cp_end = (end < 0 || (sz_size_t)end > total_codepoints) ? total_codepoints : (sz_size_t)end;
+        if (cp_start > cp_end) cp_start = cp_end;
+
+        codepoint_offset_start = cp_start;
+
+        // Convert codepoint start to byte offset
+        if (cp_start > 0) {
+            sz_cptr_t start_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_start);
+            byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
+        }
+
+        // Convert codepoint end to byte offset
+        sz_size_t byte_offset_end = haystack_full.length;
+        if (cp_end < total_codepoints) {
+            sz_cptr_t end_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_end);
+            byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
+        }
+
+        byte_length = (byte_offset_end > byte_offset_start) ? (byte_offset_end - byte_offset_start) : 0;
+    }
+    else {
+        // For bytes: start/end are byte offsets, use directly
+        sz_ssize_clamp_interval(haystack_full.length, start, end, &byte_offset_start, &byte_length);
+    }
+
+    // Prepare the search haystack
+    sz_string_view_t haystack;
+    haystack.start = haystack_full.start + byte_offset_start;
+    haystack.length = byte_length;
+
+    // Empty needle matches at start position
+    if (needle.length == 0) {
+        if (is_unicode) { return PyLong_FromSsize_t((Py_ssize_t)codepoint_offset_start); }
+        else { return PyLong_FromSsize_t((Py_ssize_t)byte_offset_start); }
+    }
+    // Empty haystack (after slicing) can't contain non-empty needle
     if (haystack.length == 0) { return PyLong_FromSsize_t(-1); }
 
+    // Validate UTF-8 input only if requested
+    if (validate) {
+        if (!sz_utf8_valid(haystack.start, haystack.length)) {
+            PyErr_SetString(PyExc_ValueError, "Haystack is not valid UTF-8");
+            return NULL;
+        }
+        if (!sz_utf8_valid(needle.start, needle.length)) {
+            PyErr_SetString(PyExc_ValueError, "Needle is not valid UTF-8");
+            return NULL;
+        }
+    }
+
     sz_size_t matched_length = 0;
+    sz_utf8_case_insensitive_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
     sz_cptr_t result = sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length,
-                                                      &matched_length);
+                                                     &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
-    Py_ssize_t index = (Py_ssize_t)(result - haystack.start);
-    return PyLong_FromSsize_t(index);
+    // Compute and return the appropriate offset type
+    sz_size_t result_byte_offset = (sz_size_t)(result - haystack_full.start);
+
+    if (is_unicode) {
+        // For str: return codepoint offset
+        sz_size_t result_codepoint_offset = sz_utf8_count(haystack_full.start, result_byte_offset);
+        return PyLong_FromSsize_t((Py_ssize_t)result_codepoint_offset);
+    }
+    else {
+        // For bytes: return byte offset
+        return PyLong_FromSsize_t((Py_ssize_t)result_byte_offset);
+    }
 }
 
 static char const doc_utf8_case_insensitive_order[] = //
@@ -3337,6 +3696,7 @@ static char const doc_utf8_case_insensitive_order[] = //
     "Args:\n"
     "    a (Str or str or bytes): First string to compare.\n"
     "    b (Str or str or bytes): Second string to compare.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
     "\n"
     "Returns:\n"
     "    int: Negative if a < b, zero if equal, positive if a > b.\n"
@@ -3348,20 +3708,33 @@ static char const doc_utf8_case_insensitive_order[] = //
     "    -1";
 
 static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *const *args,
-                                                       Py_ssize_t positional_args_count,
-                                                       PyObject *args_names_tuple) {
+                                                      Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
+    int validate = 0;                              // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd positional argument(s)",
+                     nargs_expected);
         return NULL;
     }
 
-    // Reject keyword arguments
-    if (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple) > 0) {
-        PyErr_SetString(PyExc_TypeError, "utf8_case_insensitive_order() takes no keyword arguments");
-        return NULL;
+    // Parse optional 'validate' keyword argument
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() got unexpected keyword argument '%U'",
+                             key);
+                return NULL;
+            }
+        }
     }
 
     PyObject *a_obj = is_member ? self : args[0];
@@ -3375,6 +3748,18 @@ static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *
     if (!sz_py_export_string_like(b_obj, &b.start, &b.length)) {
         wrap_current_exception("Second argument must be string-like");
         return NULL;
+    }
+
+    // Validate UTF-8 input only if requested
+    if (validate) {
+        if (!sz_utf8_valid(a.start, a.length)) {
+            PyErr_SetString(PyExc_ValueError, "First argument is not valid UTF-8");
+            return NULL;
+        }
+        if (!sz_utf8_valid(b.start, b.length)) {
+            PyErr_SetString(PyExc_ValueError, "Second argument is not valid UTF-8");
+            return NULL;
+        }
     }
 
     sz_ordering_t order = sz_utf8_case_insensitive_order(a.start, a.length, b.start, b.length);
@@ -4272,6 +4657,76 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     return (PyObject *)result_obj;
 }
 
+static char const doc_utf8_word_iter[] = //
+    "utf8_word_iter(string, /, skip_empty=False)\n"
+    "\n"
+    "Return an iterator yielding words per Unicode TR29 word boundary rules.\n"
+    "Unlike str.split(), this is TR29 compliant and supports all Unicode scripts.\n"
+    "\n"
+    "Args:\n"
+    "    string: The input UTF-8 string to split into words.\n"
+    "    skip_empty: If True, skip empty segments between consecutive boundaries.\n"
+    "\n"
+    "Returns:\n"
+    "    Iterator yielding Str objects for each word.\n";
+
+static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *kwnames) {
+    int min_args = 1, max_args = 2;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_word_iter() requires %zd to %zd arguments", min_args, max_args);
+        return NULL;
+    }
+
+    PyObject *text_obj = args[0];
+    int skip_empty = 0;
+
+    // Parse keyword arguments
+    if (kwnames) {
+        Py_ssize_t n_kwnames = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < n_kwnames; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0) { skip_empty = PyObject_IsTrue(value); }
+        }
+    }
+    // Check positional skip_empty
+    if (positional_args_count > 1) { skip_empty = PyObject_IsTrue(args[1]); }
+
+    sz_string_view_t text_view;
+    if (PyObject_TypeCheck(text_obj, &StrType)) {
+        Str *str_obj = (Str *)text_obj;
+        text_view = str_obj->memory;
+    }
+    else if (PyUnicode_Check(text_obj)) {
+        Py_ssize_t signed_length;
+        text_view.start = PyUnicode_AsUTF8AndSize(text_obj, &signed_length);
+        if (!text_view.start) return NULL;
+        text_view.length = (sz_size_t)signed_length;
+    }
+    else if (PyBytes_Check(text_obj)) {
+        text_view.start = PyBytes_AS_STRING(text_obj);
+        text_view.length = (sz_size_t)PyBytes_GET_SIZE(text_obj);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Expected str, bytes, or Str");
+        return NULL;
+    }
+
+    Utf8WordBoundaryIterator *iter = PyObject_New(Utf8WordBoundaryIterator, &Utf8WordBoundaryIteratorType);
+    if (!iter) return PyErr_NoMemory();
+
+    iter->text_obj = text_obj;
+    Py_INCREF(text_obj);
+    iter->start = text_view.start;
+    iter->end = text_view.start + text_view.length;
+    iter->text_start = text_view.start;
+    iter->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+
+    (void)self; // Unused
+    return (PyObject *)iter;
+}
+
 static char const doc_splitlines[] = //
     "Split a string by line breaks.\n"
     "\n"
@@ -4734,9 +5189,12 @@ static PyMethodDef Str_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -5106,6 +5564,103 @@ static PyTypeObject Utf8SplitWhitespaceIteratorType = {
     .tp_iternext = (iternextfunc)Utf8SplitWhitespaceIteratorType_next,
 };
 
+#pragma endregion
+
+#pragma region UTF8 Word Boundary Iterator
+
+static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *self) {
+    // Termination: start >= end means we're done
+    if (self->start >= self->end) return NULL;
+
+    // Find next word boundary
+    sz_size_t boundary_width = 0;
+    sz_cptr_t boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
+
+    // If boundary is at start (empty segment) or at end
+    if (boundary == self->start || boundary >= self->end) {
+        // Return remaining text as last word
+        sz_size_t word_len = (sz_size_t)(self->end - self->start);
+        if (word_len == 0) return NULL;
+
+        // Create a new `Str` object
+        Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+        result_obj->memory.start = self->start;
+        result_obj->memory.length = word_len;
+        result_obj->parent = self->text_obj;
+        Py_INCREF(self->text_obj);
+
+        self->start = self->end; // Mark as done
+        return (PyObject *)result_obj;
+    }
+
+    // Get word length (from current position to boundary)
+    sz_size_t word_len = (sz_size_t)(boundary - self->start);
+
+    // Skip empty segments if requested
+    while (self->skip_empty && word_len == 0 && boundary < self->end) {
+        self->start = boundary;
+        boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
+        if (boundary == self->start) break; // Avoid infinite loop
+        word_len = (sz_size_t)(boundary - self->start);
+    }
+
+    if (word_len == 0 && self->skip_empty) {
+        return NULL; // No more non-empty segments
+    }
+
+    // Create a new `Str` object for the word
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->memory.start = self->start;
+    result_obj->memory.length = word_len;
+    result_obj->parent = self->text_obj;
+    Py_INCREF(self->text_obj);
+
+    // Move start to next word
+    self->start = boundary;
+
+    return (PyObject *)result_obj;
+}
+
+static void Utf8WordBoundaryIteratorType_dealloc(Utf8WordBoundaryIterator *self) {
+    Py_XDECREF(self->text_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8WordBoundaryIteratorType_iter(PyObject *self) {
+    Py_INCREF(self);
+    return self;
+}
+
+static char const doc_Utf8WordBoundaryIterator[] = //
+    "Utf8WordBoundaryIterator(string, ...)\n"
+    "\n"
+    "UTF-8 aware word boundary iterator per Unicode TR29 algorithm.\n"
+    "Yields words (text segments between consecutive word boundaries).\n"
+    "\n"
+    "Created by:\n"
+    "  - Str.utf8_word_iter()\n"
+    "  - sz.utf8_word_iter()\n"
+    "\n"
+    "TR29 Word_Break rules implemented:\n"
+    "  - WB3: CR x LF (no break)\n"
+    "  - WB4: Ignore Extend/Format/ZWJ\n"
+    "  - WB5-WB13: Letter, number, punctuation rules\n"
+    "  - WB15-WB16: Regional Indicator pairs\n";
+
+static PyTypeObject Utf8WordBoundaryIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8WordBoundaryIterator",
+    .tp_basicsize = sizeof(Utf8WordBoundaryIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8WordBoundaryIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8WordBoundaryIterator,
+    .tp_iter = Utf8WordBoundaryIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8WordBoundaryIteratorType_next,
+};
 #pragma endregion
 
 #pragma region Hasher
@@ -5857,19 +6412,19 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     sz_ptr_t buffer_ptr = buffer;
     *did_fit = 1;
 
-    // First pass: calculate required buffer size and validate UTF-8
+    // Validate UTF-8 first
+    if (!sz_utf8_valid(cstr, cstr_length)) {
+        *did_fit = -1; // Signal UTF-8 error
+        return buffer_ptr;
+    }
+
+    // First pass: calculate required buffer size (input already validated)
     sz_size_t required_bytes = 2; // Opening and closing quotes
     sz_cptr_t scan_ptr = cstr;
     while (scan_ptr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse(scan_ptr, &rune, &rune_length);
-
-        // Check for invalid UTF-8
-        if (rune_length == sz_utf8_invalid_k) {
-            *did_fit = -1; // Signal UTF-8 error
-            return buffer_ptr;
-        }
 
         if (rune_length == 1 && *scan_ptr == '\'') { required_bytes += 2; } // Escaped quote: \'
         else { required_bytes += rune_length; }                             // Normal rune
@@ -5987,7 +6542,7 @@ static PyObject *Strs_repr(Strs *self) {
 
         // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = sz_runes_valid(cstr_start, cstr_length)
+        repr_buffer_ptr = sz_utf8_valid(cstr_start, cstr_length)
                               ? export_escaped_unquoted_to_utf8_buffer(
                                     cstr_start, cstr_length, repr_buffer_ptr,
                                     repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
@@ -6032,7 +6587,7 @@ static PyObject *Strs_str(Strs *self) {
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
-        if (sz_runes_valid(cstr_start, cstr_length)) {
+        if (sz_utf8_valid(cstr_start, cstr_length)) {
             // Valid UTF-8: format as '...' with escaped quotes
             total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
@@ -6078,7 +6633,7 @@ static PyObject *Strs_str(Strs *self) {
         int did_fit;
         // Check if the string contains valid UTF-8 and export appropriately
         result_ptr =
-            sz_runes_valid(cstr_start, cstr_length)
+            sz_utf8_valid(cstr_start, cstr_length)
                 ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
                                                          total_bytes - (result_ptr - result_buffer), &did_fit)
                 : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,
@@ -7065,9 +7620,12 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
+    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS, doc_utf8_case_insensitive_order},
+    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -7111,6 +7669,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8WordBoundaryIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 

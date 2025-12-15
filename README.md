@@ -6,19 +6,22 @@ Strings are the first fundamental data type every programming language implement
 That's why most languages lean on the C standard library (libc) for their string operations, which, despite its name, ships its hottest code in hand-tuned assembly.
 It does exploit SIMD, but it isn't perfect.
 1️⃣ Even on ubiquitous hardware - over a billion 64-bit ARM CPUs - routines such as `strstr` and `memmem` top out at roughly one-third of available throughput.
-2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches.
+2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches, hashing and case-mapping is not even part of the standard.
 3️⃣ Many higher-level languages can't rely on libc at all because their strings aren't NUL-terminated - or may even contain embedded zeroes.
 That's why StringZilla exists: predictable, high performance on every modern platform, OS, and programming language.
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
+![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+
+<!-- Those badges often stay in stale state - greyed out. Consider enabling them later.
 [![Ubuntu status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Linux%20CI&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![Windows status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Windows%20CI&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+-->
 
-StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs and GPUs.
-It delivers up to __10x higher CPU throughput in C, C++, and Python__ and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
+StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate binary and UTF-8 string operations on modern CPUs and GPUs.
+It delivers up to __10x higher CPU throughput in C, C++, Rust, Python__, and other languages, and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
 It __accelerates exact and fuzzy string matching, hashing, edit distance computations, sorting, provides allocation-free lazily-evaluated smart-iterators, and even random-string generators__.
 
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
@@ -32,13 +35,13 @@ It __accelerates exact and fuzzy string matching, hashing, edit distance computa
 - 🦫 __[Go](#quick-start-golang):__ Use the `StringZilla` cGo module
 - 🍎 __[Swift](#quick-start-swift):__ Use the `String+StringZilla` extension
 - 🟨 __[JavaScript](#quick-start-javascript):__ Use the `StringZilla` library
-- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
+- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz-` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
 - 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
-[faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
+[faq-shell]: https://github.com/ashvardanian/StringZilla-CLI
 [first-issues]: https://github.com/ashvardanian/StringZilla/issues
 
 __Who is this for?__
@@ -54,18 +57,44 @@ __Who is this for?__
 
 ## Performance
 
-<table style="width: 100%; text-align: center; table-layout: fixed;">
-  <colgroup>
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-    <col style="width: 25%;">
-  </colgroup>
+<table>
   <tr>
-    <th align="center">C</th>
-    <th align="center">C++</th>
-    <th align="center">Python</th>
-    <th align="center">StringZilla</th>
+    <th align="center" width="25%">C</th>
+    <th align="center" width="25%">C++</th>
+    <th align="center" width="25%">Python</th>
+    <th align="center" width="25%">StringZilla</th>
+  </tr>
+  <!-- Unicode case-folding -->
+  <tr>
+    <td colspan="4" align="center">Unicode case-folding, expanding characters like <code>ß</code> → <code>ss</code></td>
+  </tr>
+  <tr>
+    <td align="center">⚪</td>
+    <td align="center">⚪</td>
+    <td align="center">
+      <code>.casefold</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.4</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz.utf8_case_fold</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>1.3</b> GB/s
+    </td>
+  </tr>
+  <!-- Unicode case-insensitive search -->
+  <tr>
+    <td colspan="4" align="center">Unicode case-insensitive substring search</td>
+  </tr>
+  <tr>
+    <td align="center">⚪</td>
+    <td align="center">⚪</td>
+    <td align="center">
+      <code>icu.StringSearch</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.02</b> GB/s
+    </td>
+    <td align="center">
+      <code>utf8_case_insensitive_find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>3.0</b> GB/s
+    </td>
   </tr>
   <!-- Substrings, normal order -->
   <tr>
@@ -161,7 +190,7 @@ __Who is this for?__
   </tr>
   <!-- Random Generation -->
   <tr>
-    <td colspan="4" align="center">Random string from a given alphabet, 20 bytes long <sup>5</sup></td>
+    <td colspan="4" align="center">Random string from a given alphabet, 20 bytes long <sup>3</sup></td>
   </tr>
   <tr>
     <td align="center">
@@ -170,12 +199,12 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>std::uniform_int_distribution</code><br/>
+      <code>uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
     <td align="center">
-      <code>join(random.choices(...))</code><br/>
+      <code>join(random.choices(x))</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>13.3</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>5.9</b> MB/s
     </td>
@@ -209,7 +238,7 @@ __Who is this for?__
   </tr>
   <!-- Sorting -->
   <tr>
-    <td colspan="4" align="center">Get sorted order, ≅ 8 million English words <sup>6</sup></td>
+    <td colspan="4" align="center">Get sorted order, ≅ 8 million English words <sup>4</sup></td>
   </tr>
   <tr>
     <td align="center">
@@ -241,7 +270,7 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>NLTK</code> <sup>3</sup> and <code>CuDF</code><br/>
+      via <code>NLTK</code> <sup>5</sup> and <code>CuDF</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1,615,306</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>1,349,980</b> &centerdot;
       <span style="color:#ABABAB;">cuda:</span> <b>6,532,411,354</b> CUPS
@@ -261,7 +290,7 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>biopython</code> <sup>4</sup><br/>
+      via <code>biopython</code> <sup>6</sup><br/>
       <span style="color:#ABABAB;">x86:</span> <b>575,981,513</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>436,350,732</b> CUPS
     </td>
@@ -291,16 +320,16 @@ To inspect collision resistance and distribution shapes for our hashers, see __[
 > For CUDA benchmarks, the Nvidia H100 GPUs were used.
 > <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
 > <sup>2</sup> Six whitespaces in the ASCII set are: ` \t\n\v\f\r`. Python's and other standard libraries have specialized functions for those.
-> <sup>3</sup> Most Python libraries for strings are also implemented in C.
-> <sup>4</sup> Unlike the rest of BioPython, the alignment score computation is [implemented in C](https://github.com/biopython/biopython/blob/master/Bio/Align/_pairwisealigner.c).
-> <sup>5</sup> All modulo operations were conducted with `uint8_t` to allow compilers more optimization opportunities.
+> <sup>3</sup> All modulo operations were conducted with `uint8_t` to allow compilers more optimization opportunities.
 > The C++ STL and StringZilla benchmarks used a 64-bit [Mersenne Twister][faq-mersenne-twister] as the generator.
 > For C, C++, and StringZilla, an in-place update of the string was used.
 > In Python every string had to be allocated as a new object, which makes it less fair.
-> <sup>6</sup> Contrary to the popular opinion, Python's default `sorted` function works faster than the C and C++ standard libraries.
+> <sup>4</sup> Contrary to the popular opinion, Python's default `sorted` function works faster than the C and C++ standard libraries.
 > That holds for large lists or tuples of strings, but fails as soon as you need more complex logic, like sorting dictionaries by a string key, or producing the "sorted order" permutation.
 > The latter is very common in database engines and is most similar to `numpy.argsort`.
 > The current StringZilla solution can be at least 4x faster without loss of generality.
+> <sup>5</sup> Most Python libraries for strings are also implemented in C.
+> <sup>6</sup> Unlike the rest of BioPython, the alignment score computation is [implemented in C](https://github.com/biopython/biopython/blob/master/Bio/Align/_pairwisealigner.c).
 
 [faq-mersenne-twister]: https://en.wikipedia.org/wiki/Mersenne_Twister
 
@@ -328,10 +357,15 @@ Consider contributing if you need a feature that's not yet implemented.
 | Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| Streaming Hashes               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| SHA-256 Checksums              |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
 | Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
+| One-Shot & Streaming Hashes    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Cryptographic Hashes           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
+| Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+|                                |          |       |       |        |       |       |       |       |
+| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Case-Insensitive UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ⚪    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
@@ -427,6 +461,16 @@ x: Strs = text.split_byteset(separator='chars', maxsplit=sys.maxsize, keepsepara
 x: Strs = text.rsplit_byteset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
 ```
 
+StringZilla also provides string trimming functions and random string generation:
+
+```py
+x: str = text.lstrip('chars')  # Strip leading characters
+x: str = text.rstrip('chars')  # Strip trailing characters
+x: str = text.strip('chars')   # Strip both ends
+x: bytes = sz.random(length=100, seed=42, alphabet='ACGT')  # Random string generation
+sz.fill_random(buffer, seed=42, alphabet=None)  # Fill mutable buffer with random bytes
+```
+
 You can also transform the string using Look-Up Tables (LUTs), mapping it to a different character set.
 This would result in a copy - `str` for `str` inputs and `bytes` for other types.
 
@@ -512,6 +556,30 @@ OpenSSL (powering `hashlib`) has faster Assembly kernels, but StringZilla avoids
 - OpenSSL-backed `hashlib.sha256`: 12.6s
 - StringZilla end-to-end: 4.0s — __3× faster!__
 
+### Unicode Case-Folding and Case-Insensitive Search
+
+StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
+The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
+
+```python
+import stringzilla as sz
+
+sz.utf8_case_fold('HELLO')      # b'hello'
+sz.utf8_case_fold('Straße')     # b'strasse' — ß (1 char) expands to "ss" (2 chars)
+sz.utf8_case_fold('eﬃcient')    # b'efficient' — ﬃ ligature (1 char) expands to "ffi" (3 chars)
+```
+
+The case-insensitive search returns the byte offset of the match, handling expansions correctly.
+
+```python
+import stringzilla as sz
+
+sz.utf8_case_insensitive_find('Der große Hund', 'GROSSE')   # 4 — finds "große" at codepoint 4
+sz.utf8_case_insensitive_find('Straße', 'STRASSE')          # 0 — ß matches "SS"
+sz.utf8_case_insensitive_find('eﬃcient', 'EFFICIENT')       # 0 — ﬃ ligature matches "FFI"
+```
+
 ### Collection-Level Operations
 
 Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices with minimal memory footprint.
@@ -520,7 +588,7 @@ If all the chunks are located in consecutive memory regions, the memory overhead
 ```python
 lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
-lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
+lines_shuffled: Strs = lines.shuffled(seed=42) # or shuffle all lines and shard with slices
 lines_sorted: Strs = lines.sorted() # returns a new Strs in sorted order
 order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
@@ -820,7 +888,8 @@ sz_sha256_state_digest(&sha_state, digest);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
-sz_sequence_argsort(&array, &your_config);
+sz_sorted_idx_t order[your_count];
+sz_sequence_argsort(&array, NULL, order); // NULL allocator uses default
 ```
 
 <details>
@@ -857,12 +926,12 @@ The `sz_find_byteset` maps to `strspn` and `strcspn`, while `sz_rfind_byteset` h
         <td><code>sz_find_byte(haystack, haystack_length, needle)</code></td>
     </tr>
     <tr>
-        <td><code>strcspn(haystack, needles)</code></td>
-        <td><code>sz_rfind_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strcspn(haystack, reject)</code></td>
+        <td><code>sz_find_byteset(haystack, haystack_length, reject_bitset)</code></td>
     </tr>
     <tr>
-        <td><code>strspn(haystack, needles)</code></td>
-        <td><code>sz_find_byteset(haystack, haystack_length, needles_bitset)</code></td>
+        <td><code>strspn(haystack, accept)</code></td>
+        <td><code>sz_find_byte_not_from(haystack, haystack_length, accept, accept_length)</code></td>
     </tr>
     <tr>
         <td><code>memmem(haystack, haystack_length, needle, needle_length)</code>, <code>strstr</code></td>
@@ -921,6 +990,46 @@ auto b = "some string"_sv; // sz::string_view
 ```
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
+
+### Unicode Case-Folding and Case-Insensitive Search
+
+StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
+The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
+
+```c
+char source[] = "Straße";  // German: "Street"
+char destination[64];      // Must be at least 3x source length
+sz_size_t result_len = sz_utf8_case_fold(source, strlen(source), destination);
+// destination now contains "strasse" (7 bytes), result_len = 7
+```
+
+The case-insensitive search API returns a pointer to the start of the first relevant glyph in the haystack, or `NULL` if not found.
+It outputs the length of the matched haystack substring in bytes, and accepts a metadata structure to speed up repeated searches for the same needle.
+
+```c
+sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+sz_size_t match_length;
+sz_cptr_t match = sz_utf8_case_insensitive_find(
+    haystack, haystack_len,
+    needle, needle_len,
+    &metadata,      // Reuse for queries with the same needle
+    &match_length   // Output: bytes consumed in haystack
+);
+```
+
+Same functionality is available in C++:
+
+```cpp
+namespace sz = ashvardanian::stringzilla;
+
+sz::string_view text = "Hello World"; // Single search
+auto [offset, length] = text.utf8_case_insensitive_find("HELLO");
+
+sz::utf8_case_insensitive_needle pattern("hello"); // Repeated searches with pre-compiled pattern
+for (auto const& haystack : haystacks)
+    auto match = haystack.utf8_case_insensitive_find(pattern);
+```
 
 ### Similarity Scores
 
@@ -1637,6 +1746,44 @@ let digest = hasher.digest();
 let mac = sz::hmac_sha256(b"secret", b"Hello, world!");
 ```
 
+
+### Unicode Case-Folding and Case-Insensitive Search
+
+StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
+The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
+
+```rust
+use stringzilla::stringzilla as sz;
+
+let source = "Straße";           // German: "Street"
+let mut dest = [0u8; 64];        // Must be at least 3x source length
+let len = sz::utf8_case_fold(source, &mut dest);
+assert_eq!(&dest[..len], b"strasse");  // ß (2 bytes) → "ss" (2 bytes)
+```
+
+The case-insensitive search returns `Some((offset, matched_length))` or `None`.
+The `matched_length` may differ from needle length due to expansions.
+
+```rust
+use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+
+// Single search — ß (C3 9F) matches "SS"
+if let Some((offset, len)) = utf8_case_insensitive_find("Straße", "STRASSE") {
+    assert_eq!(offset, 0);
+    assert_eq!(len, 7);  // "Straße" is 7 bytes
+}
+
+// Repeated searches with pre-compiled needle metadata
+let needle = Utf8CaseInsensitiveNeedle::new(b"STRASSE");
+for haystack in &["Straße", "STRASSE", "strasse"] {
+    if let Some((offset, len)) = utf8_case_insensitive_find(haystack, &needle) {
+        println!("Found at byte {} with length {}", offset, len);
+    }
+}
+```
+
+
 ### Similarity Scores
 
 StringZilla exposes high-performance, batch-oriented similarity via the `szs` module.
@@ -1766,7 +1913,7 @@ Install the Node.js package and use zero-copy `Buffer` APIs.
 
 ```bash
 npm install stringzilla
-node -p "require('stringzilla').capabilities" # for CommonJS
+node -p "require('stringzilla').default.capabilities" # for CommonJS
 node -e "import('stringzilla').then(m=>console.log(m.default.capabilities)).catch(console.error)" # for ESM
 ```
 
@@ -1795,6 +1942,34 @@ const order = sz.compare(Buffer.from('a'), Buffer.from('b')); // -1, 0, or 1
 
 // Other helpers
 const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
+```
+
+### Unicode Case-Folding and Case-Insensitive Search
+
+StringZilla provides full Unicode case folding (including expansions like `ß → ss`, ligatures like `ﬁ → fi`, and special folds like `µ → μ`, `K → k`)
+and a case-insensitive substring search that accounts for those expansions.
+
+```js
+import sz from "stringzilla";
+
+// Case folding (returns a UTF-8 Buffer)
+console.log(sz.utf8CaseFold(Buffer.from("Straße")).toString("utf8")); // "strasse"
+console.log(sz.utf8CaseFold(Buffer.from("ofﬁce")).toString("utf8"));  // "office" (U+FB01 ligature)
+
+// Case-insensitive substring search (full Unicode case folding)
+const text = Buffer.from(
+    "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+    "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+);
+const patternBytes = Buffer.from("EIN MASS VON ETWA 20 μK");
+
+const first = sz.utf8CaseInsensitiveFind(text, patternBytes);
+console.log(first); // { index: 69n, length: ... } (byte offsets)
+
+// Reuse the same needle efficiently
+const pattern = new sz.Utf8CaseInsensitiveNeedle(patternBytes);
+const again = pattern.findIn(text);
+console.log(again.index === first.index);
 ```
 
 ### Hash
@@ -1855,6 +2030,30 @@ s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
 ```
 
+### Unicode Case-Folding and Case-Insensitive Search
+
+```swift
+import StringZilla
+
+let folded = "Straße".utf8CaseFoldedBytes()
+print(String(decoding: folded, as: UTF8.self)) // "strasse"
+
+let haystack =
+    "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n"
+    + "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+let needle = "EIN MASS VON ETWA 20 μK"
+
+if let range = haystack.utf8CaseInsensitiveFind(substring: needle) {
+    print(haystack[range]) // "ein Maß von etwa 20 µK"
+}
+
+// Reuse the same needle efficiently
+let compiledNeedle = Utf8CaseInsensitiveNeedle(needle)
+if let range = compiledNeedle.findFirst(in: haystack) {
+    print(haystack[range])
+}
+```
+
 ### Hash
 
 StringZilla provides high-performance hashing for Swift strings:
@@ -1884,7 +2083,7 @@ import StringZilla
 let digest = "Hello, world!".sha256() // returns [UInt8] (32 bytes)
 
 // Incremental SHA-256
-var hasher = StringZillaSha256Hasher()
+var hasher = StringZillaSha256()
 hasher.update("Hello, ")
 hasher.update("world!")
 let digestBytes = hasher.digest()     // [UInt8] (32 bytes)
@@ -1938,6 +2137,36 @@ func main() {
     fmt.Println(sz.Count("aaaaa", "aa", true))  // 4
     fmt.Println(sz.Count("abc", "", false))     // 4
     fmt.Println(sz.Bytesum("ABC"), sz.Bytesum("ABCD"))
+}
+```
+
+### Unicode Case-Folding and Case-Insensitive Search
+
+```go
+package main
+
+import (
+    "fmt"
+    sz "github.com/ashvardanian/stringzilla/golang"
+)
+
+func main() {
+    folded, _ := sz.Utf8CaseFold("Straße", true)
+    fmt.Println(folded) // "strasse"
+
+    haystack := "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
+        "Typografisch sieht man auch: ein Maß von etwa 20 μK."
+    needle := "EIN MASS VON ETWA 20 μK"
+
+    start64, len64, _ := sz.Utf8CaseInsensitiveFind(haystack, needle, true)
+    start, end := int(start64), int(start64+len64)
+    fmt.Println(haystack[start:end]) // "ein Maß von etwa 20 µK"
+
+    // Reuse the same needle efficiently
+    compiled, _ := sz.NewUtf8CaseInsensitiveNeedle(needle, true)
+    start64, len64, _ = compiled.FindIn(haystack, true)
+    start, end = int(start64), int(start64+len64)
+    fmt.Println(haystack[start:end])
 }
 ```
 
@@ -2319,7 +2548,7 @@ Very small inputs fall back to insertion sort.
 - Average time complexity: O(n log n)
 - Worst-case time complexity: quadratic (due to QuickSort), mitigated in practice by 3‑way partitioning and the n‑gram staging
 
-### Unicode, UTF-8, and Wide Characters
+### Unicode 17, UTF-8, and Wide Characters
 
 Most StringZilla operations are byte-level, so they work well with ASCII and UTF-8 content out of the box.
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
@@ -2329,9 +2558,29 @@ In some cases, like edit-distance computation, the result of byte-level evaluati
 
 Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF-32 or variable-length UTF-8.
 This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
-So consider transcoding with [simdutf](https://github.com/simdutf/simdutf), if you are coming from such environments.
+StringZilla uses proper 32-bit "runes" to represent unpacked Unicode codepoints, ensuring correct results in all operations.
+Moreover, it implements the Unicode 17.0 standard, being practically the only library besides ICU and PCRE2 to do so, but with order(s) of magnitude better performance.
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
+
+### Case-Folding and Case-Insensitive Search
+
+StringZilla provides Unicode-aware case-insensitive substring search that handles the full complexity of Unicode case folding.
+This includes multi-character expansions:
+
+| Character | Codepoint | UTF-8 Bytes | Case-Folds To | Result Bytes |
+| --------- | --------- | ----------- | ------------- | ------------ |
+| `ß`       | U+00DF    | C3 9F       | `ss`          | 73 73        |
+| `ﬃ`       | U+FB03    | EF AC 83    | `ffi`         | 66 66 69     |
+| `İ`       | U+0130    | C4 B0       | `i` + `◌̇`     | 69 CC 87     |
+
+The search returns byte offsets and lengths in the original haystack, correctly handling length differences.
+For example, searching for `"STRASSE"` (7 bytes) in `"Straße"` (7 bytes: 53 74 72 61 C3 9F 65) succeeds because both case-fold to `"strasse"`.
+
+Note that Turkish `İ` and ASCII `I` are distinct: `İstanbul` case-folds to `i̇stanbul` (with combining dot), while `ISTANBUL` case-folds to `istanbul` (without).
+They will not match each other — this is correct Unicode behavior for Turkish locale handling.
+
+For wide-character environments (Java, JavaScript, Python 2, C#), consider transcoding with [simdutf](https://github.com/simdutf/simdutf).
 
 ## Dynamic Dispatch
 

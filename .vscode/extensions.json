@@ -4,6 +4,7 @@
     "ms-vscode.cmake-tools",
     "ms-python.python",
     "ms-python.black-formatter",
+    "esbenp.prettier-vscode",
     "yzhang.markdown-all-in-one",
     "aaron-bond.better-comments",
     "cheshirekow.cmake-format"

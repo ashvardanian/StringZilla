@@ -230,7 +230,8 @@ struct span<value_type_, SZ_SIZE_MAX> {
 
     constexpr span() noexcept = default;
     constexpr span(value_type *data, size_type size) noexcept : data_(data), size_(size) {}
-    constexpr span(value_type *data, value_type *end) noexcept : data_(data), size_(static_cast<size_type>(end - data)) {}
+    constexpr span(value_type *data, value_type *end) noexcept
+        : data_(data), size_(static_cast<size_type>(end - data)) {}
 
     sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
 
@@ -260,6 +261,27 @@ struct span<value_type_, SZ_SIZE_MAX> {
     sz_constexpr_if_cpp14 span subspan(size_type offset, size_type count) const noexcept {
         sz_assert_(offset + count <= size_ && "Subspan out of bounds");
         return span(data_ + offset, count);
+    }
+
+    /// @brief  Lexicographic equality comparison for STL compatibility.
+    sz_constexpr_if_cpp14 bool operator==(span const &other) const noexcept {
+        if (size_ != other.size_) return false;
+        for (size_type i = 0; i < size_; ++i)
+            if (data_[i] != other.data_[i]) return false;
+        return true;
+    }
+
+    /// @brief  Lexicographic inequality comparison for STL compatibility.
+    sz_constexpr_if_cpp14 bool operator!=(span const &other) const noexcept { return !(*this == other); }
+
+    /// @brief  Lexicographic less-than comparison for STL compatibility.
+    sz_constexpr_if_cpp14 bool operator<(span const &other) const noexcept {
+        size_type const min_size = size_ < other.size_ ? size_ : other.size_;
+        for (size_type i = 0; i < min_size; ++i) {
+            if (data_[i] < other.data_[i]) return true;
+            if (data_[i] > other.data_[i]) return false;
+        }
+        return size_ < other.size_;
     }
 };
 
@@ -784,7 +806,9 @@ struct gpu_specs_t {
      *  - 9.0 is Hopper, like H100                      - maps to 90
      *  - 12.0, 12.1 is Blackwell, like B200            - maps to 120, 121
      */
-    inline static size_t pack_sm_code(int major, int minor) noexcept { return static_cast<size_t>((major * 10) + minor); }
+    inline static size_t pack_sm_code(int major, int minor) noexcept {
+        return static_cast<size_t>((major * 10) + minor);
+    }
 
     /**
      *  @brief Looks up hardware specs for a given compute capability (major, minor).

@@ -110,6 +110,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ">=1.24"
+          cache: false
       - name: Test Go binding
         working-directory: golang
         env:
@@ -169,11 +170,8 @@ jobs:
         run: npm install && npm test
 
       # Rust
-      - name: Test Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
   test_ubuntu_clang:
     name: Ubuntu (Clang 16) - ${{ matrix.os }}
@@ -240,9 +238,10 @@ jobs:
           cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
           cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ">=1.24"
+          cache: false
       - name: Test Go binding
         working-directory: golang
         env:
@@ -283,11 +282,8 @@ jobs:
         run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # Rust
-      - name: Test Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
         # Swift
         # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
@@ -517,7 +513,7 @@ jobs:
             target_arch: x86-64
             target: x86_64-linux-gnu
             target_processor: amd64
-    
+
     env:
       CC: clang-16
       CXX: clang++-16
@@ -550,7 +546,7 @@ jobs:
           sudo ./llvm.sh 16
 
       - name: Build C/C++ for ${{ matrix.target_arch }}
-        run: |          
+        run: |
           # Configure and build the project
           cmake -B build_artifacts \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -647,11 +643,8 @@ jobs:
         run: swift test
 
         # Rust
-      - name: Test Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
   test_windows:
     name: Windows - ${{ matrix.os }}
@@ -734,9 +727,10 @@ jobs:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
+      # bash and curl are required by dtolnay/rust-toolchain
       - name: Install Git for checkout
         run: |
-          apk add --no-cache git openssh ca-certificates
+          apk add --no-cache git openssh ca-certificates bash curl
           git --version
       - name: Log Alpine and Git versions
         run: |
@@ -782,11 +776,8 @@ jobs:
         run: pytest scripts/test_stringzilla.py -s -x
 
         # Rust
-      - name: Test Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
   build_wheels:
     name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}

@@ -95,9 +95,33 @@ typedef union sz_string_t {
 
 } sz_string_t;
 
+/*
+ *  Verify structure layout for branchless length extraction.
+ *  On little-endian 64-bit: internal.length (8-bit) overlaps with LSB of external.length at offset 8.
+ *  On little-endian 32-bit: internal.length (8-bit) overlaps with LSB of external.length at offset 4.
+ *  On big-endian 64-bit: internal.length is at offset 31, external.length at offset 24.
+ *  On big-endian 32-bit: internal.length is at offset 15, external.length at offset 12.
+ */
 #if !SZ_AVOID_LIBC // `offsetof` comes from `stddef.h`, which is part of the C standard library.
 sz_static_assert(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
                  Alignment_confusion_between_internal_and_external_storage);
+#if !SZ_IS_BIG_ENDIAN_
+#if SZ_IS_64BIT_
+sz_static_assert(offsetof(sz_string_t, internal.length) == 8, Internal_length_offset_mismatch_on_little_endian_64);
+sz_static_assert(offsetof(sz_string_t, external.length) == 8, External_length_offset_mismatch_on_little_endian_64);
+#else
+sz_static_assert(offsetof(sz_string_t, internal.length) == 4, Internal_length_offset_mismatch_on_little_endian_32);
+sz_static_assert(offsetof(sz_string_t, external.length) == 4, External_length_offset_mismatch_on_little_endian_32);
+#endif
+#else // SZ_IS_BIG_ENDIAN_
+#if SZ_IS_64BIT_
+sz_static_assert(offsetof(sz_string_t, internal.length) == 31, Internal_length_offset_mismatch_on_big_endian_64);
+sz_static_assert(offsetof(sz_string_t, external.length) == 24, External_length_offset_mismatch_on_big_endian_64);
+#else
+sz_static_assert(offsetof(sz_string_t, internal.length) == 15, Internal_length_offset_mismatch_on_big_endian_32);
+sz_static_assert(offsetof(sz_string_t, external.length) == 12, External_length_offset_mismatch_on_big_endian_32);
+#endif
+#endif
 #endif
 
 #pragma endregion // Core Structure
@@ -137,6 +161,11 @@ SZ_PUBLIC void sz_string_unpack( //
  * @param length       Number of bytes in the string, before the SZ_NULL character.
  */
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
+
+/**
+ *  @brief  Returns the length of the string in a branchless manner.
+ */
+SZ_PUBLIC sz_size_t sz_string_length(sz_string_t const *string);
 
 /**
  *  @brief  Constructs a string of a given ::length with noisy contents.
@@ -180,9 +209,9 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
  *          Performs no allocations or deallocations and can't fail.
  *
  *  @param string       String to clean.
- *  @param offset       Offset of the first byte to remove.
+ *  @param offset       Offset of the first byte to remove. If >= length, no bytes are removed.
  *  @param length       Number of bytes to remove. Out-of-bound ranges will be capped.
- *  @return             Number of bytes removed.
+ *  @return             Number of bytes removed (0 if offset >= string length).
  */
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
@@ -214,25 +243,33 @@ SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
 
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
-    sz_size_t is_big_mask = is_small - 1ull;
+    sz_size_t is_big_mask = is_small - (sz_size_t)1;
     *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
-    // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = string->external.length & (0x00000000000000FFull | is_big_mask);
+    // If the string is small, use branch-less approach to mask-out the top bytes of the length.
+    *length = string->external.length & ((sz_size_t)0xFF | is_big_mask);
+}
+
+SZ_PUBLIC sz_size_t sz_string_length(sz_string_t const *string) {
+    sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
+    sz_size_t is_big_mask = is_small - (sz_size_t)1;
+    return string->external.length & ((sz_size_t)0xFF | is_big_mask);
 }
 
 SZ_PUBLIC void sz_string_unpack( //
     sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external) {
     sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
-    sz_size_t is_big_mask = is_small - 1ull;
+    sz_size_t is_big_mask = is_small - (sz_size_t)1;
     *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
-    // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = string->external.length & (0x00000000000000FFull | is_big_mask);
-    // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
+    // If the string is small, use branch-less approach to mask-out the top bytes of the length.
+    *length = string->external.length & ((sz_size_t)0xFF | is_big_mask);
+    // In case the string is small, the `is_small - (sz_size_t)1` will become all-ones mask.
     *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 
 SZ_PUBLIC sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
+    // Fast path for self-comparison
+    if (a == b) return sz_true_k;
     // Tempting to say that the external.length is bitwise the same even if it includes
     // some bytes of the on-stack payload, but we don't at this writing maintain that invariant.
     // (An on-stack string includes noise bytes in the high-order bits of external.length. So do this
@@ -371,6 +408,9 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
     // The user intended to extend the string.
     offset = sz_min_of_two(offset, string_length);
 
+    // Guard against integer overflow in size calculation.
+    if (added_length > SZ_SSIZE_MAX - string_length - 1) return SZ_NULL_CHAR;
+
     // If we are lucky, no memory allocations will be needed.
     if (string_length + added_length < string_space) {
         sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
@@ -380,7 +420,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
     }
     // If we are not lucky, we need to allocate more memory.
     else {
-        sz_size_t next_planned_size = sz_max_of_two(SZ_CACHE_LINE_WIDTH, string_space * 2ull);
+        sz_size_t next_planned_size = sz_max_of_two(SZ_CACHE_LINE_WIDTH, string_space * (sz_size_t)2);
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         string_start = sz_string_reserve(string, new_space - 1, allocator);

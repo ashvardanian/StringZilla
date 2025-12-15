@@ -9,7 +9,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_TOKENS=file` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
+ *  - `STRINGWARS_TOKENS=line` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams.
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
@@ -25,12 +25,13 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_unicode_cpp20
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=file build_release/stringzilla_bench_unicode_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=line build_release/stringzilla_bench_unicode_cpp20
  *  @endcode
  *
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
+#include <cstring>
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -80,6 +81,67 @@ void bench_utf8_case_fold(environment_t const &env) {
 
 #pragma endregion
 
+#pragma region Case-Insensitive Find Functions
+
+/** @brief Wraps a hardware-specific UTF-8 case-insensitive find backend. */
+template <sz_utf8_case_insensitive_find_t func_>
+struct utf8_case_insensitive_find_from_sz {
+
+    environment_t const &env;
+
+    utf8_case_insensitive_find_from_sz(environment_t const &env_) : env(env_) {}
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        std::string_view haystack = env.dataset;
+        std::string_view needle = env.tokens[token_index];
+        return operator()(haystack, needle);
+    }
+
+    inline call_result_t operator()(std::string_view haystack, std::string_view needle) const noexcept {
+        sz_size_t matched_length = 0;
+        std::size_t count_matches = 0;
+        sz_cptr_t h = haystack.data();
+        sz_size_t h_len = haystack.size();
+        sz_utf8_case_insensitive_needle_metadata_t metadata;
+        std::memset(&metadata, 0, sizeof(metadata));
+
+        // Count all case-insensitive matches
+        while (h_len >= needle.size()) {
+            sz_cptr_t match = func_(h, h_len, needle.data(), needle.size(), &metadata, &matched_length);
+            if (!match) break;
+            ++count_matches;
+            // Move past the match
+            std::size_t offset = (match - h) + (matched_length ? matched_length : 1);
+            h += offset;
+            h_len -= offset;
+        }
+
+        do_not_optimize(count_matches);
+        // Operations = haystack_bytes * needle_bytes (worst case comparisons)
+        std::size_t count_operations = haystack.size() * needle.size();
+        return {haystack.size(), static_cast<check_value_t>(count_matches), count_operations};
+    }
+};
+
+void bench_utf8_case_insensitive_find(environment_t const &env) {
+
+    auto validator = utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_case_insensitive_find_serial", validator).log();
+
+#if SZ_USE_ICE
+    bench_unary(env, "sz_utf8_case_insensitive_find_ice", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_ice> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_case_insensitive_find_neon", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_neon> {env})
+        .log(base);
+#endif
+}
+
+#pragma endregion
+
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla Unicode Benchmarks!\n");
 
@@ -87,12 +149,13 @@ int main(int argc, char const **argv) {
     environment_t env = build_environment( //
         argc, argv,                        //
         "xlsum.csv",                       // Default to xlsum for multilingual testing
-        environment_t::tokenization_t::file_k);
+        environment_t::tokenization_t::lines_k);
 
     std::printf("Starting Unicode benchmarks...\n");
 
     // Unicode operations
     bench_utf8_case_fold(env);
+    bench_utf8_case_insensitive_find(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;
