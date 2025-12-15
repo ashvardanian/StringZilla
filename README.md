@@ -578,6 +578,15 @@ import stringzilla as sz
 sz.utf8_case_insensitive_find('Der große Hund', 'GROSSE')   # 4 — finds "große" at codepoint 4
 sz.utf8_case_insensitive_find('Straße', 'STRASSE')          # 0 — ß matches "SS"
 sz.utf8_case_insensitive_find('eﬃcient', 'EFFICIENT')       # 0 — ﬃ ligature matches "FFI"
+
+# Iterator for finding ALL matches
+haystack = 'Straße STRASSE strasse'
+for match in sz.utf8_case_insensitive_find_iter(haystack, 'strasse'):
+    print(match, match.offset_within(haystack))  # Yields: 'Straße', 'STRASSE', 'strasse'
+
+# With overlapping matches
+list(sz.utf8_case_insensitive_find_iter('aaaa', 'aa'))  # ['aa', 'aa'] — 2 non-overlapping
+list(sz.utf8_case_insensitive_find_iter('aaaa', 'aa', include_overlapping=True))  # 3 matches
 ```
 
 ### Collection-Level Operations

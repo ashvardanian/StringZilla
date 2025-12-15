@@ -428,7 +428,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
     sz_dispatch_table.sha256_state_update(state, data, length);
 }
 
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t *digest) {
+SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
     sz_dispatch_table.sha256_state_digest(state, digest);
 }
 
@@ -452,7 +452,7 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_dispatch_table.fill(target, length, value);
 }
 
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
+SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
     sz_dispatch_table.lookup(target, length, source, lut);
 }
 

@@ -113,6 +113,7 @@ static PyTypeObject SplitIteratorType;
 static PyTypeObject Utf8SplitLinesIteratorType;
 static PyTypeObject Utf8SplitWhitespaceIteratorType;
 static PyTypeObject Utf8WordBoundaryIteratorType;
+static PyTypeObject Utf8CaseInsensitiveFindIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -251,6 +252,29 @@ typedef struct {
     sz_bool_t skip_empty;
 
 } Utf8WordBoundaryIterator;
+
+/**
+ *  @brief  Iterator that yields all case-insensitive matches of a needle in a haystack.
+ *          Uses `sz_utf8_case_insensitive_find` for Unicode-aware case folding.
+ */
+typedef struct {
+    PyObject ob_base;
+
+    PyObject *haystack_obj; //< Reference for garbage collection
+    PyObject *needle_obj;   //< Reference for garbage collection (needle bytes must remain valid)
+
+    sz_cptr_t current;      //< Current search position in haystack
+    sz_cptr_t haystack_end; //< End boundary of haystack
+
+    sz_string_view_t needle; //< Needle view (bytes and length)
+
+    /// @brief  Reusable metadata for repeated searches with the same needle.
+    sz_utf8_case_insensitive_needle_metadata_t metadata;
+
+    /// @brief  Whether to allow overlapping matches.
+    sz_bool_t include_overlapping;
+
+} Utf8CaseInsensitiveFindIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -4727,6 +4751,112 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
+static char const doc_utf8_case_insensitive_find_iter[] = //
+    "utf8_case_insensitive_find_iter(haystack, needle, /, include_overlapping=False)\n"
+    "\n"
+    "Iterate over all case-insensitive matches of needle in haystack.\n"
+    "\n"
+    "This function uses Unicode case folding for proper handling of\n"
+    "international text. The matched region length may differ from the\n"
+    "needle length due to case folding expansions (e.g., 'ß' matches 'SS').\n"
+    "\n"
+    "Args:\n"
+    "    haystack (Str or str or bytes): The string to search in.\n"
+    "    needle (Str or str or bytes): The pattern to find.\n"
+    "    include_overlapping (bool, optional): Allow overlapping matches (default False).\n"
+    "\n"
+    "Yields:\n"
+    "    Str: Each matched region as a view into the original haystack.\n"
+    "\n"
+    "Examples:\n"
+    "    >>> list(sz.utf8_case_insensitive_find_iter('Hello HELLO hello', 'hello'))\n"
+    "    [Str('Hello'), Str('HELLO'), Str('hello')]\n"
+    "    >>> list(sz.utf8_case_insensitive_find_iter('Straße STRASSE', 'strasse'))\n"
+    "    [Str('Straße'), Str('STRASSE')]";
+
+static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObject *const *args,
+                                                          Py_ssize_t positional_args_count, PyObject *kwnames) {
+    // Check if called as member or module function
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int min_args = is_member ? 1 : 2;
+    int max_args = is_member ? 2 : 3;
+
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError,
+                     "utf8_case_insensitive_find_iter() requires %d to %d positional arguments, got %zd", min_args,
+                     max_args, positional_args_count);
+        return NULL;
+    }
+
+    PyObject *haystack_obj = is_member ? self : args[0];
+    PyObject *needle_obj = is_member ? args[0] : args[1];
+    int include_overlapping = 0;
+
+    // Parse keyword arguments
+    if (kwnames) {
+        Py_ssize_t n_kwnames = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < n_kwnames; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "include_overlapping") == 0) {
+                include_overlapping = PyObject_IsTrue(value);
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find_iter() got unexpected keyword argument '%U'",
+                             key);
+                return NULL;
+            }
+        }
+    }
+
+    // Check positional include_overlapping argument
+    if (positional_args_count > max_args - 1) include_overlapping = PyObject_IsTrue(args[is_member ? 1 : 2]);
+
+    // Extract haystack and needle views
+    sz_string_view_t haystack_view, needle_view;
+    if (!sz_py_export_string_like(haystack_obj, &haystack_view.start, &haystack_view.length) ||
+        !sz_py_export_string_like(needle_obj, &needle_view.start, &needle_view.length)) {
+        return NULL; // Exception already set by helper
+    }
+
+    // Handle edge case: empty needle yields nothing
+    if (needle_view.length == 0) {
+        // Return an empty iterator by setting current = end
+        Utf8CaseInsensitiveFindIterator *iter =
+            PyObject_New(Utf8CaseInsensitiveFindIterator, &Utf8CaseInsensitiveFindIteratorType);
+        if (!iter) return PyErr_NoMemory();
+
+        iter->haystack_obj = haystack_obj;
+        Py_INCREF(haystack_obj);
+        iter->needle_obj = needle_obj;
+        Py_INCREF(needle_obj);
+        iter->current = haystack_view.start + haystack_view.length; // Start at end = empty iterator
+        iter->haystack_end = haystack_view.start + haystack_view.length;
+        iter->needle = needle_view;
+        memset(&iter->metadata, 0, sizeof(iter->metadata));
+        iter->include_overlapping = sz_false_k;
+
+        return (PyObject *)iter;
+    }
+
+    // Allocate iterator
+    Utf8CaseInsensitiveFindIterator *iter =
+        PyObject_New(Utf8CaseInsensitiveFindIterator, &Utf8CaseInsensitiveFindIteratorType);
+    if (!iter) return PyErr_NoMemory();
+
+    iter->haystack_obj = haystack_obj;
+    Py_INCREF(haystack_obj);
+    iter->needle_obj = needle_obj;
+    Py_INCREF(needle_obj);
+    iter->current = haystack_view.start;
+    iter->haystack_end = haystack_view.start + haystack_view.length;
+    iter->needle = needle_view;
+    memset(&iter->metadata, 0, sizeof(iter->metadata));
+    iter->include_overlapping = include_overlapping ? sz_true_k : sz_false_k;
+
+    return (PyObject *)iter;
+}
+
 static char const doc_splitlines[] = //
     "Split a string by line breaks.\n"
     "\n"
@@ -5193,6 +5323,8 @@ static PyMethodDef Str_methods[] = {
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find_iter},
     {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_order},
 
@@ -5661,6 +5793,82 @@ static PyTypeObject Utf8WordBoundaryIteratorType = {
     .tp_iter = Utf8WordBoundaryIteratorType_iter,
     .tp_iternext = (iternextfunc)Utf8WordBoundaryIteratorType_next,
 };
+#pragma endregion
+
+#pragma region UTF8 Case Insensitive Find Iterator
+
+static PyObject *Utf8CaseInsensitiveFindIteratorType_next(Utf8CaseInsensitiveFindIterator *self) {
+    // Check if we've reached the end
+    sz_size_t remaining = (sz_size_t)(self->haystack_end - self->current);
+    if (remaining == 0) return NULL;
+
+    // Search for next match
+    sz_size_t matched_length = 0;
+    sz_cptr_t match = sz_utf8_case_insensitive_find(self->current, remaining, self->needle.start, self->needle.length,
+                                                    &self->metadata, &matched_length);
+
+    if (!match) return NULL;
+
+    // Create a new `Str` object for the matched region
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->memory.start = match;
+    result_obj->memory.length = matched_length;
+    result_obj->parent = self->haystack_obj;
+    Py_INCREF(self->haystack_obj);
+
+    // Advance position for next search
+    if (self->include_overlapping) {
+        // Move forward by one UTF-8 codepoint to allow overlapping matches
+        sz_size_t pos = 0;
+        sz_utf8_decode_(match, matched_length, &pos);
+        self->current = match + (pos > 0 ? pos : 1);
+    }
+    else {
+        // Move past the entire matched region (non-overlapping)
+        self->current = match + matched_length;
+    }
+
+    return (PyObject *)result_obj;
+}
+
+static void Utf8CaseInsensitiveFindIteratorType_dealloc(Utf8CaseInsensitiveFindIterator *self) {
+    Py_XDECREF(self->haystack_obj);
+    Py_XDECREF(self->needle_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8CaseInsensitiveFindIteratorType_iter(PyObject *self) {
+    Py_INCREF(self);
+    return self;
+}
+
+static char const doc_Utf8CaseInsensitiveFindIterator[] = //
+    "Utf8CaseInsensitiveFindIterator(haystack, needle, ...)\n"
+    "\n"
+    "Iterator yielding all case-insensitive matches of needle in haystack.\n"
+    "Uses Unicode case folding for proper handling of international text.\n"
+    "\n"
+    "Created by:\n"
+    "  - Str.utf8_case_insensitive_find_iter()\n"
+    "  - sz.utf8_case_insensitive_find_iter()\n"
+    "\n"
+    "Each iteration yields a Str view of the matched region in the haystack.\n"
+    "The matched length may differ from needle length due to case folding\n"
+    "expansions (e.g., German 'ß' matches 'SS').";
+
+static PyTypeObject Utf8CaseInsensitiveFindIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8CaseInsensitiveFindIterator",
+    .tp_basicsize = sizeof(Utf8CaseInsensitiveFindIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8CaseInsensitiveFindIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8CaseInsensitiveFindIterator,
+    .tp_iter = Utf8CaseInsensitiveFindIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8CaseInsensitiveFindIteratorType_next,
+};
+
 #pragma endregion
 
 #pragma region Hasher
@@ -7624,6 +7832,8 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
+    {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,
+     doc_utf8_case_insensitive_find_iter},
     {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_order},
 
@@ -7670,6 +7880,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8WordBoundaryIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8CaseInsensitiveFindIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 

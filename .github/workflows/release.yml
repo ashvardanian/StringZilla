@@ -545,6 +545,12 @@ jobs:
     name: Publish JavaScript
     needs: versioning
     runs-on: ubuntu-24.04
+    environment:
+      name: npm-stringzilla
+      url: https://www.npmjs.com/package/stringzilla
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -556,16 +562,15 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 20
+          registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
-        run: npm install
-      - name: Clean install dependencies
-        run: npm install
+        run: npm ci
       - name: Run tests
         run: npm test
       - name: Publish to NPM
-        uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create_linux_deb_package:
     name: Create Debian Package for ${{ matrix.arch }}
@@ -666,7 +671,7 @@ jobs:
           persist-credentials: false
           ref: "main"
           submodules: recursive
-        
+
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.arch }}
