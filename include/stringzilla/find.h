@@ -1133,16 +1133,32 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
     sz_u256_vec_t filter_even_vec, filter_odd_vec;
-    for (sz_size_t i = 0; i != 16; ++i)
-        filter_even_vec.u8s[i] = filter->_u8s[i * 2], filter_odd_vec.u8s[i] = filter->_u8s[i * 2 + 1];
-    filter_even_vec.xmms[1] = filter_even_vec.xmms[0];
-    filter_odd_vec.xmms[1] = filter_odd_vec.xmms[0];
+    sz_u128_vec_t filter_mask;
+    sz_u128_vec_t filter_lo, filter_hi;
+    sz_u128_vec_t filter_lo_even, filter_hi_even;
+    sz_u128_vec_t filter_lo_odd, filter_hi_odd;
+    sz_u128_vec_t filter_even, filter_odd;
 
     sz_u256_vec_t text_vec;
     sz_u256_vec_t matches_vec;
     sz_u256_vec_t lower_nibbles_vec, higher_nibbles_vec;
     sz_u256_vec_t bitset_even_vec, bitset_odd_vec;
     sz_u256_vec_t bitmask_vec, bitmask_lookup_vec;
+
+    filter_mask.xmm = _mm_set1_epi16(0x00ff);
+
+    filter_lo.xmm = _mm_lddqu_si128((__m128i const *)(filter));
+    filter_hi.xmm = _mm_lddqu_si128((__m128i const *)(filter) + 1);
+    filter_lo_even.xmm = _mm_and_si128(filter_lo.xmm, filter_mask.xmm);
+    filter_hi_even.xmm = _mm_and_si128(filter_hi.xmm, filter_mask.xmm);
+    filter_lo_odd.xmm = _mm_srli_epi16(filter_lo.xmm, 8);
+    filter_hi_odd.xmm = _mm_srli_epi16(filter_hi.xmm, 8);
+
+    filter_even.xmm = _mm_packus_epi16(filter_lo_even.xmm, filter_hi_even.xmm);
+    filter_odd.xmm = _mm_packus_epi16(filter_lo_odd.xmm, filter_hi_odd.xmm);
+    filter_even_vec.ymm = _mm256_set_m128i(filter_even.xmm, filter_even.xmm);
+    filter_odd_vec.ymm = _mm256_set_m128i(filter_odd.xmm, filter_odd.xmm);
+
     bitmask_lookup_vec.ymm = _mm256_set_epi8(                       //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
