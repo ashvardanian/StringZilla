@@ -4812,46 +4812,11 @@ static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObje
     // Check positional include_overlapping argument
     if (positional_args_count > max_args - 1) include_overlapping = PyObject_IsTrue(args[is_member ? 1 : 2]);
 
-    // Extract haystack view
-    sz_string_view_t haystack_view;
-    if (PyObject_TypeCheck(haystack_obj, &StrType)) {
-        Str *str_obj = (Str *)haystack_obj;
-        haystack_view = str_obj->memory;
-    }
-    else if (PyUnicode_Check(haystack_obj)) {
-        Py_ssize_t signed_length;
-        haystack_view.start = PyUnicode_AsUTF8AndSize(haystack_obj, &signed_length);
-        if (!haystack_view.start) return NULL;
-        haystack_view.length = (sz_size_t)signed_length;
-    }
-    else if (PyBytes_Check(haystack_obj)) {
-        haystack_view.start = PyBytes_AS_STRING(haystack_obj);
-        haystack_view.length = (sz_size_t)PyBytes_GET_SIZE(haystack_obj);
-    }
-    else {
-        PyErr_SetString(PyExc_TypeError, "haystack must be Str, str, or bytes");
-        return NULL;
-    }
-
-    // Extract needle view
-    sz_string_view_t needle_view;
-    if (PyObject_TypeCheck(needle_obj, &StrType)) {
-        Str *str_obj = (Str *)needle_obj;
-        needle_view = str_obj->memory;
-    }
-    else if (PyUnicode_Check(needle_obj)) {
-        Py_ssize_t signed_length;
-        needle_view.start = PyUnicode_AsUTF8AndSize(needle_obj, &signed_length);
-        if (!needle_view.start) return NULL;
-        needle_view.length = (sz_size_t)signed_length;
-    }
-    else if (PyBytes_Check(needle_obj)) {
-        needle_view.start = PyBytes_AS_STRING(needle_obj);
-        needle_view.length = (sz_size_t)PyBytes_GET_SIZE(needle_obj);
-    }
-    else {
-        PyErr_SetString(PyExc_TypeError, "needle must be Str, str, or bytes");
-        return NULL;
+    // Extract haystack and needle views
+    sz_string_view_t haystack_view, needle_view;
+    if (!sz_py_export_string_like(haystack_obj, &haystack_view.start, &haystack_view.length) ||
+        !sz_py_export_string_like(needle_obj, &needle_view.start, &needle_view.length)) {
+        return NULL; // Exception already set by helper
     }
 
     // Handle edge case: empty needle yields nothing
