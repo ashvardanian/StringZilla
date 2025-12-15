@@ -18,28 +18,28 @@
  *  differences between different ISA versions. Most of them are designed to be practical in common
  *  use cases, targeting the most common languages on the Internet.
  *
- *   Rank  Language    Script      UTF-8 Bytes  Has Case?  Case Folding Notes
- *  ------------------------------------------------------------------------------------------
- *   1     English     Latin       1            Yes        Simple +32 offset (A-Z)
- *   2     Russian     Cyrillic    2            Yes        Simple +32 offset (А-Я)
- *   3     Spanish     Latin       1-2          Yes        Mostly ASCII, few 2-byte (ñ, á, é)
- *   4     German      Latin       1-2          Yes        ASCII + ß→ss expansion, ä/ö/ü
- *   5     French      Latin       1-2          Yes        Mostly ASCII, accents (é, è, ç)
- *   6     Japanese    CJK + Kana  3            No*        No case, but has fullwidth A-Z in addresses
- *   7     Portuguese  Latin       1-2          Yes        Like Spanish
- *   8     Chinese     CJK         3            No         No case folding
- *   9     Italian     Latin       1-2          Yes        Like Spanish
- *   10    Polish      Latin       1-2          Yes        ASCII + ą, ę, ł, ż, etc.
- *   11    Turkish     Latin       1-2          Yes        İ/ı special handling, that we don't do
- *   12    Dutch       Latin       1            Yes        Almost pure ASCII
- *   13    Persian     Arabic      2            No         RTL, no case
- *   14    Vietnamese  Latin       2-3          Yes        Heavy diacritics (ă, ơ, ư), odd/even
- *   15    Korean      Hangul      3            No         No case folding
- *   16    Arabic      Arabic      2            No         RTL, no case
- *   17    Indonesian  Latin       1            Yes        Pure ASCII
- *   18    Greek       Greek       2            Yes        +32 offset, σ/ς handling
- *   19    Ukrainian   Cyrillic    2            Yes        Like Russian
- *   20    Czech       Latin       1-2          Yes        ASCII + ě, š, č, ř, ž
+ *  Rank  Language     Script        UTF-8 Bytes  Has Case?  Case Folding Notes
+ *  -------------------------------------------------------------------------------------------
+ *  1     English      Latin         1            Yes        Simple +32 offset (A-Z)
+ *  2     Russian      Cyrillic      2            Yes        Simple +32 offset (А-Я)
+ *  3     Spanish      Latin         1-2          Yes        Mostly ASCII, few 2-byte (ñ, á, é)
+ *  4     German       Latin         1-2          Yes        Includes 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+ *  5     French       Latin         1-2          Yes        Mostly ASCII, accents (é, è, ç)
+ *  6     Japanese     CJK + Kana    3            No*        No case, but has fullwidth A-Z in addresses
+ *  7     Portuguese   Latin         1-2          Yes        Similar to Spanish
+ *  8     Chinese      CJK           3            No         No case folding
+ *  9     Italian      Latin         1-2          Yes        Similar to Spanish
+ *  10    Polish       Latin         1-2          Yes        ASCII + ą, ę, ł, ż, etc.
+ *  11    Turkish      Latin         1-2          Yes        Locale-specific İ/ı intentionally not applied
+ *  12    Dutch        Latin         1            Yes        Almost pure ASCII
+ *  13    Persian      Arabic        2            No         RTL, no case
+ *  14    Vietnamese   Latin         2-3          Yes        Heavy diacritics (ă, ơ, ư), odd/even
+ *  15    Korean       Hangul        3            No         No case folding
+ *  16    Arabic       Arabic        2            No         RTL, no case
+ *  17    Indonesian   Latin         1            Yes        Pure ASCII
+ *  18    Greek        Greek         2            Yes        +32 offset, σ/ς handling
+ *  19    Ukrainian    Cyrillic      2            Yes        Similar to Russian
+ *  20    Czech        Latin         1-2          Yes        ASCII + ě, š, č, ř, ž
  *
  *  This doesn't, however, cover many other relevant subranges of Unicode.
  */
@@ -104,7 +104,7 @@ typedef struct sz_utf8_case_insensitive_needle_metadata_t {
  *  for worst-case expansion. The maximum expansion ratio is 3:1 (3x), which occurs with Greek
  *  characters that expand to three codepoints under case folding.
  *
- *  Worst-case example: U+0390 (2 bytes: CE 90) expands to U+03B9 + U+0308 + U+0301 (6 bytes total).
+ *  Worst-case example: 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81) (2 bytes → 6 bytes).
  *  A string of N such characters would expand from 2N to 6N bytes (3x expansion).
  *
  *  @param[in] source UTF-8 string to be case-folded.
@@ -155,13 +155,13 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *  - Greek uppercase Α–Ω (U+0391–U+03A9) are folded to α–ω (U+03B1–U+03C9) via a +32 offset.
  *    Both Σ (U+03A3) and ς (U+03C2, final sigma) fold to σ (U+03C3) for consistent matching.
  *  - Latin Extended characters include numerous one-to-one folds and several one-to-many expansions, including:
- *      ß  (U+00DF) → "ss"  (U+0073 U+0073)
- *      ẞ  (U+1E9E) → "ss"
+ *      'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+ *      'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
  *    as well as mixed-case digraphs and trigraphs normalized to lowercase sequences.
  *  - Turkic dotted/dotless-I characters are handled per Unicode Case Folding (not locale-specific):
- *      İ (U+0130)  → "i̇"   (U+0069 U+0307) — Full case folding with combining dot
- *      I (U+0049)  →  i    (U+0069)        — Standard folding (not Turkic I→ı)
- *      ı (U+0131)  →  ı    (already lowercase, unchanged)
+ *      'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87) — Full case folding with combining dot
+ *      'I' (U+0049, 49) → 'i' (U+0069, 69) — Standard folding (not Turkic 'I' (U+0049, 49) → 'ı' (U+0131, C4 B1))
+ *      'ı' (U+0131, C4 B1) → 'ı' (U+0131, C4 B1) — Already lowercase, unchanged
  *  - Lithuanian accented I/J characters with combining dots are processed as multi-codepoint expansions
  *    per CaseFolding.txt.
  *  - Additional bicameral scripts—Cherokee, Deseret, Osage, Warang Citi, Adlam—use their normative
@@ -173,7 +173,8 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
  *  @section utf8_case_insensitive_find_algo Algorithmic Considerations
  *
  *  Case-insensitive search with full Unicode case folding is fundamentally harder than byte-level search
- *  because one-to-many expansions (e.g., U+00DF -> "ss") break core assumptions of fast string algorithms:
+ *  because one-to-many expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) break core
+ *  assumptions of fast string algorithms:
  *
  *  - Boyer-Moore/Horspool skip tables assume 1:1 character mapping
  *  - Two-Way critical factorization assumes fixed pattern length
@@ -217,7 +218,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
  *
  *  Compares strings using Unicode case folding rules, producing consistent ordering regardless of
  *  letter case. Implements the same full Unicode Case Folding as `sz_utf8_case_fold`, including
- *  all one-to-many expansions (e.g., ß → ss) and bicameral script mappings.
+ *  all one-to-many expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) and bicameral script mappings.
  *
  *  Unlike simple byte comparison, this function correctly handles multi-byte UTF-8 sequences
  *  and expansion characters. Comparison is performed codepoint-by-codepoint after folding,
@@ -237,7 +238,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
  *      // result == sz_equal_k
  *
  *      result = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7);
- *      // result == sz_equal_k (ß folds to ss)
+ *      // result == sz_equal_k ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73))
  *  @endcode
  */
 SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
@@ -251,11 +252,11 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *  2. **Not bicameral**: It does not belong to any script with case distinctions
  *  3. **Not expansion target**: It does NOT appear in any multi-rune case fold expansion
  *
- *  The third condition is subtle but critical. Consider ʾ (U+02BE MODIFIER LETTER):
+ *  The third condition is subtle but critical. Consider 'ʾ' (U+02BE, CA BE):
  *  - It has no case variant and folds to itself
- *  - However, ẚ (U+1E9A) folds to "aʾ" (two runes: U+0061 U+02BE)
- *  - A needle "ʾ" must match at position 1 of the folded expansion of ẚ
- *  - Binary search cannot handle this, so ʾ must NOT be case-agnostic
+ *  - However, 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+ *  - A needle containing 'ʾ' must match at position 1 of the folded expansion of 'ẚ'
+ *  - Binary search cannot handle this, so 'ʾ' must NOT be case-agnostic
  *
  *  Case-agnostic scripts include: CJK ideographs, Hangul, digits, punctuation, most symbols,
  *  Hebrew, Arabic, Thai, Hindi (Devanagari), and many other scripts without case distinctions.
@@ -406,7 +407,8 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         if ((sz_u32_t)(rune - 0x00C0) <= 0x3E) {
             sz_assert_(sz_is_in_range_(rune, 0x00C0, 0x00FE));
             if ((rune | 0x20) == 0xF7) { folded[0] = rune; return 1; } // × (D7) and ÷ (F7) unchanged
-            if (rune == 0x00DF) { folded[0] = 0x0073; folded[1] = 0x0073; return 2; } // ß → ss
+            // 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+            if (rune == 0x00DF) { folded[0] = 0x0073; folded[1] = 0x0073; return 2; }
             folded[0] = rune + ((rune <= 0x00DE) * 0x20); return 1; }
 
         // Greek Α-Ρ: 0x0391-0x03A1 → α-ρ (+32)
@@ -535,103 +537,110 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         // Next let's handle the 2-byte irregular one-to-one mappings
         switch (rune) {
         // Latin-1 Supplement specials
-        case 0x00B5: folded[0] = 0x03BC; return 1; // µ → μ (micro sign to Greek mu)
-        case 0x0178: folded[0] = 0x00FF; return 1; // Ÿ → ÿ
-        case 0x017F: folded[0] = 0x0073; return 1; // ſ → s (long s)
+        case 0x00B5: folded[0] = 0x03BC; return 1; // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
+        case 0x0178: folded[0] = 0x00FF; return 1; // 'Ÿ' (U+0178, C5 B8) → 'ÿ' (U+00FF, C3 BF)
+        case 0x017F: folded[0] = 0x0073; return 1; // 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
         // Latin Extended-B: African/IPA letters (0x0181-0x01BF)
-        case 0x0181: folded[0] = 0x0253; return 1; // Ɓ → ɓ
-        case 0x0182: folded[0] = 0x0183; return 1; // Ƃ → ƃ
-        case 0x0184: folded[0] = 0x0185; return 1; // Ƅ → ƅ
-        case 0x0186: folded[0] = 0x0254; return 1; // Ɔ → ɔ
-        case 0x0187: folded[0] = 0x0188; return 1; // Ƈ → ƈ
-        case 0x0189: folded[0] = 0x0256; return 1; // Ɖ → ɖ
-        case 0x018A: folded[0] = 0x0257; return 1; // Ɗ → ɗ
-        case 0x018B: folded[0] = 0x018C; return 1; // Ƌ → ƌ
-        case 0x018E: folded[0] = 0x01DD; return 1; // Ǝ → ǝ
-        case 0x018F: folded[0] = 0x0259; return 1; // Ə → ə (schwa)
-        case 0x0190: folded[0] = 0x025B; return 1; // Ɛ → ɛ
-        case 0x0191: folded[0] = 0x0192; return 1; // Ƒ → ƒ
-        case 0x0193: folded[0] = 0x0260; return 1; // Ɠ → ɠ
-        case 0x0194: folded[0] = 0x0263; return 1; // Ɣ → ɣ
-        case 0x0196: folded[0] = 0x0269; return 1; // Ɩ → ɩ
-        case 0x0197: folded[0] = 0x0268; return 1; // Ɨ → ɨ
-        case 0x0198: folded[0] = 0x0199; return 1; // Ƙ → ƙ
-        case 0x019C: folded[0] = 0x026F; return 1; // Ɯ → ɯ
-        case 0x019D: folded[0] = 0x0272; return 1; // Ɲ → ɲ
-        case 0x019F: folded[0] = 0x0275; return 1; // Ɵ → ɵ
-        case 0x01A0: folded[0] = 0x01A1; return 1; // Ơ → ơ (Vietnamese)
-        case 0x01A2: folded[0] = 0x01A3; return 1; // Ƣ → ƣ
-        case 0x01A4: folded[0] = 0x01A5; return 1; // Ƥ → ƥ
-        case 0x01A6: folded[0] = 0x0280; return 1; // Ʀ → ʀ
-        case 0x01A7: folded[0] = 0x01A8; return 1; // Ƨ → ƨ
-        case 0x01A9: folded[0] = 0x0283; return 1; // Ʃ → ʃ
-        case 0x01AC: folded[0] = 0x01AD; return 1; // Ƭ → ƭ
-        case 0x01AE: folded[0] = 0x0288; return 1; // Ʈ → ʈ
-        case 0x01AF: folded[0] = 0x01B0; return 1; // Ư → ư (Vietnamese)
-        case 0x01B1: folded[0] = 0x028A; return 1; // Ʊ → ʊ
-        case 0x01B2: folded[0] = 0x028B; return 1; // Ʋ → ʋ
-        case 0x01B3: folded[0] = 0x01B4; return 1; // Ƴ → ƴ
-        case 0x01B5: folded[0] = 0x01B6; return 1; // Ƶ → ƶ
-        case 0x01B7: folded[0] = 0x0292; return 1; // Ʒ → ʒ
-        case 0x01B8: folded[0] = 0x01B9; return 1; // Ƹ → ƹ
-        case 0x01BC: folded[0] = 0x01BD; return 1; // Ƽ → ƽ
+        case 0x0181: folded[0] = 0x0253; return 1; // 'Ɓ' (U+0181, C6 81) → 'ɓ' (U+0253, C9 93)
+        case 0x0182: folded[0] = 0x0183; return 1; // 'Ƃ' (U+0182, C6 82) → 'ƃ' (U+0183, C6 83)
+        case 0x0184: folded[0] = 0x0185; return 1; // 'Ƅ' (U+0184, C6 84) → 'ƅ' (U+0185, C6 85)
+        case 0x0186: folded[0] = 0x0254; return 1; // 'Ɔ' (U+0186, C6 86) → 'ɔ' (U+0254, C9 94)
+        case 0x0187: folded[0] = 0x0188; return 1; // 'Ƈ' (U+0187, C6 87) → 'ƈ' (U+0188, C6 88)
+        case 0x0189: folded[0] = 0x0256; return 1; // 'Ɖ' (U+0189, C6 89) → 'ɖ' (U+0256, C9 96)
+        case 0x018A: folded[0] = 0x0257; return 1; // 'Ɗ' (U+018A, C6 8A) → 'ɗ' (U+0257, C9 97)
+        case 0x018B: folded[0] = 0x018C; return 1; // 'Ƌ' (U+018B, C6 8B) → 'ƌ' (U+018C, C6 8C)
+        case 0x018E: folded[0] = 0x01DD; return 1; // 'Ǝ' (U+018E, C6 8E) → 'ǝ' (U+01DD, C7 9D)
+        case 0x018F: folded[0] = 0x0259; return 1; // 'Ə' (U+018F, C6 8F) → 'ə' (U+0259, C9 99)
+        case 0x0190: folded[0] = 0x025B; return 1; // 'Ɛ' (U+0190, C6 90) → 'ɛ' (U+025B, C9 9B)
+        case 0x0191: folded[0] = 0x0192; return 1; // 'Ƒ' (U+0191, C6 91) → 'ƒ' (U+0192, C6 92)
+        case 0x0193: folded[0] = 0x0260; return 1; // 'Ɠ' (U+0193, C6 93) → 'ɠ' (U+0260, C9 A0)
+        case 0x0194: folded[0] = 0x0263; return 1; // 'Ɣ' (U+0194, C6 94) → 'ɣ' (U+0263, C9 A3)
+        case 0x0196: folded[0] = 0x0269; return 1; // 'Ɩ' (U+0196, C6 96) → 'ɩ' (U+0269, C9 A9)
+        case 0x0197: folded[0] = 0x0268; return 1; // 'Ɨ' (U+0197, C6 97) → 'ɨ' (U+0268, C9 A8)
+        case 0x0198: folded[0] = 0x0199; return 1; // 'Ƙ' (U+0198, C6 98) → 'ƙ' (U+0199, C6 99)
+        case 0x019C: folded[0] = 0x026F; return 1; // 'Ɯ' (U+019C, C6 9C) → 'ɯ' (U+026F, C9 AF)
+        case 0x019D: folded[0] = 0x0272; return 1; // 'Ɲ' (U+019D, C6 9D) → 'ɲ' (U+0272, C9 B2)
+        case 0x019F: folded[0] = 0x0275; return 1; // 'Ɵ' (U+019F, C6 9F) → 'ɵ' (U+0275, C9 B5)
+        case 0x01A0: folded[0] = 0x01A1; return 1; // 'Ơ' (U+01A0, C6 A0) → 'ơ' (U+01A1, C6 A1)
+        case 0x01A2: folded[0] = 0x01A3; return 1; // 'Ƣ' (U+01A2, C6 A2) → 'ƣ' (U+01A3, C6 A3)
+        case 0x01A4: folded[0] = 0x01A5; return 1; // 'Ƥ' (U+01A4, C6 A4) → 'ƥ' (U+01A5, C6 A5)
+        case 0x01A6: folded[0] = 0x0280; return 1; // 'Ʀ' (U+01A6, C6 A6) → 'ʀ' (U+0280, CA 80)
+        case 0x01A7: folded[0] = 0x01A8; return 1; // 'Ƨ' (U+01A7, C6 A7) → 'ƨ' (U+01A8, C6 A8)
+        case 0x01A9: folded[0] = 0x0283; return 1; // 'Ʃ' (U+01A9, C6 A9) → 'ʃ' (U+0283, CA 83)
+        case 0x01AC: folded[0] = 0x01AD; return 1; // 'Ƭ' (U+01AC, C6 AC) → 'ƭ' (U+01AD, C6 AD)
+        case 0x01AE: folded[0] = 0x0288; return 1; // 'Ʈ' (U+01AE, C6 AE) → 'ʈ' (U+0288, CA 88)
+        case 0x01AF: folded[0] = 0x01B0; return 1; // 'Ư' (U+01AF, C6 AF) → 'ư' (U+01B0, C6 B0)
+        case 0x01B1: folded[0] = 0x028A; return 1; // 'Ʊ' (U+01B1, C6 B1) → 'ʊ' (U+028A, CA 8A)
+        case 0x01B2: folded[0] = 0x028B; return 1; // 'Ʋ' (U+01B2, C6 B2) → 'ʋ' (U+028B, CA 8B)
+        case 0x01B3: folded[0] = 0x01B4; return 1; // 'Ƴ' (U+01B3, C6 B3) → 'ƴ' (U+01B4, C6 B4)
+        case 0x01B5: folded[0] = 0x01B6; return 1; // 'Ƶ' (U+01B5, C6 B5) → 'ƶ' (U+01B6, C6 B6)
+        case 0x01B7: folded[0] = 0x0292; return 1; // 'Ʒ' (U+01B7, C6 B7) → 'ʒ' (U+0292, CA 92)
+        case 0x01B8: folded[0] = 0x01B9; return 1; // 'Ƹ' (U+01B8, C6 B8) → 'ƹ' (U+01B9, C6 B9)
+        case 0x01BC: folded[0] = 0x01BD; return 1; // 'Ƽ' (U+01BC, C6 BC) → 'ƽ' (U+01BD, C6 BD)
         // Digraphs: Serbian/Croatian DŽ, LJ, NJ and DZ
-        case 0x01C4: folded[0] = 0x01C6; return 1; // Ǆ → ǆ
-        case 0x01C5: folded[0] = 0x01C6; return 1; // ǅ → ǆ (titlecase)
-        case 0x01C7: folded[0] = 0x01C9; return 1; // Ǉ → ǉ
-        case 0x01C8: folded[0] = 0x01C9; return 1; // ǈ → ǉ (titlecase)
-        case 0x01CA: folded[0] = 0x01CC; return 1; // Ǌ → ǌ
-        case 0x01CB: folded[0] = 0x01CC; return 1; // ǋ → ǌ (titlecase)
-        case 0x01F1: folded[0] = 0x01F3; return 1; // Ǳ → ǳ
-        case 0x01F2: folded[0] = 0x01F3; return 1; // ǲ → ǳ (titlecase)
+        case 0x01C4: folded[0] = 0x01C6; return 1; // 'Ǆ' (U+01C4, C7 84) → 'ǆ' (U+01C6, C7 86)
+        case 0x01C5: folded[0] = 0x01C6; return 1; // 'ǅ' (U+01C5, C7 85) → 'ǆ' (U+01C6, C7 86)
+        case 0x01C7: folded[0] = 0x01C9; return 1; // 'Ǉ' (U+01C7, C7 87) → 'ǉ' (U+01C9, C7 89)
+        case 0x01C8: folded[0] = 0x01C9; return 1; // 'ǈ' (U+01C8, C7 88) → 'ǉ' (U+01C9, C7 89)
+        case 0x01CA: folded[0] = 0x01CC; return 1; // 'Ǌ' (U+01CA, C7 8A) → 'ǌ' (U+01CC, C7 8C)
+        case 0x01CB: folded[0] = 0x01CC; return 1; // 'ǋ' (U+01CB, C7 8B) → 'ǌ' (U+01CC, C7 8C)
+        case 0x01F1: folded[0] = 0x01F3; return 1; // 'Ǳ' (U+01F1, C7 B1) → 'ǳ' (U+01F3, C7 B3)
+        case 0x01F2: folded[0] = 0x01F3; return 1; // 'ǲ' (U+01F2, C7 B2) → 'ǳ' (U+01F3, C7 B3)
         // Latin Extended-B: isolated irregulars
-        case 0x01F4: folded[0] = 0x01F5; return 1; // Ǵ → ǵ
-        case 0x01F6: folded[0] = 0x0195; return 1; // Ƕ → ƕ (hwair)
-        case 0x01F7: folded[0] = 0x01BF; return 1; // Ƿ → ƿ (wynn)
-        case 0x0220: folded[0] = 0x019E; return 1; // Ƞ → ƞ
-        case 0x023A: folded[0] = 0x2C65; return 1; // Ⱥ → ⱥ
-        case 0x023B: folded[0] = 0x023C; return 1; // Ȼ → ȼ
-        case 0x023D: folded[0] = 0x019A; return 1; // Ƚ → ƚ
-        case 0x023E: folded[0] = 0x2C66; return 1; // Ⱦ → ⱦ
-        case 0x0241: folded[0] = 0x0242; return 1; // Ɂ → ɂ
-        case 0x0243: folded[0] = 0x0180; return 1; // Ƀ → ƀ
-        case 0x0244: folded[0] = 0x0289; return 1; // Ʉ → ʉ
-        case 0x0245: folded[0] = 0x028C; return 1; // Ʌ → ʌ
+        case 0x01F4: folded[0] = 0x01F5; return 1; // 'Ǵ' (U+01F4, C7 B4) → 'ǵ' (U+01F5, C7 B5)
+        case 0x01F6: folded[0] = 0x0195; return 1; // 'Ƕ' (U+01F6, C7 B6) → 'ƕ' (U+0195, C6 95)
+        case 0x01F7: folded[0] = 0x01BF; return 1; // 'Ƿ' (U+01F7, C7 B7) → 'ƿ' (U+01BF, C6 BF)
+        case 0x0220: folded[0] = 0x019E; return 1; // 'Ƞ' (U+0220, C8 A0) → 'ƞ' (U+019E, C6 9E)
+        case 0x023A: folded[0] = 0x2C65; return 1; // 'Ⱥ' (U+023A, C8 BA) → 'ⱥ' (U+2C65, E2 B1 A5)
+        case 0x023B: folded[0] = 0x023C; return 1; // 'Ȼ' (U+023B, C8 BB) → 'ȼ' (U+023C, C8 BC)
+        case 0x023D: folded[0] = 0x019A; return 1; // 'Ƚ' (U+023D, C8 BD) → 'ƚ' (U+019A, C6 9A)
+        case 0x023E: folded[0] = 0x2C66; return 1; // 'Ⱦ' (U+023E, C8 BE) → 'ⱦ' (U+2C66, E2 B1 A6)
+        case 0x0241: folded[0] = 0x0242; return 1; // 'Ɂ' (U+0241, C9 81) → 'ɂ' (U+0242, C9 82)
+        case 0x0243: folded[0] = 0x0180; return 1; // 'Ƀ' (U+0243, C9 83) → 'ƀ' (U+0180, C6 80)
+        case 0x0244: folded[0] = 0x0289; return 1; // 'Ʉ' (U+0244, C9 84) → 'ʉ' (U+0289, CA 89)
+        case 0x0245: folded[0] = 0x028C; return 1; // 'Ʌ' (U+0245, C9 85) → 'ʌ' (U+028C, CA 8C)
         // Greek: combining iota, accented vowels, variant forms
-        case 0x0345: folded[0] = 0x03B9; return 1; // ͅ → ι (combining iota subscript)
-        case 0x0376: folded[0] = 0x0377; return 1; // Ͷ → ͷ
-        case 0x037F: folded[0] = 0x03F3; return 1; // Ϳ → ϳ
-        case 0x0386: folded[0] = 0x03AC; return 1; // Ά → ά
-        case 0x038C: folded[0] = 0x03CC; return 1; // Ό → ό
-        case 0x038E: folded[0] = 0x03CD; return 1; // Ύ → ύ
-        case 0x038F: folded[0] = 0x03CE; return 1; // Ώ → ώ
-        case 0x03C2: folded[0] = 0x03C3; return 1; // ς → σ (final sigma)
-        case 0x03CF: folded[0] = 0x03D7; return 1; // Ϗ → ϗ
-        case 0x03D0: folded[0] = 0x03B2; return 1; // ϐ → β (beta symbol)
-        case 0x03D1: folded[0] = 0x03B8; return 1; // ϑ → θ (theta symbol)
-        case 0x03D5: folded[0] = 0x03C6; return 1; // ϕ → φ (phi symbol)
-        case 0x03D6: folded[0] = 0x03C0; return 1; // ϖ → π (pi symbol)
-        case 0x03F0: folded[0] = 0x03BA; return 1; // ϰ → κ (kappa symbol)
-        case 0x03F1: folded[0] = 0x03C1; return 1; // ϱ → ρ (rho symbol)
-        case 0x03F4: folded[0] = 0x03B8; return 1; // ϴ → θ
-        case 0x03F5: folded[0] = 0x03B5; return 1; // ϵ → ε (lunate epsilon)
-        case 0x03F7: folded[0] = 0x03F8; return 1; // Ϸ → ϸ
-        case 0x03F9: folded[0] = 0x03F2; return 1; // Ϲ → ϲ
-        case 0x03FA: folded[0] = 0x03FB; return 1; // Ϻ → ϻ
+        case 0x0345: folded[0] = 0x03B9; return 1; // 'ͅ' (U+0345, CD 85) → 'ι' (U+03B9, CE B9)
+        case 0x0376: folded[0] = 0x0377; return 1; // 'Ͷ' (U+0376, CD B6) → 'ͷ' (U+0377, CD B7)
+        case 0x037F: folded[0] = 0x03F3; return 1; // 'Ϳ' (U+037F, CD BF) → 'ϳ' (U+03F3, CF B3)
+        case 0x0386: folded[0] = 0x03AC; return 1; // 'Ά' (U+0386, CE 86) → 'ά' (U+03AC, CE AC)
+        case 0x038C: folded[0] = 0x03CC; return 1; // 'Ό' (U+038C, CE 8C) → 'ό' (U+03CC, CF 8C)
+        case 0x038E: folded[0] = 0x03CD; return 1; // 'Ύ' (U+038E, CE 8E) → 'ύ' (U+03CD, CF 8D)
+        case 0x038F: folded[0] = 0x03CE; return 1; // 'Ώ' (U+038F, CE 8F) → 'ώ' (U+03CE, CF 8E)
+        case 0x03C2: folded[0] = 0x03C3; return 1; // 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
+        case 0x03CF: folded[0] = 0x03D7; return 1; // 'Ϗ' (U+03CF, CF 8F) → 'ϗ' (U+03D7, CF 97)
+        case 0x03D0: folded[0] = 0x03B2; return 1; // 'ϐ' (U+03D0, CF 90) → 'β' (U+03B2, CE B2)
+        case 0x03D1: folded[0] = 0x03B8; return 1; // 'ϑ' (U+03D1, CF 91) → 'θ' (U+03B8, CE B8)
+        case 0x03D5: folded[0] = 0x03C6; return 1; // 'ϕ' (U+03D5, CF 95) → 'φ' (U+03C6, CF 86)
+        case 0x03D6: folded[0] = 0x03C0; return 1; // 'ϖ' (U+03D6, CF 96) → 'π' (U+03C0, CF 80)
+        case 0x03F0: folded[0] = 0x03BA; return 1; // 'ϰ' (U+03F0, CF B0) → 'κ' (U+03BA, CE BA)
+        case 0x03F1: folded[0] = 0x03C1; return 1; // 'ϱ' (U+03F1, CF B1) → 'ρ' (U+03C1, CF 81)
+        case 0x03F4: folded[0] = 0x03B8; return 1; // 'ϴ' (U+03F4, CF B4) → 'θ' (U+03B8, CE B8)
+        case 0x03F5: folded[0] = 0x03B5; return 1; // 'ϵ' (U+03F5, CF B5) → 'ε' (U+03B5, CE B5)
+        case 0x03F7: folded[0] = 0x03F8; return 1; // 'Ϸ' (U+03F7, CF B7) → 'ϸ' (U+03F8, CF B8)
+        case 0x03F9: folded[0] = 0x03F2; return 1; // 'Ϲ' (U+03F9, CF B9) → 'ϲ' (U+03F2, CF B2)
+        case 0x03FA: folded[0] = 0x03FB; return 1; // 'Ϻ' (U+03FA, CF BA) → 'ϻ' (U+03FB, CF BB)
         // Cyrillic: palochka
-        case 0x04C0: folded[0] = 0x04CF; return 1; // Ӏ → ӏ
+        case 0x04C0: folded[0] = 0x04CF; return 1; // 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F)
         }
 
         // 2-byte one-to-many expansions
         switch (rune) {
         // ß handled inline in Latin-1 range above... interestingly the capital Eszett is in the 3-byte range!
-        // case 0x00DF: folded[0] = 0x0073; folded[1] = 0x0073; return 2; // ß → ss (German)
-        case 0x0130: folded[0] = 0x0069; folded[1] = 0x0307; return 2; // İ → i + combining dot (Turkish)
-        case 0x0149: folded[0] = 0x02BC; folded[1] = 0x006E; return 2; // ŉ → ʼn (Afrikaans)
-        case 0x01F0: folded[0] = 0x006A; folded[1] = 0x030C; return 2; // ǰ → j + combining caron
-        case 0x0390: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΐ → ι + 2 combining
-        case 0x03B0: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΰ → υ + 2 combining
-        case 0x0587: folded[0] = 0x0565; folded[1] = 0x0582; return 2; // և → եւ (Armenian)
+        // case 0x00DF: folded[0] = 0x0073; folded[1] = 0x0073; return 2;
+        
+        // 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+        case 0x0130: folded[0] = 0x0069; folded[1] = 0x0307; return 2;
+        // 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+        case 0x0149: folded[0] = 0x02BC; folded[1] = 0x006E; return 2;
+        // 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+        case 0x01F0: folded[0] = 0x006A; folded[1] = 0x030C; return 2;
+        // 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81)
+        case 0x0390: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3;
+        // 'ΰ' (U+03B0, CE B0) → "ΰ" (U+03C5 U+0308 U+0301, CF 85 CC 88 CC 81)
+        case 0x03B0: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3;
+        // 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
+        case 0x0587: folded[0] = 0x0565; folded[1] = 0x0582; return 2;
         }
 
         folded[0] = rune; return 1;  // 2-byte: no folding needed
@@ -760,208 +769,305 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         // Next let's handle the 3-byte irregular one-to-one mappings
         switch (rune) {
         // Georgian irregular
-        case 0x10C7: folded[0] = 0x2D27; return 1; // Ⴧ → ⴧ
-        case 0x10CD: folded[0] = 0x2D2D; return 1; // Ⴭ → ⴭ
+        case 0x10C7: folded[0] = 0x2D27; return 1; // 'Ⴧ' (U+10C7, E1 83 87) → 'ⴧ' (U+2D27, E2 B4 A7)
+        case 0x10CD: folded[0] = 0x2D2D; return 1; // 'Ⴭ' (U+10CD, E1 83 8D) → 'ⴭ' (U+2D2D, E2 B4 AD)
         // Cyrillic Extended-C: Old Slavonic variant forms
-        case 0x1C80: folded[0] = 0x0432; return 1; // ᲀ → в
-        case 0x1C81: folded[0] = 0x0434; return 1; // ᲁ → д
-        case 0x1C82: folded[0] = 0x043E; return 1; // ᲂ → о
-        case 0x1C83: folded[0] = 0x0441; return 1; // ᲃ → с
-        case 0x1C84: folded[0] = 0x0442; return 1; // ᲄ → т
-        case 0x1C85: folded[0] = 0x0442; return 1; // ᲅ → т
-        case 0x1C86: folded[0] = 0x044A; return 1; // ᲆ → ъ
-        case 0x1C87: folded[0] = 0x0463; return 1; // ᲇ → ѣ
-        case 0x1C88: folded[0] = 0xA64B; return 1; // ᲈ → ꙋ
-        case 0x1C89: folded[0] = 0x1C8A; return 1; // Ᲊ → ᲊ
+        case 0x1C80: folded[0] = 0x0432; return 1; // 'ᲀ' (U+1C80, E1 B2 80) → 'в' (U+0432, D0 B2)
+        case 0x1C81: folded[0] = 0x0434; return 1; // 'ᲁ' (U+1C81, E1 B2 81) → 'д' (U+0434, D0 B4)
+        case 0x1C82: folded[0] = 0x043E; return 1; // 'ᲂ' (U+1C82, E1 B2 82) → 'о' (U+043E, D0 BE)
+        case 0x1C83: folded[0] = 0x0441; return 1; // 'ᲃ' (U+1C83, E1 B2 83) → 'с' (U+0441, D1 81)
+        case 0x1C84: folded[0] = 0x0442; return 1; // 'ᲄ' (U+1C84, E1 B2 84) → 'т' (U+0442, D1 82)
+        case 0x1C85: folded[0] = 0x0442; return 1; // 'ᲅ' (U+1C85, E1 B2 85) → 'т' (U+0442, D1 82)
+        case 0x1C86: folded[0] = 0x044A; return 1; // 'ᲆ' (U+1C86, E1 B2 86) → 'ъ' (U+044A, D1 8A)
+        case 0x1C87: folded[0] = 0x0463; return 1; // 'ᲇ' (U+1C87, E1 B2 87) → 'ѣ' (U+0463, D1 A3)
+        case 0x1C88: folded[0] = 0xA64B; return 1; // 'ᲈ' (U+1C88, E1 B2 88) → 'ꙋ' (U+A64B, EA 99 8B)
+        case 0x1C89: folded[0] = 0x1C8A; return 1; // 'Ᲊ' (U+1C89, E1 B2 89) → 'ᲊ' (U+1C8A, E1 B2 8A)
         // Latin Extended Additional: long s with dot
-        case 0x1E9B: folded[0] = 0x1E61; return 1; // ẛ → ṡ
+        case 0x1E9B: folded[0] = 0x1E61; return 1; // 'ẛ' (U+1E9B, E1 BA 9B) → 'ṡ' (U+1E61, E1 B9 A1)
         // Greek Extended: vowels with breathing marks (irregular offsets)
-        case 0x1F59: folded[0] = 0x1F51; return 1; // Ὑ → ὑ
-        case 0x1F5B: folded[0] = 0x1F53; return 1; // Ὓ → ὓ
-        case 0x1F5D: folded[0] = 0x1F55; return 1; // Ὕ → ὕ
-        case 0x1F5F: folded[0] = 0x1F57; return 1; // Ὗ → ὗ
-        case 0x1FB8: folded[0] = 0x1FB0; return 1; // Ᾰ → ᾰ
-        case 0x1FB9: folded[0] = 0x1FB1; return 1; // Ᾱ → ᾱ
-        case 0x1FBA: folded[0] = 0x1F70; return 1; // Ὰ → ὰ
-        case 0x1FBB: folded[0] = 0x1F71; return 1; // Ά → ά
-        case 0x1FBE: folded[0] = 0x03B9; return 1; // ι → ι
-        case 0x1FD8: folded[0] = 0x1FD0; return 1; // Ῐ → ῐ
-        case 0x1FD9: folded[0] = 0x1FD1; return 1; // Ῑ → ῑ
-        case 0x1FDA: folded[0] = 0x1F76; return 1; // Ὶ → ὶ
-        case 0x1FDB: folded[0] = 0x1F77; return 1; // Ί → ί
-        case 0x1FE8: folded[0] = 0x1FE0; return 1; // Ῠ → ῠ
-        case 0x1FE9: folded[0] = 0x1FE1; return 1; // Ῡ → ῡ
-        case 0x1FEA: folded[0] = 0x1F7A; return 1; // Ὺ → ὺ
-        case 0x1FEB: folded[0] = 0x1F7B; return 1; // Ύ → ύ
-        case 0x1FEC: folded[0] = 0x1FE5; return 1; // Ῥ → ῥ
-        case 0x1FF8: folded[0] = 0x1F78; return 1; // Ὸ → ὸ
-        case 0x1FF9: folded[0] = 0x1F79; return 1; // Ό → ό
-        case 0x1FFA: folded[0] = 0x1F7C; return 1; // Ὼ → ὼ
-        case 0x1FFB: folded[0] = 0x1F7D; return 1; // Ώ → ώ
+        case 0x1F59: folded[0] = 0x1F51; return 1; // 'Ὑ' (U+1F59, E1 BD 99) → 'ὑ' (U+1F51, E1 BD 91)
+        case 0x1F5B: folded[0] = 0x1F53; return 1; // 'Ὓ' (U+1F5B, E1 BD 9B) → 'ὓ' (U+1F53, E1 BD 93)
+        case 0x1F5D: folded[0] = 0x1F55; return 1; // 'Ὕ' (U+1F5D, E1 BD 9D) → 'ὕ' (U+1F55, E1 BD 95)
+        case 0x1F5F: folded[0] = 0x1F57; return 1; // 'Ὗ' (U+1F5F, E1 BD 9F) → 'ὗ' (U+1F57, E1 BD 97)
+        case 0x1FB8: folded[0] = 0x1FB0; return 1; // 'Ᾰ' (U+1FB8, E1 BE B8) → 'ᾰ' (U+1FB0, E1 BE B0)
+        case 0x1FB9: folded[0] = 0x1FB1; return 1; // 'Ᾱ' (U+1FB9, E1 BE B9) → 'ᾱ' (U+1FB1, E1 BE B1)
+        case 0x1FBA: folded[0] = 0x1F70; return 1; // 'Ὰ' (U+1FBA, E1 BE BA) → 'ὰ' (U+1F70, E1 BD B0)
+        case 0x1FBB: folded[0] = 0x1F71; return 1; // 'Ά' (U+1FBB, E1 BE BB) → 'ά' (U+1F71, E1 BD B1)
+        case 0x1FBE: folded[0] = 0x03B9; return 1; // 'ι' (U+1FBE, E1 BE BE) → 'ι' (U+03B9, CE B9)
+        case 0x1FD8: folded[0] = 0x1FD0; return 1; // 'Ῐ' (U+1FD8, E1 BF 98) → 'ῐ' (U+1FD0, E1 BF 90)
+        case 0x1FD9: folded[0] = 0x1FD1; return 1; // 'Ῑ' (U+1FD9, E1 BF 99) → 'ῑ' (U+1FD1, E1 BF 91)
+        case 0x1FDA: folded[0] = 0x1F76; return 1; // 'Ὶ' (U+1FDA, E1 BF 9A) → 'ὶ' (U+1F76, E1 BD B6)
+        case 0x1FDB: folded[0] = 0x1F77; return 1; // 'Ί' (U+1FDB, E1 BF 9B) → 'ί' (U+1F77, E1 BD B7)
+        case 0x1FE8: folded[0] = 0x1FE0; return 1; // 'Ῠ' (U+1FE8, E1 BF A8) → 'ῠ' (U+1FE0, E1 BF A0)
+        case 0x1FE9: folded[0] = 0x1FE1; return 1; // 'Ῡ' (U+1FE9, E1 BF A9) → 'ῡ' (U+1FE1, E1 BF A1)
+        case 0x1FEA: folded[0] = 0x1F7A; return 1; // 'Ὺ' (U+1FEA, E1 BF AA) → 'ὺ' (U+1F7A, E1 BD BA)
+        case 0x1FEB: folded[0] = 0x1F7B; return 1; // 'Ύ' (U+1FEB, E1 BF AB) → 'ύ' (U+1F7B, E1 BD BB)
+        case 0x1FEC: folded[0] = 0x1FE5; return 1; // 'Ῥ' (U+1FEC, E1 BF AC) → 'ῥ' (U+1FE5, E1 BF A5)
+        case 0x1FF8: folded[0] = 0x1F78; return 1; // 'Ὸ' (U+1FF8, E1 BF B8) → 'ὸ' (U+1F78, E1 BD B8)
+        case 0x1FF9: folded[0] = 0x1F79; return 1; // 'Ό' (U+1FF9, E1 BF B9) → 'ό' (U+1F79, E1 BD B9)
+        case 0x1FFA: folded[0] = 0x1F7C; return 1; // 'Ὼ' (U+1FFA, E1 BF BA) → 'ὼ' (U+1F7C, E1 BD BC)
+        case 0x1FFB: folded[0] = 0x1F7D; return 1; // 'Ώ' (U+1FFB, E1 BF BB) → 'ώ' (U+1F7D, E1 BD BD)
         // Letterlike Symbols: compatibility mappings
-        case 0x2126: folded[0] = 0x03C9; return 1; // Ω → ω
-        case 0x212A: folded[0] = 0x006B; return 1; // K → k
-        case 0x212B: folded[0] = 0x00E5; return 1; // Å → å
-        case 0x2132: folded[0] = 0x214E; return 1; // Ⅎ → ⅎ
-        case 0x2183: folded[0] = 0x2184; return 1; // Ↄ → ↄ
+        case 0x2126: folded[0] = 0x03C9; return 1; // 'Ω' (U+2126, E2 84 A6) → 'ω' (U+03C9, CF 89)
+        case 0x212A: folded[0] = 0x006B; return 1; // 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
+        case 0x212B: folded[0] = 0x00E5; return 1; // 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5)
+        case 0x2132: folded[0] = 0x214E; return 1; // 'Ⅎ' (U+2132, E2 84 B2) → 'ⅎ' (U+214E, E2 85 8E)
+        case 0x2183: folded[0] = 0x2184; return 1; // 'Ↄ' (U+2183, E2 86 83) → 'ↄ' (U+2184, E2 86 84)
         // Latin Extended-C: irregular mappings to IPA/other blocks
-        case 0x2C60: folded[0] = 0x2C61; return 1; // Ⱡ → ⱡ
-        case 0x2C62: folded[0] = 0x026B; return 1; // Ɫ → ɫ
-        case 0x2C63: folded[0] = 0x1D7D; return 1; // Ᵽ → ᵽ
-        case 0x2C64: folded[0] = 0x027D; return 1; // Ɽ → ɽ
-        case 0x2C67: folded[0] = 0x2C68; return 1; // Ⱨ → ⱨ
-        case 0x2C69: folded[0] = 0x2C6A; return 1; // Ⱪ → ⱪ
-        case 0x2C6B: folded[0] = 0x2C6C; return 1; // Ⱬ → ⱬ
-        case 0x2C6D: folded[0] = 0x0251; return 1; // Ɑ → ɑ
-        case 0x2C6E: folded[0] = 0x0271; return 1; // Ɱ → ɱ
-        case 0x2C6F: folded[0] = 0x0250; return 1; // Ɐ → ɐ
-        case 0x2C70: folded[0] = 0x0252; return 1; // Ɒ → ɒ
-        case 0x2C72: folded[0] = 0x2C73; return 1; // Ⱳ → ⱳ
-        case 0x2C75: folded[0] = 0x2C76; return 1; // Ⱶ → ⱶ
-        case 0x2C7E: folded[0] = 0x023F; return 1; // Ȿ → ȿ
-        case 0x2C7F: folded[0] = 0x0240; return 1; // Ɀ → ɀ
+        case 0x2C60: folded[0] = 0x2C61; return 1; // 'Ⱡ' (U+2C60, E2 B1 A0) → 'ⱡ' (U+2C61, E2 B1 A1)
+        case 0x2C62: folded[0] = 0x026B; return 1; // 'Ɫ' (U+2C62, E2 B1 A2) → 'ɫ' (U+026B, C9 AB)
+        case 0x2C63: folded[0] = 0x1D7D; return 1; // 'Ᵽ' (U+2C63, E2 B1 A3) → 'ᵽ' (U+1D7D, E1 B5 BD)
+        case 0x2C64: folded[0] = 0x027D; return 1; // 'Ɽ' (U+2C64, E2 B1 A4) → 'ɽ' (U+027D, C9 BD)
+        case 0x2C67: folded[0] = 0x2C68; return 1; // 'Ⱨ' (U+2C67, E2 B1 A7) → 'ⱨ' (U+2C68, E2 B1 A8)
+        case 0x2C69: folded[0] = 0x2C6A; return 1; // 'Ⱪ' (U+2C69, E2 B1 A9) → 'ⱪ' (U+2C6A, E2 B1 AA)
+        case 0x2C6B: folded[0] = 0x2C6C; return 1; // 'Ⱬ' (U+2C6B, E2 B1 AB) → 'ⱬ' (U+2C6C, E2 B1 AC)
+        case 0x2C6D: folded[0] = 0x0251; return 1; // 'Ɑ' (U+2C6D, E2 B1 AD) → 'ɑ' (U+0251, C9 91)
+        case 0x2C6E: folded[0] = 0x0271; return 1; // 'Ɱ' (U+2C6E, E2 B1 AE) → 'ɱ' (U+0271, C9 B1)
+        case 0x2C6F: folded[0] = 0x0250; return 1; // 'Ɐ' (U+2C6F, E2 B1 AF) → 'ɐ' (U+0250, C9 90)
+        case 0x2C70: folded[0] = 0x0252; return 1; // 'Ɒ' (U+2C70, E2 B1 B0) → 'ɒ' (U+0252, C9 92)
+        case 0x2C72: folded[0] = 0x2C73; return 1; // 'Ⱳ' (U+2C72, E2 B1 B2) → 'ⱳ' (U+2C73, E2 B1 B3)
+        case 0x2C75: folded[0] = 0x2C76; return 1; // 'Ⱶ' (U+2C75, E2 B1 B5) → 'ⱶ' (U+2C76, E2 B1 B6)
+        case 0x2C7E: folded[0] = 0x023F; return 1; // 'Ȿ' (U+2C7E, E2 B1 BE) → 'ȿ' (U+023F, C8 BF)
+        case 0x2C7F: folded[0] = 0x0240; return 1; // 'Ɀ' (U+2C7F, E2 B1 BF) → 'ɀ' (U+0240, C9 80)
         // Coptic: irregular cases outside even/odd range
-        case 0x2CEB: folded[0] = 0x2CEC; return 1; // Ⳬ → ⳬ
-        case 0x2CED: folded[0] = 0x2CEE; return 1; // Ⳮ → ⳮ
-        case 0x2CF2: folded[0] = 0x2CF3; return 1; // Ⳳ → ⳳ
+        case 0x2CEB: folded[0] = 0x2CEC; return 1; // 'Ⳬ' (U+2CEB, E2 B3 AB) → 'ⳬ' (U+2CEC, E2 B3 AC)
+        case 0x2CED: folded[0] = 0x2CEE; return 1; // 'Ⳮ' (U+2CED, E2 B3 AD) → 'ⳮ' (U+2CEE, E2 B3 AE)
+        case 0x2CF2: folded[0] = 0x2CF3; return 1; // 'Ⳳ' (U+2CF2, E2 B3 B2) → 'ⳳ' (U+2CF3, E2 B3 B3)
         // Latin Extended-D: isolated irregulars
-        case 0xA779: folded[0] = 0xA77A; return 1; // Ꝺ → ꝺ
-        case 0xA77B: folded[0] = 0xA77C; return 1; // Ꝼ → ꝼ
-        case 0xA77D: folded[0] = 0x1D79; return 1; // Ᵹ → ᵹ
-        case 0xA78B: folded[0] = 0xA78C; return 1; // Ꞌ → ꞌ
-        case 0xA78D: folded[0] = 0x0265; return 1; // Ɥ → ɥ
-        case 0xA7AA: folded[0] = 0x0266; return 1; // Ɦ → ɦ
-        case 0xA7AB: folded[0] = 0x025C; return 1; // Ɜ → ɜ
-        case 0xA7AC: folded[0] = 0x0261; return 1; // Ɡ → ɡ
-        case 0xA7AD: folded[0] = 0x026C; return 1; // Ɬ → ɬ
-        case 0xA7AE: folded[0] = 0x026A; return 1; // Ɪ → ɪ
-        case 0xA7B0: folded[0] = 0x029E; return 1; // Ʞ → ʞ
-        case 0xA7B1: folded[0] = 0x0287; return 1; // Ʇ → ʇ
-        case 0xA7B2: folded[0] = 0x029D; return 1; // Ʝ → ʝ
-        case 0xA7B3: folded[0] = 0xAB53; return 1; // Ꭓ → ꭓ
-        case 0xA7C4: folded[0] = 0xA794; return 1; // Ꞔ → ꞔ
-        case 0xA7C5: folded[0] = 0x0282; return 1; // Ʂ → ʂ
-        case 0xA7C6: folded[0] = 0x1D8E; return 1; // Ᶎ → ᶎ
-        case 0xA7C7: folded[0] = 0xA7C8; return 1; // Ꟈ → ꟈ
-        case 0xA7C9: folded[0] = 0xA7CA; return 1; // Ꟊ → ꟊ
-        case 0xA7CB: folded[0] = 0x0264; return 1; // Ɤ → ɤ
-        case 0xA7CC: folded[0] = 0xA7CD; return 1; // Ꟍ → ꟍ
-        case 0xA7CE: folded[0] = 0xA7CF; return 1; // ꟏ → ꟏
-        case 0xA7D0: folded[0] = 0xA7D1; return 1; // Ꟑ → ꟑ
-        case 0xA7D2: folded[0] = 0xA7D3; return 1; // (placeholder)
-        case 0xA7D4: folded[0] = 0xA7D5; return 1; // (placeholder)
-        case 0xA7D6: folded[0] = 0xA7D7; return 1; // Ꟗ → ꟗ
-        case 0xA7D8: folded[0] = 0xA7D9; return 1; // Ꟙ → ꟙ
-        case 0xA7DA: folded[0] = 0xA7DB; return 1; // Ꟛ → ꟛ
-        case 0xA7DC: folded[0] = 0x019B; return 1; // Ƛ → ƛ
-        case 0xA7F5: folded[0] = 0xA7F6; return 1; // Ꟶ → ꟶ
+        case 0xA779: folded[0] = 0xA77A; return 1; // 'Ꝺ' (U+A779, EA 9D B9) → 'ꝺ' (U+A77A, EA 9D BA)
+        case 0xA77B: folded[0] = 0xA77C; return 1; // 'Ꝼ' (U+A77B, EA 9D BB) → 'ꝼ' (U+A77C, EA 9D BC)
+        case 0xA77D: folded[0] = 0x1D79; return 1; // 'Ᵹ' (U+A77D, EA 9D BD) → 'ᵹ' (U+1D79, E1 B5 B9)
+        case 0xA78B: folded[0] = 0xA78C; return 1; // 'Ꞌ' (U+A78B, EA 9E 8B) → 'ꞌ' (U+A78C, EA 9E 8C)
+        case 0xA78D: folded[0] = 0x0265; return 1; // 'Ɥ' (U+A78D, EA 9E 8D) → 'ɥ' (U+0265, C9 A5)
+        case 0xA7AA: folded[0] = 0x0266; return 1; // 'Ɦ' (U+A7AA, EA 9E AA) → 'ɦ' (U+0266, C9 A6)
+        case 0xA7AB: folded[0] = 0x025C; return 1; // 'Ɜ' (U+A7AB, EA 9E AB) → 'ɜ' (U+025C, C9 9C)
+        case 0xA7AC: folded[0] = 0x0261; return 1; // 'Ɡ' (U+A7AC, EA 9E AC) → 'ɡ' (U+0261, C9 A1)
+        case 0xA7AD: folded[0] = 0x026C; return 1; // 'Ɬ' (U+A7AD, EA 9E AD) → 'ɬ' (U+026C, C9 AC)
+        case 0xA7AE: folded[0] = 0x026A; return 1; // 'Ɪ' (U+A7AE, EA 9E AE) → 'ɪ' (U+026A, C9 AA)
+        case 0xA7B0: folded[0] = 0x029E; return 1; // 'Ʞ' (U+A7B0, EA 9E B0) → 'ʞ' (U+029E, CA 9E)
+        case 0xA7B1: folded[0] = 0x0287; return 1; // 'Ʇ' (U+A7B1, EA 9E B1) → 'ʇ' (U+0287, CA 87)
+        case 0xA7B2: folded[0] = 0x029D; return 1; // 'Ʝ' (U+A7B2, EA 9E B2) → 'ʝ' (U+029D, CA 9D)
+        case 0xA7B3: folded[0] = 0xAB53; return 1; // 'Ꭓ' (U+A7B3, EA 9E B3) → 'ꭓ' (U+AB53, EA AD 93)
+        case 0xA7C4: folded[0] = 0xA794; return 1; // 'Ꞔ' (U+A7C4, EA 9F 84) → 'ꞔ' (U+A794, EA 9E 94)
+        case 0xA7C5: folded[0] = 0x0282; return 1; // 'Ʂ' (U+A7C5, EA 9F 85) → 'ʂ' (U+0282, CA 82)
+        case 0xA7C6: folded[0] = 0x1D8E; return 1; // 'Ᶎ' (U+A7C6, EA 9F 86) → 'ᶎ' (U+1D8E, E1 B6 8E)
+        case 0xA7C7: folded[0] = 0xA7C8; return 1; // 'Ꟈ' (U+A7C7, EA 9F 87) → 'ꟈ' (U+A7C8, EA 9F 88)
+        case 0xA7C9: folded[0] = 0xA7CA; return 1; // 'Ꟊ' (U+A7C9, EA 9F 89) → 'ꟊ' (U+A7CA, EA 9F 8A)
+        case 0xA7CB: folded[0] = 0x0264; return 1; // 'Ɤ' (U+A7CB, EA 9F 8B) → 'ɤ' (U+0264, C9 A4)
+        case 0xA7CC: folded[0] = 0xA7CD; return 1; // 'Ꟍ' (U+A7CC, EA 9F 8C) → 'ꟍ' (U+A7CD, EA 9F 8D)
+        case 0xA7CE: folded[0] = 0xA7CF; return 1; // '꟎' (U+A7CE, EA 9F 8E) → '꟏' (U+A7CF, EA 9F 8F)
+        case 0xA7D0: folded[0] = 0xA7D1; return 1; // 'Ꟑ' (U+A7D0, EA 9F 90) → 'ꟑ' (U+A7D1, EA 9F 91)
+        case 0xA7D2: folded[0] = 0xA7D3; return 1; // '꟒' (U+A7D2, EA 9F 92) → 'ꟓ' (U+A7D3, EA 9F 93)
+        case 0xA7D4: folded[0] = 0xA7D5; return 1; // '꟔' (U+A7D4, EA 9F 94) → 'ꟕ' (U+A7D5, EA 9F 95)
+        case 0xA7D6: folded[0] = 0xA7D7; return 1; // 'Ꟗ' (U+A7D6, EA 9F 96) → 'ꟗ' (U+A7D7, EA 9F 97)
+        case 0xA7D8: folded[0] = 0xA7D9; return 1; // 'Ꟙ' (U+A7D8, EA 9F 98) → 'ꟙ' (U+A7D9, EA 9F 99)
+        case 0xA7DA: folded[0] = 0xA7DB; return 1; // 'Ꟛ' (U+A7DA, EA 9F 9A) → 'ꟛ' (U+A7DB, EA 9F 9B)
+        case 0xA7DC: folded[0] = 0x019B; return 1; // 'Ƛ' (U+A7DC, EA 9F 9C) → 'ƛ' (U+019B, C6 9B)
+        case 0xA7F5: folded[0] = 0xA7F6; return 1; // 'Ꟶ' (U+A7F5, EA 9F B5) → 'ꟶ' (U+A7F6, EA 9F B6)
         }
 
         // Next let's handle the 3-byte one-to-many expansions
         switch (rune) {
         // Latin Extended Additional
-        case 0x1E96: folded[0] = 0x0068; folded[1] = 0x0331; return 2; // ẖ → h + combining
-        case 0x1E97: folded[0] = 0x0074; folded[1] = 0x0308; return 2; // ẗ → t + combining
-        case 0x1E98: folded[0] = 0x0077; folded[1] = 0x030A; return 2; // ẘ → w + combining
-        case 0x1E99: folded[0] = 0x0079; folded[1] = 0x030A; return 2; // ẙ → y + combining
-        case 0x1E9A: folded[0] = 0x0061; folded[1] = 0x02BE; return 2; // ẚ → aʾ
-        case 0x1E9E: folded[0] = 0x0073; folded[1] = 0x0073; return 2; // ẞ → ss (German capital Eszett)
+        // 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+        case 0x1E96: folded[0] = 0x0068; folded[1] = 0x0331; return 2;
+        // 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+        case 0x1E97: folded[0] = 0x0074; folded[1] = 0x0308; return 2;
+        // 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+        case 0x1E98: folded[0] = 0x0077; folded[1] = 0x030A; return 2;
+        // 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+        case 0x1E99: folded[0] = 0x0079; folded[1] = 0x030A; return 2;
+        // 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+        case 0x1E9A: folded[0] = 0x0061; folded[1] = 0x02BE; return 2;
+        // 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+        case 0x1E9E: folded[0] = 0x0073; folded[1] = 0x0073; return 2;
         // Greek Extended: breathing marks
-        case 0x1F50: folded[0] = 0x03C5; folded[1] = 0x0313; return 2; // ὐ → υ + combining
-        case 0x1F52: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0300; return 3; // ὒ → υ + 2 combining
-        case 0x1F54: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0301; return 3; // ὔ → υ + 2 combining
-        case 0x1F56: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0342; return 3; // ὖ → υ + 2 combining
+        // 'ὐ' (U+1F50, E1 BD 90) → "ὐ" (U+03C5 U+0313, CF 85 CC 93)
+        case 0x1F50: folded[0] = 0x03C5; folded[1] = 0x0313; return 2;
+        // 'ὒ' (U+1F52, E1 BD 92) → "ὒ" (U+03C5 U+0313 U+0300, CF 85 CC 93 CC 80)
+        case 0x1F52: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0300; return 3;
+        // 'ὔ' (U+1F54, E1 BD 94) → "ὔ" (U+03C5 U+0313 U+0301, CF 85 CC 93 CC 81)
+        case 0x1F54: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0301; return 3;
+        // 'ὖ' (U+1F56, E1 BD 96) → "ὖ" (U+03C5 U+0313 U+0342, CF 85 CC 93 CD 82)
+        case 0x1F56: folded[0] = 0x03C5; folded[1] = 0x0313; folded[2] = 0x0342; return 3;
         // Greek Extended: iota subscript combinations (0x1F80-0x1FAF)
-        case 0x1F80: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2; // ᾀ → ἀι
-        case 0x1F81: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2; // ᾁ → ἁι
-        case 0x1F82: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2; // ᾂ → ἂι
-        case 0x1F83: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2; // ᾃ → ἃι
-        case 0x1F84: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2; // ᾄ → ἄι
-        case 0x1F85: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2; // ᾅ → ἅι
-        case 0x1F86: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2; // ᾆ → ἆι
-        case 0x1F87: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2; // ᾇ → ἇι
-        case 0x1F88: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2; // ᾈ → ἀι
-        case 0x1F89: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2; // ᾉ → ἁι
-        case 0x1F8A: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2; // ᾊ → ἂι
-        case 0x1F8B: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2; // ᾋ → ἃι
-        case 0x1F8C: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2; // ᾌ → ἄι
-        case 0x1F8D: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2; // ᾍ → ἅι
-        case 0x1F8E: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2; // ᾎ → ἆι
-        case 0x1F8F: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2; // ᾏ → ἇι
-        case 0x1F90: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2; // ᾐ → ἠι
-        case 0x1F91: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2; // ᾑ → ἡι
-        case 0x1F92: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2; // ᾒ → ἢι
-        case 0x1F93: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2; // ᾓ → ἣι
-        case 0x1F94: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2; // ᾔ → ἤι
-        case 0x1F95: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2; // ᾕ → ἥι
-        case 0x1F96: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2; // ᾖ → ἦι
-        case 0x1F97: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2; // ᾗ → ἧι
-        case 0x1F98: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2; // ᾘ → ἠι
-        case 0x1F99: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2; // ᾙ → ἡι
-        case 0x1F9A: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2; // ᾚ → ἢι
-        case 0x1F9B: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2; // ᾛ → ἣι
-        case 0x1F9C: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2; // ᾜ → ἤι
-        case 0x1F9D: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2; // ᾝ → ἥι
-        case 0x1F9E: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2; // ᾞ → ἦι
-        case 0x1F9F: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2; // ᾟ → ἧι
-        case 0x1FA0: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2; // ᾠ → ὠι
-        case 0x1FA1: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2; // ᾡ → ὡι
-        case 0x1FA2: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2; // ᾢ → ὢι
-        case 0x1FA3: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2; // ᾣ → ὣι
-        case 0x1FA4: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2; // ᾤ → ὤι
-        case 0x1FA5: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2; // ᾥ → ὥι
-        case 0x1FA6: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2; // ᾦ → ὦι
-        case 0x1FA7: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2; // ᾧ → ὧι
-        case 0x1FA8: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2; // ᾨ → ὠι
-        case 0x1FA9: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2; // ᾩ → ὡι
-        case 0x1FAA: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2; // ᾪ → ὢι
-        case 0x1FAB: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2; // ᾫ → ὣι
-        case 0x1FAC: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2; // ᾬ → ὤι
-        case 0x1FAD: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2; // ᾭ → ὥι
-        case 0x1FAE: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2; // ᾮ → ὦι
-        case 0x1FAF: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2; // ᾯ → ὧι
+        // 'ᾀ' (U+1F80, E1 BE 80) → "ἀι" (U+1F00 U+03B9, E1 BC 80 CE B9)
+        case 0x1F80: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2;
+        // 'ᾁ' (U+1F81, E1 BE 81) → "ἁι" (U+1F01 U+03B9, E1 BC 81 CE B9)
+        case 0x1F81: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2;
+        // 'ᾂ' (U+1F82, E1 BE 82) → "ἂι" (U+1F02 U+03B9, E1 BC 82 CE B9)
+        case 0x1F82: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2;
+        // 'ᾃ' (U+1F83, E1 BE 83) → "ἃι" (U+1F03 U+03B9, E1 BC 83 CE B9)
+        case 0x1F83: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2;
+        // 'ᾄ' (U+1F84, E1 BE 84) → "ἄι" (U+1F04 U+03B9, E1 BC 84 CE B9)
+        case 0x1F84: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2;
+        // 'ᾅ' (U+1F85, E1 BE 85) → "ἅι" (U+1F05 U+03B9, E1 BC 85 CE B9)
+        case 0x1F85: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2;
+        // 'ᾆ' (U+1F86, E1 BE 86) → "ἆι" (U+1F06 U+03B9, E1 BC 86 CE B9)
+        case 0x1F86: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2;
+        // 'ᾇ' (U+1F87, E1 BE 87) → "ἇι" (U+1F07 U+03B9, E1 BC 87 CE B9)
+        case 0x1F87: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2;
+        // 'ᾈ' (U+1F88, E1 BE 88) → "ἀι" (U+1F00 U+03B9, E1 BC 80 CE B9)
+        case 0x1F88: folded[0] = 0x1F00; folded[1] = 0x03B9; return 2;
+        // 'ᾉ' (U+1F89, E1 BE 89) → "ἁι" (U+1F01 U+03B9, E1 BC 81 CE B9)
+        case 0x1F89: folded[0] = 0x1F01; folded[1] = 0x03B9; return 2;
+        // 'ᾊ' (U+1F8A, E1 BE 8A) → "ἂι" (U+1F02 U+03B9, E1 BC 82 CE B9)
+        case 0x1F8A: folded[0] = 0x1F02; folded[1] = 0x03B9; return 2;
+        // 'ᾋ' (U+1F8B, E1 BE 8B) → "ἃι" (U+1F03 U+03B9, E1 BC 83 CE B9)
+        case 0x1F8B: folded[0] = 0x1F03; folded[1] = 0x03B9; return 2;
+        // 'ᾌ' (U+1F8C, E1 BE 8C) → "ἄι" (U+1F04 U+03B9, E1 BC 84 CE B9)
+        case 0x1F8C: folded[0] = 0x1F04; folded[1] = 0x03B9; return 2;
+        // 'ᾍ' (U+1F8D, E1 BE 8D) → "ἅι" (U+1F05 U+03B9, E1 BC 85 CE B9)
+        case 0x1F8D: folded[0] = 0x1F05; folded[1] = 0x03B9; return 2;
+        // 'ᾎ' (U+1F8E, E1 BE 8E) → "ἆι" (U+1F06 U+03B9, E1 BC 86 CE B9)
+        case 0x1F8E: folded[0] = 0x1F06; folded[1] = 0x03B9; return 2;
+        // 'ᾏ' (U+1F8F, E1 BE 8F) → "ἇι" (U+1F07 U+03B9, E1 BC 87 CE B9)
+        case 0x1F8F: folded[0] = 0x1F07; folded[1] = 0x03B9; return 2;
+        // 'ᾐ' (U+1F90, E1 BE 90) → "ἠι" (U+1F20 U+03B9, E1 BC A0 CE B9)
+        case 0x1F90: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2;
+        // 'ᾑ' (U+1F91, E1 BE 91) → "ἡι" (U+1F21 U+03B9, E1 BC A1 CE B9)
+        case 0x1F91: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2;
+        // 'ᾒ' (U+1F92, E1 BE 92) → "ἢι" (U+1F22 U+03B9, E1 BC A2 CE B9)
+        case 0x1F92: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2;
+        // 'ᾓ' (U+1F93, E1 BE 93) → "ἣι" (U+1F23 U+03B9, E1 BC A3 CE B9)
+        case 0x1F93: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2;
+        // 'ᾔ' (U+1F94, E1 BE 94) → "ἤι" (U+1F24 U+03B9, E1 BC A4 CE B9)
+        case 0x1F94: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2;
+        // 'ᾕ' (U+1F95, E1 BE 95) → "ἥι" (U+1F25 U+03B9, E1 BC A5 CE B9)
+        case 0x1F95: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2;
+        // 'ᾖ' (U+1F96, E1 BE 96) → "ἦι" (U+1F26 U+03B9, E1 BC A6 CE B9)
+        case 0x1F96: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2;
+        // 'ᾗ' (U+1F97, E1 BE 97) → "ἧι" (U+1F27 U+03B9, E1 BC A7 CE B9)
+        case 0x1F97: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2;
+        // 'ᾘ' (U+1F98, E1 BE 98) → "ἠι" (U+1F20 U+03B9, E1 BC A0 CE B9)
+        case 0x1F98: folded[0] = 0x1F20; folded[1] = 0x03B9; return 2;
+        // 'ᾙ' (U+1F99, E1 BE 99) → "ἡι" (U+1F21 U+03B9, E1 BC A1 CE B9)
+        case 0x1F99: folded[0] = 0x1F21; folded[1] = 0x03B9; return 2;
+        // 'ᾚ' (U+1F9A, E1 BE 9A) → "ἢι" (U+1F22 U+03B9, E1 BC A2 CE B9)
+        case 0x1F9A: folded[0] = 0x1F22; folded[1] = 0x03B9; return 2;
+        // 'ᾛ' (U+1F9B, E1 BE 9B) → "ἣι" (U+1F23 U+03B9, E1 BC A3 CE B9)
+        case 0x1F9B: folded[0] = 0x1F23; folded[1] = 0x03B9; return 2;
+        // 'ᾜ' (U+1F9C, E1 BE 9C) → "ἤι" (U+1F24 U+03B9, E1 BC A4 CE B9)
+        case 0x1F9C: folded[0] = 0x1F24; folded[1] = 0x03B9; return 2;
+        // 'ᾝ' (U+1F9D, E1 BE 9D) → "ἥι" (U+1F25 U+03B9, E1 BC A5 CE B9)
+        case 0x1F9D: folded[0] = 0x1F25; folded[1] = 0x03B9; return 2;
+        // 'ᾞ' (U+1F9E, E1 BE 9E) → "ἦι" (U+1F26 U+03B9, E1 BC A6 CE B9)
+        case 0x1F9E: folded[0] = 0x1F26; folded[1] = 0x03B9; return 2;
+        // 'ᾟ' (U+1F9F, E1 BE 9F) → "ἧι" (U+1F27 U+03B9, E1 BC A7 CE B9)
+        case 0x1F9F: folded[0] = 0x1F27; folded[1] = 0x03B9; return 2;
+        // 'ᾠ' (U+1FA0, E1 BE A0) → "ὠι" (U+1F60 U+03B9, E1 BD A0 CE B9)
+        case 0x1FA0: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2;
+        // 'ᾡ' (U+1FA1, E1 BE A1) → "ὡι" (U+1F61 U+03B9, E1 BD A1 CE B9)
+        case 0x1FA1: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2;
+        // 'ᾢ' (U+1FA2, E1 BE A2) → "ὢι" (U+1F62 U+03B9, E1 BD A2 CE B9)
+        case 0x1FA2: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2;
+        // 'ᾣ' (U+1FA3, E1 BE A3) → "ὣι" (U+1F63 U+03B9, E1 BD A3 CE B9)
+        case 0x1FA3: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2;
+        // 'ᾤ' (U+1FA4, E1 BE A4) → "ὤι" (U+1F64 U+03B9, E1 BD A4 CE B9)
+        case 0x1FA4: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2;
+        // 'ᾥ' (U+1FA5, E1 BE A5) → "ὥι" (U+1F65 U+03B9, E1 BD A5 CE B9)
+        case 0x1FA5: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2;
+        // 'ᾦ' (U+1FA6, E1 BE A6) → "ὦι" (U+1F66 U+03B9, E1 BD A6 CE B9)
+        case 0x1FA6: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2;
+        // 'ᾧ' (U+1FA7, E1 BE A7) → "ὧι" (U+1F67 U+03B9, E1 BD A7 CE B9)
+        case 0x1FA7: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2;
+        // 'ᾨ' (U+1FA8, E1 BE A8) → "ὠι" (U+1F60 U+03B9, E1 BD A0 CE B9)
+        case 0x1FA8: folded[0] = 0x1F60; folded[1] = 0x03B9; return 2;
+        // 'ᾩ' (U+1FA9, E1 BE A9) → "ὡι" (U+1F61 U+03B9, E1 BD A1 CE B9)
+        case 0x1FA9: folded[0] = 0x1F61; folded[1] = 0x03B9; return 2;
+        // 'ᾪ' (U+1FAA, E1 BE AA) → "ὢι" (U+1F62 U+03B9, E1 BD A2 CE B9)
+        case 0x1FAA: folded[0] = 0x1F62; folded[1] = 0x03B9; return 2;
+        // 'ᾫ' (U+1FAB, E1 BE AB) → "ὣι" (U+1F63 U+03B9, E1 BD A3 CE B9)
+        case 0x1FAB: folded[0] = 0x1F63; folded[1] = 0x03B9; return 2;
+        // 'ᾬ' (U+1FAC, E1 BE AC) → "ὤι" (U+1F64 U+03B9, E1 BD A4 CE B9)
+        case 0x1FAC: folded[0] = 0x1F64; folded[1] = 0x03B9; return 2;
+        // 'ᾭ' (U+1FAD, E1 BE AD) → "ὥι" (U+1F65 U+03B9, E1 BD A5 CE B9)
+        case 0x1FAD: folded[0] = 0x1F65; folded[1] = 0x03B9; return 2;
+        // 'ᾮ' (U+1FAE, E1 BE AE) → "ὦι" (U+1F66 U+03B9, E1 BD A6 CE B9)
+        case 0x1FAE: folded[0] = 0x1F66; folded[1] = 0x03B9; return 2;
+        // 'ᾯ' (U+1FAF, E1 BE AF) → "ὧι" (U+1F67 U+03B9, E1 BD A7 CE B9)
+        case 0x1FAF: folded[0] = 0x1F67; folded[1] = 0x03B9; return 2;
         // Greek Extended: vowel + iota subscript (0x1FB2-0x1FFC)
-        case 0x1FB2: folded[0] = 0x1F70; folded[1] = 0x03B9; return 2; // ᾲ → ὰι
-        case 0x1FB3: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2; // ᾳ → αι
-        case 0x1FB4: folded[0] = 0x03AC; folded[1] = 0x03B9; return 2; // ᾴ → άι
-        case 0x1FB6: folded[0] = 0x03B1; folded[1] = 0x0342; return 2; // ᾶ → α + combining
-        case 0x1FB7: folded[0] = 0x03B1; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ᾷ → α + 2 combining
-        case 0x1FBC: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2; // ᾼ → αι
-        case 0x1FC2: folded[0] = 0x1F74; folded[1] = 0x03B9; return 2; // ῂ → ὴι
-        case 0x1FC3: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2; // ῃ → ηι
-        case 0x1FC4: folded[0] = 0x03AE; folded[1] = 0x03B9; return 2; // ῄ → ήι
-        case 0x1FC6: folded[0] = 0x03B7; folded[1] = 0x0342; return 2; // ῆ → η + combining
-        case 0x1FC7: folded[0] = 0x03B7; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ῇ → η + 2 combining
-        case 0x1FCC: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2; // ῌ → ηι
-        case 0x1FD2: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0300; return 3; // ῒ → ι + 2 combining
-        case 0x1FD3: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΐ → ι + 2 combining
-        case 0x1FD6: folded[0] = 0x03B9; folded[1] = 0x0342; return 2; // ῖ → ι + combining
-        case 0x1FD7: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0342; return 3; // ῗ → ι + 2 combining
-        case 0x1FE2: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0300; return 3; // ῢ → υ + 2 combining
-        case 0x1FE3: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3; // ΰ → υ + 2 combining
-        case 0x1FE4: folded[0] = 0x03C1; folded[1] = 0x0313; return 2; // ῤ → ρ + combining
-        case 0x1FE6: folded[0] = 0x03C5; folded[1] = 0x0342; return 2; // ῦ → υ + combining
-        case 0x1FE7: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0342; return 3; // ῧ → υ + 2 combining
-        case 0x1FF2: folded[0] = 0x1F7C; folded[1] = 0x03B9; return 2; // ῲ → ὼι
-        case 0x1FF3: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2; // ῳ → ωι
-        case 0x1FF4: folded[0] = 0x03CE; folded[1] = 0x03B9; return 2; // ῴ → ώι
-        case 0x1FF6: folded[0] = 0x03C9; folded[1] = 0x0342; return 2; // ῶ → ω + combining
-        case 0x1FF7: folded[0] = 0x03C9; folded[1] = 0x0342; folded[2] = 0x03B9; return 3; // ῷ → ω + 2 combining
-        case 0x1FFC: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2; // ῼ → ωι
+        // 'ᾲ' (U+1FB2, E1 BE B2) → "ὰι" (U+1F70 U+03B9, E1 BD B0 CE B9)
+        case 0x1FB2: folded[0] = 0x1F70; folded[1] = 0x03B9; return 2;
+        // 'ᾳ' (U+1FB3, E1 BE B3) → "αι" (U+03B1 U+03B9, CE B1 CE B9)
+        case 0x1FB3: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2;
+        // 'ᾴ' (U+1FB4, E1 BE B4) → "άι" (U+03AC U+03B9, CE AC CE B9)
+        case 0x1FB4: folded[0] = 0x03AC; folded[1] = 0x03B9; return 2;
+        // 'ᾶ' (U+1FB6, E1 BE B6) → "ᾶ" (U+03B1 U+0342, CE B1 CD 82)
+        case 0x1FB6: folded[0] = 0x03B1; folded[1] = 0x0342; return 2;
+        // 'ᾷ' (U+1FB7, E1 BE B7) → "ᾶι" (U+03B1 U+0342 U+03B9, CE B1 CD 82 CE B9)
+        case 0x1FB7: folded[0] = 0x03B1; folded[1] = 0x0342; folded[2] = 0x03B9; return 3;
+        // 'ᾼ' (U+1FBC, E1 BE BC) → "αι" (U+03B1 U+03B9, CE B1 CE B9)
+        case 0x1FBC: folded[0] = 0x03B1; folded[1] = 0x03B9; return 2;
+        // 'ῂ' (U+1FC2, E1 BF 82) → "ὴι" (U+1F74 U+03B9, E1 BD B4 CE B9)
+        case 0x1FC2: folded[0] = 0x1F74; folded[1] = 0x03B9; return 2;
+        // 'ῃ' (U+1FC3, E1 BF 83) → "ηι" (U+03B7 U+03B9, CE B7 CE B9)
+        case 0x1FC3: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2;
+        // 'ῄ' (U+1FC4, E1 BF 84) → "ήι" (U+03AE U+03B9, CE AE CE B9)
+        case 0x1FC4: folded[0] = 0x03AE; folded[1] = 0x03B9; return 2;
+        // 'ῆ' (U+1FC6, E1 BF 86) → "ῆ" (U+03B7 U+0342, CE B7 CD 82)
+        case 0x1FC6: folded[0] = 0x03B7; folded[1] = 0x0342; return 2;
+        // 'ῇ' (U+1FC7, E1 BF 87) → "ῆι" (U+03B7 U+0342 U+03B9, CE B7 CD 82 CE B9)
+        case 0x1FC7: folded[0] = 0x03B7; folded[1] = 0x0342; folded[2] = 0x03B9; return 3;
+        // 'ῌ' (U+1FCC, E1 BF 8C) → "ηι" (U+03B7 U+03B9, CE B7 CE B9)
+        case 0x1FCC: folded[0] = 0x03B7; folded[1] = 0x03B9; return 2;
+        // 'ῒ' (U+1FD2, E1 BF 92) → "ῒ" (U+03B9 U+0308 U+0300, CE B9 CC 88 CC 80)
+        case 0x1FD2: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0300; return 3;
+        // 'ΐ' (U+1FD3, E1 BF 93) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81)
+        case 0x1FD3: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0301; return 3;
+        // 'ῖ' (U+1FD6, E1 BF 96) → "ῖ" (U+03B9 U+0342, CE B9 CD 82)
+        case 0x1FD6: folded[0] = 0x03B9; folded[1] = 0x0342; return 2;
+        // 'ῗ' (U+1FD7, E1 BF 97) → "ῗ" (U+03B9 U+0308 U+0342, CE B9 CC 88 CD 82)
+        case 0x1FD7: folded[0] = 0x03B9; folded[1] = 0x0308; folded[2] = 0x0342; return 3;
+        // 'ῢ' (U+1FE2, E1 BF A2) → "ῢ" (U+03C5 U+0308 U+0300, CF 85 CC 88 CC 80)
+        case 0x1FE2: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0300; return 3;
+        // 'ΰ' (U+1FE3, E1 BF A3) → "ΰ" (U+03C5 U+0308 U+0301, CF 85 CC 88 CC 81)
+        case 0x1FE3: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0301; return 3;
+        // 'ῤ' (U+1FE4, E1 BF A4) → "ῤ" (U+03C1 U+0313, CF 81 CC 93)
+        case 0x1FE4: folded[0] = 0x03C1; folded[1] = 0x0313; return 2;
+        // 'ῦ' (U+1FE6, E1 BF A6) → "ῦ" (U+03C5 U+0342, CF 85 CD 82)
+        case 0x1FE6: folded[0] = 0x03C5; folded[1] = 0x0342; return 2;
+        // 'ῧ' (U+1FE7, E1 BF A7) → "ῧ" (U+03C5 U+0308 U+0342, CF 85 CC 88 CD 82)
+        case 0x1FE7: folded[0] = 0x03C5; folded[1] = 0x0308; folded[2] = 0x0342; return 3;
+        // 'ῲ' (U+1FF2, E1 BF B2) → "ὼι" (U+1F7C U+03B9, E1 BD BC CE B9)
+        case 0x1FF2: folded[0] = 0x1F7C; folded[1] = 0x03B9; return 2;
+        // 'ῳ' (U+1FF3, E1 BF B3) → "ωι" (U+03C9 U+03B9, CF 89 CE B9)
+        case 0x1FF3: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2;
+        // 'ῴ' (U+1FF4, E1 BF B4) → "ώι" (U+03CE U+03B9, CF 8E CE B9)
+        case 0x1FF4: folded[0] = 0x03CE; folded[1] = 0x03B9; return 2;
+        // 'ῶ' (U+1FF6, E1 BF B6) → "ῶ" (U+03C9 U+0342, CF 89 CD 82)
+        case 0x1FF6: folded[0] = 0x03C9; folded[1] = 0x0342; return 2;
+        // 'ῷ' (U+1FF7, E1 BF B7) → "ῶι" (U+03C9 U+0342 U+03B9, CF 89 CD 82 CE B9)
+        case 0x1FF7: folded[0] = 0x03C9; folded[1] = 0x0342; folded[2] = 0x03B9; return 3;
+        // 'ῼ' (U+1FFC, E1 BF BC) → "ωι" (U+03C9 U+03B9, CF 89 CE B9)
+        case 0x1FFC: folded[0] = 0x03C9; folded[1] = 0x03B9; return 2;
         // Alphabetic Presentation Forms: ligatures
-        case 0xFB00: folded[0] = 0x0066; folded[1] = 0x0066; return 2; // ﬀ → ff
-        case 0xFB01: folded[0] = 0x0066; folded[1] = 0x0069; return 2; // ﬁ → fi
-        case 0xFB02: folded[0] = 0x0066; folded[1] = 0x006C; return 2; // ﬂ → fl
-        case 0xFB03: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x0069; return 3; // ﬃ → ffi
-        case 0xFB04: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x006C; return 3; // ﬄ → ffl
-        case 0xFB05: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬅ → st
-        case 0xFB06: folded[0] = 0x0073; folded[1] = 0x0074; return 2; // ﬆ → st
+        // 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+        case 0xFB00: folded[0] = 0x0066; folded[1] = 0x0066; return 2;
+        // 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+        case 0xFB01: folded[0] = 0x0066; folded[1] = 0x0069; return 2;
+        // 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+        case 0xFB02: folded[0] = 0x0066; folded[1] = 0x006C; return 2;
+        // 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+        case 0xFB03: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x0069; return 3;
+        // 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+        case 0xFB04: folded[0] = 0x0066; folded[1] = 0x0066; folded[2] = 0x006C; return 3;
+        // 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+        case 0xFB05: folded[0] = 0x0073; folded[1] = 0x0074; return 2;
+        // 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+        case 0xFB06: folded[0] = 0x0073; folded[1] = 0x0074; return 2;
         // Armenian ligatures
-        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2; // ﬓ → մն (men + nun)
-        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2; // ﬔ → մե (men + ech)
-        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2; // ﬕ → մի (men + ini)
-        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2; // ﬖ → վն (vew + nun)
-        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2; // ﬗ → մխ (men + xeh)
+        // 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
+        case 0xFB13: folded[0] = 0x0574; folded[1] = 0x0576; return 2;
+        // 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
+        case 0xFB14: folded[0] = 0x0574; folded[1] = 0x0565; return 2;
+        // 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
+        case 0xFB15: folded[0] = 0x0574; folded[1] = 0x056B; return 2;
+        // 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
+        case 0xFB16: folded[0] = 0x057E; folded[1] = 0x0576; return 2;
+        // 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
+        case 0xFB17: folded[0] = 0x0574; folded[1] = 0x056D; return 2;
         }
 
         folded[0] = rune; return 1;  // 3-byte: no folding needed
@@ -1023,8 +1129,8 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
     // Next let's handle the 4-byte irregular mappings
     switch (rune) {
     // Vithkuqi: Albanian historical script
-    case 0x10594: folded[0] = 0x105BB; return 1; // 𐖔 → 𐖻
-    case 0x10595: folded[0] = 0x105BC; return 1; // 𐖕 → 𐖼
+    case 0x10594: folded[0] = 0x105BB; return 1; // '𐖔' (U+010594, F0 90 96 94) → '𐖻' (U+0105BB, F0 90 96 BB)
+    case 0x10595: folded[0] = 0x105BC; return 1; // '𐖕' (U+010595, F0 90 96 95) → '𐖼' (U+0105BC, F0 90 96 BC)
     }
 
     folded[0] = rune; return 1;  // No folding needed
@@ -1039,7 +1145,7 @@ SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') 
 
 /**
  *  @brief  Iterator state for streaming through folded UTF-8 runes.
- *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently.
+ *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently.
  */
 typedef struct {
     sz_cptr_t ptr;           // Current position in UTF-8 string
@@ -1097,7 +1203,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_r
 
 /**
  *  @brief  Reverse iterator state for streaming through folded UTF-8 runes backwards.
- *  Handles one-to-many case folding expansions (e.g., ß → ss) transparently in reverse order.
+ * Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently
+ * in reverse order.
  */
 typedef struct {
     sz_cptr_t ptr;           // Current position (points to byte AFTER current sequence)
@@ -1117,7 +1224,8 @@ SZ_INTERNAL void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t
 
 /**
  *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
- *  When a codepoint folds to multiple runes (like ß→ss), returns them in reverse order (s, then s).
+ * When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
+ * reverse order ('s', then 's').
  */
 SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t_ *it, sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
@@ -1308,12 +1416,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_verify_match_(             //
  *  2. It does NOT belong to any bicameral (cased) script
  *  3. It does NOT appear in any case fold expansion as a target character
  *
- *  The third condition is critical. Consider ʾ (U+02BE MODIFIER LETTER RIGHT HALF RING):
+ *  The third condition is critical. Consider 'ʾ' (U+02BE, CA BE):
  *  - It has no case variant and folds to itself
- *  - However, ẚ (U+1E9A) folds to "aʾ" (two runes: U+0061 U+02BE)
- *  - A needle "ʾ" must match at position 1 of the folded expansion of ẚ
- *  - Binary search cannot handle this - it only sees ẚ as a 3-byte sequence (E1 BA 9A)
- *  - Therefore ʾ must NOT be treated as case-agnostic
+ *  - However, 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+ *  - A needle containing 'ʾ' must match at position 1 of the folded expansion of 'ẚ'
+ *  - Binary search cannot handle this - it only sees 'ẚ' as a 3-byte sequence (E1 BA 9A)
+ *  - Therefore 'ʾ' must NOT be treated as case-agnostic
  *
  *  This function implements the check via explicit range exclusions for all bicameral
  *  scripts and all Unicode blocks containing case fold expansion target characters.
@@ -1425,7 +1533,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t lengt
 
 /**
  *  @brief  Hash-free case-insensitive search for needles that fold to exactly 1 rune.
- *          Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' which folds to 'ss' = 2 runes).
+ *          Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) = 2 runes).
  *
  *  Single-pass algorithm: parses each source rune, folds it, checks if it produces
  *  exactly one rune matching the target. No iterator overhead, no verification needed.
@@ -1694,9 +1802,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
 
 /**
  *  @brief  Hash-free case-insensitive search for needles that fold to exactly 2 runes.
- *          Examples: 'ab', 'AB', 'ß' (folds to 'ss'), 'ﬁ' (folds to 'fi').
+ * Examples: 'ab', 'AB', 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73), 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066
+ * U+0069, 66 69).
  *
- *  Single-pass sliding window over the folded rune stream. Handles expansions (ß→ss)
+ * Single-pass sliding window over the folded rune stream. Handles expansions ('ß' (U+00DF, C3 9F) → "ss" (U+0073
+ * U+0073, 73 73))
  *  by buffering folded runes from each source and tracking source boundaries.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
@@ -1758,10 +1868,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
 
 /**
  *  @brief  Hash-free case-insensitive search for needles that fold to exactly 3 runes.
- *          Examples: 'abc', 'ABC', 'aß' (folds to 'ass'), 'ﬁa' (folds to 'fia').
+ * Examples: 'abc', 'ABC', "aß" ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) → "ass" (U+0061 U+0073 U+0073, 61 73
+ * 73),
+ * "ﬁa" ('ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)) → "fia" (U+0066 U+0069 U+0061, 66 69 61).
  *
  *  Single-pass sliding window of 3 folded runes over the haystack's folded stream.
- *  Handles expansions (ß→ss) by buffering and tracking source boundaries.
+ *  Handles expansions ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) by buffering and tracking source boundaries.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_3folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -2088,7 +2200,7 @@ SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
         sz_size_t target_runes_count = sz_unicode_fold_codepoint_(source_rune, target_runes);
 
         // In the worst case scenario, when folded, the text becomes 3x longer.
-        // That's the story of 'ΐ' (CE 90) becoming three codepoints (CE B9 CC 88 CC 81).
+        // That's the story of 'ΐ' (U+0390, CE 90) becoming three codepoints (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81).
         sz_u8_t target_bytes[12]; // 3 runes max, each up to 4 bytes
         sz_size_t target_bytes_count = 0;
         for (sz_size_t i = 0; i < target_runes_count; ++i)
@@ -2328,17 +2440,21 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
     //
     //    2.1. Latin-1 Supplement (C3 80-BF): À-ß and à-ÿ.
     //         Folding is trivial +32 to second byte for 80-9E (except × at 0x97).
-    //         Special case: ß (C3 9F) expands to "ss" - handled via mask blend.
+    //         Special case: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) - handled via mask blend.
     //
-    //    2.2. Basic Cyrillic (D0/D1): А-я and Ѐ-џ (0x0400-0x045F).
-    //         Uppercase is D0 90-AF and D1 80-8F. Folding maps lowercase TO uppercase:
-    //         - D0 B0-BF (lowercase) → D0 90-AF: subtract 0x20
-    //         - D1 80-8F (lowercase) → D0 A0-AF: add 0x20, normalize D1→D0
-    //         Excludes Extended-A (D1 A0+) which needs +1 folding.
+    //    2.2. Basic Cyrillic (D0/D1): Ѐ-џ and А-я (U+0400-U+045F).
+    //         Folding maps uppercase → lowercase:
+    //         - D0 80-8F (Ѐ-Џ) → D1 90-9F (ѐ-џ): +0x10, D0→D1
+    //         - D0 90-9F (А-П) → D0 B0-BF (а-п): +0x20
+    //         - D0 A0-AF (Р-Я) → D1 80-8F (р-я): −0x20, D0→D1
+    //         Excludes Extended-A (D1 A0+) which uses parity (+1) folding.
     //
     //    2.3. Greek (CE/CF): Basic Greek letters Α-Ω and α-ω.
-    //         Similar structure: uppercase in CE, lowercase in CF.
-    //         Excludes archaic letters and symbols needing special handling.
+    //         Uppercase is in CE, but lowercase spans both CE and CF:
+    //         - CE 91-9F (Α-Ο) → CE B1-BF (α-ο) (+0x20)
+    //         - CE A0-AB (Π-Ϋ, skipping A2) → CF 80-8B (π-ϋ) (CE→CF and −0x20)
+    //         - CF 82 ('ς' U+03C2) → CF 83 ('σ' U+03C3) (+1)
+    //         Excludes archaic letters, tonos/diacritics, and symbol variants needing special handling.
     //
     // 3. Groups of 3-byte codepoints - split into caseless and case-aware paths
     //
@@ -2346,12 +2462,12 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
     //         most punctuation (E2 80-83), Thai, Hindi, etc.
     //         Fast-path: copy directly without transformation.
     //
-    //    3.2. Georgian uppercase (E1 82 80-9F, E1 83 80-8F) → lowercase (E2 B4 80-AF).
+    //    3.2. Georgian uppercase (E1 82 A0-BF, E1 83 80-85/87/8D) → lowercase (E2 B4 80-AF).
     //         Full 3-byte transformation: lead E1→E2, second byte→B4,
     //         third byte ±0x20 depending on original second byte (82 vs 83).
     //
-    //    3.3. Fullwidth Latin (EF BC-BD): Ａ-Ｚ → ａ-ｚ.
-    //         Second byte BC with third 81-9A: add 0x21 to third byte.
+    //    3.3. Fullwidth Latin:
+    //         - Ａ-Ｚ: 'Ａ' (U+FF21, EF BC A1) → 'ａ' (U+FF41, EF BD 81) (third byte +0x20, second byte BC→BD)
     //
     // 4. Groups of 4-byte codepoints (emoji, historic scripts)
     //    Generally caseless, but Deseret/Warang Citi have folding rules.
@@ -2367,9 +2483,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
     // │ Bytes │ Range          │ Lead Byte   │ Pattern                              │
     // ├───────┼────────────────┼─────────────┼──────────────────────────────────────┤
     // │  1    │ U+0000-007F    │ 0xxxxxxx    │ ASCII                                │
-    // │  2    │ U+0080-07FF    │ 110xxxxx    │ C0-DF lead + 1 continuation          │
+    // │  2    │ U+0080-07FF    │ 110xxxxx    │ C2-DF lead + 1 continuation          │
     // │  3    │ U+0800-FFFF    │ 1110xxxx    │ E0-EF lead + 2 continuations         │
-    // │  4    │ U+10000-10FFFF │ 11110xxx    │ F0-F7 lead + 3 continuations         │
+    // │  4    │ U+10000-10FFFF │ 11110xxx    │ F0-F4 lead + 3 continuations         │
     // ├───────┴────────────────┴─────────────┴──────────────────────────────────────┤
     // │ Continuation bytes: 10xxxxxx (0x80-0xBF)                                    │
     // │ Lead byte detection: (byte & 0xC0) == 0x80 → continuation                   │
@@ -2413,20 +2529,37 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
         source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source);
         __mmask64 is_non_ascii = _mm512_movepi8_mask(source_vec.zmm);
 
-        // Compute all lead byte masks once per iteration using pre-computed constants
-        __mmask64 is_cont_mask =
-            _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, utf8_cont_test_mask), utf8_cont_pattern);
-        __mmask64 is_three_byte_lead_mask =
-            _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, utf8_3byte_test_mask), utf8_3byte_pattern);
-        __mmask64 is_four_byte_lead_mask =
-            _mm512_cmpeq_epi8_mask(_mm512_and_si512(source_vec.zmm, utf8_4byte_test_mask), utf8_3byte_test_mask);
-
-        // Check that all loaded characters are ASCII
+        // FAST PATH: Check for pure ASCII FIRST, before computing any masks.
+        // This is the most common case for English and many other Latin-script texts.
+        // Avoids computing 6+ masks that would be wasted on pure ASCII chunks.
         if (is_non_ascii == 0) {
             _mm512_mask_storeu_epi8(target, load_mask, sz_ice_fold_ascii_in_prefix_(source_vec.zmm, load_mask));
             target += chunk_size, source += chunk_size, source_length -= chunk_size;
             continue;
         }
+
+        // Compute lead byte masks only for non-ASCII chunks.
+        //
+        // Optimization: Use VPTERNLOGD (imm8=0x80 = A & B) instead of VPAND.
+        // - VPAND executes on p0/p5 only (2 ports)
+        // - VPTERNLOGD executes on p0/p1/p5 (3 ports)
+        // - VPCMPEQ-to-mask is p5-only (bottleneck)
+        // By moving AND operations to VPTERNLOGD, we reduce p5 contention, allowing
+        // the subsequent CMPEQ operations to execute with less stalling.
+        //
+        // Original pattern:
+        //   _mm512_cmpeq_epi8_mask(_mm512_and_si512(src, mask), pattern)
+        // Optimized pattern:
+        //   _mm512_cmpeq_epi8_mask(_mm512_ternarylogic_epi64(src, mask, mask, 0x80), pattern)
+        //
+        __m512i masked_cont = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_cont_test_mask, utf8_cont_test_mask, 0x80);
+        __m512i masked_3byte =
+            _mm512_ternarylogic_epi64(source_vec.zmm, utf8_3byte_test_mask, utf8_3byte_test_mask, 0x80);
+        __m512i masked_4byte =
+            _mm512_ternarylogic_epi64(source_vec.zmm, utf8_4byte_test_mask, utf8_4byte_test_mask, 0x80);
+        __mmask64 is_cont_mask = _mm512_cmpeq_epi8_mask(masked_cont, utf8_cont_pattern);
+        __mmask64 is_three_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_3byte, utf8_3byte_pattern);
+        __mmask64 is_four_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_4byte, utf8_3byte_test_mask);
 
         // Early fast path: Pure 3-byte content (no ASCII, no 2-byte, no 4-byte)
         // This is common for CJK, Hindi (Devanagari), Thai, etc.
@@ -2443,11 +2576,27 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 // EA is mostly safe (Hangul B0-BF) but some second bytes have folding:
                 //   - 0x99-0x9F: Cyrillic Ext-B, Latin Ext-D (A640-A7FF)
                 //   - 0xAD-0xAE: Cherokee Supplement (AB70-ABBF)
+                // Optimization: Range compression for E1/E2 detection.
+                // E1 (0xE1) and E2 (0xE2) are adjacent, so instead of 2 CMPEQ operations:
+                //   is_e1_mask = CMPEQ(src, E1)  // p5-only
+                //   is_e2_mask = CMPEQ(src, E2)  // p5-only
+                // We use 1 range check + 1 CMPEQ:
+                //   is_e1_e2_mask = (src - E1) < 2  // SUB (any port) + CMPLT (p5)
+                //   is_e1_mask = CMPEQ(src, E1)     // p5 (still needed for final check)
+                //   is_e2_mask = is_e1_e2_mask & ~is_e1_mask  // KANDN (k-unit, not p5)
+                // Net effect: saves 1 p5 operation and enables early-out on combined mask.
+                //
+                // Original pattern:
+                //   is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+                //   is_e2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+                //
+                __mmask64 is_e1_e2_mask = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xE1)), _mm512_set1_epi8(2));
                 __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
                 __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
                 // For E2, only allow 80-83 (General Punctuation quotes) through - many other E2 ranges have folding
                 // (84 Letterlike, 93 Enclosed Alphanumerics, B0-B3 Glagolitic/Coptic, etc.)
-                __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+                __mmask64 is_e2_mask = _kand_mask64(is_e1_e2_mask, _knot_mask64(is_e1_mask));
                 __mmask64 e2_second_byte_positions = is_e2_mask << 1;
                 // E2 folding needed if second byte is NOT in 80-83 range
                 __mmask64 is_e2_folding_mask =
@@ -2486,7 +2635,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             }
         }
 
-        // 2. Two-byte UTF-8 sequences (lead bytes C0-DF)
+        // 2. Two-byte UTF-8 sequences (valid lead bytes C2-DF)
         //
         // 2.1. Latin-1 Supplement (C3 80 - C3 BF) mixed with ASCII
         __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
@@ -2507,7 +2656,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                                                            _mm512_set1_epi8((char)0x97)); // Exclude ×
             __m512i folded = sz_ice_fold_ascii_(source_vec.zmm, is_upper_ascii | is_latin1_upper, prefix_mask);
 
-            // ß (C3 9F) → ss: replace both bytes with 's'
+            // 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73): replace both bytes with 's'
             __mmask64 is_eszett_mask =
                 _mm512_mask_cmpeq_epi8_mask(latin1_second_bytes, source_vec.zmm, _mm512_set1_epi8((char)0x9F));
             folded = _mm512_mask_set1_epi8(folded, is_eszett_mask | (is_eszett_mask >> 1), 's');
@@ -2534,9 +2683,26 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
         // EXCLUDED from fast path: Cyrillic Extended-A (0x0460-04FF) which starts at D1 A0.
         // These use +1 folding for even codepoints and must go through the general 2-byte path.
         {
+            // Optimization: Range compression for D0/D1 Cyrillic detection.
+            // D0 (0xD0) and D1 (0xD1) are adjacent, so instead of 2 CMPEQ + OR:
+            //   is_d0_mask = CMPEQ(src, D0)  // p5-only
+            //   is_d1_mask = CMPEQ(src, D1)  // p5-only
+            //   is_cyrillic_lead_mask = is_d0_mask | is_d1_mask
+            // We use 1 range check + 1 CMPEQ:
+            //   is_cyrillic_lead_mask = (src - D0) < 2  // SUB (any port) + CMPLT (p5)
+            //   is_d0_mask = CMPEQ(src, D0)             // p5 (still needed for is_after_d0_mask)
+            //   is_d1_mask = is_cyrillic_lead_mask & ~is_d0_mask  // KANDN (k-unit, not p5)
+            // Net effect: saves 1 p5 operation.
+            //
+            // Original pattern:
+            //   is_d0_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
+            //   is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
+            //   is_cyrillic_lead_mask = is_d0_mask | is_d1_mask;
+            //
+            __mmask64 is_cyrillic_lead_mask = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xD0)), _mm512_set1_epi8(2));
             __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
-            __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
-            __mmask64 is_cyrillic_lead_mask = is_d0_mask | is_d1_mask;
+            __mmask64 is_d1_mask = _kand_mask64(is_cyrillic_lead_mask, _knot_mask64(is_d0_mask));
             __mmask64 cyrillic_second_byte_positions = is_cyrillic_lead_mask << 1;
 
             // Exclude Cyrillic Extended-A: D1 with second byte >= 0xA0 (U+0460+)
@@ -2589,7 +2755,93 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             }
         }
 
-        // 2.3. Fast path for 2-byte scripts without case folding (Hebrew, Arabic, Syriac, etc.)
+        // 2.3. Greek fast path (CE/CF lead bytes for basic Greek 0x0370-0x03FF)
+        //
+        // Greek CE/CF uppercase → lowercase transformations:
+        // ┌──────────────────┬───────────────────────┬─────────────────────┬──────────────┐
+        // │ Input Range      │ Codepoints            │ Output              │ Transform    │
+        // ├──────────────────┼───────────────────────┼─────────────────────┼──────────────┤
+        // │ CE 91-9F         │ Α-Ο (U+0391-039F)     │ CE B1-BF (α-ο)      │ +0x20        │
+        // │ CE A0-A1         │ Π-Ρ (U+03A0-03A1)     │ CF 80-81 (π-ρ)      │ −0x20, CE→CF │
+        // │ CE A3-AB         │ Σ-Ϋ (U+03A3-03AB)     │ CF 83-8B (σ-ϋ)      │ −0x20, CE→CF │
+        // │ CE B1-BF         │ α-ο (lowercase)       │ unchanged           │ —            │
+        // │ CF 80-8B         │ π-ϋ (lowercase)       │ unchanged           │ —            │
+        // │ CF 82            │ ς (U+03C2, final sigma) │ CF 83 (σ U+03C3)   │ +1           │
+        // └──────────────────┴───────────────────────┴─────────────────────┴──────────────┘
+        //
+        // EXCLUDED from fast path: Greek tonos/diacritics (CE 84-90) and extended symbols (CF 8C+).
+        // These have irregular folding rules and must go through the general 2-byte path.
+        {
+            __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCE));
+            __mmask64 is_cf_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCF));
+            __mmask64 is_greek_lead_mask = is_ce_mask | is_cf_mask;
+            __mmask64 greek_second_byte_positions = is_greek_lead_mask << 1;
+
+            // Exclude problematic Greek ranges that need serial handling:
+            // - CE 84-90: tonos/diacritics with irregular folding (U+0384-0390)
+            // - CE 8C, 8E-8F: Ό, Ύ, Ώ with non-standard offsets
+            // - CE B0: ΰ (U+03B0) expands to 3 codepoints
+            // - CF 8C+: symbols and extended Greek with irregular folding
+            // Check second bytes after CE leads
+            __mmask64 is_ce_problematic =
+                (is_ce_mask << 1) &
+                (_mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x91)) | // < 0x91
+                 _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB0))); // == 0xB0 (ΰ expands)
+            // Check second bytes after CF leads (only allow 80-8B for basic lowercase + final sigma)
+            __mmask64 is_cf_problematic =
+                (is_cf_mask << 1) & _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x8C));
+
+            // Check for pure basic Greek + ASCII mix (no problematic ranges)
+            __mmask64 is_valid_greek_mix_mask = ~is_non_ascii | is_greek_lead_mask | greek_second_byte_positions;
+            is_valid_greek_mix_mask &= ~(is_ce_problematic | is_cf_problematic);
+            sz_size_t greek_length = sz_ice_first_invalid_(is_valid_greek_mix_mask, load_mask, chunk_size);
+            greek_length -= greek_length && ((is_greek_lead_mask >> (greek_length - 1)) & 1);
+
+            if (greek_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(greek_length);
+                __mmask64 is_after_ce_mask = (is_ce_mask << 1) & prefix_mask;
+                __mmask64 is_after_cf_mask = (is_cf_mask << 1) & prefix_mask;
+
+                // Start with source, apply ASCII folding
+                __m512i folded = sz_ice_fold_ascii_in_prefix_(source_vec.zmm, prefix_mask);
+
+                // CE second bytes: Range 91-9F gets +0x20, Range A0-A1 and A3-AB gets -0x20 (lead changes)
+                // Note: A2 is unassigned (U+03A2) and must be excluded!
+                // 91-9F: (second - 0x91) < 0x0F
+                __mmask64 is_ce_upper1_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_ce_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x91)),
+                    _mm512_set1_epi8(0x0F));
+                // A0-A1: Π-Ρ (2 chars)
+                __mmask64 is_ce_upper2a_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_ce_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                    _mm512_set1_epi8(0x02));
+                // A3-AB: Σ-Ϋ (9 chars) - skip A2 which is unassigned
+                __mmask64 is_ce_upper2b_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_ce_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA3)),
+                    _mm512_set1_epi8(0x09));
+                __mmask64 is_ce_upper2_mask = is_ce_upper2a_mask | is_ce_upper2b_mask;
+
+                // Apply +0x20 for CE 91-9F
+                folded = _mm512_mask_add_epi8(folded, is_ce_upper1_mask, folded, _mm512_set1_epi8(0x20));
+                // Apply -0x20 for CE A0-AB
+                folded = _mm512_mask_sub_epi8(folded, is_ce_upper2_mask, folded, _mm512_set1_epi8(0x20));
+
+                // Fix lead bytes: CE A0-AB need CE→CF
+                __mmask64 needs_cf_mask = (is_ce_upper2_mask >> 1) & (is_ce_mask & prefix_mask);
+                folded = _mm512_mask_mov_epi8(folded, needs_cf_mask, _mm512_set1_epi8((char)0xCF));
+
+                // Handle final sigma: 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
+                __mmask64 is_final_sigma =
+                    is_after_cf_mask & _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x82));
+                folded = _mm512_mask_add_epi8(folded, is_final_sigma, folded, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                target += greek_length, source += greek_length, source_length -= greek_length;
+                continue;
+            }
+        }
+
+        // 2.4. Fast path for 2-byte scripts without case folding (Hebrew, Arabic, Syriac, etc.)
         //
         // Lead bytes D7-DF cover Hebrew (D7), Arabic (D8-DB), Syriac (DC-DD), Thaana/NKo (DE-DF).
         // None of these scripts have case distinctions, so we can just copy them unchanged.
@@ -2611,7 +2863,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             }
         }
 
-        // 2.4. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian)
+        // 2.5. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian)
         //
         // Unlike Latin-1 where folding is a simple +0x20 to the second byte in-place, these scripts
         // require unpacking to 32-bit codepoints because:
@@ -3006,7 +3258,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                         folded = _mm512_mask_add_epi8(folded, sz_ice_is_ascii_upper_(source_vec.zmm) & prefix_mask,
                                                       folded, ascii_case_offset);
 
-                        // Fold Micro Sign: C2 B5 → CE BC (U+00B5 → U+03BC)
+                        // Fold Micro Sign: 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
                         __mmask64 c2_in_prefix = is_c2_lead & prefix_mask;
                         __mmask64 c2_second_pos = c2_in_prefix << 1;
                         __mmask64 is_micro_second =
@@ -3030,9 +3282,14 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             // UTF-8 third byte determines parity: even third byte = even codepoint.
             //
             // Exceptions that need serial handling:
-            //   - U+1E96-U+1E9E (E1 BA 96-9E): These expand to multiple codepoints
-            //     U+1E96 → h + combining, U+1E97 → t + combining, U+1E98 → w + combining,
-            //     U+1E99 → y + combining, U+1E9A → a + modifier, U+1E9B → ṡ, U+1E9E → ss
+            //   - U+1E96–U+1E9E (E1 BA 96-9E):
+            //     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+            //     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+            //     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+            //     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+            //     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+            //     - 'ẛ' (U+1E9B, E1 BA 9B) → 'ṡ' (U+1E61, E1 B9 A1)
+            //     - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
             if (is_e1_lead && source_length >= 3) {
                 __m512i latin_ext_second_bytes =
                     _mm512_permutexvar_epi8(_mm512_add_epi8(indices_vec, _mm512_set1_epi8(1)), source_vec.zmm);
@@ -3522,10 +3779,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length) 
  *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly folding
  *  than the proper `sz_utf8_case_fold`, but without losing any possible matches. That's typically achieved
  *  finding parts of the needle, that never appear in any multi-byte expansions of complex characters, so
- *  we don't need to shuffle data withing a CPU register - just swap some byte sequences with others.
+ *  we don't need to shuffle data within a CPU register - just swap some byte sequences with others.
  *
  *  Assuming the complexity of Unicode, the number of such rules to take care of is quite significant, so
- *  it's hard to achieve matching speeds beyond 500 MB/s for arbitrary needles. Hoever, if separate them
+ *  it's hard to achieve matching speeds beyond 500 MB/s for arbitrary needles. However, if separate them
  *  by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
  */
 typedef enum {
@@ -3539,41 +3796,41 @@ typedef enum {
      *  operation to be applied is mapping A-Z to a-z:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
      *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
@@ -3595,68 +3852,71 @@ typedef enum {
      *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
      *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
      *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
      *
      *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
      *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_ascii_invariant_k`, but not all!
      *
-     *  The lowercase 'ß' (U+00DF, C3 9F) folds to "ss" (73 73) in-place (2 bytes → 2 bytes). This creates a
-     *  mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find a match
-     *  at the second byte of the "ss" expansion, which is a UTF-8 continuation byte in the original haystack.
-     *  Example: haystack "ßStra" folds to "ssstra", needle "sstra" matches at position 1 (the 0x9F byte of ß).
+     *  The lowercase 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place (2 bytes → 2 bytes).
+     *  This creates a mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find
+     *  a match at the second byte of 'ß' (the UTF-8 continuation byte 0x9F) instead of at a codepoint boundary.
+     *  Example: haystack "ßStra" folds to "ssstra", needle "sstra" matches at position 1 (the 0x9F byte of 'ß').
      *  To avoid this, 's' is only safe when NOT at the start or end of the needle (contextual restriction).
      *
-     *  The uppercase 'ẞ' (U+1E9E, E1 BA 9E) also folds into "ss" (73 73), but is outside of Latin-1.
+     *  The uppercase 'ẞ' (U+1E9E, E1 BA 9E) also folds into "ss" (U+0073 U+0073, 73 73), but is outside of Latin-1.
      *  In UTF-8 it is a 3-byte sequence, so it resizes into a 2-byte sequence when folded. Luckily for us,
      *  it's almost never used in practice: introduced to Unicode in 2008 and officially adopted into German
      *  orthography in 2017. When processing the haystack, we check if 'ẞ' appears, and if so, we revert to
      *  serial processing for that tiny block of text.
      *
      *  Another place where 's' (U+0073, 73) appears are ligatures 'ﬅ' (U+FB05, EF AC 85) and 'ﬆ' (U+FB06, EF AC 86)
-     *  that both fold into "st" (73 74). They also result in serial fallback when detected in the haystack.
-     *  If we detect all of those ligatures from 'ﬀ' (U+FB00, EF AC 80) to 'ﬆ' (U+FB06, EF AC 86), we can safely
-     *  allow both 'f' (U+0066, 66) and 'l' (U+006C, 6C).
+     *  that both fold into "st" (U+0073 U+0074, 73 74). They also result in serial fallback when detected in the
+     *  haystack. If we detect all of those ligatures from 'ﬀ' (U+FB00, EF AC 80) to 'ﬆ' (U+FB06, EF AC 86), we can
+     *  safely allow both 'f' (U+0066, 66) and 'l' (U+006C, 6C).
      *
      *  There is one more 3-byte problematic range to consider - from (E1 BA 96) to (E1 BA 9A), which includes:
-     *  'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1), 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88),
-     *  'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A), 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A),
-     *  'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE). If we correctly detect that range in the haystack,  we can safely
-     *  allow 'h' (U+0068, 68), 't' (U+0074, 74), 'w' (U+0077, 77), 'y' (U+0079, 79), and 'a' (U+0061, 61) in needles!
+     *  'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1), 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88),
+     *  'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A), 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A),
+     *  'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE). If we correctly detect that range in the haystack, we
+     *  can safely allow 'h' (U+0068, 68), 't' (U+0074, 74), 'w' (U+0077, 77), 'y' (U+0079, 79), and 'a' (U+0061, 61) in
+     *  needles!
      *
      *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
      *  That sign is extremely rare in Western European languages, while the lowercase 'k' is obviously common
      *  in German and English. In French, Spanish, and Portuguese - less so. So we add one more check
      *  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
-     *  Similarly, we check for "ſ" (Latin Small Letter Long S, U+017F, C5 BF) which folds to 's' (U+0073, 73).
+     *  Similarly, we check for 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
      *  It's archaic in modern languages but theoretically possible in historical texts.
      *
      *  So we allow 'k' unconditionally and inherit/extend the following limitations from
-     * `sz_utf8_case_rune_ascii_invariant_k`:
+     *  `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
-     *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87).
+     *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87).
      *    It's the Turkish dotted capital I that expands into a 3-byte sequence when folded. It typically appears
      *    at the start of words, like: İstanbul (the city), İngilizce (English language).
      *
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C)
-     *    to avoid: 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C).
+     *    to avoid: 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C).
      *    It's the "J with Caron", used in phonetic transcripts and romanization of Iranian, Armenian, Georgian.
      *
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC)
-     *    to avoid: 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E).
+     *    to avoid: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
      *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
      *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
      *
-     *  - 's' (U+0073, 73) - can't be first or last, or part of the folded "ss" prefix or suffix,
-     *    to avoid mid-ß-expansion matches: 'ß' (U+00DF) folds to "ss" in-place, so a needle starting/ending
-     *    with 's' could match at position 1 (the 0x9F continuation byte). Example: "ßStra" → "ssstra",
-     *    needle "sstra" would match at the second byte of ß. Needles with 's' in the middle are safe.
+     *  - 's' (U+0073, 73) - can't be first or last, or part of the folded "ss" (U+0073 U+0073, 73 73) prefix or suffix,
+     *    to avoid mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place,
+     *    so a needle starting/ending with 's' could match at position 1 (the 0x9F continuation byte).
+     *    Example: "ßStra" → "ssstra", needle "sstra" would match at the second byte of 'ß'.
+     *    Needles with 's' in the middle are safe.
      *
      *  We also add one more limitation for a special 2-byte character that is an irregular folding target of
      *  codepoints of different length:
      *
      *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
      *
      *  There is also a Latin-1 character that doesn't change the width, but we still ban it from the safe strings:
      *
@@ -3712,59 +3972,60 @@ typedef enum {
      *
      *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
      *  That sign is extremely rare in Western European languages, while the lowercase 'k' is very common in Turkish,
-     *  Czech, Polish. So we add one more check  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
-     *  again - revert to serial. Same logic applies to "ſ" (Latin Small Letter Long S, U+017F, C5 BF) folding to 's'.
+     *  Czech, Polish. So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
+     *  again - revert to serial. Same logic applies to 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
      *
      *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning through the
      *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
      *  frequently encounter in Turkish text.
      *
      *  We inherit most contextual limitations for some of the ASCII characters from
-     * `sz_utf8_case_rune_ascii_invariant_k`:
+     *  `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_case_rune_safe_western_europe_k`:
      *
      *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
      *
      *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
      *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
@@ -3811,7 +4072,7 @@ typedef enum {
      *  - D1 90-9F: Extensions lowercase 'ѐ'-'џ' (U+0450-U+045F)
      *
      *  We entirely ban all of the Extended Cyrillic (D2/D3 lead bytes), sometimes used in Ukranian,
-     *  Kazakh, and Uzbek languages, like the 'Ґ' (D2 90) → 'ґ' (D2 91) folding with even/odd ordering
+     *  Kazakh, and Uzbek languages, like the 'Ґ' (U+0490, D2 90) → 'ґ' (U+0491, D2 91) folding with even/odd ordering
      *  of uppercase and lowercase. Similar rules apply to some Chechen, and various Turkic languages.
      *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
      *  By omitting those extensions we can make our folding kernel much lighter.
@@ -3819,46 +4080,46 @@ typedef enum {
      *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *     can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *     - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *     - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *     can't precede '̇' (U+0307, CC 87) to avoid:
-     *     - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *     - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *     - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *     - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *     - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *     - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *     - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *     - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *     can't precede '̈' (U+0308, CC 88) to avoid:
-     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *     can't precede '̈' (U+0308, CC 88) to avoid:
-     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  These ASCII constraints are necessary because mixed-script documents (Cyrillic + Latin) may contain
      *  Latin ligatures, German Eszett, or Turkish İ that the Cyrillic fold function doesn't handle.
@@ -3902,7 +4163,7 @@ typedef enum {
      *  - CE AA-AB: Dialytika uppercase 'Ϊ'-'Ϋ' (U+03AA-U+03AB) → CF 8A-8B (cross lead byte)
      *  - CE AC-AF: Accented lowercase 'ά'-'ί' (U+03AC-U+03AF)
      *  - CE B1-BF: Basic lowercase 'α'-'ο' (U+03B1-U+03BF)
-     *  - CF 80-89: Basic lowercase 'π'-'ω' (U+03C0-U+03C9), includes 'ς' (CF 82) and 'σ' (CF 83)
+     *  - CF 80-89: Basic lowercase 'π'-'ω' (U+03C0-U+03C9), includes 'ς' (U+03C2, CF 82) and 'σ' (U+03C3, CF 83)
      *  - CF 8A-8E: Accented/dialytika lowercase 'ϊ'-'ώ' (U+03CA-U+03CE)
      *
      *  Greek symbol variants that fold to basic letters (detected in haystack, serial fallback):
@@ -3916,14 +4177,14 @@ typedef enum {
      *
      *  Excluded from the needle (require serial fallback when detected in haystack):
      *
-     *  - 'ΐ' (U+0390, CE 90) → "ΐ" (CE B9 CC 88 CC 81) - iota with dialytika and tonos
-     *    EXPANDS to 'ι' (U+03B9) + '̈' (U+0308) + '́' (U+0301) - 3 codepoints!
-     *  - 'ΰ' (U+03B0, CE B0) → "ΰ" (CF 85 CC 88 CC 81) - upsilon with dialytika and tonos
-     *    EXPANDS to 'υ' (U+03C5) + '̈' (U+0308) + '́' (U+0301) - 3 codepoints!
+     *  - 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81) - iota with dialytika and tonos
+     *    EXPANDS to "ΐ" (U+03B9 U+0308 U+0301) - 3 codepoints!
+     *  - 'ΰ' (U+03B0, CE B0) → "ΰ" (U+03C5 U+0308 U+0301, CF 85 CC 88 CC 81) - upsilon with dialytika and tonos
+     *    EXPANDS to "ΰ" (U+03C5 U+0308 U+0301) - 3 codepoints!
      *  - Greek Extended / Polytonic (U+1F00-U+1FFF, E1 BC-BF lead bytes):
      *    Ancient Greek with breathing marks, accents, and iota subscript. Many expand to multiple
-     *    codepoints, e.g., 'ᾈ' (U+1F88) → "ἀι" (U+1F00 + U+03B9), 'ᾳ' (U+1FB3) → "αι" (U+03B1 + U+03B9).
-     *    Polytonic Greek is used primarily in academic, religious, and historical texts.
+     *    codepoints, e.g., 'ᾈ' (U+1F88) → "ἀι" (U+1F00 U+03B9, E1 BC 80 CE B9), 'ᾳ' (U+1FB3) → "αι" (U+03B1 U+03B9, CE
+     * B1 CE B9). Polytonic Greek is used primarily in academic, religious, and historical texts.
      *
      *  Note on the Micro Sign 'µ' (U+00B5, C2 B5):
      *  The Latin-1 micro sign folds TO Greek mu 'μ' (U+03BC, CE BC). This is handled by the Latin-1
@@ -3933,46 +4194,46 @@ typedef enum {
      *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  These ASCII constraints are necessary because mixed-script documents (Greek + Latin) are common
      *  in scientific notation, brand names, and modern Greek text with English loanwords.
@@ -4002,79 +4263,79 @@ typedef enum {
      *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (6B)
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (73)
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  We also add rules specific to Armenian ligatures:
      *
-     *  - 'և' (U+0587, Ech-Yiwn) → "եւ" ('ե' + 'ւ') - very common
-     *  - 'ﬓ' (U+FB13, Men-Now) → "մն" ('մ' + 'ն') - quite rare
-     *  - 'ﬔ' (U+FB14, Men-Ech) → "մե" ('մ' + 'ե') - quite rare
-     *  - 'ﬕ' (U+FB15, Men-Ini) → "մի" ('մ' + 'ի') - quite rare
-     *  - 'ﬖ' (U+FB16, Vew-Now) → "վն" ('վ' + 'ն') - quite rare
-     *  - 'ﬗ' (U+FB17, Men-Xeh) → "մխ" ('մ' + 'խ') - quite rare
+     *  - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82) - very common
+     *  - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6) - quite rare
+     *  - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5) - quite rare
+     *  - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB) - quite rare
+     *  - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6) - quite rare
+     *  - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD) - quite rare
      *
      *  Specific constraints by character:
      *
      *  - 'ե' (U+0565, D5 A5) - can't be first; can't follow 'մ' (U+0574, D5 B4);
      *     can't precede 'ւ' (U+0582, D6 82) to avoid:
-     *     - 'և' (U+0587, D6 87) → "եւ" (ech + yiwn)
-     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (men + ech)
+     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
      *  - 'ւ' (U+0582, D6 82) - can't be last; can't follow 'ե' (U+0565, D5 A5) to avoid:
-     *     - 'և' (U+0587, D6 87) → "եւ"
+     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
      *  - 'մ' (U+0574, D5 B4) - can't be last; can't precede 'ն' (U+0576, D5 B6), 'ե' (U+0565, D5 A5),
      *     'ի' (U+056B, D5 AB), 'խ' (U+056D, D5 AD) to avoid:
-     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (men + now)
-     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (men + ech)
-     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (men + ini)
-     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (men + xeh)
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
      *  - 'ն' (U+0576, D5 B6) - can't be first; can't follow 'մ' (U+0574, D5 B4), 'վ' (U+057E, D5 BE) to avoid:
-     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն"
-     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն"
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
      *  - 'ի' (U+056B, D5 AB) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
-     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի"
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
      *  - 'վ' (U+057E, D5 BE) - can't be first; can't precede 'ն' (U+0576, D5 B6) to avoid:
-     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն"
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
      *  - 'խ' (U+056D, D5 AD) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
-     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ"
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
      *
      *  This means that Armenian needles containing these specific bigrams (եւ, մն, մե, մի, վն, մխ)
      *  cannot use the fast path because finding them separately might miss the precomposed ligatures
@@ -4107,49 +4368,50 @@ typedef enum {
      * `sz_utf8_case_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (61 CA BE)
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
      *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (68 CC B1)
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
      *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (66 66 69)
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
      *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (6A CC 8C)
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
      *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (66 66 6C)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
      *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E)
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
      *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (73 73)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
-     *    - 'ẛ' (U+1E9B, E1 BA 9B) → "ṡ" (U+1E61, E1 B9 A1) [Latin Extended Additional]
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ẛ' (U+1E9B, E1 BA 9B) → 'ṡ' (U+1E61, E1 B9 A1) [Latin Extended Additional]
      *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
      *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (73 74)
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
      *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (77 CC 8A)
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (79 CC 8A)
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
      *  We also inherit one more limitation from the Latin-1 profile:
      *
      *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB), so needle cannot contain 'å' (U+00E5, C3 A5) to avoid ambiguity.
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
      *
      *  This means, that all other ASCII and Latin-1/A/Ext-Add characters are "safe" to use with this kernel.
      */
@@ -4239,13 +4501,13 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 'k':
-            // - Strict: UNSAFE. Kelvin sign 'K' (U+212A) folds to 'k'.
+            // - Strict: UNSAFE. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
             // - Western/Central/Viet: SAFE. Kelvin sign detected in haystack.
             case 'k': safety |= central_viet_group | western_group; break;
 
             // 'a':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE).
-            //   Avoids: 'ẚ' (U+1E9A) → "aʾ".
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE, CA BE).
+            //   Avoids: 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE).
             // - Western: SAFE. Expansion detected in haystack.
             case 'a':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
@@ -4253,8 +4515,8 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 'h':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331).
-            //   Avoids: 'ẖ' (U+1E96) → "ẖ".
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331, CC B1).
+            //   Avoids: 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1).
             // - Western: SAFE. Expansion detected in haystack.
             case 'h':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
@@ -4263,7 +4525,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
             // 'j':
             // - All: Contextual. Can't be last; can't precede '̌' (U+030C).
-            //   Avoids: 'ǰ' (U+01F0) → "ǰ".
+            //   Avoids: 'ǰ' (U+01F0) → "ǰ" (U+006A U+030C, 6A CC 8C).
             //   Western profile does NOT detect this in haystack scan.
             case 'j':
                 if (at_end == sz_false_k && next_ascii)
@@ -4272,7 +4534,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
             // 'w':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
-            //   Avoids: 'ẘ' (U+1E98) → "ẘ".
+            //   Avoids: 'ẘ' (U+1E98) → "ẘ" (U+0077 U+030A, 77 CC 8A).
             // - Western: SAFE. Expansion detected in haystack.
             case 'w':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
@@ -4281,7 +4543,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
             // 'y':
             // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
-            //   Avoids: 'ẙ' (U+1E99) → "ẙ".
+            //   Avoids: 'ẙ' (U+1E99) → "ẙ" (U+0079 U+030A, 79 CC 8A).
             // - Western: SAFE. Expansion detected in haystack.
             case 'y':
                 if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
@@ -4289,14 +4551,14 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 'n':
-            // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC).
-            //   Avoids: 'ŉ' (U+0149) → "ʼn".
-            // - Armenian: UNSAFE. Armenian kernel cannot handle ŉ (C5 89) → ʼn expansion.
+            // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC, CA BC).
+            //   Avoids: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+            // - Armenian: UNSAFE. Armenian kernel cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
             //   The character 'n' can match the 2nd part of the expansion, causing false positives.
             // - Western/Central/Viet: Contextual, same as above.
             //   Western profile does NOT detect this in haystack scan.
             case 'n':
-                // Exclude Armenian - it cannot handle ŉ → ʼn one-to-many expansion
+                // Exclude Armenian - it cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
                 if (at_start == sz_false_k && prev_ascii) {
                     safety |= (1 << sz_utf8_case_rune_ascii_invariant_k) | //
                               (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
@@ -4307,9 +4569,9 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 'i':
-            // - All: Contextual. Can't be first or last; can't follow 'f';
-            //   can't precede '̇' (U+0307).
-            //   Avoids: 'İ' (U+0130) → "i̇", and "fi" ligatures.
+            // - All: Contextual. Can't be first or last; can't follow 'f'; can't precede '̇' (U+0307, CC 87).
+            //   Avoids: 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87),
+            //   and 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69).
             //   Western profile does NOT detect Turkish 'İ' expansion.
             case 'i':
                 if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 'f')
@@ -4318,7 +4580,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
             // 'l':
             // - Strict/Central/Viet: Contextual. Can't be first; can't follow 'f'.
-            //   Avoids: "fl" ligatures.
+            //   Avoids: 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C).
             // - Western: SAFE. Ligatures detected in haystack.
             case 'l':
                 if (at_start == sz_false_k && lower_prev != 'f') safety |= strict_ascii_group | central_viet_group;
@@ -4327,8 +4589,10 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
 
             // 't':
             // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
-            //   can't precede '̈' (U+0308).
-            //   Avoids: "st" ligatures and 'ẗ' (U+1E97) → "ẗ".
+            //   can't precede '̈' (U+0308, CC 88).
+            //   Avoids: 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
+            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74),
+            //   and 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88).
             // - Western: SAFE. Ligatures/expansion detected in haystack.
             case 't':
                 if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 's')
@@ -4339,7 +4603,12 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
             // 'f':
             // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 'f';
             //   can't precede 'f', 'i', 'l'.
-            //   Avoids: "ff", "fi", "fl", "ffi", "ffl" ligatures.
+            //   Avoids:
+            //   - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+            //   - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+            //   - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+            //   - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+            //   - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
             // - Western: SAFE. Ligatures detected in haystack.
             case 'f':
                 if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 'f' &&
@@ -4349,12 +4618,14 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 break;
 
             // 's'
-            // - Strict: UNSAFE. 'ſ' (U+017F) folds to 's'.
+            // - Strict: UNSAFE. 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
             // - Central/Vietnamese: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
-            //   Avoids: "ss" (Eszett expansion), "st" (ligature expansion), and ſ→s in danger zones.
+            //   Avoids: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73),
+            //   'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
+            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74), and 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
             // - Western: Contextual. Can't be at positions 0, 1 (if prev='s'), N-1, or N-2 (if next='s').
-            //   Avoids mid-ß-expansion matches: ß→"ss" in-place means needle with 's' at these
-            //   positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
+            //   Avoids mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) in-place means
+            //   needle with 's' at these positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
             //   Example: "ßStra" → "ssstra", needle "sstra" matches at pos 1 = mid-character.
             //   Interior 's' like "tesst" or "masse" are safe for SIMD.
             case 's':
@@ -4390,7 +4661,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
 
         // Latin-1 Supplement (C2/C3 lead bytes)
-        // Exclude: 'å' (U+00E5, C3 A5) - Angstrom sign (U+212B) also folds to 'å'
+        // Exclude: 'å' (U+00E5, C3 A5) - Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5) also folds to it
         if (lead == 0xC2 || lead == 0xC3) {
             if (rune == 0x00E5) {
                 // 'å' excluded from all Latin profiles due to Angstrom ambiguity
@@ -4400,7 +4671,7 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
                 safety |= western_group;
             }
             else if (rune == 0x00B5) {
-                // 'µ' (Micro Sign) folds to Greek 'μ' (U+03BC, CE BC).
+                // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC).
                 // Allow only the Greek SIMD path; Latin paths remain unsafe.
                 safety |= (1 << sz_utf8_case_rune_safe_greek_k);
             }
@@ -4410,9 +4681,9 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         // Latin Extended-A (C4/C5 lead bytes) - for central_europe and vietnamese
         if (lead == 0xC4 || lead == 0xC5) {
             // Exclude expansions/length-changes:
-            // - U+0130 (İ) -> i + dot (C4 B0 -> 69 CC 87)
-            // - U+0149 (ŉ) -> 'n (C5 89 -> CA BC 6E)
-            // - U+017F (ſ) -> s (C5 BF -> 73)
+            // - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+            // - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+            // - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
             if (rune != 0x0130 && rune != 0x0149 && rune != 0x017F) { safety |= central_viet_group; }
         }
 
@@ -4609,10 +4880,13 @@ SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_siz
  *  an empty result is returned. It might be the case for a search query like "s" or "n", that by itself
  *  isn't safe for any path given the number of Unicode characters expanding into multiple 's'- or 'n'-containing
  *  sequences. The selected safe folded slice will never begin mid-character in the needle, so if it starts with
- *  an 'ŉ' (U+0149, C5 89), we can't chose - 'n' (6E) - the second half of its folded sequence as a starting point.
+ *  an 'ŉ' (U+0149, C5 89), we can't choose - 'n' (6E) - the second half of its folded sequence as a starting point.
  *
  *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX", unpacking runes.
- *  For each input rune, perform folding, expanding into a sequence, like: 'ŉ' (U+0149, C5 89) → "ʼn" (CA BC 6E).
+ *  For each input rune, perform folding, expanding into a sequence, like:
+ *
+ *      'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+ *
  *  Continue unpacking the rest, until we reach a 16-byte limit, like:
  *
  *      ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
@@ -4672,7 +4946,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
         sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
     } script_window_t_;
 
-    // Number of script kernels (indices 1-7 used, 0 unused)
+    // Number of script kernels (indices 1-7 used, index 0 reserved)
     sz_size_t const num_scripts = 8;
 
     // Best window found so far for each script
@@ -5385,7 +5659,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_naivel
     // Constants for Latin-1 Supplement (C3 lead byte)
     // Note: µ (Micro Sign, C2 B5) is BANNED - needles with µ use serial fallback
     __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3); // Latin-1 Supplement (upper half)
-    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' Sharp S (C3 9F) -> folds to "ss"
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
 
     // Range Logic Constants for Uppercase Detection (C3 80..9E):
     __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80); // Lower bound of the range (offset)
@@ -5395,7 +5669,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_naivel
     // Note: '÷' Division Sign (C3 B7) is outside the uppercase range (0x80..0x9E), so it's safe.
     __m512i const x_97_zmm = _mm512_set1_epi8((char)0x97); // '×' Multiplication Sign (C3 97) - has no case
 
-    // 1. Handle Eszett ß (C3 9F) → ss (73 73)
+    // 1. Handle Eszett: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
     __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c3_zmm);
     __mmask64 is_after_c3_mask = is_c3_mask << 1;
     __mmask64 is_eszett_second_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_9f_zmm);
@@ -5406,7 +5680,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_naivel
     //    We need to map:
     //    - 'À' (C3 80) ... 'Þ' (C3 9E) to 'à' (C3 A0) ... 'þ' (C3 BE)
     //    Exceptions:
-    //    - 'ß' (C3 9F) is already handled above (folds to "ss")
+    //    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is already handled above
     //    - '×' (C3 97) is the Multiplication Sign, no case variant (so exclude it)
     __mmask64 is_97_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_97_zmm);
     __mmask64 is_latin1_upper_mask = _mm512_mask_cmplt_epu8_mask(
@@ -5436,7 +5710,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_effici
     // Constants for Latin-1 Supplement (C3 lead byte)
     // Note: µ (Micro Sign, C2 B5) is BANNED - needles with µ use serial fallback
     __m512i const x_c3_zmm = _mm512_set1_epi8((char)0xC3); // Latin-1 Supplement (upper half)
-    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' Sharp S (C3 9F) -> folds to "ss"
+    __m512i const x_9f_zmm = _mm512_set1_epi8((char)0x9F); // 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
 
     // Range Logic Constants for Uppercase Detection (C3 80..9E):
     __m512i const x_80_zmm = _mm512_set1_epi8((char)0x80); // Lower bound of the range (offset)
@@ -5446,7 +5720,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_effici
     // Note: '÷' Division Sign (C3 B7) is outside the uppercase range (0x80..0x9E), so it's safe.
     __m512i const x_97_zmm = _mm512_set1_epi8((char)0x97); // '×' Multiplication Sign (C3 97) - has no case
 
-    // 1. Handle Eszett ß (C3 9F) → ss (73 73)
+    // 1. Handle Eszett: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
     __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_c3_zmm);
     __mmask64 is_after_c3_mask = is_c3_mask << 1;
     __mmask64 is_eszett_second_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_9f_zmm);
@@ -5457,7 +5731,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_effici
     //    We need to map:
     //    - 'À' (C3 80) ... 'Þ' (C3 9E) to 'à' (C3 A0) ... 'þ' (C3 BE)
     //    Exceptions:
-    //    - 'ß' (C3 9F) is already handled above (folds to "ss")
+    //    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is already handled above
     //    - '×' (C3 97) is the Multiplication Sign, no case variant (so exclude it)
     __mmask64 is_97_mask = _mm512_mask_cmpeq_epi8_mask(is_after_c3_mask, text_zmm, x_97_zmm);
     __mmask64 is_latin1_upper_mask = _mm512_mask_cmplt_epu8_mask(
@@ -5477,16 +5751,23 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_western_europe_fold_effici
  *  @brief Naive alarm function for Western Europe danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - E1 BA 9E: 'ẞ' (U+1E9E Capital Sharp S) → "ss" (3 bytes → 2 bytes)
- *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
- *  - E2 84 AB: 'Å' (U+212B Angstrom Sign) → 'å' (3 bytes → 2 bytes)
- *  - EF AC 80-86: Ligatures 'ﬀ', 'ﬁ', 'ﬂ', 'ﬃ', 'ﬄ', 'ﬅ', 'ﬆ' → 2-3 bytes
- *  - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
- *  - C3 9F: 'ß' (U+00DF Sharp S) → "ss" (2 bytes → 2 bytes, 1 rune → 2 runes)
+ *  - E1 BA 9E: 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73) (3 bytes → 2 bytes)
+ *  - E2 84 AA: 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B) (3 bytes → 1 byte)
+ *  - E2 84 AB: 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5) (3 bytes → 2 bytes)
+ *  - EF AC 80-86: Ligatures:
+ *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+ *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+ *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+ *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+ *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+ *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+ *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+ *  - C5 BF: 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73) (2 bytes → 1 byte)
+ *  - C3 9F: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) (2 bytes → 2 bytes, 1 rune → 2 runes)
  *
  *  Uses 12 CMPEQ operations (5 lead + 7 second byte checks).
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param[in] text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_naively_zmm_(__m512i text_zmm) {
@@ -5611,7 +5892,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_western_europe_alarm_eff
  *
  *  Scans the entire haystack from byte 0, looking for the folded window pattern.
  *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
- *  comparison to handle variable-width folding correctly (e.g., ß→ss).
+ *  comparison to handle variable-width folding correctly (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)).
  *
  *  @param[in] haystack Pointer to the haystack string.
  *  @param[in] haystack_length Length of the haystack in bytes.
@@ -5788,7 +6069,14 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_central_europe_fold_naivel
     //    - C5 81-87 (U+0141-U+0147): uppercase = ODD (Ł,Ń,Ņ,Ň → +1)
     //    - C5 8A-B6 (U+014A-U+0176): uppercase = EVEN (Ŋ-Ŷ → +1)
     //    - C5 B9-BD (U+0179-U+017D): uppercase = ODD (Ź,Ż,Ž → +1)
-    //    NOT folded: C5 80 (ŀ), 88-89 (ň,ʼn), B7 (ŷ), B8 (Ÿ→ÿ special), BE (ž), BF (ſ)
+    //    NOT folded (handled elsewhere or excluded):
+    //    - 'ŀ' (U+0140, C5 80)
+    //    - 'ň' (U+0148, C5 88)
+    //    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+    //    - 'ŷ' (U+0177, C5 B7)
+    //    - 'Ÿ' (U+0178, C5 B8) → 'ÿ' (U+00FF, C3 BF)
+    //    - 'ž' (U+017E, C5 BE)
+    //    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
     __mmask64 is_c4_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c4_zmm);
     __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c5_zmm);
     __mmask64 is_after_c4_mask = is_c4_mask << 1;
@@ -5903,15 +6191,22 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_central_europe_fold_effici
  *  @brief Naive alarm function for Central Europe danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k' (3 bytes → 1 byte)
- *  - C3 9F: 'ß' (U+00DF Eszett) → "ss" (2 bytes → 2 bytes, 1 rune → 2 runes)
- *  - C4 B0: 'İ' (U+0130 Turkish Dotted I) → "i̇" (2 bytes → 3 bytes)
- *  - C5 BF: 'ſ' (U+017F Long S) → 's' (2 bytes → 1 byte)
- *  - EF AC xx: Ligatures 'ﬀ', 'ﬁ', 'ﬂ', etc. → 2-3 bytes
+ *  - E2 84 AA: 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B) (3 bytes → 1 byte)
+ *  - C3 9F: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) (2 bytes → 2 bytes, 1 rune → 2 runes)
+ *  - C4 B0: 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87) (2 bytes → 3 bytes)
+ *  - C5 BF: 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73) (2 bytes → 1 byte)
+ *  - EF AC 80-86: Ligatures:
+ *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+ *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+ *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+ *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+ *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+ *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+ *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
  *
  *  Uses 10 CMPEQ operations (5 lead + 5 second byte checks).
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param[in] text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_central_europe_alarm_naively_zmm_(__m512i text_zmm) {
@@ -6532,8 +6827,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_armenian_fold_efficiently_
  *  @brief Naive alarm function for Armenian danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - D6 87: 'և' (U+0587 Ech-Yiwn ligature) → "եdelays" (2 bytes → 4 bytes)
- *  - EF AC xx: Armenian ligatures (FB13-FB17) and other Alphabetic Presentation Forms
+ *  - D6 87: 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82) (2 bytes → 4 bytes)
+ *  - EF AC 93-97: Armenian ligatures 'ﬓ'..'ﬗ' (U+FB13-U+FB17, EF AC 93-97) → 2 codepoints (4 bytes)
  *
  *  Uses 4 CMPEQ operations (2 lead + 2 second byte checks).
  *
@@ -6728,7 +7023,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_naively_zmm_(__
     // Lead bytes:
     __m512i const x_ce_zmm = _mm512_set1_epi8((char)0xCE);
     __m512i const x_cf_zmm = _mm512_set1_epi8((char)0xCF);
-    // Micro sign µ (C2 B5) folds to Greek μ (CE BC) in-place.
+    // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC) in-place.
     __m512i const x_c2_zmm = _mm512_set1_epi8((char)0xC2);
     __m512i const x_b5_zmm = _mm512_set1_epi8((char)0xB5);
     __m512i const x_bc_zmm = _mm512_set1_epi8((char)0xBC);
@@ -6748,7 +7043,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_naively_zmm_(__
     __m512i const x_ab_zmm = _mm512_set1_epi8((char)0xAB);
 
     // Specific characters:
-    // CF 82 (Final Sigma 'ς') -> CF 83 ('σ')
+    // 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
     __m512i const x_82_zmm = _mm512_set1_epi8((char)0x82);
     __m512i const x_83_zmm = _mm512_set1_epi8((char)0x83);
 
@@ -6795,7 +7090,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_naively_zmm_(__
 
     // 2. CF ranges (Final Sigma)
     // --------------------------
-    // 'ς' (CF 82) -> 'σ' (CF 83)
+    // 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
     __mmask64 is_final_sigma = _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm, x_82_zmm);
 
     // Apply transformations using masked operations
@@ -6830,7 +7125,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_naively_zmm_(__
     // Apply Final Sigma
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_final_sigma, x_83_zmm);
 
-    // Apply Micro Sign folding: C2 B5 -> CE BC
+    // Apply Micro Sign folding: 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
     __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c2_zmm);
     __mmask64 is_micro_second = (is_c2_mask << 1) & _mm512_cmpeq_epi8_mask(result_zmm, x_b5_zmm);
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_micro_second >> 1, x_ce_zmm); // Lead C2 -> CE
@@ -6901,11 +7196,11 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_efficiently_zmm
     __mmask64 is_8c_mask = is_accented_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0x8C));
     __mmask64 is_8e_8f_mask = is_accented_mask & _mm512_cmpge_epu8_mask(result_zmm, x_8e_zmm);
 
-    // Final sigma: CF 82 -> CF 83
+    // 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
     __mmask64 is_final_sigma_mask =
         _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm, _mm512_set1_epi8((char)0x82));
 
-    // Micro sign detection: C2 B5 -> CE BC
+    // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
     __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c2_zmm);
     __mmask64 is_micro_second_mask =
         (is_c2_mask << 1) & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xB5));
@@ -6915,7 +7210,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_efficiently_zmm
         ((is_basic2_mask | is_dialytika_mask | is_8c_mask | is_8e_8f_mask) >> 1) & is_ce_mask;
     result_zmm = _mm512_mask_mov_epi8(result_zmm, change_ce_to_cf_mask, x_cf_zmm);
 
-    // Micro sign lead change: C2 -> CE
+    // Micro sign lead change: C2 → CE
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_micro_second_mask >> 1, x_ce_zmm);
 
     // Offset constants
@@ -6941,10 +7236,10 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_greek_fold_efficiently_zmm
     // Single add applies all offsets simultaneously
     result_zmm = _mm512_add_epi8(result_zmm, offset_zmm);
 
-    // Final sigma: CF 82 -> CF 83 (direct replacement)
+    // Final sigma: 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83) (direct replacement)
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_final_sigma_mask, _mm512_set1_epi8((char)0x83));
 
-    // Micro sign second byte: B5 -> BC
+    // Micro sign second byte: B5 → BC
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_micro_second_mask, _mm512_set1_epi8((char)0xBC));
 
     sz_assert_(_mm512_cmpeq_epi8_mask(sz_utf8_case_insensitive_find_ice_greek_fold_naively_zmm_(text_zmm),
@@ -7296,7 +7591,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_naively_zm
     // INVERTED pattern (U+0139-U+0148): Odd=uppercase, Even=lowercase
     //   - After C4: B9,BB,BD,BF are uppercase (odd), BA,BC,BE are lowercase (even)
     //   - After C5: 81,83,85,87 are uppercase (odd), 80,82,84,86,88 are lowercase (even)
-    // Note: C4 BF (Ŀ) -> C5 80 (ŀ) crosses lead bytes, handled specially by safety profile
+    // Note: 'Ŀ' (U+013F, C4 BF) → 'ŀ' (U+0140, C5 80) crosses lead bytes, handled specially by safety profile
     __mmask64 is_c4_c5_target = is_after_c4 | is_after_c5;
     __mmask64 is_even = _mm512_cmpeq_epi8_mask(_mm512_and_si512(result_zmm, x_01_zmm), _mm512_setzero_si512());
     __mmask64 is_odd = ~is_even;
@@ -7316,8 +7611,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_naively_zm
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_inverted_range & is_odd, result_zmm, x_01_zmm);
 
     // 3. Latin Extended-B (C6): Specific Vietnamese chars
-    // Ơ (C6 A0) -> ơ (C6 A1). Even->Odd.
-    // Ư (C6 AF) -> ư (C6 B0). Odd->Even.
+    // 'Ơ' (U+01A0, C6 A0) → 'ơ' (U+01A1, C6 A1) (even → odd)
+    // 'Ư' (U+01AF, C6 AF) → 'ư' (U+01B0, C6 B0) (odd → even)
     __mmask64 is_c6_A0 = is_after_c6 & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xA0));
     __mmask64 is_c6_AF = is_after_c6 & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xAF));
 
@@ -7421,8 +7716,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_efficientl
     __mmask64 fold_inv_mask = is_inverted_range_mask & is_odd_mask;
 
     // 3. Latin Extended-B (C6): Specific Vietnamese chars
-    // Ơ (C6 A0) -> ơ (C6 A1). Even->Odd.
-    // Ư (C6 AF) -> ư (C6 B0). Odd->Even.
+    // 'Ơ' (U+01A0, C6 A0) → 'ơ' (U+01A1, C6 A1) (even → odd)
+    // 'Ư' (U+01AF, C6 AF) → 'ư' (U+01B0, C6 B0) (odd → even)
     __mmask64 is_c6_A0_mask = is_after_c6_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xA0));
     __mmask64 is_c6_AF_mask = is_after_c6_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xAF));
 
@@ -7471,16 +7766,23 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_vietnamese_fold_efficientl
  *  @brief Naive alarm function for Vietnamese danger zone detection.
  *
  *  Detects positions where danger characters occur that require special handling:
- *  - E1 BA 96-9F: Latin Extended Additional excluded characters (includes ẞ U+1E9E)
- *  - C3 9F: 'ß' (U+00DF Sharp S) → "ss"
- *  - C5 BF: 'ſ' (U+017F Long S) → 's'
- *  - EF AC xx: Ligatures (U+FB00-FB06)
- *  - E2 84 AA: 'K' (U+212A Kelvin Sign) → 'k'
+ *  - E1 BA 96-9F: Latin Extensions like 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+ *  - C3 9F: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+ *  - C5 BF: 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+ *  - EF AC 80-86: Ligatures:
+ *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+ *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+ *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+ *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+ *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+ *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+ *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+ *  - E2 84 AA: 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
  *
  *  Uses ~11 CMPEQ + 2 range operations.
  *  Note: Returns danger positions shifted to the START of multi-byte sequences.
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param[in] text_zmm The haystack ZMM register.
  *  @param[in] load_mask Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
