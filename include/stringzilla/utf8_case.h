@@ -4966,11 +4966,11 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
         sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
     } script_window_t_;
 
-    // Number of script kernels (indices 1-7 used, index 0 reserved)
-    sz_size_t const num_scripts = 8;
+    // Number of script kernels (indices 1-8 used, index 0 reserved)
+    sz_size_t const num_scripts = 9;
 
     // Best window found so far for each script
-    script_window_t_ best[8];
+    script_window_t_ best[9];
     for (sz_size_t i = 0; i < num_scripts; ++i) {
         best[i].start_offset = 0;
         best[i].input_length = 0;
@@ -4997,7 +4997,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     // Iterate through each starting position in the needle (stepping by rune)
     for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
         // Current window being built for each script at this starting position
-        script_window_t_ current[8];
+        script_window_t_ current[9];
         for (sz_size_t i = 0; i < num_scripts; ++i) {
             current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
             current[i].input_length = 0;
