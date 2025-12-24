@@ -33,7 +33,6 @@
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
-#include <cstring>
 
 using namespace ashvardanian::stringzilla::scripts;
 

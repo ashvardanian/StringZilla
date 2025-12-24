@@ -52,7 +52,6 @@
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
  *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, and `bench_memory.cpp`.
  */
-#include <cstring>    // `memmem`
 #include <functional> // `std::boyer_moore_searcher`
 
 #define SZ_USE_MISALIGNED_LOADS (1)

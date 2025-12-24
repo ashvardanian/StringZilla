@@ -38,7 +38,6 @@
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or Google Benchmark.
  *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, and `bench_sequence.cpp`.
  */
-#include <cstring> // `memmem`
 #include <memory>  // `std::unique_ptr`
 #include <numeric> // `std::iota`
 #include <string>  // `std::string`
