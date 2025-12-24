@@ -173,6 +173,19 @@
 #endif // SZ_DYNAMIC_DISPATCH
 
 /**
+ *  @brief  Disables stack protection for performance-critical functions.
+ *
+ *  GCC's `-fstack-protector-strong` inserts stack canary checks for functions with local arrays
+ *  or buffers. For hash functions that use fixed-size state structures, this is unnecessary
+ *  overhead (~10 cycles per call). This macro opts out of stack protection for such functions.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_NO_STACK_PROTECTOR __attribute__((no_stack_protector))
+#else
+#define SZ_NO_STACK_PROTECTOR
+#endif
+
+/**
  *  @brief  Alignment macro for N-byte alignment.
  */
 #if defined(_MSC_VER)

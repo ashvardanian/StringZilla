@@ -8,6 +8,23 @@ ReflowComments: true
 UseTab: Never
 IndentPPDirectives: None
 
+# StringZilla-specific macros
+# Visibility/linkage macros that act like storage class specifiers
+StatementAttributeLikeMacros:
+  - SZ_PUBLIC
+  - SZ_INTERNAL
+  - SZ_DYNAMIC
+  - SZ_EXTERNAL
+
+# Attribute-like macros (clang-format 12+)
+AttributeMacros:
+  - SZ_NO_STACK_PROTECTOR
+  - sz_align_
+
+# Macros that behave like type qualifiers in parameters
+TypenameMacros:
+  - sz_at_least_
+
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 AlignEscapedNewlines: true
