@@ -1132,17 +1132,34 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
+    // Load the 32-byte filter as two 16-byte halves, separate even/odd bytes, pack, and broadcast to YMM.
+    sz_u128_vec_t byte_mask_vec;
+    sz_u128_vec_t filter_lo_vec, filter_hi_vec;
+    sz_u128_vec_t lo_evens_vec, hi_evens_vec;
+    sz_u128_vec_t lo_odds_vec, hi_odds_vec;
+    sz_u128_vec_t evens_xmm_vec, odds_xmm_vec;
     sz_u256_vec_t filter_even_vec, filter_odd_vec;
-    for (sz_size_t i = 0; i != 16; ++i)
-        filter_even_vec.u8s[i] = filter->_u8s[i * 2], filter_odd_vec.u8s[i] = filter->_u8s[i * 2 + 1];
-    filter_even_vec.xmms[1] = filter_even_vec.xmms[0];
-    filter_odd_vec.xmms[1] = filter_odd_vec.xmms[0];
 
     sz_u256_vec_t text_vec;
     sz_u256_vec_t matches_vec;
     sz_u256_vec_t lower_nibbles_vec, higher_nibbles_vec;
     sz_u256_vec_t bitset_even_vec, bitset_odd_vec;
     sz_u256_vec_t bitmask_vec, bitmask_lookup_vec;
+
+    byte_mask_vec.xmm = _mm_set1_epi16(0x00ff);
+
+    filter_lo_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter));
+    filter_hi_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter) + 1);
+    lo_evens_vec.xmm = _mm_and_si128(filter_lo_vec.xmm, byte_mask_vec.xmm);
+    hi_evens_vec.xmm = _mm_and_si128(filter_hi_vec.xmm, byte_mask_vec.xmm);
+    lo_odds_vec.xmm = _mm_srli_epi16(filter_lo_vec.xmm, 8);
+    hi_odds_vec.xmm = _mm_srli_epi16(filter_hi_vec.xmm, 8);
+
+    evens_xmm_vec.xmm = _mm_packus_epi16(lo_evens_vec.xmm, hi_evens_vec.xmm);
+    odds_xmm_vec.xmm = _mm_packus_epi16(lo_odds_vec.xmm, hi_odds_vec.xmm);
+    filter_even_vec.ymm = _mm256_set_m128i(evens_xmm_vec.xmm, evens_xmm_vec.xmm);
+    filter_odd_vec.ymm = _mm256_set_m128i(odds_xmm_vec.xmm, odds_xmm_vec.xmm);
+
     bitmask_lookup_vec.ymm = _mm256_set_epi8(                       //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
