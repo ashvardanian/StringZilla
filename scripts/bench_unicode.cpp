@@ -6,6 +6,7 @@
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_case_fold.
+ *  - Case-insensitive UTF-8 substring search - @b utf8_case_insensitive_find.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.

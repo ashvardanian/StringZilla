@@ -1172,6 +1172,25 @@ void test_equivalence() {
         sz_utf8_find_newline_neon,                //
         sz_utf8_find_whitespace_serial,           //
         sz_utf8_find_whitespace_neon);
+
+    // Fuzz testing with different haystack sizes and sampling strategies:
+    // - (16, 0, N): Exhaustive on tiny haystacks (~136 needles each)
+    // - (32, 0, N): Exhaustive on small haystacks (~528 needles each)
+    // - (100, 100, N): Sampled on medium haystacks (100 random needles)
+    // - (200, 100, N): Sampled on larger haystacks (100 random needles)
+    std::size_t fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, fuzz_queries);
 #endif
 #if SZ_USE_SVE2
     test_utf8_equivalence(                        //

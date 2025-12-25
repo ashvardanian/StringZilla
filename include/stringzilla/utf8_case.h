@@ -8140,8 +8140,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
  *
  *  For case-folding, prefer `vaddq_u8` with masks from comparisons and bitwise logic for simple ranges like ASCII.
  *  Use `vqtbl1q_u8` for complex mappings, and `vbslq_u8` for conditional updates without branches. Detect "danger
- * zones" (multi-rune expansions or length changes) using bitwise masks; if a block contains any, fall back to a robust
- * serial handler for that specific region.
+ *  zones" (multi-rune expansions or length changes) using bitwise masks; if a block contains any, fall back to a robust
+ *  serial handler for that specific region.
  *
  *  For match detection, compare processed registers against the needle using `vceqq_u8`, convert the 16-bit match
  *  masks to 64-bit using the `sz_find_vreinterpretq_u8_u4_` pattern, combine them with bitwise OR, and use `ctz`
@@ -8163,12 +8163,772 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
     return sz_utf8_case_fold_serial(source, source_length, destination);
 }
 
+/**
+ *  @brief  Extract a 64-bit match mask from 4 NEON comparison result registers.
+ *
+ *  Uses the `sz_find_vreinterpretq_u8_u4_` pattern from find.h for each register.
+ *  Returns a sparse mask where bits 3,7,11,15,... indicate matches.
+ *  To get byte position from a set bit, use `sz_u64_ctz(mask) / 4`.
+ *
+ *  @param cmp0 Comparison result for bytes 0-15 (0xFF for match, 0x00 otherwise).
+ *  @param cmp1 Comparison result for bytes 16-31.
+ *  @param cmp2 Comparison result for bytes 32-47.
+ *  @param cmp3 Comparison result for bytes 48-63.
+ *  @param reg_index Output: which register (0-3) contains the first match.
+ *  @return Sparse 64-bit mask for the register containing the first match, or 0 if none.
+ */
+SZ_INTERNAL sz_u64_t sz_utf8_case_insensitive_find_neon_matches_x4_( //
+    uint8x16_t cmp0, uint8x16_t cmp1, uint8x16_t cmp2, uint8x16_t cmp3, int *reg_index) {
+    sz_u64_t m0 = sz_find_vreinterpretq_u8_u4_(cmp0);
+    if (m0) {
+        *reg_index = 0;
+        return m0;
+    }
+    sz_u64_t m1 = sz_find_vreinterpretq_u8_u4_(cmp1);
+    if (m1) {
+        *reg_index = 1;
+        return m1;
+    }
+    sz_u64_t m2 = sz_find_vreinterpretq_u8_u4_(cmp2);
+    if (m2) {
+        *reg_index = 2;
+        return m2;
+    }
+    sz_u64_t m3 = sz_find_vreinterpretq_u8_u4_(cmp3);
+    if (m3) {
+        *reg_index = 3;
+        return m3;
+    }
+    *reg_index = -1;
+    return 0;
+}
+
+/**
+ *  @brief  Check if any of 4 NEON registers has any non-zero byte.
+ *  @return Non-zero if any danger detected, zero otherwise.
+ */
+SZ_INTERNAL sz_u64_t sz_utf8_case_insensitive_find_neon_any_x4_( //
+    uint8x16_t v0, uint8x16_t v1, uint8x16_t v2, uint8x16_t v3) {
+    uint8x16_t any = vorrq_u8(vorrq_u8(v0, v1), vorrq_u8(v2, v3));
+    return vmaxvq_u8(any);
+}
+
+/**
+ *  @brief  Shift 4 sparse masks right by `offset` bytes with cross-register boundary handling.
+ *
+ *  The sparse mask format from `sz_find_vreinterpretq_u8_u4_` has bits at positions 3,7,11,15,...,63.
+ *  To shift by N bytes, we shift by N*4 bits, handling bytes that cross register boundaries.
+ *
+ *  @param m0-m3 Input sparse masks for registers 0-3 (covering bytes 0-15, 16-31, 32-47, 48-63).
+ *  @param offset Byte offset to shift right (must be < 16).
+ *  @param out0-out3 Output shifted sparse masks.
+ */
+SZ_INTERNAL void sz_utf8_case_insensitive_find_neon_sparse_shift_x4_( //
+    sz_u64_t m0, sz_u64_t m1, sz_u64_t m2, sz_u64_t m3,               //
+    sz_size_t offset,                                                 //
+    sz_u64_t *out0, sz_u64_t *out1, sz_u64_t *out2, sz_u64_t *out3) {
+
+    if (offset == 0) {
+        *out0 = m0;
+        *out1 = m1;
+        *out2 = m2;
+        *out3 = m3;
+        return;
+    }
+
+    sz_size_t shift_bits = offset * 4; // 4 bits per byte in sparse format
+    sz_size_t shift_back = 64 - shift_bits;
+
+    *out0 = (m0 >> shift_bits) | (m1 << shift_back);
+    *out1 = (m1 >> shift_bits) | (m2 << shift_back);
+    *out2 = (m2 >> shift_bits) | (m3 << shift_back);
+    *out3 = m3 >> shift_bits; // Zeros shifted in from beyond
+}
+
+/**
+ *  @brief  Convert sparse mask (4 bits/byte) to dense mask (1 bit/byte).
+ *
+ *  The sparse format from `sz_find_vreinterpretq_u8_u4_` has bits at positions 3,7,11,...,63.
+ *  This packs them into a 16-bit dense mask where bit N represents byte N.
+ *
+ *  @param sparse Input sparse mask (64 bits, 16 bytes × 4 bits).
+ *  @return Dense 16-bit mask (one bit per byte).
+ */
+SZ_INTERNAL sz_u64_t sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sz_u64_t sparse) {
+    // Mask to keep only the marker bits (bit 3 of each nibble)
+    sparse &= 0x8888888888888888ull;
+    // Shift so bits are at positions 0,4,8,...,60
+    sparse >>= 3;
+    // Pack from 4-bit spacing to 1-bit spacing using parallel bit extraction
+    sparse = (sparse | (sparse >> 3)) & 0x0303030303030303ull;  // 2-bit groups, 8-bit spacing
+    sparse = (sparse | (sparse >> 6)) & 0x000F000F000F000Full;  // 4-bit groups, 16-bit spacing
+    sparse = (sparse | (sparse >> 12)) & 0x000000FF000000FFull; // 8-bit groups, 32-bit spacing
+    sparse = (sparse | (sparse >> 24)) & 0x000000000000FFFFull; // Final 16-bit result
+    return sparse;
+}
+
+/**
+ *  @brief  Fold ASCII uppercase A-Z to lowercase a-z in a single NEON register.
+ *  @param text Input text register.
+ *  @return Folded text register.
+ */
+SZ_INTERNAL uint8x16_t sz_utf8_case_insensitive_find_neon_ascii_fold_(uint8x16_t text) {
+    uint8x16_t const a_upper = vdupq_n_u8('A');
+    uint8x16_t const range26 = vdupq_n_u8(26);
+    uint8x16_t const x_20 = vdupq_n_u8(0x20);
+    // (byte - 'A') < 26 identifies uppercase ASCII
+    uint8x16_t offset = vsubq_u8(text, a_upper);
+    uint8x16_t is_upper = vcltq_u8(offset, range26);
+    // Use bitwise OR: uppercase has bit 5 clear, adding 0x20 sets it
+    return vorrq_u8(text, vandq_u8(is_upper, x_20));
+}
+
+/**
+ *  @brief  Fold Western European characters in a single NEON register.
+ *
+ *  Handles ASCII A-Z, Latin-1 uppercase (C3 80-9E), and Eszett (C3 9F → "ss").
+ *  For single-register use, C3 at byte 15 is handled conservatively.
+ *
+ *  @param text Input text register.
+ *  @return Folded text register.
+ */
+SZ_INTERNAL uint8x16_t sz_utf8_case_insensitive_find_neon_western_europe_fold_(uint8x16_t text) {
+    uint8x16_t const x_20 = vdupq_n_u8(0x20);
+    uint8x16_t const x_73 = vdupq_n_u8('s');
+    uint8x16_t const x_c3 = vdupq_n_u8(0xC3);
+    uint8x16_t const x_9f = vdupq_n_u8(0x9F);
+    uint8x16_t const x_80 = vdupq_n_u8(0x80);
+    uint8x16_t const x_1f = vdupq_n_u8(0x1F);
+    uint8x16_t const x_97 = vdupq_n_u8(0x97);
+    uint8x16_t const zeros = vdupq_n_u8(0);
+
+    // ASCII fold first
+    uint8x16_t folded = sz_utf8_case_insensitive_find_neon_ascii_fold_(text);
+
+    // Detect C3 lead bytes and bytes following C3
+    uint8x16_t is_c3 = vceqq_u8(text, x_c3);
+    uint8x16_t is_after_c3 = vextq_u8(zeros, is_c3, 15); // Shift right by 1
+
+    // Detect 9F bytes (for eszett)
+    uint8x16_t is_9f = vceqq_u8(text, x_9f);
+    uint8x16_t is_eszett_second = vandq_u8(is_after_c3, is_9f);
+
+    // Eszett lead: C3 followed by 9F (shift 9F left)
+    uint8x16_t is_9f_next = vextq_u8(is_9f, zeros, 1);
+    uint8x16_t is_eszett_lead = vandq_u8(is_c3, is_9f_next);
+    uint8x16_t is_eszett = vorrq_u8(is_eszett_second, is_eszett_lead);
+
+    // Replace eszett bytes with 's'
+    folded = vbslq_u8(is_eszett, x_73, folded);
+
+    // Latin-1 uppercase: (byte - 0x80) < 0x1F, after C3, not 0x97, not eszett
+    uint8x16_t offset_80 = vsubq_u8(text, x_80);
+    uint8x16_t in_range = vcltq_u8(offset_80, x_1f);
+    uint8x16_t is_97 = vceqq_u8(text, x_97);
+    uint8x16_t exclude = vorrq_u8(is_97, is_eszett_second);
+    uint8x16_t is_latin1_upper = vbicq_u8(vandq_u8(is_after_c3, in_range), exclude);
+
+    // Add 0x20 to fold
+    return vorrq_u8(folded, vandq_u8(is_latin1_upper, x_20));
+}
+
+/**
+ *  @brief  ASCII case-insensitive search using 4x16-byte NEON registers (64 bytes/iteration).
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_ascii_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,               //
+    sz_cptr_t needle, sz_size_t needle_length,                   //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
+
+    sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+
+    // Pre-load needle window for verification
+    sz_u128_vec_t needle_window_vec;
+    needle_window_vec.u8x16 = vld1q_u8((sz_u8_t const *)needle_metadata->folded_slice);
+
+    // Probe positions and bytes
+    sz_size_t const offset_second = needle_metadata->probe_second;
+    sz_size_t const offset_third = needle_metadata->probe_third;
+    sz_size_t const offset_last = folded_window_length - 1;
+
+    uint8x16_t const probe_first = vdupq_n_u8(needle_metadata->folded_slice[0]);
+    uint8x16_t const probe_second = vdupq_n_u8(needle_metadata->folded_slice[offset_second]);
+    uint8x16_t const probe_third = vdupq_n_u8(needle_metadata->folded_slice[offset_third]);
+    uint8x16_t const probe_last = vdupq_n_u8(needle_metadata->folded_slice[offset_last]);
+
+    sz_cptr_t haystack_ptr = haystack;
+    sz_size_t const step = 64 - folded_window_length + 1;
+
+    // Main loop: process 64 bytes per iteration
+    while (haystack_ptr + 64 + offset_last <= haystack_end) {
+        // Prefetch next chunk to hide memory latency
+        __builtin_prefetch(haystack_ptr + 128, 0, 3);
+
+        // Load 64 bytes ONCE
+        uint8x16_t text0 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 0));
+        uint8x16_t text1 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 16));
+        uint8x16_t text2 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 32));
+        uint8x16_t text3 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 48));
+
+        // Fold ONCE (key optimization - no redundant loads/folds at different offsets)
+        uint8x16_t folded0 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text0);
+        uint8x16_t folded1 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text1);
+        uint8x16_t folded2 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text2);
+        uint8x16_t folded3 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text3);
+
+        // Compare SAME folded data against each probe byte (16 comparisons total)
+        uint8x16_t cmp_first0 = vceqq_u8(folded0, probe_first);
+        uint8x16_t cmp_first1 = vceqq_u8(folded1, probe_first);
+        uint8x16_t cmp_first2 = vceqq_u8(folded2, probe_first);
+        uint8x16_t cmp_first3 = vceqq_u8(folded3, probe_first);
+
+        uint8x16_t cmp_second0 = vceqq_u8(folded0, probe_second);
+        uint8x16_t cmp_second1 = vceqq_u8(folded1, probe_second);
+        uint8x16_t cmp_second2 = vceqq_u8(folded2, probe_second);
+        uint8x16_t cmp_second3 = vceqq_u8(folded3, probe_second);
+
+        uint8x16_t cmp_third0 = vceqq_u8(folded0, probe_third);
+        uint8x16_t cmp_third1 = vceqq_u8(folded1, probe_third);
+        uint8x16_t cmp_third2 = vceqq_u8(folded2, probe_third);
+        uint8x16_t cmp_third3 = vceqq_u8(folded3, probe_third);
+
+        uint8x16_t cmp_last0 = vceqq_u8(folded0, probe_last);
+        uint8x16_t cmp_last1 = vceqq_u8(folded1, probe_last);
+        uint8x16_t cmp_last2 = vceqq_u8(folded2, probe_last);
+        uint8x16_t cmp_last3 = vceqq_u8(folded3, probe_last);
+
+        // Extract sparse masks (16 calls to sz_find_vreinterpretq_u8_u4_)
+        sz_u64_t sf0 = sz_find_vreinterpretq_u8_u4_(cmp_first0);
+        sz_u64_t sf1 = sz_find_vreinterpretq_u8_u4_(cmp_first1);
+        sz_u64_t sf2 = sz_find_vreinterpretq_u8_u4_(cmp_first2);
+        sz_u64_t sf3 = sz_find_vreinterpretq_u8_u4_(cmp_first3);
+
+        sz_u64_t ss0 = sz_find_vreinterpretq_u8_u4_(cmp_second0);
+        sz_u64_t ss1 = sz_find_vreinterpretq_u8_u4_(cmp_second1);
+        sz_u64_t ss2 = sz_find_vreinterpretq_u8_u4_(cmp_second2);
+        sz_u64_t ss3 = sz_find_vreinterpretq_u8_u4_(cmp_second3);
+
+        sz_u64_t st0 = sz_find_vreinterpretq_u8_u4_(cmp_third0);
+        sz_u64_t st1 = sz_find_vreinterpretq_u8_u4_(cmp_third1);
+        sz_u64_t st2 = sz_find_vreinterpretq_u8_u4_(cmp_third2);
+        sz_u64_t st3 = sz_find_vreinterpretq_u8_u4_(cmp_third3);
+
+        sz_u64_t sl0 = sz_find_vreinterpretq_u8_u4_(cmp_last0);
+        sz_u64_t sl1 = sz_find_vreinterpretq_u8_u4_(cmp_last1);
+        sz_u64_t sl2 = sz_find_vreinterpretq_u8_u4_(cmp_last2);
+        sz_u64_t sl3 = sz_find_vreinterpretq_u8_u4_(cmp_last3);
+
+        // Cross-register shift for second, third, last probes (like AVX-512 mask shifts)
+        sz_u64_t ss0_sh, ss1_sh, ss2_sh, ss3_sh;
+        sz_u64_t st0_sh, st1_sh, st2_sh, st3_sh;
+        sz_u64_t sl0_sh, sl1_sh, sl2_sh, sl3_sh;
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(ss0, ss1, ss2, ss3, offset_second, &ss0_sh, &ss1_sh,
+                                                            &ss2_sh, &ss3_sh);
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(st0, st1, st2, st3, offset_third, &st0_sh, &st1_sh, &st2_sh,
+                                                            &st3_sh);
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(sl0, sl1, sl2, sl3, offset_last, &sl0_sh, &sl1_sh, &sl2_sh,
+                                                            &sl3_sh);
+
+        // AND all probes together and convert sparse to dense (16 bits per register)
+        sz_u64_t dense0 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf0 & ss0_sh & st0_sh & sl0_sh);
+        sz_u64_t dense1 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf1 & ss1_sh & st1_sh & sl1_sh);
+        sz_u64_t dense2 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf2 & ss2_sh & st2_sh & sl2_sh);
+        sz_u64_t dense3 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf3 & ss3_sh & st3_sh & sl3_sh);
+
+        // Combine into single 64-bit mask with validity masking
+        // step tells us how many positions are valid (1-64)
+        sz_u64_t combined = dense0 | (dense1 << 16) | (dense2 << 32) | (dense3 << 48);
+        sz_u64_t valid_mask = (step >= 64) ? ~0ull : ((1ull << step) - 1);
+        combined &= valid_mask;
+
+        // Single loop over all match positions
+        while (combined) {
+            sz_size_t candidate_offset = (sz_size_t)sz_u64_ctz(combined);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
+
+            // Verify window bytes match
+            sz_u128_vec_t haystack_candidate_vec;
+            haystack_candidate_vec.u8x16 = vld1q_u8((sz_u8_t const *)haystack_candidate_ptr);
+            haystack_candidate_vec.u8x16 = sz_utf8_case_insensitive_find_neon_ascii_fold_(haystack_candidate_vec.u8x16);
+
+            // Compare folded window (up to 16 bytes)
+            uint8x16_t window_cmp = vceqq_u8(haystack_candidate_vec.u8x16, needle_window_vec.u8x16);
+            sz_u64_t window_matches = sz_find_vreinterpretq_u8_u4_(window_cmp);
+            sz_u64_t window_mask =
+                (folded_window_length >= 16) ? 0xFFFFFFFFFFFFFFFFull : ((1ull << (folded_window_length * 4)) - 1);
+
+            if ((window_matches & window_mask) == (0x8888888888888888ull & window_mask)) {
+                sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(
+                    haystack, haystack_length, needle, needle_length, (sz_size_t)(haystack_candidate_ptr - haystack),
+                    needle_metadata->folded_slice_length, needle_metadata->offset_in_unfolded,
+                    needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded,
+                    matched_length);
+                if (match) return match;
+            }
+
+            combined &= combined - 1;
+        }
+
+        haystack_ptr += step;
+    }
+
+    // Tail processing: fall back to serial for remaining positions
+    // This ensures correctness when haystack is too small for full NEON processing
+    // or when valid match positions were missed by the main loop
+    return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
+                                                (sz_utf8_case_insensitive_needle_metadata_t *)needle_metadata,
+                                                matched_length);
+}
+
+/**
+ *  @brief  Fold Western European characters (ASCII + Latin-1 Supplement) in 4 NEON registers.
+ *
+ *  Handles:
+ *  - ASCII A-Z -> a-z (trivial +0x20)
+ *  - Latin-1 uppercase C3 80-9E -> +0x20 to second byte (except C3 97 = multiplication sign)
+ *  - Eszett C3 9F -> "ss" (both bytes become 's')
+ *
+ *  Uses vextq_u8 chains to handle C3 lead bytes that span register boundaries.
+ *
+ *  @param text0-text3 Input text registers (64 bytes total).
+ *  @param result0-result3 Output folded registers.
+ */
+SZ_INTERNAL __attribute__((noinline)) void sz_utf8_case_insensitive_find_neon_western_europe_fold_x4_( //
+    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,  //
+    uint8x16_t *result0, uint8x16_t *result1, uint8x16_t *result2, uint8x16_t *result3) {
+
+    // Constants
+    uint8x16_t const x_20 = vdupq_n_u8(0x20);
+    uint8x16_t const x_73 = vdupq_n_u8('s');
+    uint8x16_t const x_c3 = vdupq_n_u8(0xC3);
+    uint8x16_t const x_9f = vdupq_n_u8(0x9F);
+    uint8x16_t const x_80 = vdupq_n_u8(0x80);
+    uint8x16_t const x_1f = vdupq_n_u8(0x1F);
+    uint8x16_t const x_97 = vdupq_n_u8(0x97);
+    uint8x16_t const zeros = vdupq_n_u8(0);
+
+    // Step 1: ASCII fold first
+    uint8x16_t folded0 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text0);
+    uint8x16_t folded1 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text1);
+    uint8x16_t folded2 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text2);
+    uint8x16_t folded3 = sz_utf8_case_insensitive_find_neon_ascii_fold_(text3);
+
+    // Step 2: Detect C3 lead bytes
+    uint8x16_t is_c3_0 = vceqq_u8(text0, x_c3);
+    uint8x16_t is_c3_1 = vceqq_u8(text1, x_c3);
+    uint8x16_t is_c3_2 = vceqq_u8(text2, x_c3);
+    uint8x16_t is_c3_3 = vceqq_u8(text3, x_c3);
+
+    // Step 3: Create "is_after_c3" masks using vextq_u8 for cross-register shifting
+    // vextq_u8(a, b, 15) extracts [a[15], b[0], b[1], ..., b[14]]
+    uint8x16_t is_after_c3_0 = vextq_u8(zeros, is_c3_0, 15);
+    uint8x16_t is_after_c3_1 = vextq_u8(is_c3_0, is_c3_1, 15);
+    uint8x16_t is_after_c3_2 = vextq_u8(is_c3_1, is_c3_2, 15);
+    uint8x16_t is_after_c3_3 = vextq_u8(is_c3_2, is_c3_3, 15);
+
+    // Step 4: Handle eszett (C3 9F -> "ss")
+    // Detect 9F bytes
+    uint8x16_t is_9f_0 = vceqq_u8(text0, x_9f);
+    uint8x16_t is_9f_1 = vceqq_u8(text1, x_9f);
+    uint8x16_t is_9f_2 = vceqq_u8(text2, x_9f);
+    uint8x16_t is_9f_3 = vceqq_u8(text3, x_9f);
+
+    // Eszett second byte: 9F preceded by C3 (uses is_after_c3 computed above)
+    uint8x16_t is_eszett_second_0 = vandq_u8(is_after_c3_0, is_9f_0);
+    uint8x16_t is_eszett_second_1 = vandq_u8(is_after_c3_1, is_9f_1);
+    uint8x16_t is_eszett_second_2 = vandq_u8(is_after_c3_2, is_9f_2);
+    uint8x16_t is_eszett_second_3 = vandq_u8(is_after_c3_3, is_9f_3);
+
+    // Eszett lead byte: C3 followed by 9F (shift is_9f LEFT instead - parallel path!)
+    // vextq_u8(a, b, 1) extracts [a[1], a[2], ..., a[15], b[0]] - shifts LEFT by 1
+    uint8x16_t is_9f_next_0 = vextq_u8(is_9f_0, is_9f_1, 1);
+    uint8x16_t is_9f_next_1 = vextq_u8(is_9f_1, is_9f_2, 1);
+    uint8x16_t is_9f_next_2 = vextq_u8(is_9f_2, is_9f_3, 1);
+    uint8x16_t is_9f_next_3 = vextq_u8(is_9f_3, zeros, 1);
+
+    uint8x16_t is_eszett_lead_0 = vandq_u8(is_c3_0, is_9f_next_0);
+    uint8x16_t is_eszett_lead_1 = vandq_u8(is_c3_1, is_9f_next_1);
+    uint8x16_t is_eszett_lead_2 = vandq_u8(is_c3_2, is_9f_next_2);
+    uint8x16_t is_eszett_lead_3 = vandq_u8(is_c3_3, is_9f_next_3);
+
+    uint8x16_t is_eszett_0 = vorrq_u8(is_eszett_second_0, is_eszett_lead_0);
+    uint8x16_t is_eszett_1 = vorrq_u8(is_eszett_second_1, is_eszett_lead_1);
+    uint8x16_t is_eszett_2 = vorrq_u8(is_eszett_second_2, is_eszett_lead_2);
+    uint8x16_t is_eszett_3 = vorrq_u8(is_eszett_second_3, is_eszett_lead_3);
+
+    // Replace eszett bytes with 's'
+    folded0 = vbslq_u8(is_eszett_0, x_73, folded0);
+    folded1 = vbslq_u8(is_eszett_1, x_73, folded1);
+    folded2 = vbslq_u8(is_eszett_2, x_73, folded2);
+    folded3 = vbslq_u8(is_eszett_3, x_73, folded3);
+
+    // Step 5: Handle Latin-1 uppercase (C3 80-9E, excluding 97 and 9F)
+    // Is byte in range [0x80, 0x9E] (i.e., (byte - 0x80) < 0x1F)?
+    uint8x16_t offset_80_0 = vsubq_u8(text0, x_80);
+    uint8x16_t offset_80_1 = vsubq_u8(text1, x_80);
+    uint8x16_t offset_80_2 = vsubq_u8(text2, x_80);
+    uint8x16_t offset_80_3 = vsubq_u8(text3, x_80);
+
+    uint8x16_t in_range_0 = vcltq_u8(offset_80_0, x_1f);
+    uint8x16_t in_range_1 = vcltq_u8(offset_80_1, x_1f);
+    uint8x16_t in_range_2 = vcltq_u8(offset_80_2, x_1f);
+    uint8x16_t in_range_3 = vcltq_u8(offset_80_3, x_1f);
+
+    // Exclude 0x97 (multiplication sign) and eszett second byte
+    uint8x16_t is_97_0 = vceqq_u8(text0, x_97);
+    uint8x16_t is_97_1 = vceqq_u8(text1, x_97);
+    uint8x16_t is_97_2 = vceqq_u8(text2, x_97);
+    uint8x16_t is_97_3 = vceqq_u8(text3, x_97);
+
+    uint8x16_t exclude_0 = vorrq_u8(is_97_0, is_eszett_second_0);
+    uint8x16_t exclude_1 = vorrq_u8(is_97_1, is_eszett_second_1);
+    uint8x16_t exclude_2 = vorrq_u8(is_97_2, is_eszett_second_2);
+    uint8x16_t exclude_3 = vorrq_u8(is_97_3, is_eszett_second_3);
+
+    // Final mask: after C3, in uppercase range, not excluded
+    // vbicq_u8(a, b) = a AND NOT(b) - saves one instruction vs vandq + vmvnq
+    uint8x16_t is_latin1_upper_0 = vbicq_u8(vandq_u8(is_after_c3_0, in_range_0), exclude_0);
+    uint8x16_t is_latin1_upper_1 = vbicq_u8(vandq_u8(is_after_c3_1, in_range_1), exclude_1);
+    uint8x16_t is_latin1_upper_2 = vbicq_u8(vandq_u8(is_after_c3_2, in_range_2), exclude_2);
+    uint8x16_t is_latin1_upper_3 = vbicq_u8(vandq_u8(is_after_c3_3, in_range_3), exclude_3);
+
+    // Add 0x20 to fold (using OR since we're setting bit 5)
+    *result0 = vorrq_u8(folded0, vandq_u8(is_latin1_upper_0, x_20));
+    *result1 = vorrq_u8(folded1, vandq_u8(is_latin1_upper_1, x_20));
+    *result2 = vorrq_u8(folded2, vandq_u8(is_latin1_upper_2, x_20));
+    *result3 = vorrq_u8(folded3, vandq_u8(is_latin1_upper_3, x_20));
+}
+
+/**
+ *  @brief  Detect danger bytes in Western European text that require serial fallback.
+ *
+ *  Detects:
+ *  - E1 BA xx: Capital Sharp S (U+1E9E)
+ *  - E2 84 AA: Kelvin sign (U+212A)
+ *  - E2 84 AB: Angstrom sign (U+212B)
+ *  - EF AC 80-86: Latin ligatures (U+FB00-FB06)
+ *  - C5 BF: Long S (U+017F)
+ *  - C3 9F: Sharp S / Eszett (U+00DF) - marks for length-change awareness
+ *
+ *  @param text0-text3 Input text registers (64 bytes total).
+ *  @param danger0-danger3 Output danger masks (0xFF at danger positions).
+ */
+SZ_INTERNAL __attribute__((noinline)) void sz_utf8_case_insensitive_find_neon_western_europe_alarm_x4_( //
+    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,   //
+    uint8x16_t *danger0, uint8x16_t *danger1, uint8x16_t *danger2, uint8x16_t *danger3) {
+
+    // Lead byte constants
+    uint8x16_t const x_e1 = vdupq_n_u8(0xE1);
+    uint8x16_t const x_e2 = vdupq_n_u8(0xE2);
+    uint8x16_t const x_ef = vdupq_n_u8(0xEF);
+    uint8x16_t const x_c5 = vdupq_n_u8(0xC5);
+    uint8x16_t const x_c3 = vdupq_n_u8(0xC3);
+
+    // Second byte constants
+    uint8x16_t const x_ba = vdupq_n_u8(0xBA);
+    uint8x16_t const x_84 = vdupq_n_u8(0x84);
+    uint8x16_t const x_ac = vdupq_n_u8(0xAC);
+    uint8x16_t const x_bf = vdupq_n_u8(0xBF);
+    uint8x16_t const x_9f = vdupq_n_u8(0x9F);
+    uint8x16_t const zeros = vdupq_n_u8(0);
+
+    // Detect lead bytes
+    uint8x16_t is_e1_0 = vceqq_u8(text0, x_e1), is_e1_1 = vceqq_u8(text1, x_e1);
+    uint8x16_t is_e1_2 = vceqq_u8(text2, x_e1), is_e1_3 = vceqq_u8(text3, x_e1);
+    uint8x16_t is_e2_0 = vceqq_u8(text0, x_e2), is_e2_1 = vceqq_u8(text1, x_e2);
+    uint8x16_t is_e2_2 = vceqq_u8(text2, x_e2), is_e2_3 = vceqq_u8(text3, x_e2);
+    uint8x16_t is_ef_0 = vceqq_u8(text0, x_ef), is_ef_1 = vceqq_u8(text1, x_ef);
+    uint8x16_t is_ef_2 = vceqq_u8(text2, x_ef), is_ef_3 = vceqq_u8(text3, x_ef);
+    uint8x16_t is_c5_0 = vceqq_u8(text0, x_c5), is_c5_1 = vceqq_u8(text1, x_c5);
+    uint8x16_t is_c5_2 = vceqq_u8(text2, x_c5), is_c5_3 = vceqq_u8(text3, x_c5);
+    uint8x16_t is_c3_0 = vceqq_u8(text0, x_c3), is_c3_1 = vceqq_u8(text1, x_c3);
+    uint8x16_t is_c3_2 = vceqq_u8(text2, x_c3), is_c3_3 = vceqq_u8(text3, x_c3);
+
+    // Detect second bytes
+    uint8x16_t is_ba_0 = vceqq_u8(text0, x_ba), is_ba_1 = vceqq_u8(text1, x_ba);
+    uint8x16_t is_ba_2 = vceqq_u8(text2, x_ba), is_ba_3 = vceqq_u8(text3, x_ba);
+    uint8x16_t is_84_0 = vceqq_u8(text0, x_84), is_84_1 = vceqq_u8(text1, x_84);
+    uint8x16_t is_84_2 = vceqq_u8(text2, x_84), is_84_3 = vceqq_u8(text3, x_84);
+    uint8x16_t is_ac_0 = vceqq_u8(text0, x_ac), is_ac_1 = vceqq_u8(text1, x_ac);
+    uint8x16_t is_ac_2 = vceqq_u8(text2, x_ac), is_ac_3 = vceqq_u8(text3, x_ac);
+    uint8x16_t is_bf_0 = vceqq_u8(text0, x_bf), is_bf_1 = vceqq_u8(text1, x_bf);
+    uint8x16_t is_bf_2 = vceqq_u8(text2, x_bf), is_bf_3 = vceqq_u8(text3, x_bf);
+    uint8x16_t is_9f_0 = vceqq_u8(text0, x_9f), is_9f_1 = vceqq_u8(text1, x_9f);
+    uint8x16_t is_9f_2 = vceqq_u8(text2, x_9f), is_9f_3 = vceqq_u8(text3, x_9f);
+
+    // Create shifted "after lead byte" masks
+    uint8x16_t after_e1_0 = vextq_u8(zeros, is_e1_0, 15);
+    uint8x16_t after_e1_1 = vextq_u8(is_e1_0, is_e1_1, 15);
+    uint8x16_t after_e1_2 = vextq_u8(is_e1_1, is_e1_2, 15);
+    uint8x16_t after_e1_3 = vextq_u8(is_e1_2, is_e1_3, 15);
+
+    uint8x16_t after_e2_0 = vextq_u8(zeros, is_e2_0, 15);
+    uint8x16_t after_e2_1 = vextq_u8(is_e2_0, is_e2_1, 15);
+    uint8x16_t after_e2_2 = vextq_u8(is_e2_1, is_e2_2, 15);
+    uint8x16_t after_e2_3 = vextq_u8(is_e2_2, is_e2_3, 15);
+
+    uint8x16_t after_ef_0 = vextq_u8(zeros, is_ef_0, 15);
+    uint8x16_t after_ef_1 = vextq_u8(is_ef_0, is_ef_1, 15);
+    uint8x16_t after_ef_2 = vextq_u8(is_ef_1, is_ef_2, 15);
+    uint8x16_t after_ef_3 = vextq_u8(is_ef_2, is_ef_3, 15);
+
+    uint8x16_t after_c5_0 = vextq_u8(zeros, is_c5_0, 15);
+    uint8x16_t after_c5_1 = vextq_u8(is_c5_0, is_c5_1, 15);
+    uint8x16_t after_c5_2 = vextq_u8(is_c5_1, is_c5_2, 15);
+    uint8x16_t after_c5_3 = vextq_u8(is_c5_2, is_c5_3, 15);
+
+    uint8x16_t after_c3_0 = vextq_u8(zeros, is_c3_0, 15);
+    uint8x16_t after_c3_1 = vextq_u8(is_c3_0, is_c3_1, 15);
+    uint8x16_t after_c3_2 = vextq_u8(is_c3_1, is_c3_2, 15);
+    uint8x16_t after_c3_3 = vextq_u8(is_c3_2, is_c3_3, 15);
+
+    // Build danger masks: E1 BA, E2 84, EF AC, C5 BF, C3 9F
+    // Using vtstq_u8 instead of vandq_u8 - semantically equivalent for 0xFF/0x00 masks
+    *danger0 = vorrq_u8(vorrq_u8(vorrq_u8(vtstq_u8(after_e1_0, is_ba_0), vtstq_u8(after_e2_0, is_84_0)),
+                                 vorrq_u8(vtstq_u8(after_ef_0, is_ac_0), vtstq_u8(after_c5_0, is_bf_0))),
+                        vtstq_u8(after_c3_0, is_9f_0));
+    *danger1 = vorrq_u8(vorrq_u8(vorrq_u8(vtstq_u8(after_e1_1, is_ba_1), vtstq_u8(after_e2_1, is_84_1)),
+                                 vorrq_u8(vtstq_u8(after_ef_1, is_ac_1), vtstq_u8(after_c5_1, is_bf_1))),
+                        vtstq_u8(after_c3_1, is_9f_1));
+    *danger2 = vorrq_u8(vorrq_u8(vorrq_u8(vtstq_u8(after_e1_2, is_ba_2), vtstq_u8(after_e2_2, is_84_2)),
+                                 vorrq_u8(vtstq_u8(after_ef_2, is_ac_2), vtstq_u8(after_c5_2, is_bf_2))),
+                        vtstq_u8(after_c3_2, is_9f_2));
+    *danger3 = vorrq_u8(vorrq_u8(vorrq_u8(vtstq_u8(after_e1_3, is_ba_3), vtstq_u8(after_e2_3, is_84_3)),
+                                 vorrq_u8(vtstq_u8(after_ef_3, is_ac_3), vtstq_u8(after_c5_3, is_bf_3))),
+                        vtstq_u8(after_c3_3, is_9f_3));
+}
+
+/**
+ *  @brief  Western European case-insensitive search using 4x16-byte NEON registers.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
+
+    sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+
+    // Pre-load needle window for verification
+    sz_u128_vec_t needle_window_vec;
+    needle_window_vec.u8x16 = vld1q_u8((sz_u8_t const *)needle_metadata->folded_slice);
+
+    // Probe positions and bytes
+    sz_size_t const offset_second = needle_metadata->probe_second;
+    sz_size_t const offset_third = needle_metadata->probe_third;
+    sz_size_t const offset_last = folded_window_length - 1;
+
+    uint8x16_t const probe_first = vdupq_n_u8(needle_metadata->folded_slice[0]);
+    uint8x16_t const probe_second = vdupq_n_u8(needle_metadata->folded_slice[offset_second]);
+    uint8x16_t const probe_third = vdupq_n_u8(needle_metadata->folded_slice[offset_third]);
+    uint8x16_t const probe_last = vdupq_n_u8(needle_metadata->folded_slice[offset_last]);
+
+    // Pre-load first folded rune for danger zone matching
+    sz_rune_t needle_first_safe_folded_rune;
+    {
+        sz_rune_length_t dummy;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+    }
+
+    sz_cptr_t haystack_ptr = haystack;
+
+    while (haystack_ptr < haystack_end) {
+        sz_size_t const available = (sz_size_t)(haystack_end - haystack_ptr);
+        if (available < folded_window_length) break;
+
+        sz_size_t const chunk_size = available < 64 ? available : 64;
+        sz_size_t const valid_starts = chunk_size >= folded_window_length ? chunk_size - folded_window_length + 1 : 0;
+        sz_size_t const step = valid_starts > 2 ? valid_starts - 2 : 1;
+
+        // For partial chunks, fall back to serial
+        if (chunk_size < 64 || haystack_ptr + 64 + offset_last > haystack_end) {
+            sz_cptr_t result = sz_utf8_case_insensitive_find_serial(
+                haystack_ptr, available, needle, needle_length,
+                (sz_utf8_case_insensitive_needle_metadata_t *)needle_metadata, matched_length);
+            if (result) return result;
+            break;
+        }
+
+        // Prefetch next chunk to hide memory latency
+        __builtin_prefetch(haystack_ptr + 128, 0, 3);
+
+        // Load 64 bytes
+        uint8x16_t text0 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 0));
+        uint8x16_t text1 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 16));
+        uint8x16_t text2 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 32));
+        uint8x16_t text3 = vld1q_u8((sz_u8_t const *)(haystack_ptr + 48));
+
+        // Check for danger bytes
+        uint8x16_t danger0, danger1, danger2, danger3;
+        sz_utf8_case_insensitive_find_neon_western_europe_alarm_x4_(text0, text1, text2, text3, &danger0, &danger1,
+                                                                    &danger2, &danger3);
+
+        if (sz_utf8_case_insensitive_find_neon_any_x4_(danger0, danger1, danger2, danger3)) {
+            // Fall back to serial for this chunk due to danger bytes
+            // The danger handler needs to scan far enough to find the first safe rune for any match
+            // starting at valid positions (0 to valid_starts-1). The first safe rune for a match at
+            // position P is at position P + offset_in_unfolded. Use available as upper bound (not chunk_size)
+            // since the danger handler does proper UTF-8 parsing and doesn't rely on SIMD folding.
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, available);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(
+                haystack, haystack_length, needle, needle_length, haystack_ptr, danger_scan_length,
+                needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
+        }
+
+        // Fold ONCE (the key optimization - no redundant loads/folds at different offsets)
+        uint8x16_t folded0, folded1, folded2, folded3;
+        sz_utf8_case_insensitive_find_neon_western_europe_fold_x4_(text0, text1, text2, text3, &folded0, &folded1,
+                                                                   &folded2, &folded3);
+
+        // Compare SAME folded data against each probe byte (16 comparisons total)
+        uint8x16_t cmp_first0 = vceqq_u8(folded0, probe_first);
+        uint8x16_t cmp_first1 = vceqq_u8(folded1, probe_first);
+        uint8x16_t cmp_first2 = vceqq_u8(folded2, probe_first);
+        uint8x16_t cmp_first3 = vceqq_u8(folded3, probe_first);
+
+        uint8x16_t cmp_second0 = vceqq_u8(folded0, probe_second);
+        uint8x16_t cmp_second1 = vceqq_u8(folded1, probe_second);
+        uint8x16_t cmp_second2 = vceqq_u8(folded2, probe_second);
+        uint8x16_t cmp_second3 = vceqq_u8(folded3, probe_second);
+
+        uint8x16_t cmp_third0 = vceqq_u8(folded0, probe_third);
+        uint8x16_t cmp_third1 = vceqq_u8(folded1, probe_third);
+        uint8x16_t cmp_third2 = vceqq_u8(folded2, probe_third);
+        uint8x16_t cmp_third3 = vceqq_u8(folded3, probe_third);
+
+        uint8x16_t cmp_last0 = vceqq_u8(folded0, probe_last);
+        uint8x16_t cmp_last1 = vceqq_u8(folded1, probe_last);
+        uint8x16_t cmp_last2 = vceqq_u8(folded2, probe_last);
+        uint8x16_t cmp_last3 = vceqq_u8(folded3, probe_last);
+
+        // Extract sparse masks (16 calls to sz_find_vreinterpretq_u8_u4_)
+        sz_u64_t sf0 = sz_find_vreinterpretq_u8_u4_(cmp_first0);
+        sz_u64_t sf1 = sz_find_vreinterpretq_u8_u4_(cmp_first1);
+        sz_u64_t sf2 = sz_find_vreinterpretq_u8_u4_(cmp_first2);
+        sz_u64_t sf3 = sz_find_vreinterpretq_u8_u4_(cmp_first3);
+
+        sz_u64_t ss0 = sz_find_vreinterpretq_u8_u4_(cmp_second0);
+        sz_u64_t ss1 = sz_find_vreinterpretq_u8_u4_(cmp_second1);
+        sz_u64_t ss2 = sz_find_vreinterpretq_u8_u4_(cmp_second2);
+        sz_u64_t ss3 = sz_find_vreinterpretq_u8_u4_(cmp_second3);
+
+        sz_u64_t st0 = sz_find_vreinterpretq_u8_u4_(cmp_third0);
+        sz_u64_t st1 = sz_find_vreinterpretq_u8_u4_(cmp_third1);
+        sz_u64_t st2 = sz_find_vreinterpretq_u8_u4_(cmp_third2);
+        sz_u64_t st3 = sz_find_vreinterpretq_u8_u4_(cmp_third3);
+
+        sz_u64_t sl0 = sz_find_vreinterpretq_u8_u4_(cmp_last0);
+        sz_u64_t sl1 = sz_find_vreinterpretq_u8_u4_(cmp_last1);
+        sz_u64_t sl2 = sz_find_vreinterpretq_u8_u4_(cmp_last2);
+        sz_u64_t sl3 = sz_find_vreinterpretq_u8_u4_(cmp_last3);
+
+        // Cross-register shift for second, third, last probes (like AVX-512 mask shifts)
+        sz_u64_t ss0_sh, ss1_sh, ss2_sh, ss3_sh;
+        sz_u64_t st0_sh, st1_sh, st2_sh, st3_sh;
+        sz_u64_t sl0_sh, sl1_sh, sl2_sh, sl3_sh;
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(ss0, ss1, ss2, ss3, offset_second, &ss0_sh, &ss1_sh,
+                                                            &ss2_sh, &ss3_sh);
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(st0, st1, st2, st3, offset_third, &st0_sh, &st1_sh, &st2_sh,
+                                                            &st3_sh);
+        sz_utf8_case_insensitive_find_neon_sparse_shift_x4_(sl0, sl1, sl2, sl3, offset_last, &sl0_sh, &sl1_sh, &sl2_sh,
+                                                            &sl3_sh);
+
+        // AND all probes together and convert sparse to dense (16 bits per register)
+        sz_u64_t dense0 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf0 & ss0_sh & st0_sh & sl0_sh);
+        sz_u64_t dense1 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf1 & ss1_sh & st1_sh & sl1_sh);
+        sz_u64_t dense2 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf2 & ss2_sh & st2_sh & sl2_sh);
+        sz_u64_t dense3 = sz_utf8_case_insensitive_find_neon_sparse_to_dense_(sf3 & ss3_sh & st3_sh & sl3_sh);
+
+        // Combine into single 64-bit mask with validity masking
+        // valid_starts tells us how many positions are valid (1-64)
+        sz_u64_t combined = dense0 | (dense1 << 16) | (dense2 << 32) | (dense3 << 48);
+        sz_u64_t valid_mask = (valid_starts >= 64) ? ~0ull : ((1ull << valid_starts) - 1);
+        combined &= valid_mask;
+
+        // Single loop over all match positions
+        while (combined) {
+            sz_size_t candidate_offset = (sz_size_t)sz_u64_ctz(combined);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
+
+            // Load and fold candidate window for verification (single register)
+            uint8x16_t cand0 = vld1q_u8((sz_u8_t const *)haystack_candidate_ptr);
+            uint8x16_t cand_folded = sz_utf8_case_insensitive_find_neon_western_europe_fold_(cand0);
+
+            // Compare window
+            uint8x16_t window_cmp = vceqq_u8(cand_folded, needle_window_vec.u8x16);
+            sz_u64_t window_matches = sz_find_vreinterpretq_u8_u4_(window_cmp);
+            sz_u64_t window_mask =
+                (folded_window_length > 15) ? 0xFFFFFFFFFFFFFFFFull : ((1ull << (folded_window_length * 4 + 1)) - 1);
+
+            if ((window_matches & window_mask) == (0x8888888888888888ull & window_mask)) {
+                sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(
+                    haystack, haystack_length, needle, needle_length, (sz_size_t)(haystack_candidate_ptr - haystack),
+                    needle_metadata->folded_slice_length, needle_metadata->offset_in_unfolded,
+                    needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded,
+                    matched_length);
+                if (match) return match;
+            }
+
+            combined &= combined - 1;
+        }
+
+        haystack_ptr += step;
+    }
+
+    // Tail processing: fall back to serial for remaining positions
+    // This ensures correctness when haystack is too small for full NEON processing
+    // or when valid match positions were missed by the main loop
+    return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
+                                                (sz_utf8_case_insensitive_needle_metadata_t *)needle_metadata,
+                                                matched_length);
+}
+
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
     sz_cptr_t haystack, sz_size_t haystack_length,      //
     sz_cptr_t needle, sz_size_t needle_length,          //
     sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-    return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                matched_length);
+
+    // Handle empty needle
+    if (needle_length == 0) {
+        if (matched_length) *matched_length = 0;
+        return haystack;
+    }
+
+    // Check for case-invariant needle (direct substring search)
+    int const is_unknown = needle_metadata->kernel_id == sz_utf8_case_rune_unknown_k;
+    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_case_rune_case_invariant_k;
+    if (known_agnostic || (is_unknown && sz_utf8_case_invariant_neon(needle, needle_length))) {
+        needle_metadata->kernel_id = sz_utf8_case_rune_case_invariant_k;
+        sz_cptr_t result = sz_find_neon(haystack, haystack_length, needle, needle_length);
+        if (result && matched_length) *matched_length = needle_length;
+        return result;
+    }
+
+    // Analyze needle if not already done
+    if (is_unknown) {
+        sz_utf8_case_insensitive_needle_metadata_(needle, needle_length, needle_metadata);
+        if (needle_metadata->kernel_id == sz_utf8_case_rune_fallback_serial_k)
+            return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length,
+                                                        needle_metadata, matched_length);
+    }
+
+    // Dispatch to NEON kernels based on kernel_id
+    switch (needle_metadata->kernel_id) {
+    case sz_utf8_case_rune_ascii_invariant_k:
+        return sz_utf8_case_insensitive_find_neon_ascii_(haystack, haystack_length, needle, needle_length,
+                                                         needle_metadata, matched_length);
+    case sz_utf8_case_rune_safe_western_europe_k:
+        return sz_utf8_case_insensitive_find_neon_western_europe_(haystack, haystack_length, needle, needle_length,
+                                                                  needle_metadata, matched_length);
+    default:
+        // All other kernels fall back to serial for now
+        return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                                    matched_length);
+    }
 }
 
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length) {
