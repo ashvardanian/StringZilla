@@ -2268,6 +2268,1435 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_si
 
 #pragma endregion // Serial Implementation
 
+#pragma region Character Safety Profiles
+
+/**
+ *  @brief Safety profile for a single character across all script paths.
+ *
+ *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly folding
+ *  than the proper `sz_utf8_case_fold`, but without losing any possible matches. That's typically achieved
+ *  finding parts of the needle, that never appear in any multi-byte expansions of complex characters, so
+ *  we don't need to shuffle data within a CPU register - just swap some byte sequences with others.
+ *
+ *  Assuming the complexity of Unicode, the number of such rules to take care of is quite significant, so
+ *  it's hard to achieve matching speeds beyond 500 MB/s for arbitrary needles. However, if separate them
+ *  by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
+ */
+typedef enum {
+    sz_utf8_case_rune_unknown_k = 0,
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII characters, mostly for English text,
+     *          exclusive to single-byte characters without case-folding "collisions" and ambiguities.
+     *
+     *  If all of the following @b needle-constraints are satisfied, our case-insensitive UTF-8 substring search
+     *  becomes no more than a trivial case-insensitive ASCII substring search, where the only @b haystack-folding
+     *  operation to be applied is mapping A-Z to a-z:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_ascii_invariant_k = 1,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 Supplements designed mostly
+     *          for Western European languages (like French, German, Spanish, & Portuguese) with a mixture of
+     *          single-byte and double-byte UTF-8 character sequences.
+     *
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
+     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
+     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
+     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
+     *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+     *
+     *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
+     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_ascii_invariant_k`, but not all!
+     *
+     *  The lowercase 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place (2 bytes → 2 bytes).
+     *  This creates a mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find
+     *  a match at the second byte of 'ß' (the UTF-8 continuation byte 0x9F) instead of at a codepoint boundary.
+     *  Example: haystack "ßStra" folds to "ssstra", needle "sstra" matches at position 1 (the 0x9F byte of 'ß').
+     *  To avoid this, 's' is only safe when NOT at the start or end of the needle (contextual restriction).
+     *
+     *  The uppercase 'ẞ' (U+1E9E, E1 BA 9E) also folds into "ss" (U+0073 U+0073, 73 73), but is outside of Latin-1.
+     *  In UTF-8 it is a 3-byte sequence, so it resizes into a 2-byte sequence when folded. Luckily for us,
+     *  it's almost never used in practice: introduced to Unicode in 2008 and officially adopted into German
+     *  orthography in 2017. When processing the haystack, we check if 'ẞ' appears, and if so, we revert to
+     *  serial processing for that tiny block of text.
+     *
+     *  Another place where 's' (U+0073, 73) appears are ligatures 'ﬅ' (U+FB05, EF AC 85) and 'ﬆ' (U+FB06, EF AC 86)
+     *  that both fold into "st" (U+0073 U+0074, 73 74). They also result in serial fallback when detected in the
+     *  haystack. If we detect all of those ligatures from 'ﬀ' (U+FB00, EF AC 80) to 'ﬆ' (U+FB06, EF AC 86), we can
+     *  safely allow both 'f' (U+0066, 66) and 'l' (U+006C, 6C).
+     *
+     *  There is one more 3-byte problematic range to consider - from (E1 BA 96) to (E1 BA 9A), which includes:
+     *  'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1), 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88),
+     *  'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A), 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A),
+     *  'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE). If we correctly detect that range in the haystack, we
+     *  can safely allow 'h' (U+0068, 68), 't' (U+0074, 74), 'w' (U+0077, 77), 'y' (U+0079, 79), and 'a' (U+0061, 61) in
+     *  needles!
+     *
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is obviously common
+     *  in German and English. In French, Spanish, and Portuguese - less so. So we add one more check
+     *  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
+     *  Similarly, we check for 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
+     *  It's archaic in modern languages but theoretically possible in historical texts.
+     *
+     *  So we allow 'k' unconditionally and inherit/extend the following limitations from
+     *  `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
+     *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87).
+     *    It's the Turkish dotted capital I that expands into a 3-byte sequence when folded. It typically appears
+     *    at the start of words, like: İstanbul (the city), İngilizce (English language).
+     *
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C)
+     *    to avoid: 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C).
+     *    It's the "J with Caron", used in phonetic transcripts and romanization of Iranian, Armenian, Georgian.
+     *
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC)
+     *    to avoid: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+     *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
+     *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
+     *
+     *  - 's' (U+0073, 73) - can't be first or last, or part of the folded "ss" (U+0073 U+0073, 73 73) prefix or suffix,
+     *    to avoid mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place,
+     *    so a needle starting/ending with 's' could match at position 1 (the 0x9F continuation byte).
+     *    Example: "ßStra" → "ssstra", needle "sstra" would match at the second byte of 'ß'.
+     *    Needles with 's' in the middle are safe.
+     *
+     *  We also add one more limitation for a special 2-byte character that is an irregular folding target of
+     *  codepoints of different length:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
+     *
+     *  There is also a Latin-1 character that doesn't change the width, but we still ban it from the safe strings:
+     *
+     *  - 'µ' (U+00B5, C2 B5) - the mathematical Micro sign folds to the Greek lowercase 'μ' (U+03BC, CE BC), which
+     *    is also a folding target of the uppercase Greek letter 'Μ' (U+039C, CE 9C). To avoid having to filter/check
+     *    for Greek symbols in the haystacks, we ban the Micro sign from the needles.
+     *
+     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
+     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_western_europe_k = 2,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin-A Supplements designed
+     *          mostly for Central European languages (like Polish, Czech, & Hungarian) and Turkish with a mixture of
+     *          single-byte, double-byte, and rare triple-byte UTF-8 character sequences.
+     *
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
+     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
+     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
+     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
+     *  - 63x Latin-A extension uppercase letters for Polish, Czech, Hungarian, & Turkish, like:
+     *    - 'Ą' (U+0104, C4 84) → 'ą' (U+0105, C4 85),
+     *    - 'Ł' (U+0141, C5 81) → 'ł' (U+0142, C5 82),
+     *    - 'Č' (U+010C, C4 8C) → 'č' (U+010D, C4 8D)
+     *
+     *  This doesn't cover Latin-B extensions (like Baltic, Romanian, & Vietnamese letters), and is not optimal
+     *  for Western European languages, assuming the lack of "ss" handling for German Eszett 'ß' (U+00DF, C3 9F).
+     *  There is, however, a huge overlap between the Central European, Western European, and Turkic scripts:
+     *
+     *  - Czech has the highest overlap - nearly half of Czech words with Latin-A characters (like Č, Ř, Š, Ž)
+     *    also contain Latin-1 characters (Á, É, Í, Ó, Ú, Ý). Examples: sčítání, dalšími, řízení, systémů.
+     *  - Polish has minimal word-level overlap because Polish only uses Ó/ó from Latin-1, and most Polish-specific
+     *    letters (Ą, Ę, Ł, Ń, Ś, Ź, Ż) are in Latin-A. Example: mieszkańców (has both ń and ó).
+     *  - Turkish has moderate overlap from Ç, Ö, Ü (Latin-1) mixing with Ğ, İ, Ş (Latin-A).
+     *    Examples: içeriği, öğrencilerden, dönüşüm.
+     *
+     *  All those languages are not always related linguistically:
+     *
+     *  - Czech and Polish are Slavic languages, that use Latin script with háčeks since 15th century.
+     *  - Hungarian is a Uralic language, that adopted Latin script in 11th century.
+     *  - Turkish is a Turkic (Altaic) language, that switched from Arabic to Latin script in 1928.
+     *    Atatürk's 1928 alphabet reform:
+     *    - borrowed Ç, Ö, Ü from French and German subsets of Latin-1 Supplement (C3 lead byte).
+     *    - introduced Ğ, İ, Ş, which ended up in the Latin Extended-A (C4/C5 lead byte).
+     *
+     *  But due to overlapping character sets, they can all benefit from the same fast path.
+     *
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is very common in Turkish,
+     *  Czech, Polish. So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
+     *  again - revert to serial. Same logic applies to 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
+     *
+     *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning through the
+     *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
+     *  frequently encounter in Turkish text.
+     *
+     *  We inherit most contextual limitations for some of the ASCII characters from
+     *  `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_case_rune_safe_western_europe_k`:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
+     *
+     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
+     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_central_europe_k = 3,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic designed mostly
+     *          for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
+     *          (like Serbian, Bulgarian, & Macedonian), but excluding Cyrillic Extensions.
+     *
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 32x Basic Cyrillic uppercase letters:
+     *    - 'А' (U+0410, D0 90) → 'а' (U+0430, D0 B0) through 'П' (U+041F, D0 9F) → 'п' (U+043F, D0 BF)
+     *    - 'Р' (U+0420, D0 A0) → 'р' (U+0440, D1 80) through 'Я' (U+042F, D0 AF) → 'я' (U+044F, D1 8F)
+     *  - 16x Cyrillic extensions for non-Russian Slavic languages:
+     *    - 'Ѐ' (U+0400, D0 80) → 'ѐ' (U+0450, D1 90) - Cyrillic E with grave (Macedonian, Serbian)
+     *    - 'Ё' (U+0401, D0 81) → 'ё' (U+0451, D1 91) - Cyrillic IO (Russian, Belarusian)
+     *    - 'Ђ' (U+0402, D0 82) → 'ђ' (U+0452, D1 92) - Cyrillic DJE (Serbian)
+     *    - 'Ѓ' (U+0403, D0 83) → 'ѓ' (U+0453, D1 93) - Cyrillic GJE (Macedonian)
+     *    - 'Є' (U+0404, D0 84) → 'є' (U+0454, D1 94) - Cyrillic Ukrainian IE (Ukrainian)
+     *    - 'Ѕ' (U+0405, D0 85) → 'ѕ' (U+0455, D1 95) - Cyrillic DZE (Macedonian)
+     *    - 'І' (U+0406, D0 86) → 'і' (U+0456, D1 96) - Cyrillic Byelorussian-Ukrainian I (Ukrainian, Belarusian)
+     *    - 'Ї' (U+0407, D0 87) → 'ї' (U+0457, D1 97) - Cyrillic YI (Ukrainian)
+     *    - 'Ј' (U+0408, D0 88) → 'ј' (U+0458, D1 98) - Cyrillic JE (Serbian, Macedonian)
+     *    - 'Љ' (U+0409, D0 89) → 'љ' (U+0459, D1 99) - Cyrillic LJE (Serbian, Macedonian)
+     *    - 'Њ' (U+040A, D0 8A) → 'њ' (U+045A, D1 9A) - Cyrillic NJE (Serbian, Macedonian)
+     *    - 'Ћ' (U+040B, D0 8B) → 'ћ' (U+045B, D1 9B) - Cyrillic TSHE (Serbian)
+     *    - 'Ќ' (U+040C, D0 8C) → 'ќ' (U+045C, D1 9C) - Cyrillic KJE (Macedonian)
+     *    - 'Ѝ' (U+040D, D0 8D) → 'ѝ' (U+045D, D1 9D) - Cyrillic I with grave (Bulgarian, Macedonian)
+     *    - 'Ў' (U+040E, D0 8E) → 'ў' (U+045E, D1 9E) - Cyrillic short U (Belarusian)
+     *    - 'Џ' (U+040F, D0 8F) → 'џ' (U+045F, D1 9F) - Cyrillic DZHE (Serbian, Macedonian)
+     *
+     *  UTF-8 byte patterns for Basic Cyrillic (D0/D1 lead bytes):
+     *  - D0 80-8F: Extensions uppercase 'Ѐ'-'Џ' (U+0400-U+040F) → fold to D1 90-9F
+     *  - D0 90-9F: Basic uppercase 'А'-'П' (U+0410-U+041F) → fold to D0 B0-BF (same lead byte)
+     *  - D0 A0-AF: Basic uppercase 'Р'-'Я' (U+0420-U+042F) → fold to D1 80-8F (cross lead byte)
+     *  - D0 B0-BF: Basic lowercase 'а'-'п' (U+0430-U+043F)
+     *  - D1 80-8F: Basic lowercase 'р'-'я' (U+0440-U+044F)
+     *  - D1 90-9F: Extensions lowercase 'ѐ'-'џ' (U+0450-U+045F)
+     *
+     *  We entirely ban all of the Extended Cyrillic (D2/D3 lead bytes), sometimes used in Ukranian,
+     *  Kazakh, and Uzbek languages, like the 'Ґ' (U+0490, D2 90) → 'ґ' (U+0491, D2 91) folding with even/odd ordering
+     *  of uppercase and lowercase. Similar rules apply to some Chechen, and various Turkic languages.
+     *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
+     *  By omitting those extensions we can make our folding kernel much lighter.
+     *
+     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *     can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *     - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *     can't precede '̇' (U+0307, CC 87) to avoid:
+     *     - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *     - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *     - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *     - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *     can't precede '̈' (U+0308, CC 88) to avoid:
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *     can't precede '̈' (U+0308, CC 88) to avoid:
+     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  These ASCII constraints are necessary because mixed-script documents (Cyrillic + Latin) may contain
+     *  Latin ligatures, German Eszett, or Turkish İ that the Cyrillic fold function doesn't handle.
+     *
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_cyrillic_k = 4,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Greek designed mostly
+     *          for Modern Greek (Demotic) text with a mixture of single-byte and double-byte UTF-8
+     *          character sequences.
+     *
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *
+     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
+     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 24x Basic Greek uppercase letters (monotonic, without diacritics):
+     *    - 'Α' (U+0391, CE 91) → 'α' (U+03B1, CE B1) through 'Ο' (U+039F, CE 9F) → 'ο' (U+03BF, CE BF)
+     *    - 'Π' (U+03A0, CE A0) → 'π' (U+03C0, CF 80) through 'Ω' (U+03A9, CE A9) → 'ω' (U+03C9, CF 89)
+     *  - 1x Final sigma to regular sigma:
+     *    - 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
+     *  - 7x Greek accented uppercase letters (tonos only, modern orthography):
+     *    - 'Ά' (U+0386, CE 86) → 'ά' (U+03AC, CE AC)
+     *    - 'Έ' (U+0388, CE 88) → 'έ' (U+03AD, CE AD)
+     *    - 'Ή' (U+0389, CE 89) → 'ή' (U+03AE, CE AE)
+     *    - 'Ί' (U+038A, CE 8A) → 'ί' (U+03AF, CE AF)
+     *    - 'Ό' (U+038C, CE 8C) → 'ό' (U+03CC, CF 8C)
+     *    - 'Ύ' (U+038E, CE 8E) → 'ύ' (U+03CD, CF 8D)
+     *    - 'Ώ' (U+038F, CE 8F) → 'ώ' (U+03CE, CF 8E)
+     *  - 2x Greek uppercase letters with dialytika:
+     *    - 'Ϊ' (U+03AA, CE AA) → 'ϊ' (U+03CA, CF 8A)
+     *    - 'Ϋ' (U+03AB, CE AB) → 'ϋ' (U+03CB, CF 8B)
+     *
+     *  UTF-8 byte patterns for Basic Greek (CE/CF lead bytes):
+     *  - CE 86-8F: Accented uppercase 'Ά'-'Ώ' (with gaps) → CE AC-AF or CF 8C-8E
+     *  - CE 91-9F: Basic uppercase 'Α'-'Ο' (U+0391-U+039F) → CE B1-BF (same lead byte)
+     *  - CE A0-A9: Basic uppercase 'Π'-'Ω' (U+03A0-U+03A9) → CF 80-89 (cross lead byte)
+     *  - CE AA-AB: Dialytika uppercase 'Ϊ'-'Ϋ' (U+03AA-U+03AB) → CF 8A-8B (cross lead byte)
+     *  - CE AC-AF: Accented lowercase 'ά'-'ί' (U+03AC-U+03AF)
+     *  - CE B1-BF: Basic lowercase 'α'-'ο' (U+03B1-U+03BF)
+     *  - CF 80-89: Basic lowercase 'π'-'ω' (U+03C0-U+03C9), includes 'ς' (U+03C2, CF 82) and 'σ' (U+03C3, CF 83)
+     *  - CF 8A-8E: Accented/dialytika lowercase 'ϊ'-'ώ' (U+03CA-U+03CE)
+     *
+     *  Greek symbol variants that fold to basic letters (detected in haystack, serial fallback):
+     *  - 'ϐ' (U+03D0, CF 90) → 'β' (U+03B2, CE B2) - Greek Beta Symbol
+     *  - 'ϑ' (U+03D1, CF 91) → 'θ' (U+03B8, CE B8) - Greek Theta Symbol
+     *  - 'ϕ' (U+03D5, CF 95) → 'φ' (U+03C6, CF 86) - Greek Phi Symbol
+     *  - 'ϖ' (U+03D6, CF 96) → 'π' (U+03C0, CF 80) - Greek Pi Symbol
+     *  - 'ϰ' (U+03F0, CF B0) → 'κ' (U+03BA, CE BA) - Greek Kappa Symbol
+     *  - 'ϱ' (U+03F1, CF B1) → 'ρ' (U+03C1, CF 81) - Greek Rho Symbol
+     *  - 'ϵ' (U+03F5, CF B5) → 'ε' (U+03B5, CE B5) - Greek Lunate Epsilon Symbol
+     *
+     *  Excluded from the needle (require serial fallback when detected in haystack):
+     *
+     *  - 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81) - iota with dialytika and tonos
+     *    EXPANDS to "ΐ" (U+03B9 U+0308 U+0301) - 3 codepoints!
+     *  - 'ΰ' (U+03B0, CE B0) → "ΰ" (U+03C5 U+0308 U+0301, CF 85 CC 88 CC 81) - upsilon with dialytika and tonos
+     *    EXPANDS to "ΰ" (U+03C5 U+0308 U+0301) - 3 codepoints!
+     *  - Greek Extended / Polytonic (U+1F00-U+1FFF, E1 BC-BF lead bytes):
+     *    Ancient Greek with breathing marks, accents, and iota subscript. Many expand to multiple
+     *    codepoints, e.g., 'ᾈ' (U+1F88) → "ἀι" (U+1F00 U+03B9, E1 BC 80 CE B9), 'ᾳ' (U+1FB3) → "αι" (U+03B1 U+03B9, CE
+     * B1 CE B9). Polytonic Greek is used primarily in academic, religious, and historical texts.
+     *
+     *  Note on the Micro Sign 'µ' (U+00B5, C2 B5):
+     *  The Latin-1 micro sign folds TO Greek mu 'μ' (U+03BC, CE BC). This is handled by the Latin-1
+     *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
+     *  only handles characters that originate in the Greek block.
+     *
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  These ASCII constraints are necessary because mixed-script documents (Greek + Latin) are common
+     *  in scientific notation, brand names, and modern Greek text with English loanwords.
+     *
+     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
+     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
+     *  as well as digits, punctuation, symbols, and control characters.
+     */
+    sz_utf8_case_rune_safe_greek_k = 5,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *
+     *  These kernels fold:
+     *  - 26x ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
+     *  - 38x Armenian uppercase letters: '
+     *    - 'Ա' (U+0531, D4 B1) → 'ա' (U+0561, D5 A1)
+     *    - 'Ֆ' (U+0556, D5 96) → 'ֆ' (U+0586, D6 86)
+     *
+     *  UTF-8 byte ranges handled:
+     *  - D4 B1-BF: uppercase 'Ա' (U+0531) through 'Ձ' (U+053F)
+     *  - D5 80-96: uppercase 'Ղ' (U+0540) through 'Ֆ' (U+0556)
+     *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
+     *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
+     *
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
+     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
+     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  We also add rules specific to Armenian ligatures:
+     *
+     *  - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82) - very common
+     *  - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6) - quite rare
+     *  - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5) - quite rare
+     *  - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB) - quite rare
+     *  - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6) - quite rare
+     *  - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD) - quite rare
+     *
+     *  Specific constraints by character:
+     *
+     *  - 'ե' (U+0565, D5 A5) - can't be first; can't follow 'մ' (U+0574, D5 B4);
+     *     can't precede 'ւ' (U+0582, D6 82) to avoid:
+     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
+     *  - 'ւ' (U+0582, D6 82) - can't be last; can't follow 'ե' (U+0565, D5 A5) to avoid:
+     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
+     *  - 'մ' (U+0574, D5 B4) - can't be last; can't precede 'ն' (U+0576, D5 B6), 'ե' (U+0565, D5 A5),
+     *     'ի' (U+056B, D5 AB), 'խ' (U+056D, D5 AD) to avoid:
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
+     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
+     *  - 'ն' (U+0576, D5 B6) - can't be first; can't follow 'մ' (U+0574, D5 B4), 'վ' (U+057E, D5 BE) to avoid:
+     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
+     *  - 'ի' (U+056B, D5 AB) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
+     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
+     *  - 'վ' (U+057E, D5 BE) - can't be first; can't precede 'ն' (U+0576, D5 B6) to avoid:
+     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
+     *  - 'խ' (U+056D, D5 AD) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
+     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
+     *
+     *  This means that Armenian needles containing these specific bigrams (եւ, մն, մե, մի, վն, մխ)
+     *  cannot use the fast path because finding them separately might miss the precomposed ligatures
+     *  present in the haystack.
+     */
+    sz_utf8_case_rune_safe_armenian_k = 6,
+
+    /**
+     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin Extended Additional.
+     *  @sa sz_utf8_case_rune_safe_central_europe_k for the inherited Latin rules.
+     *
+     *  These kernels extend Latin-1/A/B with Vietnamese characters:
+     *  - Everything from `sz_utf8_case_rune_safe_central_europe_k` (ASCII + Latin-1/A)
+     *  - 166x Latin Extended Additional letters (U+1E00-U+1E95, U+1EA0-U+1EFF) for Vietnamese.
+     *    Include precomposed Latin letters with additional diacritics (e.g. Ạ/ạ, Ả/ả, Ấ/ấ).
+     *
+     *  UTF-8 byte ranges handled:
+     *  - 00-7F: ASCII, e.g. 'a' (U+0061, 61)
+     *  - C2/C3: Latin-1 Supplement, e.g. 'â' (U+00E2, C3 A2)
+     *  - C4-C5: Latin Extended-A, e.g. 'đ' (U+0111, C4 91)
+     *  - C6: Latin Extended-B (for ơ, ư), e.g. 'ơ' (U+01A1, C6 A1)
+     *  - E1 B8 80 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95), e.g. 'Ḁ' (U+1E00, E1 B8 80)
+     *  - E1 BA A0 - E1 BB BF: Latin Extended Additional (U+1EA0-U+1EFF), e.g. 'ạ' (U+1EA1, E1 BA A1)
+     *
+     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
+     *  That sign is extremely rare, while the lowercase 'k' is common in Vietnamese (e.g. "kem", "kéo").
+     *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
+     *
+     *  We inherit most contextual limitations for some of the ASCII characters from
+     * `sz_utf8_case_rune_ascii_invariant_k`:
+     *
+     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
+     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
+     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
+     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
+     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
+     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
+     *    can't precede '̇' (U+0307, CC 87) to avoid:
+     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
+     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
+     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
+     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
+     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
+     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ẛ' (U+1E9B, E1 BA 9B) → 'ṡ' (U+1E61, E1 B9 A1) [Latin Extended Additional]
+     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
+     *    can't precede '̈' (U+0308, CC 88) to avoid:
+     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
+     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
+     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
+     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
+     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
+     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
+     *
+     *  We also inherit one more limitation from the Latin-1 profile:
+     *
+     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
+     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
+     *    to avoid ambiguity.
+     *
+     *  This means, that all other ASCII and Latin-1/A/Ext-Add characters are "safe" to use with this kernel.
+     */
+    sz_utf8_case_rune_safe_vietnamese_k = 7,
+
+    sz_utf8_case_rune_case_invariant_k = 8,
+    sz_utf8_case_rune_fallback_serial_k = 255,
+} sz_utf8_case_rune_safety_profile_t_;
+
+/**
+ *  @brief  Determine safety profile for a character across all script contexts.
+ *
+ *  This function encodes the contextual safety rules from the ASCII selector
+ *  and applies them consistently to all paths that include ASCII.
+ *
+ *  @param[in] rune The decoded codepoint
+ *  @param[in] rune_bytes UTF-8 byte length of this codepoint (1-4)
+ *  @param[in] prev_rune Previous codepoint (0 if at start)
+ *  @param[in] next_rune Next codepoint (0 if at end)
+ *  @param[in] prev_prev_rune Codepoint before prev_rune (0 if prev is at start)
+ *  @param[in] next_next_rune Codepoint after next_rune (0 if next is at end)
+ *  @param[out] safety_profiles Safety flags for each script path
+ *  @return The primary fast path preferred for this rune
+ *
+ *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
+ *        codepoint in StringZilla's length-based strings. This works because:
+ *        1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
+ *        2. Ligature checks use inequality (lower_prev != 'f'), and 0 never matches letters
+ *        3. NUL doesn't participate in any Unicode case folding or ligature expansions
+ *
+ *  @note The neighbor-of-neighbor context (prev_prev, next_next) enables position-1 and
+ *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
+ *        position 1; if next_next==0 && next!=0, we're at position N-2.
+ */
+SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile_( //
+    sz_rune_t rune, sz_size_t rune_bytes,                                          //
+    sz_rune_t prev_rune, sz_rune_t next_rune,                                      //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                            //
+    unsigned int *safety_profiles) {
+
+    unsigned safety = 0;
+
+    // Bitmasks for profiles that share identical ASCII rules
+    unsigned int western_group = //
+        (1 << sz_utf8_case_rune_safe_western_europe_k);
+    unsigned int central_viet_group =                    //
+        (1 << sz_utf8_case_rune_safe_central_europe_k) | //
+        (1 << sz_utf8_case_rune_safe_vietnamese_k);
+    unsigned int strict_ascii_group =                //
+        (1 << sz_utf8_case_rune_ascii_invariant_k) | //
+        (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
+        (1 << sz_utf8_case_rune_safe_greek_k) |      //
+        (1 << sz_utf8_case_rune_safe_armenian_k);
+
+    // Helper: lowercase ASCII
+    sz_rune_t lower = (rune >= 'A' && rune <= 'Z') ? (rune + 0x20) : rune;
+    sz_rune_t lower_prev = (prev_rune >= 'A' && prev_rune <= 'Z') ? (prev_rune + 0x20) : prev_rune;
+    sz_rune_t lower_next = (next_rune >= 'A' && next_rune <= 'Z') ? (next_rune + 0x20) : next_rune;
+
+    // Helper: is neighbor ASCII letter? (explicit conversion for C++ compatibility)
+    // Note: prev_rune/next_rune == 0 means boundary (start/end of needle)
+    sz_bool_t prev_ascii = (prev_rune != 0 && prev_rune < 0x80) ? sz_true_k : sz_false_k;
+    sz_bool_t next_ascii = (next_rune != 0 && next_rune < 0x80) ? sz_true_k : sz_false_k;
+    sz_bool_t at_start = (prev_rune == 0) ? sz_true_k : sz_false_k;
+    sz_bool_t at_end = (next_rune == 0) ? sz_true_k : sz_false_k;
+
+    // Helper: position detection for 's' rule (mid-ß-expansion avoidance in Western profile)
+    // Position 1: prev exists but prev_prev doesn't (prev is at position 0)
+    // Position N-2: next exists but next_next doesn't (next is at position N-1)
+    sz_bool_t at_pos_1 = (prev_rune != 0 && prev_prev_rune == 0) ? sz_true_k : sz_false_k;
+    sz_bool_t at_pos_n_minus_2 = (next_rune != 0 && next_next_rune == 0) ? sz_true_k : sz_false_k;
+
+    // ASCII character (1-byte UTF-8)
+    if (rune < 0x80) {
+        if (lower >= 'a' && lower <= 'z') {
+            switch (lower) {
+
+            // Unconditionally safe for all profiles.
+            // No Unicode chars fold to sequences containing these,
+            // and they don't participate in dangerous ligatures.
+            // clang-format off
+            case 'b': case 'c': case 'd': case 'e': case 'g':
+            case 'm': case 'o': case 'p': case 'q': case 'r': case 'u':
+            case 'v': case 'x': case 'z':
+                // clang-format on
+                safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+
+            // 'k':
+            // - Strict: UNSAFE. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
+            // - Western/Central/Viet: SAFE. Kelvin sign detected in haystack.
+            case 'k': safety |= central_viet_group | western_group; break;
+
+            // 'a':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE, CA BE).
+            //   Avoids: 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE).
+            // - Western: SAFE. Expansion detected in haystack.
+            case 'a':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'h':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331, CC B1).
+            //   Avoids: 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1).
+            // - Western: SAFE. Expansion detected in haystack.
+            case 'h':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'j':
+            // - All: Contextual. Can't be last; can't precede '̌' (U+030C).
+            //   Avoids: 'ǰ' (U+01F0) → "ǰ" (U+006A U+030C, 6A CC 8C).
+            //   Western profile does NOT detect this in haystack scan.
+            case 'j':
+                if (at_end == sz_false_k && next_ascii)
+                    safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+
+            // 'w':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
+            //   Avoids: 'ẘ' (U+1E98) → "ẘ" (U+0077 U+030A, 77 CC 8A).
+            // - Western: SAFE. Expansion detected in haystack.
+            case 'w':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'y':
+            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
+            //   Avoids: 'ẙ' (U+1E99) → "ẙ" (U+0079 U+030A, 79 CC 8A).
+            // - Western: SAFE. Expansion detected in haystack.
+            case 'y':
+                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'n':
+            // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC, CA BC).
+            //   Avoids: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+            // - Armenian: UNSAFE. Armenian kernel cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+            //   The character 'n' can match the 2nd part of the expansion, causing false positives.
+            // - Western/Central/Viet: Contextual, same as above.
+            //   Western profile does NOT detect this in haystack scan.
+            case 'n':
+                // Exclude Armenian - it cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+                if (at_start == sz_false_k && prev_ascii) {
+                    safety |= (1 << sz_utf8_case_rune_ascii_invariant_k) | //
+                              (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
+                              (1 << sz_utf8_case_rune_safe_greek_k);       //
+                    // Armenian EXCLUDED: sz_utf8_case_rune_safe_armenian_k
+                    safety |= central_viet_group | western_group;
+                }
+                break;
+
+            // 'i':
+            // - All: Contextual. Can't be first or last; can't follow 'f'; can't precede '̇' (U+0307, CC 87).
+            //   Avoids: 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87),
+            //   and 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69).
+            //   Western profile does NOT detect Turkish 'İ' expansion.
+            case 'i':
+                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 'f')
+                    safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+
+            // 'l':
+            // - Strict/Central/Viet: Contextual. Can't be first; can't follow 'f'.
+            //   Avoids: 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C).
+            // - Western: SAFE. Ligatures detected in haystack.
+            case 'l':
+                if (at_start == sz_false_k && lower_prev != 'f') safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 't':
+            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
+            //   can't precede '̈' (U+0308, CC 88).
+            //   Avoids: 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
+            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74),
+            //   and 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88).
+            // - Western: SAFE. Ligatures/expansion detected in haystack.
+            case 't':
+                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 's')
+                    safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 'f':
+            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 'f';
+            //   can't precede 'f', 'i', 'l'.
+            //   Avoids:
+            //   - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
+            //   - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
+            //   - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
+            //   - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
+            //   - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
+            // - Western: SAFE. Ligatures detected in haystack.
+            case 'f':
+                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 'f' &&
+                    lower_next != 'f' && lower_next != 'i' && lower_next != 'l')
+                    safety |= strict_ascii_group | central_viet_group;
+                safety |= western_group;
+                break;
+
+            // 's'
+            // - Strict: UNSAFE. 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
+            // - Central/Vietnamese: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
+            //   Avoids: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73),
+            //   'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
+            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74), and 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
+            // - Western: Contextual. Can't be at positions 0, 1 (if prev='s'), N-1, or N-2 (if next='s').
+            //   Avoids mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) in-place means
+            //   needle with 's' at these positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
+            //   Example: "ßStra" → "ssstra", needle "sstra" matches at pos 1 = mid-character.
+            //   Interior 's' like "tesst" or "masse" are safe for SIMD.
+            case 's':
+                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
+                    lower_next != 's' && lower_next != 't')
+                    safety |= central_viet_group;
+                // Western: ban pos 0, pos 1 if prev='s', pos N-1, pos N-2 if next='s'
+                if (at_start == sz_false_k && at_end == sz_false_k && //
+                    !(at_pos_1 == sz_true_k && lower_prev == 's') &&  //
+                    !(at_pos_n_minus_2 == sz_true_k && lower_next == 's'))
+                    safety |= western_group;
+                break;
+
+            default:
+                // Should not happen for a-z
+                safety |= strict_ascii_group | central_viet_group | western_group;
+                break;
+            }
+        }
+        else {
+            // Non-letters (digits, punctuation, whitespace) - always safe for all profiles
+            safety |= strict_ascii_group | central_viet_group | western_group;
+        }
+
+        *safety_profiles = safety;
+        return sz_utf8_case_rune_ascii_invariant_k;
+    }
+
+    // 2-byte UTF-8 (U+0080 to U+07FF)
+    // Must check EXACT ranges that the fold functions handle, not just lead bytes
+    if (rune_bytes == 2) {
+        sz_u8_t lead = (rune >> 6) | 0xC0;     // Reconstruct lead byte
+        sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
+
+        // Latin-1 Supplement (C2/C3 lead bytes)
+        // Exclude: 'å' (U+00E5, C3 A5) - Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5) also folds to it
+        if (lead == 0xC2 || lead == 0xC3) {
+            if (rune == 0x00E5) {
+                // 'å' excluded from all Latin profiles due to Angstrom ambiguity
+            }
+            else if (rune == 0x00DF) {
+                // 'ß' excluded from Central Europe and Vietnamese, allowed in Western Europe
+                safety |= western_group;
+            }
+            else if (rune == 0x00B5) {
+                // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC).
+                // Allow only the Greek SIMD path; Latin paths remain unsafe.
+                safety |= (1 << sz_utf8_case_rune_safe_greek_k);
+            }
+            else { safety |= western_group | central_viet_group; }
+        }
+
+        // Latin Extended-A (C4/C5 lead bytes) - for central_europe and vietnamese
+        if (lead == 0xC4 || lead == 0xC5) {
+            // Exclude expansions/length-changes:
+            // - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
+            // - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
+            // - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
+            if (rune != 0x0130 && rune != 0x0149 && rune != 0x017F) { safety |= central_viet_group; }
+        }
+
+        // Latin Extended-B (C6 lead byte) - for vietnamese (supports ơ/ư)
+        if (lead == 0xC6) { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
+
+        // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
+        // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
+        // D1 80-9F: U+0440-U+045F (lowercase continuation)
+        // Note: D2/D3 Extended Cyrillic BANNED from SIMD kernel - needles with D2/D3 use serial fallback
+        if ((lead == 0xD0 && second >= 0x80 && second <= 0xBF) || //
+            (lead == 0xD1 && second >= 0x80 && second <= 0x9F)) { //
+            safety |= (1 << sz_utf8_case_rune_safe_cyrillic_k);
+        }
+
+        // Greek - check exact ranges handled by sz_utf8_case_insensitive_find_ice_greek_fold_zmm_
+        // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
+        //   - EXCLUDE CE 90: 'ΐ' (U+0390) expands to 3 codepoints
+        // CE 91-A9: basic uppercase Α-Ω
+        // CE AA-AB: dialytika uppercase Ϊ-Ϋ
+        // CE AC-AF: accented lowercase ά-ί
+        //   - EXCLUDE CE B0: 'ΰ' (U+03B0) expands to 3 codepoints
+        // CE B1-BF: basic lowercase α-ο
+        // CF 80-89: basic lowercase π-ω (includes final sigma at 82, sigma at 83)
+        // CF 8A-8E: accented/dialytika lowercase ϊ-ώ
+        if (lead == 0xCE) {
+            // Accented uppercase (with gaps) - exclude 87, 8B, 8D, 90
+            if ((second >= 0x86 && second <= 0x8F) && second != 0x87 && second != 0x8B && second != 0x8D &&
+                second != 0x90) {
+                safety |= (1 << sz_utf8_case_rune_safe_greek_k);
+            }
+            // Basic uppercase Α-Ω
+            if (second >= 0x91 && second <= 0xA9) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+            // Dialytika uppercase Ϊ-Ϋ
+            if (second >= 0xAA && second <= 0xAB) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+            // Accented lowercase ά-ί
+            if (second >= 0xAC && second <= 0xAF) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+            // Basic lowercase α-ο - exclude B0 (ΰ expands)
+            if (second >= 0xB1 && second <= 0xBF) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+        }
+        if (lead == 0xCF) {
+            // Basic lowercase π-ω
+            if (second >= 0x80 && second <= 0x89) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+            // Accented/dialytika lowercase ϊ-ώ
+            if (second >= 0x8A && second <= 0x8E) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
+        }
+
+        // Armenian - check exact ranges with contextual constraints for ligatures
+        // D4 B1-BF: uppercase Ա-Ի (U+0531-U+053F)
+        // D5 80-96: uppercase Լ-Ֆ (U+0540-U+0556)
+        // D5 A1-BF: lowercase ա-տ (U+0561-U+057F)
+        // D6 80-86: lowercase ր-ֆ (U+0580-U+0586)
+        //
+        // Ligature constraints (from spec):
+        // - 'ե' (U+0565): can't be first; can't follow 'մ'; can't precede 'ւ'
+        // - 'ւ' (U+0582): can't be last; can't follow 'ե'
+        // - 'մ' (U+0574): can't be last; can't precede 'ն', 'ե', 'ի', 'խ'
+        // - 'ն' (U+0576): can't be first; can't follow 'մ', 'վ'
+        // - 'ի' (U+056B): can't be first; can't follow 'մ'
+        // - 'վ' (U+057E): can't be first; can't precede 'ն'
+        // - 'խ' (U+056D): can't be first; can't follow 'մ'
+        {
+            sz_bool_t is_armenian_range = sz_false_k;
+            sz_bool_t armenian_safe = sz_true_k;
+
+            if ((lead == 0xD4 && second >= 0xB1 && second <= 0xBF) ||
+                (lead == 0xD5 && second >= 0x80 && second <= 0x96) ||
+                (lead == 0xD5 && second >= 0xA1 && second <= 0xBF) ||
+                (lead == 0xD6 && second >= 0x80 && second <= 0x86)) {
+                is_armenian_range = sz_true_k;
+
+                // Helper: get lowercase Armenian codepoint for neighbor checks
+                sz_rune_t lower_prev_arm = prev_rune;
+                sz_rune_t lower_next_arm = next_rune;
+                if (prev_rune >= 0x0531 && prev_rune <= 0x0556) lower_prev_arm = prev_rune + 0x30;
+                if (next_rune >= 0x0531 && next_rune <= 0x0556) lower_next_arm = next_rune + 0x30;
+
+                // Check ligature constraints
+                switch (rune) {
+                case 0x0565: // U+0565 ech - can't be first; can't follow U+0574 men; can't precede U+0582 yiwn
+                case 0x0535: // U+0535 Ech uppercase
+                    if (at_start || lower_prev_arm == 0x0574 || lower_next_arm == 0x0582) armenian_safe = sz_false_k;
+                    break;
+                case 0x0582: // U+0582 yiwn - can't be first; can't be last; can't follow U+0565 ech
+                    // Armenian ligature և (U+0587) → ech + yiwn; needle starting with yiwn matches mid-expansion
+                    if (at_start || at_end || lower_prev_arm == 0x0565) armenian_safe = sz_false_k;
+                    break;
+                case 0x0574: // U+0574 men - can't be last; can't precede U+0576, U+0565, U+056B, U+056D
+                case 0x0544: // U+0544 Men uppercase
+                    if (at_end || lower_next_arm == 0x0576 || lower_next_arm == 0x0565 || lower_next_arm == 0x056B ||
+                        lower_next_arm == 0x056D)
+                        armenian_safe = sz_false_k;
+                    break;
+                case 0x0576: // U+0576 now - can't be first; can't follow U+0574 men, U+057E vew
+                case 0x0546: // U+0546 Now uppercase
+                    if (at_start || lower_prev_arm == 0x0574 || lower_prev_arm == 0x057E) armenian_safe = sz_false_k;
+                    break;
+                case 0x056B: // U+056B ini - can't be first; can't follow U+0574 men
+                case 0x053B: // U+053B Ini uppercase
+                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
+                    break;
+                case 0x057E: // U+057E vew - can't be last; can't precede U+0576 now
+                case 0x054E: // U+054E Vew uppercase
+                    if (at_end || lower_next_arm == 0x0576) armenian_safe = sz_false_k;
+                    break;
+                case 0x056D: // U+056D xeh - can't be first; can't follow U+0574 men
+                case 0x053D: // U+053D Xeh uppercase
+                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
+                    break;
+                default: break;
+                }
+            }
+
+            if (is_armenian_range && armenian_safe) { safety |= (1 << sz_utf8_case_rune_safe_armenian_k); }
+        }
+
+        // Output safety and determine primary script for 2-byte runes
+        // For case-invariant non-ASCII runes, add the ASCII-invariant bit.
+        // This enables fast ASCII kernel for needles like "中文字" that contain no cased characters.
+        // ASCII fold only affects bytes 0x41-0x5A (A-Z), so all other bytes pass through unchanged.
+        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
+        *safety_profiles = safety;
+        if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k; // Latin-1 Supplement
+        if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k; // Latin Extended-A/B
+        if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;          // Greek
+        if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;       // Cyrillic
+        if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;       // Armenian
+        return sz_utf8_case_rune_case_invariant_k;
+    }
+
+    // 3-byte UTF-8 (U+0800 to U+FFFF)
+    if (rune_bytes == 3) {
+        sz_u8_t lead = (rune >> 12) | 0xE0;
+        sz_u8_t second = ((rune >> 6) & 0x3F) | 0x80;
+        sz_u8_t third = (rune & 0x3F) | 0x80;
+
+        // Vietnamese/Latin Extended Additional (E1 B8-BB range)
+        // U+1E00-U+1EFF maps to E1 B8 80 - E1 BB BF
+        if (lead == 0xE1 && (second >= 0xB8 && second <= 0xBB)) {
+            // Need detailed check for exclusions in U+1E96-U+1E9F
+            // 1E96-1E9F: E1 BA 96 - E1 BA 9F
+            if (second == 0xBA && third >= 0x96 && third <= 0x9F) {
+                // Excluded: expansions or irregulars
+            }
+            else { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
+        }
+
+        // Output safety and determine primary script for 3-byte runes
+        // For case-invariant non-ASCII runes (like CJK), add the ASCII-invariant bit.
+        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
+        *safety_profiles = safety;
+        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k; // Latin Extended Additional
+        return sz_utf8_case_rune_case_invariant_k;
+    }
+
+    // 4-byte UTF-8 - currently no fast paths, but case-invariant 4-byte runes can use ASCII kernel
+    if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
+    *safety_profiles = safety;
+    return sz_utf8_case_rune_case_invariant_k;
+}
+
+/**
+ *  @brief Compute diversity score for a byte sequence.
+ *
+ *  Uses a 256-bit bitmap to efficiently count distinct byte values.
+ *  Higher scores indicate more diverse byte values, which lead to better
+ *  filtering during SIMD search (fewer false positives).
+ *
+ *  @param[in] data Pointer to byte sequence.
+ *  @param[in] length Length of byte sequence.
+ *  @return Count of distinct byte values (0-256).
+ */
+SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
+    if (length <= 1) return length;
+    sz_u64_t seen[4] = {0, 0, 0, 0}; // 256-bit bitmap
+    sz_size_t distinct = 0;
+    for (sz_size_t i = 0; i < length; ++i) {
+        sz_u8_t byte = data[i];
+        sz_size_t word = byte >> 6;                // Which 64-bit word (0-3)
+        sz_u64_t bit = (sz_u64_t)1 << (byte & 63); // Bit within the word
+        if (!(seen[word] & bit)) {
+            seen[word] |= bit;
+            ++distinct;
+        }
+    }
+    return distinct;
+}
+
+/**
+ *  @brief Find the "best safe window" in the needle for each script path.
+ *
+ *  The objective is as follows. For a given needle, find a slice, that when folded fits into 16 bytes
+ *  and where all characters are "safe" with respect to a certain path. If no such path can be found,
+ *  an empty result is returned. It might be the case for a search query like "s" or "n", that by itself
+ *  isn't safe for any path given the number of Unicode characters expanding into multiple 's'- or 'n'-containing
+ *  sequences. The selected safe folded slice will never begin mid-character in the needle, so if it starts with
+ *  an 'ŉ' (U+0149, C5 89), we can't choose - 'n' (6E) - the second half of its folded sequence as a starting point.
+ *
+ *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX", unpacking runes.
+ *  For each input rune, perform folding, expanding into a sequence, like:
+ *
+ *      'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
+ *
+ *  Continue unpacking the rest, until we reach a 16-byte limit, like:
+ *
+ *      ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
+ *      CA BC 6E 45 45 44 4C 45 5F 57 49 54 48 5F 4C 4F 4E 47
+ *
+ *  At this point, we need to trim it to make sure - its characters satisfy boundary conditions.
+ *  Assuming at the next step we'll move the iterator to the next input rune to point to 'E' (U+0045) input character,
+ *  we only trim from the end. But also invalidate the whole starting position if a bad character is chosen at start.
+ *  For safe window starting position we can have multiple length variants, assuming different safe paths can have
+ *  different rules for the last symbol in the safe sequence.
+ *
+ *  Once we have safe window for a certain script, we evaluate its diversity score - the number of distinct byte
+ *  values in the folded window. The more diverse - the better! We keep track of best seen window for each script.
+ *
+ *  We also track not only the safety with respect to a certain profile, but also applicability. For example,
+ *  the needle "xyz" is safe with respect to the Western European path, as well as Central European, Vietnamese,
+ *  and potentially others. But it's pure ASCII. We shouldn't pay the cost of complex Vietnamese case-folding of
+ *  triple-byte Latin extensions for just "xyz". So we must invalidate the "safe path" if its just "safe", but
+ *  not ideal.
+ *
+ *  In the end, we'll have up to 7 best safe windows, one per script path.
+ *  The heuristic is:
+ *
+ *  - Prefer ASCII, if there is an ASCII-safe path at least 4 bytes wide with at least 4 distinct byte values.
+ *    It's only one subtraction, a comparison, and a masked addition. Cheapest of all kernels.
+ *  - Pick the most diverse variant from all others, if ASCII variant isn't good enough.
+ *
+ *  We then identify the four "probe" positions within the <= 16 byte folded safe window, one more than
+ *  in exact substring search kernels with Raita heuristics:
+ *
+ *  1. implicit at `refined->folded_slice[0]`
+ *  2. stored in `refined->probe_second` - targets last byte of 2nd character when 4+ chars
+ *  3. stored in `refined->probe_third` - targets last byte of 3rd character when 4+ chars
+ *  4. implicit at `refined->folded_slice[refined->folded_slice_length - 1]`
+ *
+ *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text almost
+ *  all letters will have the same first byte, but mostly different second byte. The same is true for many
+ *  other languages. For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
+ *  The function also sets `offset_in_unfolded` and `length_in_unfolded` to track where the
+ *  selected folded slice came from in the original unfolded input.
+ *
+ *  @param[in] needle Pointer to needle string (original, not folded)
+ *  @param[in] needle_length Length in bytes
+ *  @param[out] refined Output metadata structure to populate
+ */
+SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
+                                                           sz_utf8_case_insensitive_needle_metadata_t *refined) {
+
+    // Per-script window state during iteration
+    typedef struct {
+        sz_size_t start_offset;   // Byte offset in original needle
+        sz_size_t input_length;   // Bytes consumed from original needle
+        sz_u8_t folded_bytes[16]; // Folded content
+        sz_size_t folded_length;  // Length of folded content (bytes)
+        sz_bool_t applicable;     // Has >=1 primary-script character
+        sz_bool_t broken;         // Window continuity broken - skip further extension
+        sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
+    } script_window_t_;
+
+    // Number of script kernels (indices 1-7 used, index 0 reserved)
+    sz_size_t const num_scripts = 8;
+
+    // Best window found so far for each script
+    script_window_t_ best[8];
+    for (sz_size_t i = 0; i < num_scripts; ++i) {
+        best[i].start_offset = 0;
+        best[i].input_length = 0;
+        best[i].folded_length = 0;
+        best[i].applicable = sz_false_k;
+        best[i].broken = sz_false_k;
+        best[i].diversity = 0;
+    }
+
+    // Handle empty needle
+    if (needle_length == 0) {
+        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
+        refined->offset_in_unfolded = 0;
+        refined->length_in_unfolded = 0;
+        refined->folded_slice_length = 0;
+        refined->probe_second = 0;
+        refined->probe_third = 0;
+        return;
+    }
+
+    sz_u8_t const *needle_bytes = (sz_u8_t const *)needle;
+    sz_u8_t const *needle_end = needle_bytes + needle_length;
+
+    // Iterate through each starting position in the needle (stepping by rune)
+    for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
+        // Current window being built for each script at this starting position
+        script_window_t_ current[8];
+        for (sz_size_t i = 0; i < num_scripts; ++i) {
+            current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
+            current[i].input_length = 0;
+            current[i].folded_length = 0;
+            current[i].applicable = sz_false_k;
+            current[i].broken = sz_false_k;
+            current[i].diversity = 0;
+        }
+
+        // Track context for safety profile evaluation
+        sz_rune_t prev_prev_rune = 0;
+        sz_rune_t prev_rune = 0;
+
+        // Fold forward from start_ptr until 16 bytes or needle end
+        sz_u8_t const *pos = start_ptr;
+        sz_bool_t any_active = sz_true_k;
+
+        while (pos < needle_end && any_active) {
+            // Parse current rune
+            sz_rune_t rune;
+            sz_rune_length_t rune_bytes;
+            sz_rune_parse((sz_cptr_t)pos, &rune, &rune_bytes);
+            if (pos + rune_bytes > needle_end) break; // Incomplete rune
+
+            // Parse next rune for context (if available)
+            sz_rune_t next_rune = 0;
+            sz_rune_length_t next_bytes = sz_utf8_invalid_k;
+            if (pos + rune_bytes < needle_end) {
+                sz_rune_parse((sz_cptr_t)(pos + rune_bytes), &next_rune, &next_bytes);
+                if (pos + rune_bytes + next_bytes > needle_end) next_rune = 0;
+            }
+
+            // Parse next-next rune for context
+            sz_rune_t next_next_rune = 0;
+            if (next_rune != 0 && pos + rune_bytes + next_bytes < needle_end) {
+                sz_rune_length_t next_next_bytes;
+                sz_rune_parse((sz_cptr_t)(pos + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
+                if (pos + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
+            }
+
+            // Get safety mask and primary script for this rune
+            unsigned safety_mask = 0;
+            sz_utf8_case_rune_safety_profile_t_ primary_script = sz_utf8_case_rune_safety_profile_( //
+                rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune, &safety_mask);
+
+            // Fold this rune
+            sz_rune_t folded_runes[4];
+            sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+
+            // Convert folded runes to UTF-8 bytes
+            sz_u8_t folded_utf8[16];
+            sz_size_t folded_utf8_len = 0;
+            for (sz_size_t i = 0; i < folded_count; ++i) {
+                folded_utf8_len += sz_rune_export(folded_runes[i], folded_utf8 + folded_utf8_len);
+            }
+
+            // Update each script's window
+            any_active = sz_false_k;
+            for (sz_size_t script = 1; script < num_scripts; ++script) {
+                if (current[script].broken) continue;
+
+                // Check if this rune is safe for this script
+                sz_bool_t is_safe = (safety_mask & (1u << script)) ? sz_true_k : sz_false_k;
+
+                // Check if adding this rune would exceed 16 bytes
+                if (is_safe && current[script].folded_length + folded_utf8_len <= 16) {
+                    // Extend this script's window
+                    for (sz_size_t b = 0; b < folded_utf8_len; ++b) {
+                        current[script].folded_bytes[current[script].folded_length + b] = folded_utf8[b];
+                    }
+                    current[script].folded_length += folded_utf8_len;
+                    current[script].input_length += rune_bytes;
+
+                    // Mark as applicable if primary script matches
+                    if (primary_script == script) { current[script].applicable = sz_true_k; }
+                    any_active = sz_true_k;
+                }
+                else {
+                    // Window broken for this script
+                    current[script].broken = sz_true_k;
+                }
+            }
+
+            // Update context for next iteration
+            prev_prev_rune = prev_rune;
+            prev_rune = rune;
+            pos += rune_bytes;
+        }
+
+        // Compare current to best for each script
+        for (sz_size_t script = 1; script < num_scripts; ++script) {
+            if (!current[script].applicable || current[script].folded_length == 0) continue;
+
+            // Compute diversity score
+            current[script].diversity =
+                sz_utf8_probe_diversity_score_(current[script].folded_bytes, current[script].folded_length);
+
+            // Update best if this is better (prefer higher diversity, then longer length)
+            if (current[script].diversity > best[script].diversity ||
+                (current[script].diversity == best[script].diversity &&
+                 current[script].folded_length > best[script].folded_length)) {
+                best[script] = current[script];
+            }
+        }
+
+        // Advance to next rune for next starting position
+        sz_rune_t skip_rune;
+        sz_rune_length_t skip_len;
+        sz_rune_parse((sz_cptr_t)start_ptr, &skip_rune, &skip_len);
+        start_ptr += skip_len;
+    }
+
+    // Select final kernel based on best windows
+    // Rule: Prefer ASCII if >=4 bytes with >=4 diversity; otherwise pick most diverse applicable
+    sz_size_t chosen_script = 0;
+    sz_size_t best_diversity = 0;
+
+    // Check ASCII preference
+    if (best[sz_utf8_case_rune_ascii_invariant_k].applicable &&
+        best[sz_utf8_case_rune_ascii_invariant_k].folded_length >= 4 &&
+        best[sz_utf8_case_rune_ascii_invariant_k].diversity >= 4) {
+        chosen_script = sz_utf8_case_rune_ascii_invariant_k;
+    }
+    else {
+        // Find most diverse applicable script
+        for (sz_size_t script = 1; script < num_scripts; ++script) {
+            if (best[script].applicable && best[script].diversity > best_diversity) {
+                best_diversity = best[script].diversity;
+                chosen_script = script;
+            }
+        }
+    }
+
+    // If no applicable window found, fall back to serial
+    if (chosen_script == 0) {
+        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
+        refined->offset_in_unfolded = 0;
+        refined->length_in_unfolded = 0;
+        refined->folded_slice_length = 0;
+        refined->probe_second = 0;
+        refined->probe_third = 0;
+        return;
+    }
+
+    // Populate output metadata
+    refined->kernel_id = (sz_u8_t)chosen_script;
+    refined->offset_in_unfolded = best[chosen_script].start_offset;
+    refined->length_in_unfolded = best[chosen_script].input_length;
+    refined->folded_slice_length = (sz_u8_t)best[chosen_script].folded_length;
+
+    // Copy folded bytes
+    for (sz_size_t i = 0; i < best[chosen_script].folded_length; ++i) {
+        refined->folded_slice[i] = best[chosen_script].folded_bytes[i];
+    }
+
+    // Compute probe positions - target last bytes of UTF-8 codepoints for maximum diversity
+    sz_size_t folded_len = best[chosen_script].folded_length;
+    if (folded_len == 0) {
+        refined->probe_second = 0;
+        refined->probe_third = 0;
+        return;
+    }
+
+    // Find character end positions in the folded slice
+    // A byte is a character's last byte if the next byte is a UTF-8 leader (not continuation)
+    sz_size_t char_ends[16];
+    sz_size_t char_count = 0;
+    for (sz_size_t i = 0; i < folded_len; ++i) {
+        sz_u8_t next = (i + 1 < folded_len) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
+        if ((next & 0xC0) != 0x80) {                                               // Next is not a continuation byte
+            if (char_count < 16) char_ends[char_count++] = i;
+        }
+    }
+
+    // Determine probe positions
+    if (char_count >= 4) {
+        // 4+ characters: target last bytes of 2nd and 3rd characters
+        refined->probe_second = (sz_u8_t)char_ends[1];
+        refined->probe_third = (sz_u8_t)char_ends[2];
+    }
+    else if (folded_len <= 3) {
+        // Very short: probes overlap
+        refined->probe_second = (folded_len > 1) ? 1 : 0;
+        refined->probe_third = (folded_len > 1) ? 1 : 0;
+    }
+    else {
+        // 1-3 characters but 4+ bytes: use byte diversity search
+        sz_u8_t byte_first = refined->folded_slice[0];
+        sz_u8_t byte_last = refined->folded_slice[folded_len - 1];
+
+        sz_size_t probe_second = folded_len / 3;
+        sz_size_t probe_third = (folded_len * 2) / 3;
+
+        // Try to find positions with bytes distinct from first/last
+        for (sz_size_t i = 1; i < folded_len - 1; ++i) {
+            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last) {
+                probe_second = i;
+                break;
+            }
+        }
+
+        sz_u8_t byte_second = refined->folded_slice[probe_second];
+        for (sz_size_t i = probe_second + 1; i < folded_len - 1; ++i) {
+            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last &&
+                refined->folded_slice[i] != byte_second) {
+                probe_third = i;
+                break;
+            }
+        }
+
+        // Clamp bounds
+        if (probe_second == 0) probe_second = 1;
+        if (probe_third >= folded_len - 1) probe_third = folded_len - 2;
+        if (probe_third <= probe_second && probe_second + 1 < folded_len - 1) probe_third = probe_second + 1;
+
+        refined->probe_second = (sz_u8_t)probe_second;
+        refined->probe_third = (sz_u8_t)probe_third;
+    }
+}
+
+#pragma endregion Character Safety Profiles
+
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
 #if defined(__clang__)
@@ -3771,1434 +5200,6 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length) 
     return sz_true_k;
 }
 
-#pragma region Character Safety Profiles
-
-/**
- *  @brief Safety profile for a single character across all script paths.
- *
- *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly folding
- *  than the proper `sz_utf8_case_fold`, but without losing any possible matches. That's typically achieved
- *  finding parts of the needle, that never appear in any multi-byte expansions of complex characters, so
- *  we don't need to shuffle data within a CPU register - just swap some byte sequences with others.
- *
- *  Assuming the complexity of Unicode, the number of such rules to take care of is quite significant, so
- *  it's hard to achieve matching speeds beyond 500 MB/s for arbitrary needles. However, if separate them
- *  by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
- */
-typedef enum {
-    sz_utf8_case_rune_unknown_k = 0,
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII characters, mostly for English text,
-     *          exclusive to single-byte characters without case-folding "collisions" and ambiguities.
-     *
-     *  If all of the following @b needle-constraints are satisfied, our case-insensitive UTF-8 substring search
-     *  becomes no more than a trivial case-insensitive ASCII substring search, where the only @b haystack-folding
-     *  operation to be applied is mapping A-Z to a-z:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
-     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
-     *  as well as digits, punctuation, symbols, and control characters.
-     */
-    sz_utf8_case_rune_ascii_invariant_k = 1,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 Supplements designed mostly
-     *          for Western European languages (like French, German, Spanish, & Portuguese) with a mixture of
-     *          single-byte and double-byte UTF-8 character sequences.
-     *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
-     *
-     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
-     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
-     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
-     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
-     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
-     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
-     *  - 1x special case of folding from Latin-1 to ASCII pair, preserving byte-width:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
-     *
-     *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
-     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_ascii_invariant_k`, but not all!
-     *
-     *  The lowercase 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place (2 bytes → 2 bytes).
-     *  This creates a mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find
-     *  a match at the second byte of 'ß' (the UTF-8 continuation byte 0x9F) instead of at a codepoint boundary.
-     *  Example: haystack "ßStra" folds to "ssstra", needle "sstra" matches at position 1 (the 0x9F byte of 'ß').
-     *  To avoid this, 's' is only safe when NOT at the start or end of the needle (contextual restriction).
-     *
-     *  The uppercase 'ẞ' (U+1E9E, E1 BA 9E) also folds into "ss" (U+0073 U+0073, 73 73), but is outside of Latin-1.
-     *  In UTF-8 it is a 3-byte sequence, so it resizes into a 2-byte sequence when folded. Luckily for us,
-     *  it's almost never used in practice: introduced to Unicode in 2008 and officially adopted into German
-     *  orthography in 2017. When processing the haystack, we check if 'ẞ' appears, and if so, we revert to
-     *  serial processing for that tiny block of text.
-     *
-     *  Another place where 's' (U+0073, 73) appears are ligatures 'ﬅ' (U+FB05, EF AC 85) and 'ﬆ' (U+FB06, EF AC 86)
-     *  that both fold into "st" (U+0073 U+0074, 73 74). They also result in serial fallback when detected in the
-     *  haystack. If we detect all of those ligatures from 'ﬀ' (U+FB00, EF AC 80) to 'ﬆ' (U+FB06, EF AC 86), we can
-     *  safely allow both 'f' (U+0066, 66) and 'l' (U+006C, 6C).
-     *
-     *  There is one more 3-byte problematic range to consider - from (E1 BA 96) to (E1 BA 9A), which includes:
-     *  'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1), 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88),
-     *  'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A), 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A),
-     *  'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE). If we correctly detect that range in the haystack, we
-     *  can safely allow 'h' (U+0068, 68), 't' (U+0074, 74), 'w' (U+0077, 77), 'y' (U+0079, 79), and 'a' (U+0061, 61) in
-     *  needles!
-     *
-     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
-     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is obviously common
-     *  in German and English. In French, Spanish, and Portuguese - less so. So we add one more check
-     *  for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
-     *  Similarly, we check for 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
-     *  It's archaic in modern languages but theoretically possible in historical texts.
-     *
-     *  So we allow 'k' unconditionally and inherit/extend the following limitations from
-     *  `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
-     *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87).
-     *    It's the Turkish dotted capital I that expands into a 3-byte sequence when folded. It typically appears
-     *    at the start of words, like: İstanbul (the city), İngilizce (English language).
-     *
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C)
-     *    to avoid: 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C).
-     *    It's the "J with Caron", used in phonetic transcripts and romanization of Iranian, Armenian, Georgian.
-     *
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC)
-     *    to avoid: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
-     *    It's mostly used in Afrikaans (South Africa/Namibia), contracted from Dutch "een" (one/a), in phrases
-     *    like "Dit is 'n boom" (It is a tree), "Dit is 'n appel" (This is an apple).
-     *
-     *  - 's' (U+0073, 73) - can't be first or last, or part of the folded "ss" (U+0073 U+0073, 73 73) prefix or suffix,
-     *    to avoid mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place,
-     *    so a needle starting/ending with 's' could match at position 1 (the 0x9F continuation byte).
-     *    Example: "ßStra" → "ssstra", needle "sstra" would match at the second byte of 'ß'.
-     *    Needles with 's' in the middle are safe.
-     *
-     *  We also add one more limitation for a special 2-byte character that is an irregular folding target of
-     *  codepoints of different length:
-     *
-     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
-     *    to avoid ambiguity.
-     *
-     *  There is also a Latin-1 character that doesn't change the width, but we still ban it from the safe strings:
-     *
-     *  - 'µ' (U+00B5, C2 B5) - the mathematical Micro sign folds to the Greek lowercase 'μ' (U+03BC, CE BC), which
-     *    is also a folding target of the uppercase Greek letter 'Μ' (U+039C, CE 9C). To avoid having to filter/check
-     *    for Greek symbols in the haystacks, we ban the Micro sign from the needles.
-     *
-     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
-     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
-     *  as well as digits, punctuation, symbols, and control characters.
-     */
-    sz_utf8_case_rune_safe_western_europe_k = 2,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin-A Supplements designed
-     *          mostly for Central European languages (like Polish, Czech, & Hungarian) and Turkish with a mixture of
-     *          single-byte, double-byte, and rare triple-byte UTF-8 character sequences.
-     *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
-     *
-     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
-     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
-     *  - 30x Latin-1 supplement uppercase letters for French, German, Spanish, & Portuguese, like:
-     *    - 'À' (U+00C0, C3 80) → 'à' (U+00E0, C3 A0),
-     *    - 'Ñ' (U+00D1, C3 91) → 'ñ' (U+00F1, C3 B1),
-     *    - 'Ü' (U+00DC, C3 9C) → 'ü' (U+00FC, C3 BC)
-     *  - 63x Latin-A extension uppercase letters for Polish, Czech, Hungarian, & Turkish, like:
-     *    - 'Ą' (U+0104, C4 84) → 'ą' (U+0105, C4 85),
-     *    - 'Ł' (U+0141, C5 81) → 'ł' (U+0142, C5 82),
-     *    - 'Č' (U+010C, C4 8C) → 'č' (U+010D, C4 8D)
-     *
-     *  This doesn't cover Latin-B extensions (like Baltic, Romanian, & Vietnamese letters), and is not optimal
-     *  for Western European languages, assuming the lack of "ss" handling for German Eszett 'ß' (U+00DF, C3 9F).
-     *  There is, however, a huge overlap between the Central European, Western European, and Turkic scripts:
-     *
-     *  - Czech has the highest overlap - nearly half of Czech words with Latin-A characters (like Č, Ř, Š, Ž)
-     *    also contain Latin-1 characters (Á, É, Í, Ó, Ú, Ý). Examples: sčítání, dalšími, řízení, systémů.
-     *  - Polish has minimal word-level overlap because Polish only uses Ó/ó from Latin-1, and most Polish-specific
-     *    letters (Ą, Ę, Ł, Ń, Ś, Ź, Ż) are in Latin-A. Example: mieszkańców (has both ń and ó).
-     *  - Turkish has moderate overlap from Ç, Ö, Ü (Latin-1) mixing with Ğ, İ, Ş (Latin-A).
-     *    Examples: içeriği, öğrencilerden, dönüşüm.
-     *
-     *  All those languages are not always related linguistically:
-     *
-     *  - Czech and Polish are Slavic languages, that use Latin script with háčeks since 15th century.
-     *  - Hungarian is a Uralic language, that adopted Latin script in 11th century.
-     *  - Turkish is a Turkic (Altaic) language, that switched from Arabic to Latin script in 1928.
-     *    Atatürk's 1928 alphabet reform:
-     *    - borrowed Ç, Ö, Ü from French and German subsets of Latin-1 Supplement (C3 lead byte).
-     *    - introduced Ğ, İ, Ş, which ended up in the Latin Extended-A (C4/C5 lead byte).
-     *
-     *  But due to overlapping character sets, they can all benefit from the same fast path.
-     *
-     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
-     *  That sign is extremely rare in Western European languages, while the lowercase 'k' is very common in Turkish,
-     *  Czech, Polish. So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected,
-     *  again - revert to serial. Same logic applies to 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
-     *
-     *  The Turkish dotted 'İ' (U+0130, C4 B0) expands into a 3-byte sequence. We detect it when scanning through the
-     *  haystack and fall back to the serial algorithm. That's pretty much the only triple-byte sequence we will
-     *  frequently encounter in Turkish text.
-     *
-     *  We inherit most contextual limitations for some of the ASCII characters from
-     *  `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_case_rune_safe_western_europe_k`:
-     *
-     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
-     *    to avoid ambiguity.
-     *
-     *  This means, that all of the ASCII and Latin-1 characters beyond the rules above are considered "safe"
-     *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
-     *  as well as digits, punctuation, symbols, and control characters.
-     */
-    sz_utf8_case_rune_safe_central_europe_k = 3,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic designed mostly
-     *          for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
-     *          (like Serbian, Bulgarian, & Macedonian), but excluding Cyrillic Extensions.
-     *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
-     *
-     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
-     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
-     *  - 32x Basic Cyrillic uppercase letters:
-     *    - 'А' (U+0410, D0 90) → 'а' (U+0430, D0 B0) through 'П' (U+041F, D0 9F) → 'п' (U+043F, D0 BF)
-     *    - 'Р' (U+0420, D0 A0) → 'р' (U+0440, D1 80) through 'Я' (U+042F, D0 AF) → 'я' (U+044F, D1 8F)
-     *  - 16x Cyrillic extensions for non-Russian Slavic languages:
-     *    - 'Ѐ' (U+0400, D0 80) → 'ѐ' (U+0450, D1 90) - Cyrillic E with grave (Macedonian, Serbian)
-     *    - 'Ё' (U+0401, D0 81) → 'ё' (U+0451, D1 91) - Cyrillic IO (Russian, Belarusian)
-     *    - 'Ђ' (U+0402, D0 82) → 'ђ' (U+0452, D1 92) - Cyrillic DJE (Serbian)
-     *    - 'Ѓ' (U+0403, D0 83) → 'ѓ' (U+0453, D1 93) - Cyrillic GJE (Macedonian)
-     *    - 'Є' (U+0404, D0 84) → 'є' (U+0454, D1 94) - Cyrillic Ukrainian IE (Ukrainian)
-     *    - 'Ѕ' (U+0405, D0 85) → 'ѕ' (U+0455, D1 95) - Cyrillic DZE (Macedonian)
-     *    - 'І' (U+0406, D0 86) → 'і' (U+0456, D1 96) - Cyrillic Byelorussian-Ukrainian I (Ukrainian, Belarusian)
-     *    - 'Ї' (U+0407, D0 87) → 'ї' (U+0457, D1 97) - Cyrillic YI (Ukrainian)
-     *    - 'Ј' (U+0408, D0 88) → 'ј' (U+0458, D1 98) - Cyrillic JE (Serbian, Macedonian)
-     *    - 'Љ' (U+0409, D0 89) → 'љ' (U+0459, D1 99) - Cyrillic LJE (Serbian, Macedonian)
-     *    - 'Њ' (U+040A, D0 8A) → 'њ' (U+045A, D1 9A) - Cyrillic NJE (Serbian, Macedonian)
-     *    - 'Ћ' (U+040B, D0 8B) → 'ћ' (U+045B, D1 9B) - Cyrillic TSHE (Serbian)
-     *    - 'Ќ' (U+040C, D0 8C) → 'ќ' (U+045C, D1 9C) - Cyrillic KJE (Macedonian)
-     *    - 'Ѝ' (U+040D, D0 8D) → 'ѝ' (U+045D, D1 9D) - Cyrillic I with grave (Bulgarian, Macedonian)
-     *    - 'Ў' (U+040E, D0 8E) → 'ў' (U+045E, D1 9E) - Cyrillic short U (Belarusian)
-     *    - 'Џ' (U+040F, D0 8F) → 'џ' (U+045F, D1 9F) - Cyrillic DZHE (Serbian, Macedonian)
-     *
-     *  UTF-8 byte patterns for Basic Cyrillic (D0/D1 lead bytes):
-     *  - D0 80-8F: Extensions uppercase 'Ѐ'-'Џ' (U+0400-U+040F) → fold to D1 90-9F
-     *  - D0 90-9F: Basic uppercase 'А'-'П' (U+0410-U+041F) → fold to D0 B0-BF (same lead byte)
-     *  - D0 A0-AF: Basic uppercase 'Р'-'Я' (U+0420-U+042F) → fold to D1 80-8F (cross lead byte)
-     *  - D0 B0-BF: Basic lowercase 'а'-'п' (U+0430-U+043F)
-     *  - D1 80-8F: Basic lowercase 'р'-'я' (U+0440-U+044F)
-     *  - D1 90-9F: Extensions lowercase 'ѐ'-'џ' (U+0450-U+045F)
-     *
-     *  We entirely ban all of the Extended Cyrillic (D2/D3 lead bytes), sometimes used in Ukranian,
-     *  Kazakh, and Uzbek languages, like the 'Ґ' (U+0490, D2 90) → 'ґ' (U+0491, D2 91) folding with even/odd ordering
-     *  of uppercase and lowercase. Similar rules apply to some Chechen, and various Turkic languages.
-     *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
-     *  By omitting those extensions we can make our folding kernel much lighter.
-     *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *     can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *     - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *     - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *     can't precede '̇' (U+0307, CC 87) to avoid:
-     *     - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *     - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *     - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *     - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *     - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *     - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *     - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *     - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *     can't precede '̈' (U+0308, CC 88) to avoid:
-     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *     can't precede '̈' (U+0308, CC 88) to avoid:
-     *     - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *     - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *     - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *     - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *     - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  These ASCII constraints are necessary because mixed-script documents (Cyrillic + Latin) may contain
-     *  Latin ligatures, German Eszett, or Turkish İ that the Cyrillic fold function doesn't handle.
-     *
-     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
-     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
-     *  as well as digits, punctuation, symbols, and control characters.
-     */
-    sz_utf8_case_rune_safe_cyrillic_k = 4,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Greek designed mostly
-     *          for Modern Greek (Demotic) text with a mixture of single-byte and double-byte UTF-8
-     *          character sequences.
-     *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
-     *
-     *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
-     *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
-     *  - 24x Basic Greek uppercase letters (monotonic, without diacritics):
-     *    - 'Α' (U+0391, CE 91) → 'α' (U+03B1, CE B1) through 'Ο' (U+039F, CE 9F) → 'ο' (U+03BF, CE BF)
-     *    - 'Π' (U+03A0, CE A0) → 'π' (U+03C0, CF 80) through 'Ω' (U+03A9, CE A9) → 'ω' (U+03C9, CF 89)
-     *  - 1x Final sigma to regular sigma:
-     *    - 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
-     *  - 7x Greek accented uppercase letters (tonos only, modern orthography):
-     *    - 'Ά' (U+0386, CE 86) → 'ά' (U+03AC, CE AC)
-     *    - 'Έ' (U+0388, CE 88) → 'έ' (U+03AD, CE AD)
-     *    - 'Ή' (U+0389, CE 89) → 'ή' (U+03AE, CE AE)
-     *    - 'Ί' (U+038A, CE 8A) → 'ί' (U+03AF, CE AF)
-     *    - 'Ό' (U+038C, CE 8C) → 'ό' (U+03CC, CF 8C)
-     *    - 'Ύ' (U+038E, CE 8E) → 'ύ' (U+03CD, CF 8D)
-     *    - 'Ώ' (U+038F, CE 8F) → 'ώ' (U+03CE, CF 8E)
-     *  - 2x Greek uppercase letters with dialytika:
-     *    - 'Ϊ' (U+03AA, CE AA) → 'ϊ' (U+03CA, CF 8A)
-     *    - 'Ϋ' (U+03AB, CE AB) → 'ϋ' (U+03CB, CF 8B)
-     *
-     *  UTF-8 byte patterns for Basic Greek (CE/CF lead bytes):
-     *  - CE 86-8F: Accented uppercase 'Ά'-'Ώ' (with gaps) → CE AC-AF or CF 8C-8E
-     *  - CE 91-9F: Basic uppercase 'Α'-'Ο' (U+0391-U+039F) → CE B1-BF (same lead byte)
-     *  - CE A0-A9: Basic uppercase 'Π'-'Ω' (U+03A0-U+03A9) → CF 80-89 (cross lead byte)
-     *  - CE AA-AB: Dialytika uppercase 'Ϊ'-'Ϋ' (U+03AA-U+03AB) → CF 8A-8B (cross lead byte)
-     *  - CE AC-AF: Accented lowercase 'ά'-'ί' (U+03AC-U+03AF)
-     *  - CE B1-BF: Basic lowercase 'α'-'ο' (U+03B1-U+03BF)
-     *  - CF 80-89: Basic lowercase 'π'-'ω' (U+03C0-U+03C9), includes 'ς' (U+03C2, CF 82) and 'σ' (U+03C3, CF 83)
-     *  - CF 8A-8E: Accented/dialytika lowercase 'ϊ'-'ώ' (U+03CA-U+03CE)
-     *
-     *  Greek symbol variants that fold to basic letters (detected in haystack, serial fallback):
-     *  - 'ϐ' (U+03D0, CF 90) → 'β' (U+03B2, CE B2) - Greek Beta Symbol
-     *  - 'ϑ' (U+03D1, CF 91) → 'θ' (U+03B8, CE B8) - Greek Theta Symbol
-     *  - 'ϕ' (U+03D5, CF 95) → 'φ' (U+03C6, CF 86) - Greek Phi Symbol
-     *  - 'ϖ' (U+03D6, CF 96) → 'π' (U+03C0, CF 80) - Greek Pi Symbol
-     *  - 'ϰ' (U+03F0, CF B0) → 'κ' (U+03BA, CE BA) - Greek Kappa Symbol
-     *  - 'ϱ' (U+03F1, CF B1) → 'ρ' (U+03C1, CF 81) - Greek Rho Symbol
-     *  - 'ϵ' (U+03F5, CF B5) → 'ε' (U+03B5, CE B5) - Greek Lunate Epsilon Symbol
-     *
-     *  Excluded from the needle (require serial fallback when detected in haystack):
-     *
-     *  - 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81) - iota with dialytika and tonos
-     *    EXPANDS to "ΐ" (U+03B9 U+0308 U+0301) - 3 codepoints!
-     *  - 'ΰ' (U+03B0, CE B0) → "ΰ" (U+03C5 U+0308 U+0301, CF 85 CC 88 CC 81) - upsilon with dialytika and tonos
-     *    EXPANDS to "ΰ" (U+03C5 U+0308 U+0301) - 3 codepoints!
-     *  - Greek Extended / Polytonic (U+1F00-U+1FFF, E1 BC-BF lead bytes):
-     *    Ancient Greek with breathing marks, accents, and iota subscript. Many expand to multiple
-     *    codepoints, e.g., 'ᾈ' (U+1F88) → "ἀι" (U+1F00 U+03B9, E1 BC 80 CE B9), 'ᾳ' (U+1FB3) → "αι" (U+03B1 U+03B9, CE
-     * B1 CE B9). Polytonic Greek is used primarily in academic, religious, and historical texts.
-     *
-     *  Note on the Micro Sign 'µ' (U+00B5, C2 B5):
-     *  The Latin-1 micro sign folds TO Greek mu 'μ' (U+03BC, CE BC). This is handled by the Latin-1
-     *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
-     *  only handles characters that originate in the Greek block.
-     *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  These ASCII constraints are necessary because mixed-script documents (Greek + Latin) are common
-     *  in scientific notation, brand names, and modern Greek text with English loanwords.
-     *
-     *  This means, that all ASCII characters beyond the rules above are considered "safe" for this profile.
-     *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
-     *  as well as digits, punctuation, symbols, and control characters.
-     */
-    sz_utf8_case_rune_safe_greek_k = 5,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
-     *
-     *  These kernels fold:
-     *  - 26x ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
-     *  - 38x Armenian uppercase letters: '
-     *    - 'Ա' (U+0531, D4 B1) → 'ա' (U+0561, D5 A1)
-     *    - 'Ֆ' (U+0556, D5 96) → 'ֆ' (U+0586, D6 86)
-     *
-     *  UTF-8 byte ranges handled:
-     *  - D4 B1-BF: uppercase 'Ա' (U+0531) through 'Ձ' (U+053F)
-     *  - D5 80-96: uppercase 'Ղ' (U+0540) through 'Ֆ' (U+0556)
-     *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
-     *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
-     *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'k' (U+006B, 6B) - can't be present at all, because it's a folding target of the Kelvin sign:
-     *    - 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be present at all, because it's a folding target of the old S sign:
-     *    - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  We also add rules specific to Armenian ligatures:
-     *
-     *  - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82) - very common
-     *  - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6) - quite rare
-     *  - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5) - quite rare
-     *  - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB) - quite rare
-     *  - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6) - quite rare
-     *  - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD) - quite rare
-     *
-     *  Specific constraints by character:
-     *
-     *  - 'ե' (U+0565, D5 A5) - can't be first; can't follow 'մ' (U+0574, D5 B4);
-     *     can't precede 'ւ' (U+0582, D6 82) to avoid:
-     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
-     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
-     *  - 'ւ' (U+0582, D6 82) - can't be last; can't follow 'ե' (U+0565, D5 A5) to avoid:
-     *     - 'և' (U+0587, D6 87) → "եւ" (U+0565 U+0582, D5 A5 D6 82)
-     *  - 'մ' (U+0574, D5 B4) - can't be last; can't precede 'ն' (U+0576, D5 B6), 'ե' (U+0565, D5 A5),
-     *     'ի' (U+056B, D5 AB), 'խ' (U+056D, D5 AD) to avoid:
-     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
-     *     - 'ﬔ' (U+FB14, EF AC 94) → "մե" (U+0574 U+0565, D5 B4 D5 A5)
-     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
-     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
-     *  - 'ն' (U+0576, D5 B6) - can't be first; can't follow 'մ' (U+0574, D5 B4), 'վ' (U+057E, D5 BE) to avoid:
-     *     - 'ﬓ' (U+FB13, EF AC 93) → "մն" (U+0574 U+0576, D5 B4 D5 B6)
-     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
-     *  - 'ի' (U+056B, D5 AB) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
-     *     - 'ﬕ' (U+FB15, EF AC 95) → "մի" (U+0574 U+056B, D5 B4 D5 AB)
-     *  - 'վ' (U+057E, D5 BE) - can't be first; can't precede 'ն' (U+0576, D5 B6) to avoid:
-     *     - 'ﬖ' (U+FB16, EF AC 96) → "վն" (U+057E U+0576, D5 BE D5 B6)
-     *  - 'խ' (U+056D, D5 AD) - can't be first; can't follow 'մ' (U+0574, D5 B4) to avoid:
-     *     - 'ﬗ' (U+FB17, EF AC 97) → "մխ" (U+0574 U+056D, D5 B4 D5 AD)
-     *
-     *  This means that Armenian needles containing these specific bigrams (եւ, մն, մե, մի, վն, մխ)
-     *  cannot use the fast path because finding them separately might miss the precomposed ligatures
-     *  present in the haystack.
-     */
-    sz_utf8_case_rune_safe_armenian_k = 6,
-
-    /**
-     *  @brief  Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin Extended Additional.
-     *  @sa sz_utf8_case_rune_safe_central_europe_k for the inherited Latin rules.
-     *
-     *  These kernels extend Latin-1/A/B with Vietnamese characters:
-     *  - Everything from `sz_utf8_case_rune_safe_central_europe_k` (ASCII + Latin-1/A)
-     *  - 166x Latin Extended Additional letters (U+1E00-U+1E95, U+1EA0-U+1EFF) for Vietnamese.
-     *    Include precomposed Latin letters with additional diacritics (e.g. Ạ/ạ, Ả/ả, Ấ/ấ).
-     *
-     *  UTF-8 byte ranges handled:
-     *  - 00-7F: ASCII, e.g. 'a' (U+0061, 61)
-     *  - C2/C3: Latin-1 Supplement, e.g. 'â' (U+00E2, C3 A2)
-     *  - C4-C5: Latin Extended-A, e.g. 'đ' (U+0111, C4 91)
-     *  - C6: Latin Extended-B (for ơ, ư), e.g. 'ơ' (U+01A1, C6 A1)
-     *  - E1 B8 80 - E1 BA 95: Latin Extended Additional (U+1E00-U+1E95), e.g. 'Ḁ' (U+1E00, E1 B8 80)
-     *  - E1 BA A0 - E1 BB BF: Latin Extended Additional (U+1EA0-U+1EFF), e.g. 'ạ' (U+1EA1, E1 BA A1)
-     *
-     *  There is also a Unicode rule for folding the Kelvin 'K' (U+212A, E2 84 AA) into 'k' (U+006B, 6B).
-     *  That sign is extremely rare, while the lowercase 'k' is common in Vietnamese (e.g. "kem", "kéo").
-     *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
-     *
-     *  We inherit most contextual limitations for some of the ASCII characters from
-     * `sz_utf8_case_rune_ascii_invariant_k`:
-     *
-     *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
-     *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
-     *  - 'f' (U+0066, 66) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede 'f' (U+0066, 66), 'i' (U+0069, 69), 'l' (U+006C, 6C) to avoid:
-     *    - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'h' (U+0068, 68) - can't be last; can't precede '̱' (U+0331, CC B1) to avoid:
-     *    - 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1)
-     *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66);
-     *    can't precede '̇' (U+0307, CC 87) to avoid:
-     *    - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-     *    - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-     *    - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-     *  - 'j' (U+006A, 6A) - can't be last; can't precede '̌' (U+030C, CC 8C) to avoid:
-     *    - 'ǰ' (U+01F0, C7 B0) → "ǰ" (U+006A U+030C, 6A CC 8C)
-     *  - 'l' (U+006C, 6C) - can't be first; can't follow 'f' (U+0066, 66) to avoid:
-     *    - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-     *    - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-     *  - 'n' (U+006E, 6E) - can't be first; can't follow 'ʼ' (U+02BC, CA BC) to avoid:
-     *    - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-     *  - 's' (U+0073, 73) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede 's' (U+0073, 73), 't' (U+0074, 74) to avoid:
-     *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
-     *    - 'ẞ' (U+1E9E, E1 BA 9E) → "ss" (U+0073 U+0073, 73 73)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ẛ' (U+1E9B, E1 BA 9B) → 'ṡ' (U+1E61, E1 B9 A1) [Latin Extended Additional]
-     *  - 't' (U+0074, 74) - can't be first or last; can't follow 's' (U+0073, 73);
-     *    can't precede '̈' (U+0308, CC 88) to avoid:
-     *    - 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88)
-     *    - 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74)
-     *    - 'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74)
-     *  - 'w' (U+0077, 77) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẘ' (U+1E98, E1 BA 98) → "ẘ" (U+0077 U+030A, 77 CC 8A)
-     *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
-     *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
-     *
-     *  We also inherit one more limitation from the Latin-1 profile:
-     *
-     *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
-     *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
-     *    to avoid ambiguity.
-     *
-     *  This means, that all other ASCII and Latin-1/A/Ext-Add characters are "safe" to use with this kernel.
-     */
-    sz_utf8_case_rune_safe_vietnamese_k = 7,
-
-    sz_utf8_case_rune_case_invariant_k = 8,
-    sz_utf8_case_rune_fallback_serial_k = 255,
-} sz_utf8_case_rune_safety_profile_t_;
-
-/**
- *  @brief  Determine safety profile for a character across all script contexts.
- *
- *  This function encodes the contextual safety rules from the ASCII selector
- *  and applies them consistently to all paths that include ASCII.
- *
- *  @param[in] rune The decoded codepoint
- *  @param[in] rune_bytes UTF-8 byte length of this codepoint (1-4)
- *  @param[in] prev_rune Previous codepoint (0 if at start)
- *  @param[in] next_rune Next codepoint (0 if at end)
- *  @param[in] prev_prev_rune Codepoint before prev_rune (0 if prev is at start)
- *  @param[in] next_next_rune Codepoint after next_rune (0 if next is at end)
- *  @param[out] safety_profiles Safety flags for each script path
- *  @return The primary fast path preferred for this rune
- *
- *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
- *        codepoint in StringZilla's length-based strings. This works because:
- *        1. NUL is valid ASCII (< 0x80), so boundary and actual NUL are treated identically
- *        2. Ligature checks use inequality (lower_prev != 'f'), and 0 never matches letters
- *        3. NUL doesn't participate in any Unicode case folding or ligature expansions
- *
- *  @note The neighbor-of-neighbor context (prev_prev, next_next) enables position-1 and
- *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
- *        position 1; if next_next==0 && next!=0, we're at position N-2.
- */
-SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile_( //
-    sz_rune_t rune, sz_size_t rune_bytes,                                          //
-    sz_rune_t prev_rune, sz_rune_t next_rune,                                      //
-    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                            //
-    unsigned int *safety_profiles) {
-
-    unsigned safety = 0;
-
-    // Bitmasks for profiles that share identical ASCII rules
-    unsigned int western_group = //
-        (1 << sz_utf8_case_rune_safe_western_europe_k);
-    unsigned int central_viet_group =                    //
-        (1 << sz_utf8_case_rune_safe_central_europe_k) | //
-        (1 << sz_utf8_case_rune_safe_vietnamese_k);
-    unsigned int strict_ascii_group =                //
-        (1 << sz_utf8_case_rune_ascii_invariant_k) | //
-        (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
-        (1 << sz_utf8_case_rune_safe_greek_k) |      //
-        (1 << sz_utf8_case_rune_safe_armenian_k);
-
-    // Helper: lowercase ASCII
-    sz_rune_t lower = (rune >= 'A' && rune <= 'Z') ? (rune + 0x20) : rune;
-    sz_rune_t lower_prev = (prev_rune >= 'A' && prev_rune <= 'Z') ? (prev_rune + 0x20) : prev_rune;
-    sz_rune_t lower_next = (next_rune >= 'A' && next_rune <= 'Z') ? (next_rune + 0x20) : next_rune;
-
-    // Helper: is neighbor ASCII letter? (explicit conversion for C++ compatibility)
-    // Note: prev_rune/next_rune == 0 means boundary (start/end of needle)
-    sz_bool_t prev_ascii = (prev_rune != 0 && prev_rune < 0x80) ? sz_true_k : sz_false_k;
-    sz_bool_t next_ascii = (next_rune != 0 && next_rune < 0x80) ? sz_true_k : sz_false_k;
-    sz_bool_t at_start = (prev_rune == 0) ? sz_true_k : sz_false_k;
-    sz_bool_t at_end = (next_rune == 0) ? sz_true_k : sz_false_k;
-
-    // Helper: position detection for 's' rule (mid-ß-expansion avoidance in Western profile)
-    // Position 1: prev exists but prev_prev doesn't (prev is at position 0)
-    // Position N-2: next exists but next_next doesn't (next is at position N-1)
-    sz_bool_t at_pos_1 = (prev_rune != 0 && prev_prev_rune == 0) ? sz_true_k : sz_false_k;
-    sz_bool_t at_pos_n_minus_2 = (next_rune != 0 && next_next_rune == 0) ? sz_true_k : sz_false_k;
-
-    // ASCII character (1-byte UTF-8)
-    if (rune < 0x80) {
-        if (lower >= 'a' && lower <= 'z') {
-            switch (lower) {
-
-            // Unconditionally safe for all profiles.
-            // No Unicode chars fold to sequences containing these,
-            // and they don't participate in dangerous ligatures.
-            // clang-format off
-            case 'b': case 'c': case 'd': case 'e': case 'g':
-            case 'm': case 'o': case 'p': case 'q': case 'r': case 'u':
-            case 'v': case 'x': case 'z':
-                // clang-format on
-                safety |= strict_ascii_group | central_viet_group | western_group;
-                break;
-
-            // 'k':
-            // - Strict: UNSAFE. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
-            // - Western/Central/Viet: SAFE. Kelvin sign detected in haystack.
-            case 'k': safety |= central_viet_group | western_group; break;
-
-            // 'a':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede 'ʾ' (U+02BE, CA BE).
-            //   Avoids: 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE).
-            // - Western: SAFE. Expansion detected in haystack.
-            case 'a':
-                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 'h':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̱' (U+0331, CC B1).
-            //   Avoids: 'ẖ' (U+1E96, E1 BA 96) → "ẖ" (U+0068 U+0331, 68 CC B1).
-            // - Western: SAFE. Expansion detected in haystack.
-            case 'h':
-                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 'j':
-            // - All: Contextual. Can't be last; can't precede '̌' (U+030C).
-            //   Avoids: 'ǰ' (U+01F0) → "ǰ" (U+006A U+030C, 6A CC 8C).
-            //   Western profile does NOT detect this in haystack scan.
-            case 'j':
-                if (at_end == sz_false_k && next_ascii)
-                    safety |= strict_ascii_group | central_viet_group | western_group;
-                break;
-
-            // 'w':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
-            //   Avoids: 'ẘ' (U+1E98) → "ẘ" (U+0077 U+030A, 77 CC 8A).
-            // - Western: SAFE. Expansion detected in haystack.
-            case 'w':
-                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 'y':
-            // - Strict/Central/Viet: Contextual. Can't be last; can't precede '̊' (U+030A).
-            //   Avoids: 'ẙ' (U+1E99) → "ẙ" (U+0079 U+030A, 79 CC 8A).
-            // - Western: SAFE. Expansion detected in haystack.
-            case 'y':
-                if (at_end == sz_false_k && next_ascii) safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 'n':
-            // - ASCII/Cyrillic/Greek: Contextual. Can't be first; can't follow 'ʼ' (U+02BC, CA BC).
-            //   Avoids: 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
-            // - Armenian: UNSAFE. Armenian kernel cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
-            //   The character 'n' can match the 2nd part of the expansion, causing false positives.
-            // - Western/Central/Viet: Contextual, same as above.
-            //   Western profile does NOT detect this in haystack scan.
-            case 'n':
-                // Exclude Armenian - it cannot handle 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-                if (at_start == sz_false_k && prev_ascii) {
-                    safety |= (1 << sz_utf8_case_rune_ascii_invariant_k) | //
-                              (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
-                              (1 << sz_utf8_case_rune_safe_greek_k);       //
-                    // Armenian EXCLUDED: sz_utf8_case_rune_safe_armenian_k
-                    safety |= central_viet_group | western_group;
-                }
-                break;
-
-            // 'i':
-            // - All: Contextual. Can't be first or last; can't follow 'f'; can't precede '̇' (U+0307, CC 87).
-            //   Avoids: 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87),
-            //   and 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69).
-            //   Western profile does NOT detect Turkish 'İ' expansion.
-            case 'i':
-                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 'f')
-                    safety |= strict_ascii_group | central_viet_group | western_group;
-                break;
-
-            // 'l':
-            // - Strict/Central/Viet: Contextual. Can't be first; can't follow 'f'.
-            //   Avoids: 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C).
-            // - Western: SAFE. Ligatures detected in haystack.
-            case 'l':
-                if (at_start == sz_false_k && lower_prev != 'f') safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 't':
-            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 's';
-            //   can't precede '̈' (U+0308, CC 88).
-            //   Avoids: 'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
-            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74),
-            //   and 'ẗ' (U+1E97, E1 BA 97) → "ẗ" (U+0074 U+0308, 74 CC 88).
-            // - Western: SAFE. Ligatures/expansion detected in haystack.
-            case 't':
-                if (at_start == sz_false_k && at_end == sz_false_k && next_ascii && lower_prev != 's')
-                    safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 'f':
-            // - Strict/Central/Viet: Contextual. Can't be first/last; can't follow 'f';
-            //   can't precede 'f', 'i', 'l'.
-            //   Avoids:
-            //   - 'ﬀ' (U+FB00, EF AC 80) → "ff" (U+0066 U+0066, 66 66)
-            //   - 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)
-            //   - 'ﬂ' (U+FB02, EF AC 82) → "fl" (U+0066 U+006C, 66 6C)
-            //   - 'ﬃ' (U+FB03, EF AC 83) → "ffi" (U+0066 U+0066 U+0069, 66 66 69)
-            //   - 'ﬄ' (U+FB04, EF AC 84) → "ffl" (U+0066 U+0066 U+006C, 66 66 6C)
-            // - Western: SAFE. Ligatures detected in haystack.
-            case 'f':
-                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 'f' &&
-                    lower_next != 'f' && lower_next != 'i' && lower_next != 'l')
-                    safety |= strict_ascii_group | central_viet_group;
-                safety |= western_group;
-                break;
-
-            // 's'
-            // - Strict: UNSAFE. 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
-            // - Central/Vietnamese: Contextual. Can't be first/last; can't be adjacent to 's'/'t'.
-            //   Avoids: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73),
-            //   'ﬅ' (U+FB05, EF AC 85) → "st" (U+0073 U+0074, 73 74),
-            //   'ﬆ' (U+FB06, EF AC 86) → "st" (U+0073 U+0074, 73 74), and 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73).
-            // - Western: Contextual. Can't be at positions 0, 1 (if prev='s'), N-1, or N-2 (if next='s').
-            //   Avoids mid-ß-expansion matches: 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) in-place means
-            //   needle with 's' at these positions could match at byte offset 1 (UTF-8 continuation byte 0x9F).
-            //   Example: "ßStra" → "ssstra", needle "sstra" matches at pos 1 = mid-character.
-            //   Interior 's' like "tesst" or "masse" are safe for SIMD.
-            case 's':
-                if (at_start == sz_false_k && at_end == sz_false_k && prev_ascii && next_ascii && lower_prev != 's' &&
-                    lower_next != 's' && lower_next != 't')
-                    safety |= central_viet_group;
-                // Western: ban pos 0, pos 1 if prev='s', pos N-1, pos N-2 if next='s'
-                if (at_start == sz_false_k && at_end == sz_false_k && //
-                    !(at_pos_1 == sz_true_k && lower_prev == 's') &&  //
-                    !(at_pos_n_minus_2 == sz_true_k && lower_next == 's'))
-                    safety |= western_group;
-                break;
-
-            default:
-                // Should not happen for a-z
-                safety |= strict_ascii_group | central_viet_group | western_group;
-                break;
-            }
-        }
-        else {
-            // Non-letters (digits, punctuation, whitespace) - always safe for all profiles
-            safety |= strict_ascii_group | central_viet_group | western_group;
-        }
-
-        *safety_profiles = safety;
-        return sz_utf8_case_rune_ascii_invariant_k;
-    }
-
-    // 2-byte UTF-8 (U+0080 to U+07FF)
-    // Must check EXACT ranges that the fold functions handle, not just lead bytes
-    if (rune_bytes == 2) {
-        sz_u8_t lead = (rune >> 6) | 0xC0;     // Reconstruct lead byte
-        sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
-
-        // Latin-1 Supplement (C2/C3 lead bytes)
-        // Exclude: 'å' (U+00E5, C3 A5) - Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5) also folds to it
-        if (lead == 0xC2 || lead == 0xC3) {
-            if (rune == 0x00E5) {
-                // 'å' excluded from all Latin profiles due to Angstrom ambiguity
-            }
-            else if (rune == 0x00DF) {
-                // 'ß' excluded from Central Europe and Vietnamese, allowed in Western Europe
-                safety |= western_group;
-            }
-            else if (rune == 0x00B5) {
-                // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC).
-                // Allow only the Greek SIMD path; Latin paths remain unsafe.
-                safety |= (1 << sz_utf8_case_rune_safe_greek_k);
-            }
-            else { safety |= western_group | central_viet_group; }
-        }
-
-        // Latin Extended-A (C4/C5 lead bytes) - for central_europe and vietnamese
-        if (lead == 0xC4 || lead == 0xC5) {
-            // Exclude expansions/length-changes:
-            // - 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87)
-            // - 'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E)
-            // - 'ſ' (U+017F, C5 BF) → 's' (U+0073, 73)
-            if (rune != 0x0130 && rune != 0x0149 && rune != 0x017F) { safety |= central_viet_group; }
-        }
-
-        // Latin Extended-B (C6 lead byte) - for vietnamese (supports ơ/ư)
-        if (lead == 0xC6) { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
-
-        // Cyrillic - check exact ranges handled by sz_utf8_case_insensitive_find_ice_cyrillic_fold_zmm_
-        // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
-        // D1 80-9F: U+0440-U+045F (lowercase continuation)
-        // Note: D2/D3 Extended Cyrillic BANNED from SIMD kernel - needles with D2/D3 use serial fallback
-        if ((lead == 0xD0 && second >= 0x80 && second <= 0xBF) || //
-            (lead == 0xD1 && second >= 0x80 && second <= 0x9F)) { //
-            safety |= (1 << sz_utf8_case_rune_safe_cyrillic_k);
-        }
-
-        // Greek - check exact ranges handled by sz_utf8_case_insensitive_find_ice_greek_fold_zmm_
-        // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
-        //   - EXCLUDE CE 90: 'ΐ' (U+0390) expands to 3 codepoints
-        // CE 91-A9: basic uppercase Α-Ω
-        // CE AA-AB: dialytika uppercase Ϊ-Ϋ
-        // CE AC-AF: accented lowercase ά-ί
-        //   - EXCLUDE CE B0: 'ΰ' (U+03B0) expands to 3 codepoints
-        // CE B1-BF: basic lowercase α-ο
-        // CF 80-89: basic lowercase π-ω (includes final sigma at 82, sigma at 83)
-        // CF 8A-8E: accented/dialytika lowercase ϊ-ώ
-        if (lead == 0xCE) {
-            // Accented uppercase (with gaps) - exclude 87, 8B, 8D, 90
-            if ((second >= 0x86 && second <= 0x8F) && second != 0x87 && second != 0x8B && second != 0x8D &&
-                second != 0x90) {
-                safety |= (1 << sz_utf8_case_rune_safe_greek_k);
-            }
-            // Basic uppercase Α-Ω
-            if (second >= 0x91 && second <= 0xA9) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-            // Dialytika uppercase Ϊ-Ϋ
-            if (second >= 0xAA && second <= 0xAB) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-            // Accented lowercase ά-ί
-            if (second >= 0xAC && second <= 0xAF) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-            // Basic lowercase α-ο - exclude B0 (ΰ expands)
-            if (second >= 0xB1 && second <= 0xBF) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-        }
-        if (lead == 0xCF) {
-            // Basic lowercase π-ω
-            if (second >= 0x80 && second <= 0x89) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-            // Accented/dialytika lowercase ϊ-ώ
-            if (second >= 0x8A && second <= 0x8E) { safety |= (1 << sz_utf8_case_rune_safe_greek_k); }
-        }
-
-        // Armenian - check exact ranges with contextual constraints for ligatures
-        // D4 B1-BF: uppercase Ա-Ի (U+0531-U+053F)
-        // D5 80-96: uppercase Լ-Ֆ (U+0540-U+0556)
-        // D5 A1-BF: lowercase ա-տ (U+0561-U+057F)
-        // D6 80-86: lowercase ր-ֆ (U+0580-U+0586)
-        //
-        // Ligature constraints (from spec):
-        // - 'ե' (U+0565): can't be first; can't follow 'մ'; can't precede 'ւ'
-        // - 'ւ' (U+0582): can't be last; can't follow 'ե'
-        // - 'մ' (U+0574): can't be last; can't precede 'ն', 'ե', 'ի', 'խ'
-        // - 'ն' (U+0576): can't be first; can't follow 'մ', 'վ'
-        // - 'ի' (U+056B): can't be first; can't follow 'մ'
-        // - 'վ' (U+057E): can't be first; can't precede 'ն'
-        // - 'խ' (U+056D): can't be first; can't follow 'մ'
-        {
-            sz_bool_t is_armenian_range = sz_false_k;
-            sz_bool_t armenian_safe = sz_true_k;
-
-            if ((lead == 0xD4 && second >= 0xB1 && second <= 0xBF) ||
-                (lead == 0xD5 && second >= 0x80 && second <= 0x96) ||
-                (lead == 0xD5 && second >= 0xA1 && second <= 0xBF) ||
-                (lead == 0xD6 && second >= 0x80 && second <= 0x86)) {
-                is_armenian_range = sz_true_k;
-
-                // Helper: get lowercase Armenian codepoint for neighbor checks
-                sz_rune_t lower_prev_arm = prev_rune;
-                sz_rune_t lower_next_arm = next_rune;
-                if (prev_rune >= 0x0531 && prev_rune <= 0x0556) lower_prev_arm = prev_rune + 0x30;
-                if (next_rune >= 0x0531 && next_rune <= 0x0556) lower_next_arm = next_rune + 0x30;
-
-                // Check ligature constraints
-                switch (rune) {
-                case 0x0565: // U+0565 ech - can't be first; can't follow U+0574 men; can't precede U+0582 yiwn
-                case 0x0535: // U+0535 Ech uppercase
-                    if (at_start || lower_prev_arm == 0x0574 || lower_next_arm == 0x0582) armenian_safe = sz_false_k;
-                    break;
-                case 0x0582: // U+0582 yiwn - can't be first; can't be last; can't follow U+0565 ech
-                    // Armenian ligature և (U+0587) → ech + yiwn; needle starting with yiwn matches mid-expansion
-                    if (at_start || at_end || lower_prev_arm == 0x0565) armenian_safe = sz_false_k;
-                    break;
-                case 0x0574: // U+0574 men - can't be last; can't precede U+0576, U+0565, U+056B, U+056D
-                case 0x0544: // U+0544 Men uppercase
-                    if (at_end || lower_next_arm == 0x0576 || lower_next_arm == 0x0565 || lower_next_arm == 0x056B ||
-                        lower_next_arm == 0x056D)
-                        armenian_safe = sz_false_k;
-                    break;
-                case 0x0576: // U+0576 now - can't be first; can't follow U+0574 men, U+057E vew
-                case 0x0546: // U+0546 Now uppercase
-                    if (at_start || lower_prev_arm == 0x0574 || lower_prev_arm == 0x057E) armenian_safe = sz_false_k;
-                    break;
-                case 0x056B: // U+056B ini - can't be first; can't follow U+0574 men
-                case 0x053B: // U+053B Ini uppercase
-                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
-                    break;
-                case 0x057E: // U+057E vew - can't be last; can't precede U+0576 now
-                case 0x054E: // U+054E Vew uppercase
-                    if (at_end || lower_next_arm == 0x0576) armenian_safe = sz_false_k;
-                    break;
-                case 0x056D: // U+056D xeh - can't be first; can't follow U+0574 men
-                case 0x053D: // U+053D Xeh uppercase
-                    if (at_start || lower_prev_arm == 0x0574) armenian_safe = sz_false_k;
-                    break;
-                default: break;
-                }
-            }
-
-            if (is_armenian_range && armenian_safe) { safety |= (1 << sz_utf8_case_rune_safe_armenian_k); }
-        }
-
-        // Output safety and determine primary script for 2-byte runes
-        // For case-invariant non-ASCII runes, add the ASCII-invariant bit.
-        // This enables fast ASCII kernel for needles like "中文字" that contain no cased characters.
-        // ASCII fold only affects bytes 0x41-0x5A (A-Z), so all other bytes pass through unchanged.
-        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
-        *safety_profiles = safety;
-        if (rune >= 0x0080 && rune <= 0x00FF) return sz_utf8_case_rune_safe_western_europe_k; // Latin-1 Supplement
-        if (rune >= 0x0100 && rune <= 0x024F) return sz_utf8_case_rune_safe_central_europe_k; // Latin Extended-A/B
-        if (rune >= 0x0370 && rune <= 0x03FF) return sz_utf8_case_rune_safe_greek_k;          // Greek
-        if (rune >= 0x0400 && rune <= 0x04FF) return sz_utf8_case_rune_safe_cyrillic_k;       // Cyrillic
-        if (rune >= 0x0530 && rune <= 0x058F) return sz_utf8_case_rune_safe_armenian_k;       // Armenian
-        return sz_utf8_case_rune_case_invariant_k;
-    }
-
-    // 3-byte UTF-8 (U+0800 to U+FFFF)
-    if (rune_bytes == 3) {
-        sz_u8_t lead = (rune >> 12) | 0xE0;
-        sz_u8_t second = ((rune >> 6) & 0x3F) | 0x80;
-        sz_u8_t third = (rune & 0x3F) | 0x80;
-
-        // Vietnamese/Latin Extended Additional (E1 B8-BB range)
-        // U+1E00-U+1EFF maps to E1 B8 80 - E1 BB BF
-        if (lead == 0xE1 && (second >= 0xB8 && second <= 0xBB)) {
-            // Need detailed check for exclusions in U+1E96-U+1E9F
-            // 1E96-1E9F: E1 BA 96 - E1 BA 9F
-            if (second == 0xBA && third >= 0x96 && third <= 0x9F) {
-                // Excluded: expansions or irregulars
-            }
-            else { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
-        }
-
-        // Output safety and determine primary script for 3-byte runes
-        // For case-invariant non-ASCII runes (like CJK), add the ASCII-invariant bit.
-        if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
-        *safety_profiles = safety;
-        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k; // Latin Extended Additional
-        return sz_utf8_case_rune_case_invariant_k;
-    }
-
-    // 4-byte UTF-8 - currently no fast paths, but case-invariant 4-byte runes can use ASCII kernel
-    if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
-    *safety_profiles = safety;
-    return sz_utf8_case_rune_case_invariant_k;
-}
-
-/**
- *  @brief Compute diversity score for a byte sequence.
- *
- *  Uses a 256-bit bitmap to efficiently count distinct byte values.
- *  Higher scores indicate more diverse byte values, which lead to better
- *  filtering during SIMD search (fewer false positives).
- *
- *  @param[in] data Pointer to byte sequence.
- *  @param[in] length Length of byte sequence.
- *  @return Count of distinct byte values (0-256).
- */
-SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
-    if (length <= 1) return length;
-    sz_u64_t seen[4] = {0, 0, 0, 0}; // 256-bit bitmap
-    sz_size_t distinct = 0;
-    for (sz_size_t i = 0; i < length; ++i) {
-        sz_u8_t byte = data[i];
-        sz_size_t word = byte >> 6;                // Which 64-bit word (0-3)
-        sz_u64_t bit = (sz_u64_t)1 << (byte & 63); // Bit within the word
-        if (!(seen[word] & bit)) {
-            seen[word] |= bit;
-            ++distinct;
-        }
-    }
-    return distinct;
-}
-
-/**
- *  @brief Find the "best safe window" in the needle for each script path.
- *
- *  The objective is as follows. For a given needle, find a slice, that when folded fits into 16 bytes
- *  and where all characters are "safe" with respect to a certain path. If no such path can be found,
- *  an empty result is returned. It might be the case for a search query like "s" or "n", that by itself
- *  isn't safe for any path given the number of Unicode characters expanding into multiple 's'- or 'n'-containing
- *  sequences. The selected safe folded slice will never begin mid-character in the needle, so if it starts with
- *  an 'ŉ' (U+0149, C5 89), we can't choose - 'n' (6E) - the second half of its folded sequence as a starting point.
- *
- *  The algorithm is as follows. Iterate through the arbitrary-case "ŉEeDlE_WITH_LONG_SUFFIX", unpacking runes.
- *  For each input rune, perform folding, expanding into a sequence, like:
- *
- *      'ŉ' (U+0149, C5 89) → "ʼn" (U+02BC U+006E, CA BC 6E).
- *
- *  Continue unpacking the rest, until we reach a 16-byte limit, like:
- *
- *      ʼ     n  e  e  d  l  e  _  w  i  t  h  _  l  o  n  g
- *      CA BC 6E 45 45 44 4C 45 5F 57 49 54 48 5F 4C 4F 4E 47
- *
- *  At this point, we need to trim it to make sure - its characters satisfy boundary conditions.
- *  Assuming at the next step we'll move the iterator to the next input rune to point to 'E' (U+0045) input character,
- *  we only trim from the end. But also invalidate the whole starting position if a bad character is chosen at start.
- *  For safe window starting position we can have multiple length variants, assuming different safe paths can have
- *  different rules for the last symbol in the safe sequence.
- *
- *  Once we have safe window for a certain script, we evaluate its diversity score - the number of distinct byte
- *  values in the folded window. The more diverse - the better! We keep track of best seen window for each script.
- *
- *  We also track not only the safety with respect to a certain profile, but also applicability. For example,
- *  the needle "xyz" is safe with respect to the Western European path, as well as Central European, Vietnamese,
- *  and potentially others. But it's pure ASCII. We shouldn't pay the cost of complex Vietnamese case-folding of
- *  triple-byte Latin extensions for just "xyz". So we must invalidate the "safe path" if its just "safe", but
- *  not ideal.
- *
- *  In the end, we'll have up to 7 best safe windows, one per script path.
- *  The heuristic is:
- *
- *  - Prefer ASCII, if there is an ASCII-safe path at least 4 bytes wide with at least 4 distinct byte values.
- *    It's only one subtraction, a comparison, and a masked addition. Cheapest of all kernels.
- *  - Pick the most diverse variant from all others, if ASCII variant isn't good enough.
- *
- *  We then identify the four "probe" positions within the <= 16 byte folded safe window, one more than
- *  in exact substring search kernels with Raita heuristics:
- *
- *  1. implicit at `refined->folded_slice[0]`
- *  2. stored in `refined->probe_second` - targets last byte of 2nd character when 4+ chars
- *  3. stored in `refined->probe_third` - targets last byte of 3rd character when 4+ chars
- *  4. implicit at `refined->folded_slice[refined->folded_slice_length - 1]`
- *
- *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text almost
- *  all letters will have the same first byte, but mostly different second byte. The same is true for many
- *  other languages. For short strings (< 4 bytes), probes will necessarily overlap - this is expected.
- *  The function also sets `offset_in_unfolded` and `length_in_unfolded` to track where the
- *  selected folded slice came from in the original unfolded input.
- *
- *  @param[in] needle Pointer to needle string (original, not folded)
- *  @param[in] needle_length Length in bytes
- *  @param[out] refined Output metadata structure to populate
- */
-SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
-                                                           sz_utf8_case_insensitive_needle_metadata_t *refined) {
-
-    // Per-script window state during iteration
-    typedef struct {
-        sz_size_t start_offset;   // Byte offset in original needle
-        sz_size_t input_length;   // Bytes consumed from original needle
-        sz_u8_t folded_bytes[16]; // Folded content
-        sz_size_t folded_length;  // Length of folded content (bytes)
-        sz_bool_t applicable;     // Has >=1 primary-script character
-        sz_bool_t broken;         // Window continuity broken - skip further extension
-        sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
-    } script_window_t_;
-
-    // Number of script kernels (indices 1-7 used, index 0 reserved)
-    sz_size_t const num_scripts = 8;
-
-    // Best window found so far for each script
-    script_window_t_ best[8];
-    for (sz_size_t i = 0; i < num_scripts; ++i) {
-        best[i].start_offset = 0;
-        best[i].input_length = 0;
-        best[i].folded_length = 0;
-        best[i].applicable = sz_false_k;
-        best[i].broken = sz_false_k;
-        best[i].diversity = 0;
-    }
-
-    // Handle empty needle
-    if (needle_length == 0) {
-        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
-        refined->offset_in_unfolded = 0;
-        refined->length_in_unfolded = 0;
-        refined->folded_slice_length = 0;
-        refined->probe_second = 0;
-        refined->probe_third = 0;
-        return;
-    }
-
-    sz_u8_t const *needle_bytes = (sz_u8_t const *)needle;
-    sz_u8_t const *needle_end = needle_bytes + needle_length;
-
-    // Iterate through each starting position in the needle (stepping by rune)
-    for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
-        // Current window being built for each script at this starting position
-        script_window_t_ current[8];
-        for (sz_size_t i = 0; i < num_scripts; ++i) {
-            current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
-            current[i].input_length = 0;
-            current[i].folded_length = 0;
-            current[i].applicable = sz_false_k;
-            current[i].broken = sz_false_k;
-            current[i].diversity = 0;
-        }
-
-        // Track context for safety profile evaluation
-        sz_rune_t prev_prev_rune = 0;
-        sz_rune_t prev_rune = 0;
-
-        // Fold forward from start_ptr until 16 bytes or needle end
-        sz_u8_t const *pos = start_ptr;
-        sz_bool_t any_active = sz_true_k;
-
-        while (pos < needle_end && any_active) {
-            // Parse current rune
-            sz_rune_t rune;
-            sz_rune_length_t rune_bytes;
-            sz_rune_parse((sz_cptr_t)pos, &rune, &rune_bytes);
-            if (pos + rune_bytes > needle_end) break; // Incomplete rune
-
-            // Parse next rune for context (if available)
-            sz_rune_t next_rune = 0;
-            sz_rune_length_t next_bytes = sz_utf8_invalid_k;
-            if (pos + rune_bytes < needle_end) {
-                sz_rune_parse((sz_cptr_t)(pos + rune_bytes), &next_rune, &next_bytes);
-                if (pos + rune_bytes + next_bytes > needle_end) next_rune = 0;
-            }
-
-            // Parse next-next rune for context
-            sz_rune_t next_next_rune = 0;
-            if (next_rune != 0 && pos + rune_bytes + next_bytes < needle_end) {
-                sz_rune_length_t next_next_bytes;
-                sz_rune_parse((sz_cptr_t)(pos + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
-                if (pos + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
-            }
-
-            // Get safety mask and primary script for this rune
-            unsigned safety_mask = 0;
-            sz_utf8_case_rune_safety_profile_t_ primary_script = sz_utf8_case_rune_safety_profile_( //
-                rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune, &safety_mask);
-
-            // Fold this rune
-            sz_rune_t folded_runes[4];
-            sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
-
-            // Convert folded runes to UTF-8 bytes
-            sz_u8_t folded_utf8[16];
-            sz_size_t folded_utf8_len = 0;
-            for (sz_size_t i = 0; i < folded_count; ++i) {
-                folded_utf8_len += sz_rune_export(folded_runes[i], folded_utf8 + folded_utf8_len);
-            }
-
-            // Update each script's window
-            any_active = sz_false_k;
-            for (sz_size_t script = 1; script < num_scripts; ++script) {
-                if (current[script].broken) continue;
-
-                // Check if this rune is safe for this script
-                sz_bool_t is_safe = (safety_mask & (1u << script)) ? sz_true_k : sz_false_k;
-
-                // Check if adding this rune would exceed 16 bytes
-                if (is_safe && current[script].folded_length + folded_utf8_len <= 16) {
-                    // Extend this script's window
-                    for (sz_size_t b = 0; b < folded_utf8_len; ++b) {
-                        current[script].folded_bytes[current[script].folded_length + b] = folded_utf8[b];
-                    }
-                    current[script].folded_length += folded_utf8_len;
-                    current[script].input_length += rune_bytes;
-
-                    // Mark as applicable if primary script matches
-                    if (primary_script == script) { current[script].applicable = sz_true_k; }
-                    any_active = sz_true_k;
-                }
-                else {
-                    // Window broken for this script
-                    current[script].broken = sz_true_k;
-                }
-            }
-
-            // Update context for next iteration
-            prev_prev_rune = prev_rune;
-            prev_rune = rune;
-            pos += rune_bytes;
-        }
-
-        // Compare current to best for each script
-        for (sz_size_t script = 1; script < num_scripts; ++script) {
-            if (!current[script].applicable || current[script].folded_length == 0) continue;
-
-            // Compute diversity score
-            current[script].diversity =
-                sz_utf8_probe_diversity_score_(current[script].folded_bytes, current[script].folded_length);
-
-            // Update best if this is better (prefer higher diversity, then longer length)
-            if (current[script].diversity > best[script].diversity ||
-                (current[script].diversity == best[script].diversity &&
-                 current[script].folded_length > best[script].folded_length)) {
-                best[script] = current[script];
-            }
-        }
-
-        // Advance to next rune for next starting position
-        sz_rune_t skip_rune;
-        sz_rune_length_t skip_len;
-        sz_rune_parse((sz_cptr_t)start_ptr, &skip_rune, &skip_len);
-        start_ptr += skip_len;
-    }
-
-    // Select final kernel based on best windows
-    // Rule: Prefer ASCII if >=4 bytes with >=4 diversity; otherwise pick most diverse applicable
-    sz_size_t chosen_script = 0;
-    sz_size_t best_diversity = 0;
-
-    // Check ASCII preference
-    if (best[sz_utf8_case_rune_ascii_invariant_k].applicable &&
-        best[sz_utf8_case_rune_ascii_invariant_k].folded_length >= 4 &&
-        best[sz_utf8_case_rune_ascii_invariant_k].diversity >= 4) {
-        chosen_script = sz_utf8_case_rune_ascii_invariant_k;
-    }
-    else {
-        // Find most diverse applicable script
-        for (sz_size_t script = 1; script < num_scripts; ++script) {
-            if (best[script].applicable && best[script].diversity > best_diversity) {
-                best_diversity = best[script].diversity;
-                chosen_script = script;
-            }
-        }
-    }
-
-    // If no applicable window found, fall back to serial
-    if (chosen_script == 0) {
-        refined->kernel_id = sz_utf8_case_rune_fallback_serial_k;
-        refined->offset_in_unfolded = 0;
-        refined->length_in_unfolded = 0;
-        refined->folded_slice_length = 0;
-        refined->probe_second = 0;
-        refined->probe_third = 0;
-        return;
-    }
-
-    // Populate output metadata
-    refined->kernel_id = (sz_u8_t)chosen_script;
-    refined->offset_in_unfolded = best[chosen_script].start_offset;
-    refined->length_in_unfolded = best[chosen_script].input_length;
-    refined->folded_slice_length = (sz_u8_t)best[chosen_script].folded_length;
-
-    // Copy folded bytes
-    for (sz_size_t i = 0; i < best[chosen_script].folded_length; ++i) {
-        refined->folded_slice[i] = best[chosen_script].folded_bytes[i];
-    }
-
-    // Compute probe positions - target last bytes of UTF-8 codepoints for maximum diversity
-    sz_size_t folded_len = best[chosen_script].folded_length;
-    if (folded_len == 0) {
-        refined->probe_second = 0;
-        refined->probe_third = 0;
-        return;
-    }
-
-    // Find character end positions in the folded slice
-    // A byte is a character's last byte if the next byte is a UTF-8 leader (not continuation)
-    sz_size_t char_ends[16];
-    sz_size_t char_count = 0;
-    for (sz_size_t i = 0; i < folded_len; ++i) {
-        sz_u8_t next = (i + 1 < folded_len) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
-        if ((next & 0xC0) != 0x80) {                                               // Next is not a continuation byte
-            if (char_count < 16) char_ends[char_count++] = i;
-        }
-    }
-
-    // Determine probe positions
-    if (char_count >= 4) {
-        // 4+ characters: target last bytes of 2nd and 3rd characters
-        refined->probe_second = (sz_u8_t)char_ends[1];
-        refined->probe_third = (sz_u8_t)char_ends[2];
-    }
-    else if (folded_len <= 3) {
-        // Very short: probes overlap
-        refined->probe_second = (folded_len > 1) ? 1 : 0;
-        refined->probe_third = (folded_len > 1) ? 1 : 0;
-    }
-    else {
-        // 1-3 characters but 4+ bytes: use byte diversity search
-        sz_u8_t byte_first = refined->folded_slice[0];
-        sz_u8_t byte_last = refined->folded_slice[folded_len - 1];
-
-        sz_size_t probe_second = folded_len / 3;
-        sz_size_t probe_third = (folded_len * 2) / 3;
-
-        // Try to find positions with bytes distinct from first/last
-        for (sz_size_t i = 1; i < folded_len - 1; ++i) {
-            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last) {
-                probe_second = i;
-                break;
-            }
-        }
-
-        sz_u8_t byte_second = refined->folded_slice[probe_second];
-        for (sz_size_t i = probe_second + 1; i < folded_len - 1; ++i) {
-            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last &&
-                refined->folded_slice[i] != byte_second) {
-                probe_third = i;
-                break;
-            }
-        }
-
-        // Clamp bounds
-        if (probe_second == 0) probe_second = 1;
-        if (probe_third >= folded_len - 1) probe_third = folded_len - 2;
-        if (probe_third <= probe_second && probe_second + 1 < folded_len - 1) probe_third = probe_second + 1;
-
-        refined->probe_second = (sz_u8_t)probe_second;
-        refined->probe_third = (sz_u8_t)probe_third;
-    }
-}
-
-#pragma endregion Character Safety Profiles
 #pragma region ASCII Case-Insensitive Find
 
 /**
@@ -8495,7 +8496,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_ascii_( //
  *  @param result0-result3 Output folded registers.
  */
 SZ_INTERNAL __attribute__((noinline)) void sz_utf8_case_insensitive_find_neon_western_europe_fold_x4_( //
-    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,  //
+    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,                            //
     uint8x16_t *result0, uint8x16_t *result1, uint8x16_t *result2, uint8x16_t *result3) {
 
     // Constants
@@ -8615,7 +8616,7 @@ SZ_INTERNAL __attribute__((noinline)) void sz_utf8_case_insensitive_find_neon_we
  *  @param danger0-danger3 Output danger masks (0xFF at danger positions).
  */
 SZ_INTERNAL __attribute__((noinline)) void sz_utf8_case_insensitive_find_neon_western_europe_alarm_x4_( //
-    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,   //
+    uint8x16_t text0, uint8x16_t text1, uint8x16_t text2, uint8x16_t text3,                             //
     uint8x16_t *danger0, uint8x16_t *danger1, uint8x16_t *danger2, uint8x16_t *danger3) {
 
     // Lead byte constants
