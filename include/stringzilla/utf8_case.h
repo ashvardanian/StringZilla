@@ -130,6 +130,21 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
     sz_ptr_t destination);
 
 /**
+ *  @brief  Convert a UTF-8 string to uppercase using Full Unicode Case Mapping.
+ *
+ *  This function converts all lowercase letters in the source string to their uppercase equivalents,
+ *  including handling of one-to-many expansions (e.g., 'ß' → "SS", 'ﬁ' → "FI").
+ *
+ *  @param source       Pointer to the source UTF-8 string.
+ *  @param source_length Number of bytes in source (not characters).
+ *  @param destination  Buffer to write the uppercased result. Must be at least 3x source_length bytes.
+ *  @return Number of bytes written to destination.
+ */
+SZ_DYNAMIC sz_size_t sz_utf8_case_upper(          //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
+
+/**
  *  @brief  Case-insensitive substring search in UTF-8 strings.
  *
  *  In applications where the haystack remains largely static and memory/storage is cheap, it is recommended
@@ -307,6 +322,11 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(  //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_serial(  //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
+
 /** @copydoc sz_utf8_case_insensitive_find */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
@@ -324,6 +344,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t lengt
 
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_case_insensitive_find */
@@ -1138,10 +1162,428 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
 }
 
 /**
+ * @brief Convert a Unicode codepoint to uppercase (Full Case Mapping).
+ * @param rune The input codepoint
+ * @param upper Output array for uppercase codepoint(s)
+ * @return Number of codepoints written (1-3)
+ */
+SZ_INTERNAL sz_size_t sz_unicode_upper_codepoint_(sz_rune_t rune, sz_rune_t *upper) {
+    // clang-format off
+
+    // ASCII a-z → A-Z
+    if (rune <= 0x7F) {
+        if ((sz_u32_t)(rune - 0x61) <= 25) {
+            upper[0] = rune - 0x20; return 1; }
+        upper[0] = rune; return 1;
+    }
+
+    // 2-byte UTF-8 (U+0080-07FF)
+    if (rune <= 0x7FF) {
+        // Cyrillic а-я → uppercase (- 0x20)
+        if ((sz_u32_t)(rune - 0x0430) <= 0x1F) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Latin-1 à-þ → uppercase (- 0x20)
+        if ((sz_u32_t)(rune - 0x00E0) <= 0x1E) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Greek α-ρ → uppercase (- 0x20)
+        if ((sz_u32_t)(rune - 0x03B1) <= 0x10) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Greek σ-ϋ → uppercase (- 0x20)
+        if ((sz_u32_t)(rune - 0x03C3) <= 0x8) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Cyrillic ѐ-џ → uppercase (- 0x50)
+        if ((sz_u32_t)(rune - 0x0450) <= 0xF) {
+            upper[0] = rune - 0x50; return 1; }
+
+        // Armenian ա-ֆ → uppercase (- 0x30)
+        if ((sz_u32_t)(rune - 0x0561) <= 0x25) {
+            upper[0] = rune - 0x30; return 1; }
+
+        // Greek έ-ί → uppercase (- 0x25)
+        if ((sz_u32_t)(rune - 0x03AD) <= 0x2) {
+            upper[0] = rune - 0x25; return 1; }
+
+        // Greek ͻ-ͽ → uppercase (+ 0x82)
+        if ((sz_u32_t)(rune - 0x037B) <= 0x2) {
+            upper[0] = rune + 0x82; return 1; }
+
+        // Parity-based ranges (reversed: odd lowercase → -1)
+        sz_u32_t is_odd = (rune & 1);
+
+        // Latin Extended-A: Ā-Į (0x0100-0x012E, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0101) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A: Ĳ-Ķ (0x0132-0x0136, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0133) <= 0x4 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A: Ĺ-Ň (0x0139-0x0147, odd → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x013A) <= 0xE && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A: Ŋ-Ŷ (0x014A-0x0176, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x014B) <= 0x2C && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A: Ź-Ž (0x0179-0x017D, odd → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x017A) <= 0x4 && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ǎ-Ǜ (0x01CD-0x01DB, odd → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x01CE) <= 0xE && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ǟ-Ǯ (0x01DE-0x01EE, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x01DF) <= 0x10 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ǹ-Ǿ (0x01F8-0x01FE, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x01F9) <= 0x6 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ȁ-Ȟ (0x0200-0x021E, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0201) <= 0x1E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ȣ-Ȳ (0x0222-0x0232, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0223) <= 0x10 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B: Ɇ-Ɏ (0x0246-0x024E, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0247) <= 0x8 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Greek archaic: Ͱ-Ͳ (0x0370-0x0372, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0371) <= 0x2 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Greek archaic: Ϙ-Ϯ (0x03D8-0x03EE, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x03D9) <= 0x16 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic extended: Ѡ-Ҁ (0x0460-0x0480, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0461) <= 0x20 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic extended: Ҋ-Ҿ (0x048A-0x04BE, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x048B) <= 0x34 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic extended: Ӂ-Ӎ (0x04C1-0x04CD, odd → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x04C2) <= 0xC && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic extended: Ӑ-Ӿ (0x04D0-0x04FE, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x04D1) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic extended: Ԁ-Ԯ (0x0500-0x052E, even → +1) (reversed)
+        if ((sz_u32_t)(rune - 0x0501) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Irregular 1:1 mappings (reversed)
+        switch (rune) {
+        case 0x00FF: upper[0] = 0x0178; return 1;
+        case 0x017F: upper[0] = 0x0053; return 1;
+        case 0x0180: upper[0] = 0x0243; return 1;
+        case 0x0183: upper[0] = 0x0182; return 1;
+        case 0x0185: upper[0] = 0x0184; return 1;
+        case 0x0188: upper[0] = 0x0187; return 1;
+        case 0x018C: upper[0] = 0x018B; return 1;
+        case 0x0192: upper[0] = 0x0191; return 1;
+        case 0x0195: upper[0] = 0x01F6; return 1;
+        case 0x0199: upper[0] = 0x0198; return 1;
+        case 0x019A: upper[0] = 0x023D; return 1;
+        case 0x019B: upper[0] = 0xA7DC; return 1;
+        case 0x019E: upper[0] = 0x0220; return 1;
+        case 0x01A1: upper[0] = 0x01A0; return 1;
+        case 0x01A3: upper[0] = 0x01A2; return 1;
+        case 0x01A5: upper[0] = 0x01A4; return 1;
+        case 0x01A8: upper[0] = 0x01A7; return 1;
+        case 0x01AD: upper[0] = 0x01AC; return 1;
+        case 0x01B0: upper[0] = 0x01AF; return 1;
+        case 0x01B4: upper[0] = 0x01B3; return 1;
+        case 0x01B6: upper[0] = 0x01B5; return 1;
+        case 0x01B9: upper[0] = 0x01B8; return 1;
+        case 0x01BD: upper[0] = 0x01BC; return 1;
+        case 0x01BF: upper[0] = 0x01F7; return 1;
+        case 0x01C6: upper[0] = 0x01C4; return 1;
+        case 0x01C9: upper[0] = 0x01C7; return 1;
+        case 0x01CC: upper[0] = 0x01CA; return 1;
+        case 0x01DD: upper[0] = 0x018E; return 1;
+        case 0x01F3: upper[0] = 0x01F1; return 1;
+        case 0x01F5: upper[0] = 0x01F4; return 1;
+        case 0x023C: upper[0] = 0x023B; return 1;
+        case 0x023F: upper[0] = 0x2C7E; return 1;
+        case 0x0240: upper[0] = 0x2C7F; return 1;
+        case 0x0242: upper[0] = 0x0241; return 1;
+        case 0x0250: upper[0] = 0x2C6F; return 1;
+        case 0x0251: upper[0] = 0x2C6D; return 1;
+        case 0x0252: upper[0] = 0x2C70; return 1;
+        case 0x0253: upper[0] = 0x0181; return 1;
+        case 0x0254: upper[0] = 0x0186; return 1;
+        case 0x0256: upper[0] = 0x0189; return 1;
+        case 0x0257: upper[0] = 0x018A; return 1;
+        case 0x0259: upper[0] = 0x018F; return 1;
+        case 0x025B: upper[0] = 0x0190; return 1;
+        case 0x025C: upper[0] = 0xA7AB; return 1;
+        case 0x0260: upper[0] = 0x0193; return 1;
+        case 0x0261: upper[0] = 0xA7AC; return 1;
+        case 0x0263: upper[0] = 0x0194; return 1;
+        case 0x0264: upper[0] = 0xA7CB; return 1;
+        case 0x0265: upper[0] = 0xA78D; return 1;
+        case 0x0266: upper[0] = 0xA7AA; return 1;
+        case 0x0268: upper[0] = 0x0197; return 1;
+        case 0x0269: upper[0] = 0x0196; return 1;
+        case 0x026A: upper[0] = 0xA7AE; return 1;
+        case 0x026B: upper[0] = 0x2C62; return 1;
+        case 0x026C: upper[0] = 0xA7AD; return 1;
+        case 0x026F: upper[0] = 0x019C; return 1;
+        case 0x0271: upper[0] = 0x2C6E; return 1;
+        case 0x0272: upper[0] = 0x019D; return 1;
+        case 0x0275: upper[0] = 0x019F; return 1;
+        case 0x027D: upper[0] = 0x2C64; return 1;
+        case 0x0280: upper[0] = 0x01A6; return 1;
+        case 0x0282: upper[0] = 0xA7C5; return 1;
+        case 0x0283: upper[0] = 0x01A9; return 1;
+        case 0x0287: upper[0] = 0xA7B1; return 1;
+        case 0x0288: upper[0] = 0x01AE; return 1;
+        case 0x0289: upper[0] = 0x0244; return 1;
+        case 0x028A: upper[0] = 0x01B1; return 1;
+        case 0x028B: upper[0] = 0x01B2; return 1;
+        case 0x028C: upper[0] = 0x0245; return 1;
+        case 0x0292: upper[0] = 0x01B7; return 1;
+        case 0x029D: upper[0] = 0xA7B2; return 1;
+        case 0x029E: upper[0] = 0xA7B0; return 1;
+        case 0x0377: upper[0] = 0x0376; return 1;
+        case 0x03AC: upper[0] = 0x0386; return 1;
+        case 0x03C2: upper[0] = 0x03A3; return 1;
+        case 0x03C3: upper[0] = 0x03A3; return 1;
+        case 0x03CC: upper[0] = 0x038C; return 1;
+        case 0x03CD: upper[0] = 0x038E; return 1;
+        case 0x03CE: upper[0] = 0x038F; return 1;
+        case 0x03D7: upper[0] = 0x03CF; return 1;
+        case 0x03F2: upper[0] = 0x03F9; return 1;
+        case 0x03F3: upper[0] = 0x037F; return 1;
+        case 0x03F8: upper[0] = 0x03F7; return 1;
+        case 0x03FB: upper[0] = 0x03FA; return 1;
+        case 0x04CF: upper[0] = 0x04C0; return 1;
+        // ß → SS (full uppercase)
+        case 0x00DF: upper[0] = 0x0053; upper[1] = 0x0053; return 2;
+        }
+
+        upper[0] = rune; return 1;
+    }
+
+    // 3-byte UTF-8 (U+0800-FFFF)
+    if (rune <= 0xFFFF) {
+        // Georgian Ⴀ-Ⴥ: 0x10A0-0x10C5 (+7264) → uppercase (- 0x1C60)
+        if ((sz_u32_t)(rune - 0x2D00) <= 0x25) {
+            upper[0] = rune - 0x1C60; return 1; }
+
+        // Georgian Mtavruli Ა-Ჺ: 0x1C90-0x1CBA (-3008) → uppercase (+ 0xBC0)
+        if ((sz_u32_t)(rune - 0x10D0) <= 0x2A) {
+            upper[0] = rune + 0xBC0; return 1; }
+
+        // Georgian Mtavruli Ჽ-Ჿ: 0x1CBD-0x1CBF (-3008) → uppercase (+ 0xBC0)
+        if ((sz_u32_t)(rune - 0x10FD) <= 0x2) {
+            upper[0] = rune + 0xBC0; return 1; }
+
+        // Cherokee Ᏸ-Ᏽ: 0x13F8-0x13FD (-8) → uppercase (+ 0x8)
+        if ((sz_u32_t)(rune - 0x13F0) <= 0x5) {
+            upper[0] = rune + 0x8; return 1; }
+
+        // Cherokee Ꭰ-Ᏼ: 0xAB70-0xABBF → Ꭰ-Ᏼ: 0x13A0-0x13EF (-38864) → uppercase (+ 0x97D0)
+        if ((sz_u32_t)(rune - 0x13A0) <= 0x4F) {
+            upper[0] = rune + 0x97D0; return 1; }
+
+        // Greek Extended: multiple -8 offset ranges → uppercase (+ 0x8)
+        if ((sz_u32_t)(rune - 0x1F00) <= 0x7) {
+            upper[0] = rune + 0x8; return 1; }
+
+        // Greek Extended Ὲ-Ή: 0x1FC8-0x1FCB (-86) → uppercase (+ 0x56)
+        if ((sz_u32_t)(rune - 0x1F72) <= 0x3) {
+            upper[0] = rune + 0x56; return 1; }
+
+        // Roman numerals Ⅰ-Ⅿ: 0x2160-0x216F (+16) → uppercase (- 0x10)
+        if ((sz_u32_t)(rune - 0x2170) <= 0xF) {
+            upper[0] = rune - 0x10; return 1; }
+
+        // Circled letters Ⓐ-Ⓩ: 0x24B6-0x24CF (+26) → uppercase (- 0x1A)
+        if ((sz_u32_t)(rune - 0x24D0) <= 0x19) {
+            upper[0] = rune - 0x1A; return 1; }
+
+        // Glagolitic Ⰰ-Ⱟ: 0x2C00-0x2C2F (+48) → uppercase (- 0x30)
+        if ((sz_u32_t)(rune - 0x2C30) <= 0x2F) {
+            upper[0] = rune - 0x30; return 1; }
+
+        // Fullwidth Ａ-Ｚ: 0xFF21-0xFF3A (+32) → uppercase (- 0x20)
+        if ((sz_u32_t)(rune - 0xFF41) <= 0x19) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Parity-based ranges (odd lowercase → -1)
+        sz_u32_t is_odd_3 = (rune & 1);
+
+        // Latin Extended Additional Ḁ-Ẕ: 0x1E00-0x1E94 (reversed)
+        if ((sz_u32_t)(rune - 0x1E01) <= 0x94 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended Additional (Vietnamese) Ạ-Ỿ: 0x1EA0-0x1EFE (reversed)
+        if ((sz_u32_t)(rune - 0x1EA1) <= 0x5E && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Coptic Ⲁ-Ⳣ: 0x2C80-0x2CE2 (reversed)
+        if ((sz_u32_t)(rune - 0x2C81) <= 0x62 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Extended-B Ꙁ-Ꙭ: 0xA640-0xA66C (reversed)
+        if ((sz_u32_t)(rune - 0xA641) <= 0x2C && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Extended-B Ꚁ-Ꚛ: 0xA680-0xA69A (reversed)
+        if ((sz_u32_t)(rune - 0xA681) <= 0x1A && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ranges (reversed)
+        if ((sz_u32_t)(rune - 0xA723) <= 0xC && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // 3-byte irregular 1:1 mappings (reversed)
+        switch (rune) {
+        case 0x1C8A: upper[0] = 0x1C89; return 1;
+        case 0x1D79: upper[0] = 0xA77D; return 1;
+        case 0x1D7D: upper[0] = 0x2C63; return 1;
+        case 0x1D8E: upper[0] = 0xA7C6; return 1;
+        case 0x1E61: upper[0] = 0x1E9B; return 1;
+        case 0x1F51: upper[0] = 0x1F59; return 1;
+        case 0x1F53: upper[0] = 0x1F5B; return 1;
+        case 0x1F55: upper[0] = 0x1F5D; return 1;
+        case 0x1F57: upper[0] = 0x1F5F; return 1;
+        case 0x1F70: upper[0] = 0x1FBA; return 1;
+        case 0x1F71: upper[0] = 0x1FBB; return 1;
+        case 0x1F76: upper[0] = 0x1FDA; return 1;
+        case 0x1F77: upper[0] = 0x1FDB; return 1;
+        case 0x1F78: upper[0] = 0x1FF8; return 1;
+        case 0x1F79: upper[0] = 0x1FF9; return 1;
+        case 0x1F7A: upper[0] = 0x1FEA; return 1;
+        case 0x1F7B: upper[0] = 0x1FEB; return 1;
+        case 0x1F7C: upper[0] = 0x1FFA; return 1;
+        case 0x1F7D: upper[0] = 0x1FFB; return 1;
+        case 0x1FB0: upper[0] = 0x1FB8; return 1;
+        case 0x1FB1: upper[0] = 0x1FB9; return 1;
+        case 0x1FD0: upper[0] = 0x1FD8; return 1;
+        case 0x1FD1: upper[0] = 0x1FD9; return 1;
+        case 0x1FE0: upper[0] = 0x1FE8; return 1;
+        case 0x1FE1: upper[0] = 0x1FE9; return 1;
+        case 0x1FE5: upper[0] = 0x1FEC; return 1;
+        case 0x214E: upper[0] = 0x2132; return 1;
+        case 0x2184: upper[0] = 0x2183; return 1;
+        case 0x2C61: upper[0] = 0x2C60; return 1;
+        case 0x2C65: upper[0] = 0x023A; return 1;
+        case 0x2C66: upper[0] = 0x023E; return 1;
+        case 0x2C68: upper[0] = 0x2C67; return 1;
+        case 0x2C6A: upper[0] = 0x2C69; return 1;
+        case 0x2C6C: upper[0] = 0x2C6B; return 1;
+        case 0x2C73: upper[0] = 0x2C72; return 1;
+        case 0x2C76: upper[0] = 0x2C75; return 1;
+        case 0x2CEC: upper[0] = 0x2CEB; return 1;
+        case 0x2CEE: upper[0] = 0x2CED; return 1;
+        case 0x2CF3: upper[0] = 0x2CF2; return 1;
+        case 0x2D27: upper[0] = 0x10C7; return 1;
+        case 0x2D2D: upper[0] = 0x10CD; return 1;
+        case 0xA77A: upper[0] = 0xA779; return 1;
+        case 0xA77C: upper[0] = 0xA77B; return 1;
+        case 0xA78C: upper[0] = 0xA78B; return 1;
+        case 0xA794: upper[0] = 0xA7C4; return 1;
+        case 0xA7C8: upper[0] = 0xA7C7; return 1;
+        case 0xA7CA: upper[0] = 0xA7C9; return 1;
+        case 0xA7CD: upper[0] = 0xA7CC; return 1;
+        case 0xA7CF: upper[0] = 0xA7CE; return 1;
+        case 0xA7D1: upper[0] = 0xA7D0; return 1;
+        case 0xA7D3: upper[0] = 0xA7D2; return 1;
+        case 0xA7D5: upper[0] = 0xA7D4; return 1;
+        case 0xA7D7: upper[0] = 0xA7D6; return 1;
+        case 0xA7D9: upper[0] = 0xA7D8; return 1;
+        case 0xA7DB: upper[0] = 0xA7DA; return 1;
+        case 0xA7F6: upper[0] = 0xA7F5; return 1;
+        case 0xAB53: upper[0] = 0xA7B3; return 1;
+        // Typographic ligatures → uppercase expansion
+        case 0xFB00: upper[0] = 0x0046; upper[1] = 0x0046; return 2; // ﬀ → FF
+        case 0xFB01: upper[0] = 0x0046; upper[1] = 0x0049; return 2; // ﬁ → FI
+        case 0xFB02: upper[0] = 0x0046; upper[1] = 0x004C; return 2; // ﬂ → FL
+        case 0xFB03: upper[0] = 0x0046; upper[1] = 0x0046; upper[2] = 0x0049; return 3; // ﬃ → FFI
+        case 0xFB04: upper[0] = 0x0046; upper[1] = 0x0046; upper[2] = 0x004C; return 3; // ﬄ → FFL
+        case 0xFB05: upper[0] = 0x0053; upper[1] = 0x0054; return 2; // ﬅ → ST
+        case 0xFB06: upper[0] = 0x0053; upper[1] = 0x0054; return 2; // ﬆ → ST
+        }
+
+        upper[0] = rune; return 1;
+    }
+
+    // 4-byte UTF-8 (U+10000+)
+    // Deseret 𐐀-𐐧: 0x10400-0x10427 (+40) → uppercase (- 0x28)
+    if ((sz_u32_t)(rune - 0x10428) <= 0x27) {
+        upper[0] = rune - 0x28; return 1; }
+
+    // Osage 𐒰-𐓓: 0x104B0-0x104D3 (+40) → uppercase (- 0x28)
+    if ((sz_u32_t)(rune - 0x104D8) <= 0x23) {
+        upper[0] = rune - 0x28; return 1; }
+
+    // Vithkuqi: 3 ranges with gaps, all +39 → uppercase (- 0x27)
+    if ((sz_u32_t)(rune - 0x10597) <= 0xA) {
+        upper[0] = rune - 0x27; return 1; }
+
+    // Old Hungarian: 0x10C80-0x10CB2 (+64) → uppercase (- 0x40)
+    if ((sz_u32_t)(rune - 0x10CC0) <= 0x32) {
+        upper[0] = rune - 0x40; return 1; }
+
+    // Garay: 0x10D50-0x10D65 (+32) → uppercase (- 0x20)
+    if ((sz_u32_t)(rune - 0x10D70) <= 0x15) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // Warang Citi: 0x118A0-0x118BF (+32) → uppercase (- 0x20)
+    if ((sz_u32_t)(rune - 0x118C0) <= 0x1F) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // Medefaidrin: 0x16E40-0x16E5F (+32) → uppercase (- 0x20)
+    if ((sz_u32_t)(rune - 0x16E60) <= 0x1F) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // Beria Erfe: 0x16EA0-0x16EB8 (+27) → uppercase (- 0x1B)
+    if ((sz_u32_t)(rune - 0x16EBB) <= 0x18) {
+        upper[0] = rune - 0x1B; return 1; }
+
+    // Adlam: 0x1E900-0x1E921 (+34) → uppercase (- 0x22)
+    if ((sz_u32_t)(rune - 0x1E922) <= 0x21) {
+        upper[0] = rune - 0x22; return 1; }
+
+    // 4-byte irregular 1:1 mappings (reversed)
+    switch (rune) {
+    case 0x105BB: upper[0] = 0x10594; return 1;
+    case 0x105BC: upper[0] = 0x10595; return 1;
+    }
+
+    upper[0] = rune; return 1;
+
+    // clang-format on
+}
+
+/**
  *  @brief  Branchless ASCII case fold - converts A-Z to a-z.
  *  Uses unsigned subtraction trick: (c - 'A') <= 25 is true only for uppercase letters.
  */
 SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
+
+/**
+ *  @brief  Branchless ASCII uppercase - converts a-z to A-Z.
+ *  Uses unsigned subtraction trick: (c - 'a') <= 25 is true only for lowercase letters.
+ */
+SZ_INTERNAL sz_u8_t sz_ascii_upper_(sz_u8_t c) { return c - (((sz_u8_t)(c - 'a') <= 25u) * 0x20); }
 
 /**
  *  @brief  Iterator state for streaming through folded UTF-8 runes.
@@ -2243,6 +2685,34 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t i = 0; i != folded_count; ++i)
             destination_ptr += sz_rune_export(folded_runes[i], destination_ptr);
+    }
+
+    return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t const *source_end = source_ptr + source_length;
+    sz_u8_t *destination_ptr = (sz_u8_t *)destination;
+
+    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation is needed.
+    while (source_ptr < source_end) {
+        // ASCII fast-path: process consecutive ASCII bytes without UTF-8 decode/encode overhead.
+        // This handles ~95% of typical text content with minimal branching.
+        while (source_ptr < source_end && *source_ptr < 0x80) *destination_ptr++ = sz_ascii_upper_(*source_ptr++);
+        if (source_ptr >= source_end) break;
+
+        // Multi-byte UTF-8 sequence: use full decode/upper/encode path
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse((sz_cptr_t)source_ptr, &rune, &rune_length);
+        source_ptr += rune_length;
+
+        sz_rune_t upper_runes[3]; // Unicode uppercasing produces at most 3 runes (e.g., ﬃ → FFI)
+        sz_size_t upper_count = sz_unicode_upper_codepoint_(rune, upper_runes);
+        for (sz_size_t i = 0; i != upper_count; ++i)
+            destination_ptr += sz_rune_export(upper_runes[i], destination_ptr);
     }
 
     return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
@@ -3663,6 +4133,582 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 #undef sz_ice_fold_ascii_
 #undef sz_ice_fold_ascii_in_prefix_
 #undef sz_ice_transform_georgian_
+
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+    // This is the inverse of sz_utf8_case_fold_ice - converts lowercase to uppercase.
+    //
+    // Key inversions:
+    // 1. ASCII: a-z (0x61-0x7A) → A-Z (0x41-0x5A): subtract 0x20
+    // 2. Latin-1 (C3): à-þ (A0-BE) → À-Þ (80-9E): subtract 0x20 from second byte
+    // 3. Cyrillic (D0/D1):
+    //    - D0 B0-BF (а-п) → D0 90-9F (А-П): -0x20
+    //    - D1 80-8F (р-я) → D0 A0-AF (Р-Я): +0x20, D1→D0
+    //    - D1 90-9F (ѐ-џ) → D0 80-8F (Ѐ-Џ): -0x10, D1→D0
+    // 4. Greek (CE/CF):
+    //    - CE B1-BF (α-ο) → CE 91-9F (Α-Ο): -0x20
+    //    - CF 80-8B (π-ϋ) → CE A0-AB (Π-Ϋ): +0x20, CF→CE
+    // 5. Fullwidth: ａ-ｚ (EF BD 81-9A) → Ａ-Ｚ (EF BC A1-BA): -0x20 third, BD→BC
+    //
+    sz_u512_vec_t source_vec;
+    sz_ptr_t target_start = target;
+
+    __m512i const a_lower_vec = _mm512_set1_epi8('a');
+    __m512i const subtract26_vec = _mm512_set1_epi8(26);
+    __m512i const ascii_case_offset = _mm512_set1_epi8(0x20);
+
+    __m512i const utf8_cont_test_mask = _mm512_set1_epi8((char)0xC0);
+    __m512i const utf8_cont_pattern = _mm512_set1_epi8((char)0x80);
+    __m512i const utf8_3byte_test_mask = _mm512_set1_epi8((char)0xF0);
+    __m512i const utf8_3byte_pattern = _mm512_set1_epi8((char)0xE0);
+    __m512i const utf8_4byte_test_mask = _mm512_set1_epi8((char)0xF8);
+
+    while (source_length) {
+        _mm_prefetch(source + 1024, _MM_HINT_T1);
+        _mm_prefetch(source + 512, _MM_HINT_T0);
+
+        sz_size_t chunk_size = sz_min_of_two(source_length, 64);
+        __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
+        source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source);
+        __mmask64 is_non_ascii = _mm512_movepi8_mask(source_vec.zmm);
+
+        // FAST PATH: Pure ASCII - uppercase a-z to A-Z
+        if (is_non_ascii == 0) {
+            __mmask64 is_lower = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+            __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower, source_vec.zmm, ascii_case_offset);
+            _mm512_mask_storeu_epi8(target, load_mask, upper);
+            target += chunk_size, source += chunk_size, source_length -= chunk_size;
+            continue;
+        }
+
+        // Compute lead byte masks
+        __m512i masked_cont = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_cont_test_mask, utf8_cont_test_mask, 0x80);
+        __m512i masked_3byte = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_3byte_test_mask, utf8_3byte_test_mask, 0x80);
+        __m512i masked_4byte = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_4byte_test_mask, utf8_4byte_test_mask, 0x80);
+        __mmask64 is_cont_mask = _mm512_cmpeq_epi8_mask(masked_cont, utf8_cont_pattern);
+        __mmask64 is_three_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_3byte, utf8_3byte_pattern);
+        __mmask64 is_four_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_4byte, utf8_3byte_test_mask);
+
+        // 3-byte caseless fast path (CJK, Thai, Hindi, etc.)
+        {
+            __mmask64 is_valid_pure_3byte_mask = is_three_byte_lead_mask | is_cont_mask;
+            if ((is_valid_pure_3byte_mask & load_mask) == (is_non_ascii & load_mask) && !is_four_byte_lead_mask) {
+                __mmask64 is_e1_e2_mask = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xE1)), _mm512_set1_epi8(2));
+                __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+                __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+                __mmask64 is_e2_mask = _kand_mask64(is_e1_e2_mask, _knot_mask64(is_e1_mask));
+                __mmask64 e2_second_byte_positions = is_e2_mask << 1;
+                __mmask64 is_e2_upper_mask = e2_second_byte_positions &
+                    ~_mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                            _mm512_set1_epi8(0x04));
+                __mmask64 is_ea_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
+                __mmask64 ea_second_byte_positions = is_ea_mask << 1;
+                __mmask64 is_ea_upper_mask = ea_second_byte_positions &
+                    (_mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x99)),
+                                            _mm512_set1_epi8(0x07)) |
+                     _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
+                                            _mm512_set1_epi8(0x02)));
+                if (!(is_e1_mask | is_e2_upper_mask | is_ea_upper_mask | is_ef_mask)) {
+                    sz_size_t copy_len = chunk_size;
+                    __mmask64 leads_in_chunk_mask = is_three_byte_lead_mask & load_mask;
+                    if (leads_in_chunk_mask) {
+                        int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_mask);
+                        if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
+                    }
+                    if (copy_len > 0) {
+                        __mmask64 copy_mask = sz_u64_mask_until_(copy_len);
+                        // Uppercase ASCII within 3-byte content
+                        __mmask64 is_lower = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower & copy_mask,
+                                                             source_vec.zmm, ascii_case_offset);
+                        _mm512_mask_storeu_epi8(target, copy_mask, upper);
+                        target += copy_len, source += copy_len, source_length -= copy_len;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Latin-1 Supplement (C3): à-þ → À-Þ (excluding ß=0x9F which expands to SS)
+        __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
+        __mmask64 latin1_second_byte_positions = is_latin1_lead << 1;
+        // Exclude ß (C3 9F) - it expands to SS and must go through fallback
+        __mmask64 is_sharp_s = latin1_second_byte_positions &
+            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x9F));
+        __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | latin1_second_byte_positions;
+        is_valid_latin1_mix &= ~is_sharp_s; // Stop before ß
+        sz_size_t latin1_length = sz_ice_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
+        latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1);
+
+        if (latin1_length >= 2) {
+            __mmask64 prefix_mask = sz_u64_mask_until_(latin1_length);
+            __mmask64 latin1_second_bytes = latin1_second_byte_positions & prefix_mask;
+
+            // ASCII a-z and Latin-1 à-þ (second byte 0xA0-0xBE excl. ÷=0xB7) get -0x20
+            __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+            // Latin-1 lowercase: second byte 0xA0-0xBE (à-þ), excluding ÷ at 0xB7
+            __mmask64 is_latin1_lower = _mm512_mask_cmpge_epu8_mask(latin1_second_bytes, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0xA0));
+            is_latin1_lower &= _mm512_mask_cmple_epu8_mask(latin1_second_bytes, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xBE));
+            is_latin1_lower ^= _mm512_mask_cmpeq_epi8_mask(is_latin1_lower, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xB7)); // Exclude ÷
+
+            __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, (is_lower_ascii | is_latin1_lower) & prefix_mask,
+                                                  source_vec.zmm, ascii_case_offset);
+            _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+            target += latin1_length, source += latin1_length, source_length -= latin1_length;
+            continue;
+        }
+
+        // Cyrillic (D0/D1): lowercase → uppercase
+        {
+            __mmask64 is_cyrillic_lead_mask = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xD0)), _mm512_set1_epi8(2));
+            __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
+            __mmask64 is_d1_mask = _kand_mask64(is_cyrillic_lead_mask, _knot_mask64(is_d0_mask));
+            __mmask64 cyrillic_second_byte_positions = is_cyrillic_lead_mask << 1;
+
+            // Exclude D1 A0+ (Extended Cyrillic)
+            __mmask64 is_d1_extended_mask =
+                (is_d1_mask << 1) & _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+
+            __mmask64 is_valid_cyrillic_mix_mask =
+                ~is_non_ascii | is_cyrillic_lead_mask | cyrillic_second_byte_positions;
+            is_valid_cyrillic_mix_mask &= ~is_d1_extended_mask;
+            sz_size_t cyrillic_length = sz_ice_first_invalid_(is_valid_cyrillic_mix_mask, load_mask, chunk_size);
+            cyrillic_length -= cyrillic_length && ((is_cyrillic_lead_mask >> (cyrillic_length - 1)) & 1);
+
+            if (cyrillic_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(cyrillic_length);
+                __mmask64 is_after_d0_mask = (is_d0_mask << 1) & prefix_mask;
+                __mmask64 is_after_d1_mask = (is_d1_mask << 1) & prefix_mask;
+
+                // Start with source, apply ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // D0 B0-BF (а-п) → D0 90-9F (А-П): -0x20 to second byte
+                __mmask64 is_d0_lower_mask = _mm512_mask_cmpge_epu8_mask(is_after_d0_mask, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0xB0));
+                upper = _mm512_mask_sub_epi8(upper, is_d0_lower_mask, upper, _mm512_set1_epi8(0x20));
+
+                // D1 80-8F (р-я) → D0 A0-AF (Р-Я): +0x20 to second byte, D1→D0 for lead
+                __mmask64 is_d1_lower1_mask = _mm512_mask_cmplt_epu8_mask(is_after_d1_mask, source_vec.zmm,
+                                                                           _mm512_set1_epi8((char)0x90));
+                upper = _mm512_mask_add_epi8(upper, is_d1_lower1_mask, upper, _mm512_set1_epi8(0x20));
+                // Change lead byte D1→D0
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower1_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                // D1 90-9F (ѐ-џ) → D0 80-8F (Ѐ-Џ): -0x10 to second byte, D1→D0 for lead
+                __mmask64 is_d1_lower2_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_d1_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x90)),
+                    _mm512_set1_epi8(0x10));
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower2_mask, upper, _mm512_set1_epi8(0x10));
+                // Change lead byte D1→D0
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower2_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += cyrillic_length, source += cyrillic_length, source_length -= cyrillic_length;
+                continue;
+            }
+        }
+
+        // Cyrillic Extended (D2): lowercase → uppercase (parity-based)
+        // U+0480-04BF = D2 80-BF, odd second byte is lowercase
+        // ҳ (D2 B3) → Ҳ (D2 B2), ҷ (D2 B7) → Ҷ (D2 B6)
+        {
+            __mmask64 is_d2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD2));
+            __mmask64 d2_second_byte_positions = is_d2_mask << 1;
+
+            __mmask64 is_valid_d2_mix_mask = ~is_non_ascii | is_d2_mask | d2_second_byte_positions;
+            sz_size_t d2_length = sz_ice_first_invalid_(is_valid_d2_mix_mask, load_mask, chunk_size);
+            d2_length -= d2_length && ((is_d2_mask >> (d2_length - 1)) & 1);
+
+            if (d2_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(d2_length);
+                __mmask64 is_after_d2_mask = (is_d2_mask << 1) & prefix_mask;
+
+                // ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // Parity-based: odd second byte (8B,8D,...,BD,BF) → subtract 1
+                // Range 0x8A-0xBE: uppercase even, lowercase odd
+                __mmask64 is_in_range = _mm512_mask_cmpge_epu8_mask(is_after_d2_mask, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x8B));
+                is_in_range &= _mm512_mask_cmple_epu8_mask(is_after_d2_mask, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xBF));
+                // Check if odd (lowercase)
+                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                __mmask64 is_d2_lower = is_in_range & is_odd;
+
+                upper = _mm512_mask_sub_epi8(upper, is_d2_lower, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += d2_length, source += d2_length, source_length -= d2_length;
+                continue;
+            }
+        }
+
+        // Cyrillic Extended (D3): lowercase → uppercase (parity-based)
+        // U+04C0-04FF = D3 80-BF
+        // Two sub-ranges with opposite parity:
+        // - 0x04C2-0x04CE (D3 82-8E): even second byte is lowercase → subtract 1
+        // - 0x04D1-0x04FF (D3 91-BF): odd second byte is lowercase → subtract 1
+        // Example: ӣ (D3 A3, U+04E3) → Ӣ (D3 A2, U+04E2)
+        {
+            __mmask64 is_d3_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD3));
+            __mmask64 d3_second_byte_positions = is_d3_mask << 1;
+
+            __mmask64 is_valid_d3_mix_mask = ~is_non_ascii | is_d3_mask | d3_second_byte_positions;
+            sz_size_t d3_length = sz_ice_first_invalid_(is_valid_d3_mix_mask, load_mask, chunk_size);
+            d3_length -= d3_length && ((is_d3_mask >> (d3_length - 1)) & 1);
+
+            if (d3_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(d3_length);
+                __mmask64 is_after_d3_mask = (is_d3_mask << 1) & prefix_mask;
+
+                // ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // Get parity of second byte
+                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+
+                // Range 1: D3 82-8E (0x04C2-0x04CE) - even is lowercase
+                __mmask64 is_range1 = _mm512_mask_cmpge_epu8_mask(is_after_d3_mask, source_vec.zmm,
+                                                                   _mm512_set1_epi8((char)0x82));
+                is_range1 &= _mm512_mask_cmple_epu8_mask(is_after_d3_mask, source_vec.zmm,
+                                                         _mm512_set1_epi8((char)0x8E));
+                __mmask64 is_d3_lower1 = is_range1 & ~is_odd;  // even bytes are lowercase
+
+                // Range 2: D3 91-BF (0x04D1-0x04FF) - odd is lowercase
+                __mmask64 is_range2 = _mm512_mask_cmpge_epu8_mask(is_after_d3_mask, source_vec.zmm,
+                                                                   _mm512_set1_epi8((char)0x91));
+                is_range2 &= _mm512_mask_cmple_epu8_mask(is_after_d3_mask, source_vec.zmm,
+                                                         _mm512_set1_epi8((char)0xBF));
+                __mmask64 is_d3_lower2 = is_range2 & is_odd;  // odd bytes are lowercase
+
+                upper = _mm512_mask_sub_epi8(upper, is_d3_lower1 | is_d3_lower2, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += d3_length, source += d3_length, source_length -= d3_length;
+                continue;
+            }
+        }
+
+        // Cyrillic Extended D1 A0+ (0x0460-0x047F): lowercase → uppercase (parity-based)
+        // D1 A0-BF, odd second byte is lowercase → subtract 1
+        {
+            __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
+            __mmask64 d1_second_byte_positions = is_d1_mask << 1;
+            // Only D1 A0+ (Extended Cyrillic)
+            __mmask64 is_d1_extended = d1_second_byte_positions &
+                _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+
+            __mmask64 is_valid_d1ext_mix_mask = ~is_non_ascii | is_d1_mask | d1_second_byte_positions;
+            // Exclude non-extended D1 (D1 80-9F)
+            __mmask64 is_d1_basic = d1_second_byte_positions &
+                _mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+            is_valid_d1ext_mix_mask &= ~is_d1_basic;
+
+            sz_size_t d1ext_length = sz_ice_first_invalid_(is_valid_d1ext_mix_mask, load_mask, chunk_size);
+            d1ext_length -= d1ext_length && ((is_d1_mask >> (d1ext_length - 1)) & 1);
+
+            if (d1ext_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(d1ext_length);
+
+                // ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // Parity: odd second byte (A1,A3,...,BF) → subtract 1
+                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                __mmask64 is_d1ext_lower = is_d1_extended & prefix_mask & is_odd;
+
+                upper = _mm512_mask_sub_epi8(upper, is_d1ext_lower, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += d1ext_length, source += d1ext_length, source_length -= d1ext_length;
+                continue;
+            }
+        }
+
+        // Cyrillic Extended D4 (0x0500-0x052E): lowercase → uppercase (parity-based)
+        // D4 80-AE, odd second byte is lowercase → subtract 1
+        {
+            __mmask64 is_d4_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD4));
+            __mmask64 d4_second_byte_positions = is_d4_mask << 1;
+
+            __mmask64 is_valid_d4_mix_mask = ~is_non_ascii | is_d4_mask | d4_second_byte_positions;
+            sz_size_t d4_length = sz_ice_first_invalid_(is_valid_d4_mix_mask, load_mask, chunk_size);
+            d4_length -= d4_length && ((is_d4_mask >> (d4_length - 1)) & 1);
+
+            if (d4_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(d4_length);
+                __mmask64 is_after_d4_mask = (is_d4_mask << 1) & prefix_mask;
+
+                // ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // Range D4 81-AF (0x0501-0x052F): odd second byte is lowercase
+                __mmask64 is_in_range = _mm512_mask_cmpge_epu8_mask(is_after_d4_mask, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x81));
+                is_in_range &= _mm512_mask_cmple_epu8_mask(is_after_d4_mask, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xAF));
+                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                __mmask64 is_d4_lower = is_in_range & is_odd;
+
+                upper = _mm512_mask_sub_epi8(upper, is_d4_lower, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += d4_length, source += d4_length, source_length -= d4_length;
+                continue;
+            }
+        }
+
+        // Greek (CE/CF): lowercase → uppercase
+        {
+            __mmask64 is_greek_lead_mask = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xCE)), _mm512_set1_epi8(2));
+            __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCE));
+            __mmask64 is_cf_mask = _kand_mask64(is_greek_lead_mask, _knot_mask64(is_ce_mask));
+            __mmask64 greek_second_byte_positions = is_greek_lead_mask << 1;
+
+            __mmask64 is_valid_greek_mix_mask =
+                ~is_non_ascii | is_greek_lead_mask | greek_second_byte_positions;
+            sz_size_t greek_length = sz_ice_first_invalid_(is_valid_greek_mix_mask, load_mask, chunk_size);
+            greek_length -= greek_length && ((is_greek_lead_mask >> (greek_length - 1)) & 1);
+
+            if (greek_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(greek_length);
+                __mmask64 is_after_ce_mask = (is_ce_mask << 1) & prefix_mask;
+                __mmask64 is_after_cf_mask = (is_cf_mask << 1) & prefix_mask;
+
+                // ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // CE B1-BF (α-ο) → CE 91-9F (Α-Ο): -0x20
+                __mmask64 is_ce_lower_mask = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0xB1));
+                upper = _mm512_mask_sub_epi8(upper, is_ce_lower_mask, upper, _mm512_set1_epi8(0x20));
+
+                // CF 80-8B (π-ϋ) → CE A0-AB (Π-Ϋ): +0x20, CF→CE
+                __mmask64 is_cf_lower_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_cf_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                    _mm512_set1_epi8(0x0C));
+                upper = _mm512_mask_add_epi8(upper, is_cf_lower_mask, upper, _mm512_set1_epi8(0x20));
+                upper = _mm512_mask_sub_epi8(upper, is_cf_lower_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                // Special case: ς (CF 82, U+03C2) → Σ (CE A3, U+03A3)
+                // The +0x20 above gave A2, need to add 1 more to get A3
+                __mmask64 is_final_sigma = is_after_cf_mask &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x82));
+                upper = _mm512_mask_add_epi8(upper, is_final_sigma, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += greek_length, source += greek_length, source_length -= greek_length;
+                continue;
+            }
+        }
+
+        // Georgian lowercase (E2 B4) → uppercase (E1 82/83)
+        // Inverse of fold: E1 82 A0-BF → E2 B4 80-9F, E1 83 80-85 → E2 B4 A0-A5
+        // For upper: E2 B4 80-9F → E1 82 A0-BF, E2 B4 A0-A5 → E1 83 80-85
+        {
+            __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+            if (is_e2_mask) {
+                __mmask64 e2_second_positions = is_e2_mask << 1;
+                // Check for B4 second byte (Georgian lowercase range)
+                __mmask64 is_b4_second = e2_second_positions &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB4));
+
+                if (is_b4_second) {
+                    __mmask64 is_valid_georgian = ~is_non_ascii | is_e2_mask | is_cont_mask;
+                    sz_size_t georgian_length = sz_ice_first_invalid_(is_valid_georgian, load_mask, chunk_size);
+                    georgian_length -= georgian_length && ((is_e2_mask >> (georgian_length - 1)) & 1);
+
+                    if (georgian_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(georgian_length);
+                        __mmask64 is_after_e2_mask = (is_e2_mask << 1) & prefix_mask;
+                        __mmask64 third_positions = (is_e2_mask << 2) & prefix_mask;
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Check if B4 second byte (only process Georgian lowercase)
+                        __mmask64 is_georgian_lower = is_after_e2_mask &
+                            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB4));
+
+                        // Third byte 80-9F → E1 82 A0-BF (add 0x20 to third, change E2→E1, B4→82)
+                        // Third byte A0-A5 → E1 83 80-85 (subtract 0x20 from third, change E2→E1, B4→83)
+                        __mmask64 third_after_b4 = (is_georgian_lower << 1) & prefix_mask;
+                        __mmask64 is_range1 = third_after_b4 &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                                   _mm512_set1_epi8(0x20)); // 80-9F
+                        __mmask64 is_range2 = third_after_b4 &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                                                   _mm512_set1_epi8(0x06)); // A0-A5
+
+                        // Transform range1: third +0x20, lead E2→E1, second B4→82
+                        upper = _mm512_mask_add_epi8(upper, is_range1, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_range1 >> 2, upper, _mm512_set1_epi8(1)); // E2→E1
+                        upper = _mm512_mask_sub_epi8(upper, is_range1 >> 1, upper, _mm512_set1_epi8(0x32)); // B4→82
+
+                        // Transform range2: third -0x20, lead E2→E1, second B4→83
+                        upper = _mm512_mask_sub_epi8(upper, is_range2, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_range2 >> 2, upper, _mm512_set1_epi8(1)); // E2→E1
+                        upper = _mm512_mask_sub_epi8(upper, is_range2 >> 1, upper, _mm512_set1_epi8(0x31)); // B4→83
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += georgian_length, source += georgian_length, source_length -= georgian_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Latin Extended Additional (E1 B8-BB): lowercase → uppercase (parity-based)
+        // Odd codepoints are lowercase → subtract 1 to get uppercase
+        // UTF-8 third byte determines parity: odd third byte = odd codepoint = lowercase
+        {
+            __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+            if (is_e1_mask) {
+                __mmask64 e1_second_positions = is_e1_mask << 1;
+                // Check for B8-BB second byte (Latin Extended Additional)
+                __mmask64 is_latin_ext = e1_second_positions &
+                    _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xB8)),
+                                           _mm512_set1_epi8(0x04)); // B8, B9, BA, BB
+
+                // Exclude Georgian (82/83) - they need different handling
+                __mmask64 is_georgian = e1_second_positions &
+                    _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x82)),
+                                           _mm512_set1_epi8(0x02)); // 82, 83
+
+                if (is_latin_ext && !is_georgian) {
+                    __mmask64 is_valid_latin_ext = ~is_non_ascii | is_e1_mask | is_cont_mask;
+                    sz_size_t latin_ext_length = sz_ice_first_invalid_(is_valid_latin_ext, load_mask, chunk_size);
+                    latin_ext_length -= latin_ext_length && ((is_e1_mask >> (latin_ext_length - 1)) & 1);
+
+                    if (latin_ext_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(latin_ext_length);
+                        __mmask64 third_positions = (is_e1_mask << 2) & prefix_mask;
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Parity: odd third byte is lowercase → subtract 1
+                        __mmask64 is_latin_ext_second = (is_e1_mask << 1) & prefix_mask &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xB8)),
+                                                   _mm512_set1_epi8(0x04));
+                        __mmask64 third_after_latin = (is_latin_ext_second << 1) & prefix_mask;
+                        __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                        __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                        __mmask64 is_lowercase = third_after_latin & is_odd;
+
+                        upper = _mm512_mask_sub_epi8(upper, is_lowercase, upper, _mm512_set1_epi8(1));
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += latin_ext_length, source += latin_ext_length, source_length -= latin_ext_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fullwidth lowercase (EF BD 81-9A) → uppercase (EF BC A1-BA)
+        // Inverse of fold: third byte -0x20, second byte BD→BC
+        {
+            __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+            if (is_ef_mask) {
+                __mmask64 ef_second_positions = is_ef_mask << 1;
+                // Check for BD second byte (Fullwidth lowercase)
+                __mmask64 is_bd_second = ef_second_positions &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBD));
+
+                if (is_bd_second) {
+                    __mmask64 is_valid_fullwidth = ~is_non_ascii | is_ef_mask | is_cont_mask;
+                    sz_size_t fullwidth_length = sz_ice_first_invalid_(is_valid_fullwidth, load_mask, chunk_size);
+                    fullwidth_length -= fullwidth_length && ((is_ef_mask >> (fullwidth_length - 1)) & 1);
+
+                    if (fullwidth_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(fullwidth_length);
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Check for BD second byte after EF
+                        __mmask64 is_fullwidth_lower = ((is_ef_mask << 1) & prefix_mask) &
+                            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBD));
+
+                        // Third byte 81-9A → A1-BA (lowercase ａ-ｚ → uppercase Ａ-Ｚ)
+                        __mmask64 third_after_bd = (is_fullwidth_lower << 1) & prefix_mask;
+                        __mmask64 is_fullwidth_az = third_after_bd &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x81)),
+                                                   _mm512_set1_epi8(0x1A)); // 81-9A (26 letters)
+
+                        // Transform: third +0x20, second BD→BC
+                        upper = _mm512_mask_add_epi8(upper, is_fullwidth_az, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_fullwidth_az >> 1, upper, _mm512_set1_epi8(1)); // BD→BC
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += fullwidth_length, source += fullwidth_length, source_length -= fullwidth_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback to serial for complex cases
+        {
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)source, &rune, &rune_length);
+            source += rune_length;
+            source_length -= rune_length;
+
+            sz_rune_t upper_runes[3];
+            sz_size_t upper_count = sz_unicode_upper_codepoint_(rune, upper_runes);
+            for (sz_size_t i = 0; i != upper_count; ++i)
+                target += sz_rune_export(upper_runes[i], target);
+        }
+    }
+
+    return (sz_size_t)(target - target_start);
+}
+
+
 
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *ptr = (sz_u8_t const *)str;
@@ -8402,6 +9448,14 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length
     return sz_utf8_case_fold_ice(source, source_length, destination);
 #else
     return sz_utf8_case_fold_serial(source, source_length, destination);
+#endif
+}
+
+SZ_DYNAMIC sz_size_t sz_utf8_case_upper(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+#if SZ_USE_ICE
+    return sz_utf8_case_upper_ice(source, source_length, destination);
+#else
+    return sz_utf8_case_upper_serial(source, source_length, destination);
 #endif
 }
 
