@@ -3505,6 +3505,96 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
     return result_bytes;
 }
 
+static char const doc_utf8_case_upper[] = //
+    "Convert a UTF-8 string to uppercase using Unicode case mapping.\n"
+    "\n"
+    "Applies the simple uppercase mappings from UnicodeData.txt and the\n"
+    "Unconditional Full mappings from SpecialCasing.txt. One codepoint can\n"
+    "expand into up to three (e.g., 'ß' to 'SS', 'ﬃ' to 'FFI', 'ΐ' to 'Ϊ́').\n"
+    "Locale-dependent and contextual rules (Final_Sigma, Turkic, Lithuanian)\n"
+    "are NOT applied.\n"
+    "\n"
+    "Args:\n"
+    "    text (Str or str or bytes): The input UTF-8 string.\n"
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"
+    "\n"
+    "Returns:\n"
+    "    bytes: The uppercased UTF-8 string.\n"
+    "\n"
+    "Example:\n"
+    "    >>> sz.utf8_case_upper('hello')\n"
+    "    b'HELLO'\n"
+    "    >>> sz.utf8_case_upper('stra\\u00dfe')  # German sharp S\n"
+    "    b'STRASSE'";
+
+static PyObject *Str_like_utf8_case_upper(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs_expected = !is_member;
+    int validate = 0;
+
+    if (positional_args_count != nargs_expected) {
+        PyErr_Format(PyExc_TypeError, "utf8_case_upper() takes exactly %zd positional argument(s)", nargs_expected);
+        return NULL;
+    }
+
+    if (args_names_tuple) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            if (PyUnicode_CompareWithASCIIString(key, "validate") == 0) {
+                PyObject *val = args[positional_args_count + i];
+                validate = PyObject_IsTrue(val);
+                if (validate < 0) return NULL;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "utf8_case_upper() got unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    PyObject *str_obj = is_member ? self : args[0];
+
+    sz_string_view_t str;
+    if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
+        wrap_current_exception("Argument must be string-like");
+        return NULL;
+    }
+
+    if (validate && !sz_utf8_valid(str.start, str.length)) {
+        PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
+        return NULL;
+    }
+
+    // Upper-casing can grow each non-ASCII codepoint into up to 3 codepoints of up to 4 bytes,
+    // so allocate 6x the source length to cover realistic Greek / Latin decomposed expansions.
+    if (str.length > (sz_size_t)(PY_SSIZE_T_MAX / 6)) {
+        PyErr_SetString(PyExc_OverflowError, "Input too large for uppercased buffer");
+        return NULL;
+    }
+    sz_size_t max_result_length = str.length * 6;
+    if (max_result_length == 0) { return PyBytes_FromStringAndSize("", 0); }
+
+    PyObject *result_bytes = PyBytes_FromStringAndSize(NULL, max_result_length);
+    if (!result_bytes) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for uppercased string");
+        return NULL;
+    }
+
+    sz_ptr_t destination = (sz_ptr_t)PyBytes_AS_STRING(result_bytes);
+    sz_size_t actual_length = sz_utf8_case_upper(str.start, str.length, destination);
+
+    if (actual_length < max_result_length) {
+        if (_PyBytes_Resize(&result_bytes, actual_length) < 0) {
+            Py_XDECREF(result_bytes);
+            return NULL;
+        }
+    }
+
+    return result_bytes;
+}
+
 static char const doc_utf8_case_insensitive_find[] = //
     "Find substring using Unicode case-insensitive matching.\n"
     "\n"
@@ -5321,6 +5411,7 @@ static PyMethodDef Str_methods[] = {
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_case_upper", (PyCFunction)Str_like_utf8_case_upper, SZ_METHOD_FLAGS, doc_utf8_case_upper},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
     {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,
@@ -7830,6 +7921,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
     {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_case_upper", (PyCFunction)Str_like_utf8_case_upper, SZ_METHOD_FLAGS, doc_utf8_case_upper},
     {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
      doc_utf8_case_insensitive_find},
     {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,

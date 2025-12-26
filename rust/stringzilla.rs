@@ -455,6 +455,7 @@ extern "C" {
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
+    pub(crate) fn sz_utf8_case_upper(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
     pub(crate) fn sz_utf8_case_insensitive_find(
         haystack: *const c_void,
         haystack_length: usize,
@@ -1036,6 +1037,54 @@ where
 
     unsafe {
         sz_utf8_case_fold(
+            source_ref.as_ptr() as *const c_void,
+            source_ref.len(),
+            dest_slice.as_mut_ptr() as *mut c_void,
+        )
+    }
+}
+
+/// Converts a UTF-8 string to uppercase, writing the result to a destination buffer.
+///
+/// Applies the simple uppercase mappings from `UnicodeData.txt` together with the
+/// Unconditional Full mappings from `SpecialCasing.txt`, so codepoints like `ß`,
+/// `ﬃ`, or `ΐ` expand into multiple output codepoints. Locale-dependent and
+/// contextual rules (Final_Sigma, Turkic, Lithuanian) are NOT applied.
+///
+/// # Arguments
+///
+/// * `source`: The UTF-8 string to uppercase.
+/// * `destination`: The destination buffer to write the uppercased string.
+///
+/// # Returns
+///
+/// The number of bytes written to the destination buffer.
+///
+/// # Safety
+///
+/// The caller must ensure the destination buffer is large enough. Allocate
+/// `source.len() * 6` bytes to cover any realistic input (one codepoint can
+/// expand into up to three codepoints of up to four UTF-8 bytes each).
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// let source = "hello straße";
+/// let mut dest = [0u8; 32];
+/// let len = sz::utf8_case_upper(source, &mut dest);
+/// assert_eq!(&dest[..len], "HELLO STRASSE".as_bytes());
+/// ```
+pub fn utf8_case_upper<T, D>(source: T, destination: &mut D) -> usize
+where
+    T: AsRef<[u8]>,
+    D: AsMut<[u8]> + ?Sized,
+{
+    let source_ref = source.as_ref();
+    let dest_slice = destination.as_mut();
+
+    unsafe {
+        sz_utf8_case_upper(
             source_ref.as_ptr() as *const c_void,
             source_ref.len(),
             dest_slice.as_mut_ptr() as *mut c_void,
