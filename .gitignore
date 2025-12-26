@@ -31,16 +31,11 @@ node_modules/
 .tmp/
 
 # Recommended datasets
-utf8.txt
-leipzig1M.txt
-enwik9.txt
-xlsum.csv
-acgt_100.txt
-acgt_100k.txt
-acgt_10k.txt
-acgt_10m.txt
-acgt_1k.txt
-acgt_1m.txt
+/utf8.txt
+/enwik9.txt
+/xlsum.csv
+/acgt*.txt
+/leipzig*.txt
 
 # StringZilla-specific log files
 /failed_sz_*

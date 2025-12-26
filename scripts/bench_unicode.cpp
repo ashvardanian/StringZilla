@@ -6,6 +6,7 @@
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_case_fold.
+ *  - Case-insensitive substring search for Unicode text - @b utf8_case_insensitive_find.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -25,13 +26,13 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_unicode_cpp20
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=line build_release/stringzilla_bench_unicode_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words STRINGWARS_UNIQUE=1 \
+ *      build_release/stringzilla_bench_unicode_cpp20
  *  @endcode
  *
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
-#include <cstring>
 
 using namespace ashvardanian::stringzilla::scripts;
 

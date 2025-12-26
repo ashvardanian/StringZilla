@@ -153,24 +153,44 @@
  *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
  *  - `SZ_EXTERNAL` is used for third-party libraries that are linked dynamically.
  */
+
+#if defined(__cplusplus)
+#define SZ_C_INLINE inline
+#else
+#define SZ_C_INLINE inline static
+#endif
+
 #if SZ_DYNAMIC_DISPATCH
 #if defined(_WIN32) || defined(__CYGWIN__)
 #define SZ_DYNAMIC __declspec(dllexport)
 #define SZ_EXTERNAL __declspec(dllimport)
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
+#define SZ_PUBLIC SZ_C_INLINE
+#define SZ_INTERNAL SZ_C_INLINE
 #else
 #define SZ_DYNAMIC extern __attribute__((visibility("default")))
 #define SZ_EXTERNAL extern
-#define SZ_PUBLIC __attribute__((unused)) inline static
-#define SZ_INTERNAL __attribute__((always_inline)) inline static
+#define SZ_PUBLIC __attribute__((unused)) SZ_C_INLINE
+#define SZ_INTERNAL __attribute__((always_inline)) SZ_C_INLINE
 #endif // _WIN32 || __CYGWIN__
 #else
-#define SZ_DYNAMIC inline static
+#define SZ_DYNAMIC SZ_C_INLINE
 #define SZ_EXTERNAL extern
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
+#define SZ_PUBLIC SZ_C_INLINE
+#define SZ_INTERNAL SZ_C_INLINE
 #endif // SZ_DYNAMIC_DISPATCH
+
+/**
+ *  @brief  Disables stack protection for performance-critical functions.
+ *
+ *  GCC's `-fstack-protector-strong` inserts stack canary checks for functions with local arrays
+ *  or buffers. For hash functions that use fixed-size state structures, this is unnecessary
+ *  overhead (~10 cycles per call). This macro opts out of stack protection for such functions.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_NO_STACK_PROTECTOR __attribute__((no_stack_protector))
+#else
+#define SZ_NO_STACK_PROTECTOR
+#endif
 
 /**
  *  @brief  Alignment macro for N-byte alignment.
@@ -1358,11 +1378,21 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
- *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including
- * 0.
+ *  @note  Uses LZCNT/CLZ for efficient computation on modern CPUs.
+ *         Edge cases: bit_ceil(0) = 0, bit_ceil(1) = 1.
  *  @see https://stackoverflow.com/a/10143264
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
+#if defined(__LZCNT__) || defined(__BMI__)
+    // Edge cases: 0 and 1 return themselves, avoids undefined clz(0).
+    if (x <= 1) return x;
+#if SZ_IS_64BIT_
+    return (sz_size_t)1 << (64 - sz_u64_clz(x - 1));
+#else
+    return (sz_size_t)1 << (32 - sz_u32_clz((sz_u32_t)(x - 1)));
+#endif
+#else
+    // The following trick is valid for 0 input as well.
     x--;
     x |= x >> 1;
     x |= x >> 2;
@@ -1374,6 +1404,7 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
 #endif
     x++;
     return x;
+#endif
 }
 
 /**

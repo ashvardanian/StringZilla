@@ -4417,7 +4417,20 @@ typedef enum {
      */
     sz_utf8_case_rune_safe_vietnamese_k = 7,
 
-    sz_utf8_case_rune_case_invariant_k = 8,
+    /**
+     *  @brief  Describes a safety-class profile for Georgian Mkhedruli script.
+     *  @sa sz_utf8_case_rune_ascii_invariant_k for inherited ASCII rules.
+     *
+     *  Georgian Mkhedruli (U+10D0-U+10FF) is caseless - no folding needed for Georgian characters.
+     *  Only ASCII A-Z folding for mixed text. Mtavruli (U+1C90-U+1CBF), Asomtavruli (U+10A0-U+10C5),
+     *  and Nuskhuri (U+2D00-U+2D25) trigger alarm for serial fallback (rare in modern text).
+     *
+     *  All Georgian scripts use 3-byte UTF-8 sequences and fold to 3-byte sequences, so there
+     *  are no length changes during case folding - making this the simplest non-ASCII kernel.
+     */
+    sz_utf8_case_rune_safe_georgian_k = 8,
+
+    sz_utf8_case_rune_case_invariant_k = 9,
     sz_utf8_case_rune_fallback_serial_k = 255,
 } sz_utf8_case_rune_safety_profile_t_;
 
@@ -4464,7 +4477,8 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         (1 << sz_utf8_case_rune_ascii_invariant_k) | //
         (1 << sz_utf8_case_rune_safe_cyrillic_k) |   //
         (1 << sz_utf8_case_rune_safe_greek_k) |      //
-        (1 << sz_utf8_case_rune_safe_armenian_k);
+        (1 << sz_utf8_case_rune_safe_armenian_k) |   //
+        (1 << sz_utf8_case_rune_safe_georgian_k);
 
     // Helper: lowercase ASCII
     sz_rune_t lower = (rune >= 'A' && rune <= 'Z') ? (rune + 0x20) : rune;
@@ -4831,10 +4845,16 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
             else { safety |= (1 << sz_utf8_case_rune_safe_vietnamese_k); }
         }
 
+        // Georgian Mkhedruli (E1 83 90-BF range)
+        // U+10D0-U+10FF maps to E1 83 90 - E1 83 BF
+        // Mkhedruli is caseless, so all characters are safe for the Georgian kernel.
+        if (lead == 0xE1 && second == 0x83 && third >= 0x90) { safety |= (1 << sz_utf8_case_rune_safe_georgian_k); }
+
         // Output safety and determine primary script for 3-byte runes
         // For case-invariant non-ASCII runes (like CJK), add the ASCII-invariant bit.
         if (sz_rune_is_case_invariant_(rune)) safety |= (1 << sz_utf8_case_rune_ascii_invariant_k);
         *safety_profiles = safety;
+        if (rune >= 0x10D0 && rune <= 0x10FF) return sz_utf8_case_rune_safe_georgian_k;   // Georgian Mkhedruli
         if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_case_rune_safe_vietnamese_k; // Latin Extended Additional
         return sz_utf8_case_rune_case_invariant_k;
     }
@@ -4946,11 +4966,11 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
         sz_size_t diversity;      // Distinct byte count (computed at end of each starting position)
     } script_window_t_;
 
-    // Number of script kernels (indices 1-7 used, index 0 reserved)
-    sz_size_t const num_scripts = 8;
+    // Number of script kernels (indices 1-8 used, index 0 reserved)
+    sz_size_t const num_scripts = 9;
 
     // Best window found so far for each script
-    script_window_t_ best[8];
+    script_window_t_ best[9];
     for (sz_size_t i = 0; i < num_scripts; ++i) {
         best[i].start_offset = 0;
         best[i].input_length = 0;
@@ -4977,7 +4997,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     // Iterate through each starting position in the needle (stepping by rune)
     for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
         // Current window being built for each script at this starting position
-        script_window_t_ current[8];
+        script_window_t_ current[9];
         for (sz_size_t i = 0; i < num_scripts; ++i) {
             current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
             current[i].input_length = 0;
@@ -8033,6 +8053,188 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_vietnamese_(   //
 
 #pragma endregion // Vietnamese Case-Insensitive Find
 
+#pragma region Georgian Case-Insensitive Find
+
+/**
+ *  @brief Detect danger zones in Georgian text (Mtavruli, Asomtavruli, Nuskhuri).
+ *  @sa sz_utf8_case_rune_safe_georgian_k
+ *
+ *  Georgian Mkhedruli is caseless, so we only need to detect non-Mkhedruli Georgian scripts
+ *  that require special handling via serial fallback:
+ *  - Mtavruli (E1 B2 xx): Modern uppercase, folds to Mkhedruli
+ *  - Asomtavruli (E1 82 A0-E5): Historical uppercase, folds to Nuskhuri
+ *  - Nuskhuri (E2 B4 xx): Ecclesiastical script
+ *
+ *  All Georgian scripts use 3-byte UTF-8, so no length changes during folding.
+ */
+SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_ice_georgian_alarm_zmm_(__m512i text_zmm) {
+    // Lead byte detection
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xE1));
+    __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xE2));
+
+    // Second byte detection
+    __mmask64 is_b2_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB2)); // Mtavruli
+    __mmask64 is_82_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0x82)); // Asomtavruli
+    __mmask64 is_b4_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB4)); // Nuskhuri
+
+    // E1 B2 xx = Mtavruli (folds to Mkhedruli)
+    __mmask64 mtavruli_mask = (is_e1_mask << 1) & is_b2_mask;
+
+    // E1 82 [A0-E5] = Asomtavruli (folds to Nuskhuri)
+    // Third byte range check: (byte - 0xA0) < 0x46 covers A0-E5
+    __mmask64 after_e1_82 = (is_e1_mask << 1) & is_82_mask;
+    __m512i off_a0 = _mm512_add_epi8(text_zmm, _mm512_set1_epi8(0x60)); // -0xA0 = +0x60
+    __mmask64 in_a0_e5 = _mm512_cmplt_epu8_mask(off_a0, _mm512_set1_epi8(0x46));
+    __mmask64 asomtavruli_mask = (after_e1_82 << 1) & in_a0_e5;
+
+    // E2 B4 xx = Nuskhuri
+    __mmask64 nuskhuri_mask = (is_e2_mask << 1) & is_b4_mask;
+
+    // Shift back to sequence start positions
+    return (mtavruli_mask >> 1) | (asomtavruli_mask >> 2) | (nuskhuri_mask >> 1);
+}
+
+/**
+ *  @brief Fold Georgian text - only ASCII A-Z needs folding.
+ *  @sa sz_utf8_case_rune_safe_georgian_k
+ *
+ *  Georgian Mkhedruli is caseless, so Georgian characters pass through unchanged.
+ *  Only ASCII uppercase letters need folding for mixed Latin text.
+ */
+SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_ice_georgian_fold_zmm_(__m512i text_zmm) {
+    // ASCII A-Z range check: (byte - 'A') <= 25
+    __m512i off_a = _mm512_sub_epi8(text_zmm, _mm512_set1_epi8('A'));
+    __mmask64 is_upper = _mm512_cmple_epu8_mask(off_a, _mm512_set1_epi8(25));
+    return _mm512_mask_add_epi8(text_zmm, is_upper, text_zmm, _mm512_set1_epi8(0x20));
+}
+
+/**
+ *  @brief Georgian case-insensitive search for needles with safe slices up to 16 bytes.
+ *  @sa sz_utf8_case_rune_safe_georgian_k
+ *
+ *  This is the fastest non-ASCII kernel because Mkhedruli is caseless - no Georgian
+ *  folding needed in the hot path. Only ASCII A-Z folding for mixed text.
+ *
+ *  @param[in] haystack Pointer to the haystack string.
+ *  @param[in] haystack_length Length of the haystack in bytes.
+ *  @param[in] needle Pointer to the full needle string.
+ *  @param[in] needle_length Length of the full needle in bytes.
+ *  @param[in] needle_metadata Pre-folded window content with probe positions.
+ *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start or SZ_NULL_CHAR if not found.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_ice_georgian_(     //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, //
+    sz_size_t *matched_length) {
+
+    // Validate inputs
+    sz_assert_(needle_metadata && "needle_metadata must be provided");
+    sz_assert_(needle_metadata->folded_slice_length > 0 && "folded window must be non-empty");
+
+    sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+    sz_assert_(folded_window_length <= 16 && "expect folded needle part to fit in XMM registers");
+
+    // Pre-load folded window into XMM
+    __mmask16 const folded_window_mask = sz_u16_mask_until_(folded_window_length);
+    sz_u128_vec_t needle_window_vec, haystack_candidate_vec;
+    needle_window_vec.xmm = _mm_loadu_si128((__m128i const *)needle_metadata->folded_slice);
+
+    // 4 probe positions
+    sz_size_t const offset_first = 0;
+    sz_size_t const offset_second = needle_metadata->probe_second;
+    sz_size_t const offset_third = needle_metadata->probe_third;
+    sz_size_t const offset_last = folded_window_length - 1;
+
+    // Pre-broadcast probe values
+    sz_u512_vec_t probe_first_vec, probe_second_vec, probe_third_vec, probe_last_vec;
+    probe_first_vec.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_first]);
+    probe_second_vec.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_second]);
+    probe_third_vec.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_third]);
+    probe_last_vec.zmm = _mm512_set1_epi8(needle_metadata->folded_slice[offset_last]);
+
+    // For danger zone handling
+    sz_rune_t needle_first_safe_folded_rune;
+    {
+        sz_rune_length_t dummy;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+    }
+
+    sz_cptr_t haystack_ptr = haystack;
+    sz_u512_vec_t haystack_vec;
+
+    while (haystack_ptr < haystack_end) {
+        sz_size_t chunk_size = sz_min_of_two(haystack_end - haystack_ptr, 64);
+        sz_size_t valid_starts = (chunk_size >= folded_window_length) ? chunk_size - folded_window_length + 1 : 0;
+        sz_size_t step = (valid_starts > 2) ? valid_starts - 2 : 1;
+        __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
+        __mmask64 valid_mask = sz_u64_mask_until_(valid_starts);
+
+        haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
+
+        // Check for anomalies using alarm function
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_ice_georgian_alarm_zmm_(haystack_vec.zmm);
+        if (danger_mask) {
+            sz_size_t danger_scan_length =
+                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+                haystack, haystack_length,                                   //
+                needle, needle_length,                                       //
+                haystack_ptr, danger_scan_length,                            //
+                needle_first_safe_folded_rune,                               //
+                needle_metadata->offset_in_unfolded,                         //
+                matched_length);
+            if (match) return match;
+            haystack_ptr += step;
+            continue;
+        }
+
+        haystack_vec.zmm = sz_utf8_case_insensitive_find_ice_georgian_fold_zmm_(haystack_vec.zmm);
+
+        sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second_vec.zmm) >> offset_second;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_third_vec.zmm) >> offset_third;
+        matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_last_vec.zmm) >> offset_last;
+        matches &= valid_mask;
+
+        // Candidate Verification
+        for (; matches; matches &= matches - 1) {
+            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
+
+            haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(sz_utf8_case_insensitive_find_ice_georgian_fold_zmm_(
+                _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
+
+            __mmask16 window_mismatch_mask =
+                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            if (window_mismatch_mask) continue;
+
+            sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
+                haystack, haystack_length,                                                                 //
+                needle, needle_length,                                                                     //
+                haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length,                   //
+                needle_metadata->offset_in_unfolded,                                                       //
+                needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
+                matched_length);
+            if (match) {
+                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
+                                                      needle_metadata);
+                return match;
+            }
+        }
+        haystack_ptr += step;
+    }
+
+    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
+                                          needle_metadata);
+    return SZ_NULL_CHAR;
+}
+
+#pragma endregion // Georgian Case-Insensitive Find
+
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
     sz_cptr_t needle, sz_size_t needle_length,         //
@@ -8095,6 +8297,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_ice( //
 
     if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_cyrillic_k)
         return sz_utf8_case_insensitive_find_ice_cyrillic_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_georgian_k)
+        return sz_utf8_case_insensitive_find_ice_georgian_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial
