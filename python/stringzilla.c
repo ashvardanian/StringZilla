@@ -117,7 +117,29 @@ static PyTypeObject Utf8CaseInsensitiveFindIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
-static sz_string_view_t temporary_memory = {NULL, 0};
+/**
+ *  @brief  Thread-local storage macro for free-threaded Python compatibility.
+ *
+ *  In free-threaded builds, each thread gets its own temporary_memory buffer
+ *  to avoid data races. The buffers are leaked when threads exit (bounded leak).
+ */
+#ifdef Py_GIL_DISABLED
+    #if defined(__cplusplus) && __cplusplus >= 201103L
+        #define SZ_THREAD_LOCAL thread_local
+    #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+        #define SZ_THREAD_LOCAL _Thread_local
+    #elif defined(__GNUC__) || defined(__clang__)
+        #define SZ_THREAD_LOCAL __thread
+    #elif defined(_MSC_VER)
+        #define SZ_THREAD_LOCAL __declspec(thread)
+    #else
+        #error "No thread-local storage support available for free-threaded Python"
+    #endif
+#else
+    #define SZ_THREAD_LOCAL
+#endif
+
+static SZ_THREAD_LOCAL sz_string_view_t temporary_memory = {NULL, 0};
 
 /**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
@@ -6316,7 +6338,8 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         new_spans[i].length = length;
     }
 
-    // Determine memory needed for sorting
+    // Determine memory needed for sorting.
+    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
     sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * substrings_count;
     if (temporary_memory.length < memory_needed) {
         void *new_memory = realloc(temporary_memory.start, memory_needed);
@@ -6416,7 +6439,8 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    // Determine the amount of memory needed
+    // Determine the amount of memory needed.
+    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
     sz_size_t const count = Strs_len(self);
     sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * count;
     if (temporary_memory.length < memory_needed) {
@@ -7781,6 +7805,8 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
 }
 
 static void stringzilla_cleanup(PyObject *m) {
+    // Free the temporary buffer. In GIL-enabled builds this is the single shared buffer.
+    // In free-threaded builds this frees only the current thread's buffer.
     if (temporary_memory.start) free(temporary_memory.start);
     temporary_memory.start = NULL;
     temporary_memory.length = 0;
@@ -7886,6 +7912,11 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
+
+#ifdef Py_GIL_DISABLED
+    // Declare that this module is safe for free-threaded Python
+    PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
 
     // Add version metadata
     {
@@ -8027,7 +8058,8 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    // Initialize temporary_memory, if needed
+    // Pre-allocate the temporary buffer for the main thread.
+    // In free-threaded builds, other threads will lazily allocate.
     temporary_memory.start = malloc(4096);
     temporary_memory.length = 4096 * (temporary_memory.start != NULL);
     return m;
