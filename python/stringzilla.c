@@ -117,9 +117,29 @@ static PyTypeObject Utf8CaseInsensitiveFindIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
-#ifndef Py_GIL_DISABLED
-static sz_string_view_t temporary_memory = {NULL, 0};
+/**
+ *  @brief  Thread-local storage macro for free-threaded Python compatibility.
+ *
+ *  In free-threaded builds, each thread gets its own temporary_memory buffer
+ *  to avoid data races. The buffers are leaked when threads exit (bounded leak).
+ */
+#ifdef Py_GIL_DISABLED
+    #if defined(__cplusplus) && __cplusplus >= 201103L
+        #define SZ_THREAD_LOCAL thread_local
+    #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+        #define SZ_THREAD_LOCAL _Thread_local
+    #elif defined(__GNUC__) || defined(__clang__)
+        #define SZ_THREAD_LOCAL __thread
+    #elif defined(_MSC_VER)
+        #define SZ_THREAD_LOCAL __declspec(thread)
+    #else
+        #error "No thread-local storage support available for free-threaded Python"
+    #endif
+#else
+    #define SZ_THREAD_LOCAL
 #endif
+
+static SZ_THREAD_LOCAL sz_string_view_t temporary_memory = {NULL, 0};
 
 /**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
@@ -6318,18 +6338,9 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         new_spans[i].length = length;
     }
 
-    // Determine memory needed for sorting
+    // Determine memory needed for sorting.
+    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
     sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * substrings_count;
-#ifdef Py_GIL_DISABLED
-    // allocate per-call to avoid shared mutable state
-    sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(memory_needed);
-    if (!order) {
-        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-        return NULL;
-    }
-#else
-    // reuse the global buffer for efficiency
     if (temporary_memory.length < memory_needed) {
         void *new_memory = realloc(temporary_memory.start, memory_needed);
         if (!new_memory) {
@@ -6346,7 +6357,6 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         return NULL;
     }
     sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
-#endif
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
@@ -6366,9 +6376,6 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
     if (sorted_spans == NULL) {
         allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
-#ifdef Py_GIL_DISABLED
-        free(order);
-#endif
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for sorted slices");
         return NULL;
     }
@@ -6378,9 +6385,6 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 
     // Free the temporary spans array
     allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
-#ifdef Py_GIL_DISABLED
-    free(order);
-#endif
 
     // Create a new Strs object for the sorted layout
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
@@ -6435,33 +6439,24 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    // Determine the amount of memory needed
+    // Determine the amount of memory needed.
+    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
     sz_size_t const count = Strs_len(self);
     sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * count;
-#ifdef Py_GIL_DISABLED
-    // allocate per-call to avoid shared mutable state
-    sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(memory_needed);
-    if (!order) {
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-        return NULL;
-    }
-#else
-    // reuse the global buffer for efficiency
     if (temporary_memory.length < memory_needed) {
         void *new_memory = realloc(temporary_memory.start, memory_needed);
         if (!new_memory) {
             PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-            return NULL;
+            return 0;
         }
         temporary_memory.start = new_memory;
         temporary_memory.length = memory_needed;
     }
     if (!temporary_memory.start) {
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-        return NULL;
+        return 0;
     }
     sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
-#endif
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
@@ -6493,27 +6488,18 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
     // So instead of NumPy, let's produce a tuple of integers.
     PyObject *tuple = PyTuple_New(count);
     if (!tuple) {
-#ifdef Py_GIL_DISABLED
-        free(order);
-#endif
         PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple");
         return NULL;
     }
     for (sz_size_t i = 0; i < count; ++i) {
         PyObject *index = PyLong_FromUnsignedLong(order[i]);
         if (!index) {
-#ifdef Py_GIL_DISABLED
-            free(order);
-#endif
             PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple element");
             Py_DECREF(tuple);
             return NULL;
         }
         PyTuple_SET_ITEM(tuple, i, index);
     }
-#ifdef Py_GIL_DISABLED
-    free(order);
-#endif
     return tuple;
 }
 
@@ -7819,13 +7805,11 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
 }
 
 static void stringzilla_cleanup(PyObject *m) {
-#ifndef Py_GIL_DISABLED
-    // free the shared buffer in GIL-enabled builds
+    // Free the temporary buffer. In GIL-enabled builds this is the single shared buffer.
+    // In free-threaded builds this frees only the current thread's buffer.
     if (temporary_memory.start) free(temporary_memory.start);
     temporary_memory.start = NULL;
     temporary_memory.length = 0;
-#endif
-    (void)m; // Unused parameter
 }
 
 static PyMethodDef stringzilla_methods[] = {
@@ -8074,10 +8058,9 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-#ifndef Py_GIL_DISABLED
-    // Initialize the shared temporary buffer for GIL-enabled builds
+    // Pre-allocate the temporary buffer for the main thread.
+    // In free-threaded builds, other threads will lazily allocate.
     temporary_memory.start = malloc(4096);
     temporary_memory.length = 4096 * (temporary_memory.start != NULL);
-#endif
     return m;
 }
