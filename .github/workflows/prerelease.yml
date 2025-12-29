@@ -10,6 +10,7 @@ env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
   PYTHON_VERSION: 3.12
+  PYTHON_FT_VERSION: 3.14t
   SWIFT_VERSION: 6.0
   PYTHONUTF8: 1
 
@@ -51,9 +52,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm]
+        python-version: [ ${{ env.PYTHON_VERISON }} ]
+        include:
+          - python-version: ${{ env.PYTHON_FT_VERSION }}
+            os: ubuntu-22.04-arm
     env:
       CC: gcc-12
       CXX: g++-12
+      PYTHON_VERSION: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -159,7 +165,13 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
+        if: matrix.python-version != env.PYTHON_FT_VERSION
         run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
+      - name: Test Python with parallel threads
+        if: matrix.python-version == env.PYTHON_FT_VERSION
+        run: |
+            python -m pip install pytest-run-parallel
+            python -X faulthandler -m pytest scripts/test_stringzilla.py --parallel-threads=4
 
         # JavaScript
       - name: Set up Node.js
