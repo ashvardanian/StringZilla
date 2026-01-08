@@ -55,6 +55,13 @@
 #endif
 #endif
 
+#if defined(__linux__)
+#include <unistd.h>      // syscall, close
+#include <sys/syscall.h> // __NR_perf_event_open
+#include <sys/ioctl.h>   // ioctl
+#include <linux/perf_event.h>
+#endif
+
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
 
@@ -138,6 +145,161 @@ inline std::uint64_t cpu_cycles_per_second() {
     std::uint64_t end = cpu_cycle_counter();
     return end - start;
 }
+
+#if defined(__linux__)
+
+/**
+ *  @brief Wrapper for Linux `perf_event_open` system call.
+ *         Provides precise hardware counter measurements without overhead from preprocessing.
+ */
+class perf_event_t {
+    int fd_ = -1;
+
+  public:
+    perf_event_t() = default;
+
+    /**
+     *  @brief Initialize perf event for CPU cycles counting.
+     *  @return true if successfully initialized, false otherwise.
+     */
+    bool init_cycles() {
+        struct perf_event_attr pe;
+        std::memset(&pe, 0, sizeof(pe));
+        pe.type = PERF_TYPE_HARDWARE;
+        pe.size = sizeof(pe);
+        pe.config = PERF_COUNT_HW_CPU_CYCLES;
+        pe.disabled = 1;       // Start disabled
+        pe.exclude_kernel = 1; // Don't count kernel cycles
+        pe.exclude_hv = 1;     // Don't count hypervisor cycles
+
+        fd_ = static_cast<int>(syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+        return fd_ >= 0;
+    }
+
+    /**
+     *  @brief Initialize perf event for instruction counting.
+     *  @return true if successfully initialized, false otherwise.
+     */
+    bool init_instructions() {
+        struct perf_event_attr pe;
+        std::memset(&pe, 0, sizeof(pe));
+        pe.type = PERF_TYPE_HARDWARE;
+        pe.size = sizeof(pe);
+        pe.config = PERF_COUNT_HW_INSTRUCTIONS;
+        pe.disabled = 1;
+        pe.exclude_kernel = 1;
+        pe.exclude_hv = 1;
+
+        fd_ = static_cast<int>(syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+        return fd_ >= 0;
+    }
+
+    /**
+     *  @brief Initialize perf event with custom configuration.
+     *  @param type Event type (PERF_TYPE_HARDWARE, PERF_TYPE_RAW, etc.)
+     *  @param config Event configuration
+     *  @return true if successfully initialized, false otherwise.
+     */
+    bool init_custom(std::uint32_t type, std::uint64_t config) {
+        struct perf_event_attr pe;
+        std::memset(&pe, 0, sizeof(pe));
+        pe.type = type;
+        pe.size = sizeof(pe);
+        pe.config = config;
+        pe.disabled = 1;
+        pe.exclude_kernel = 1;
+        pe.exclude_hv = 1;
+
+        fd_ = static_cast<int>(syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+        return fd_ >= 0;
+    }
+
+    /**
+     *  @brief Reset the counter to zero.
+     */
+    inline void reset() {
+        if (fd_ >= 0) { ioctl(fd_, PERF_EVENT_IOC_RESET, 0); }
+    }
+
+    /**
+     *  @brief Enable the counter (start counting).
+     */
+    inline void enable() {
+        if (fd_ >= 0) { ioctl(fd_, PERF_EVENT_IOC_ENABLE, 0); }
+    }
+
+    /**
+     *  @brief Disable the counter (stop counting).
+     */
+    inline void disable() {
+        if (fd_ >= 0) { ioctl(fd_, PERF_EVENT_IOC_DISABLE, 0); }
+    }
+
+    /**
+     *  @brief Read the current counter value.
+     *  @return Counter value, or 0 if reading failed.
+     */
+    inline std::uint64_t read() const {
+        std::uint64_t count = 0;
+        if (fd_ >= 0) {
+            ssize_t bytes = ::read(fd_, &count, sizeof(count));
+            if (bytes != sizeof(count)) return 0;
+        }
+        return count;
+    }
+
+    /**
+     *  @brief Check if the perf event is valid.
+     */
+    inline bool is_valid() const { return fd_ >= 0; }
+
+    /**
+     *  @brief Close the perf event file descriptor.
+     */
+    void close() {
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
+
+    ~perf_event_t() { close(); }
+
+    // Disable copy
+    perf_event_t(perf_event_t const &) = delete;
+    perf_event_t &operator=(perf_event_t const &) = delete;
+
+    // Enable move
+    perf_event_t(perf_event_t &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+    perf_event_t &operator=(perf_event_t &&other) noexcept {
+        if (this != &other) {
+            close();
+            fd_ = other.fd_;
+            other.fd_ = -1;
+        }
+        return *this;
+    }
+};
+
+/**
+ *  @brief RAII wrapper to automatically enable/disable a perf event around a code section.
+ */
+class scoped_perf_measurement_t {
+    perf_event_t &event_;
+
+  public:
+    explicit scoped_perf_measurement_t(perf_event_t &event) : event_(event) {
+        event_.reset();
+        event_.enable();
+    }
+
+    ~scoped_perf_measurement_t() { event_.disable(); }
+
+    scoped_perf_measurement_t(scoped_perf_measurement_t const &) = delete;
+    scoped_perf_measurement_t &operator=(scoped_perf_measurement_t const &) = delete;
+};
+
+#endif // __linux__
 
 /** @brief Measures the duration of a single call to the given function. */
 template <typename function_type_>
