@@ -196,6 +196,8 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 
 #pragma endregion // Core API
 
+#if !SZ_DYNAMIC_DISPATCH
+
 #pragma region Helper API
 
 /**
@@ -1423,7 +1425,6 @@ SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 #pragma region Core Functionality
 
@@ -1483,8 +1484,9 @@ SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, c
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

@@ -120,6 +120,8 @@ SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 
 #pragma endregion // Core API
 
+#if !SZ_DYNAMIC_DISPATCH
+
 /* SSE implementation of the string search algorithms for Westmere processors and newer.
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
  */
@@ -516,7 +518,6 @@ SZ_PUBLIC sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t 
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #if SZ_USE_SKYLAKE
@@ -546,8 +547,9 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

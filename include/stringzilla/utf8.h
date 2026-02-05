@@ -267,6 +267,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
 
 #pragma endregion
 
+#if !SZ_DYNAMIC_DISPATCH
+
 /*  Implementation Section
  *  Following the same pattern as find.h with implementations in the header file.
  */
@@ -1734,8 +1736,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
-
 SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
     return sz_utf8_count_ice(text, length);
@@ -1792,9 +1792,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
-
 #pragma endregion // Dynamic Dispatch
+
+#endif // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

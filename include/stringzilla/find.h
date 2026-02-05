@@ -240,6 +240,8 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_ice(sz_cptr_t text, sz_size_t length
 SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 #endif
 
+#if !SZ_DYNAMIC_DISPATCH
+
 #pragma endregion // Core API
 
 #pragma region Helper Shortcuts
@@ -2005,7 +2007,6 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 #pragma region Core Functionality
 
@@ -2096,8 +2097,9 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_bytes
 }
 
 #pragma endregion
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

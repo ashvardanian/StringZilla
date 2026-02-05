@@ -323,6 +323,15 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr
 /** @copydoc sz_sha256_state_digest */
 SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
+/** @copydoc sz_sha256_state_init */
+SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state);
+
+/** @copydoc sz_sha256_state_update */
+SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_sha256_state_digest */
+SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+
 #endif
 
 #if SZ_USE_HASWELL
@@ -458,6 +467,8 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state);
 #endif
 
 #pragma endregion // Core API
+
+#if !SZ_DYNAMIC_DISPATCH
 
 #pragma region Helper Methods
 
@@ -4151,7 +4162,6 @@ SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t non
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
@@ -4287,8 +4297,9 @@ SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t d
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

@@ -344,6 +344,8 @@ SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_i
 
 #pragma endregion // Generic Internal Helpers
 
+#if !SZ_DYNAMIC_DISPATCH
+
 #pragma region Serial QuickSort Implementation
 
 SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                //
@@ -1167,7 +1169,6 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                            sz_sorted_idx_t *order) {
@@ -1191,8 +1192,9 @@ SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_me
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }
