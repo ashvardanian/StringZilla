@@ -392,7 +392,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     // techniques and process eight characters at a time.
     sz_u64_vec_t h_vec, n_vec, match_vec;
     match_vec.u64 = 0;
-    n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
+    n_vec.u64 = (sz_u64_t) * (sz_u8_t const *)n * 0x0101010101010101ull;
     for (; h + 8 <= h_end; h += 8) {
         h_vec.u64 = *(sz_u64_t const *)h;
         match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
@@ -427,7 +427,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
     sz_u64_vec_t h_vec, n_vec, match_vec;
-    n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
+    n_vec.u64 = (sz_u64_t) * (sz_u8_t const *)n * 0x0101010101010101ull;
     for (; h >= h_start + 7; h -= 8) {
         h_vec.u64 = *(sz_u64_t const *)(h - 7);
         match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
