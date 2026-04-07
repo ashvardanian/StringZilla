@@ -21,6 +21,10 @@
 
 #include "types.h"
 
+#if !SZ_AVOID_LIBC
+#include <string.h> // `memchr`, `memrchr`
+#endif
+
 #include "compare.h" // `sz_equal`
 
 #ifdef __cplusplus
@@ -2042,6 +2046,10 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cp
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
+#if !SZ_AVOID_LIBC
+    if (n_length == 1) return (sz_cptr_t)memchr(haystack, *(sz_u8_t const *)needle, h_length);
+#endif
 #if SZ_USE_SKYLAKE
     return sz_find_skylake(haystack, h_length, needle, n_length);
 #elif SZ_USE_HASWELL
@@ -2058,6 +2066,10 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
+#if !SZ_AVOID_LIBC && defined(__GLIBC__)
+    if (n_length == 1) return (sz_cptr_t)memrchr(haystack, *(sz_u8_t const *)needle, h_length);
+#endif
 #if SZ_USE_SKYLAKE
     return sz_rfind_skylake(haystack, h_length, needle, n_length);
 #elif SZ_USE_HASWELL
