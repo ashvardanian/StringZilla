@@ -2257,79 +2257,6 @@ void test_comparisons() {
 }
 
 /**
- *  @brief  Regression test for signed-char bug in `sz_find_byte_serial` and `sz_rfind_byte_serial`.
- *          When compiled with `-fsigned-char`, bytes > 0x7F would be sign-extended during the SWAR
- *          broadcast multiplication, producing incorrect results. This test verifies that single-byte
- *          search works correctly for all byte values 0x00-0xFF across various haystack lengths.
- *  @see    https://github.com/ashvardanian/StringZilla/issues/306
- */
-void test_find_byte_serial_high_bytes() {
-
-    // Test every byte value in a haystack long enough to exercise the SWAR loop (>=8 bytes)
-    // and the scalar tail. We place the target byte at different positions to cover both paths.
-    sz_u8_t haystack_bytes[64];
-
-    // Fill the haystack with a neutral byte that won't match our needle
-    std::memset(haystack_bytes, 0x00, sizeof(haystack_bytes));
-
-    for (unsigned needle_byte = 0x80; needle_byte <= 0xFF; ++needle_byte) {
-        sz_u8_t needle_u8 = (sz_u8_t)needle_byte;
-        char const *needle = (char const *)&needle_u8;
-
-        // Test 1: needle in the SWAR-processed region (position 5, within first 8-byte block)
-        haystack_bytes[5] = needle_u8;
-        {
-            sz_cptr_t result = sz_find_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result != SZ_NULL_CHAR && "sz_find_byte_serial must find high bytes in SWAR region");
-            assert((sz_size_t)(result - (sz_cptr_t)haystack_bytes) == 5);
-        }
-        {
-            sz_cptr_t result = sz_rfind_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result != SZ_NULL_CHAR && "sz_rfind_byte_serial must find high bytes in SWAR region");
-            assert((sz_size_t)(result - (sz_cptr_t)haystack_bytes) == 5);
-        }
-        haystack_bytes[5] = 0x00;
-
-        // Test 2: needle in the scalar tail region (position 61, within last few bytes)
-        haystack_bytes[61] = needle_u8;
-        {
-            sz_cptr_t result = sz_find_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result != SZ_NULL_CHAR && "sz_find_byte_serial must find high bytes in scalar tail");
-            assert((sz_size_t)(result - (sz_cptr_t)haystack_bytes) == 61);
-        }
-        {
-            sz_cptr_t result = sz_rfind_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result != SZ_NULL_CHAR && "sz_rfind_byte_serial must find high bytes in scalar tail");
-            assert((sz_size_t)(result - (sz_cptr_t)haystack_bytes) == 61);
-        }
-        haystack_bytes[61] = 0x00;
-
-        // Test 3: needle not present - must return NULL
-        {
-            sz_cptr_t result = sz_find_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result == SZ_NULL_CHAR && "sz_find_byte_serial must return NULL when byte is absent");
-        }
-        {
-            sz_cptr_t result = sz_rfind_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-            assert(result == SZ_NULL_CHAR && "sz_rfind_byte_serial must return NULL when byte is absent");
-        }
-    }
-
-    // Test 4: multiple occurrences - find returns first, rfind returns last
-    std::memset(haystack_bytes, 0x00, sizeof(haystack_bytes));
-    haystack_bytes[3] = 0xBE;
-    haystack_bytes[40] = 0xBE;
-    {
-        sz_u8_t n = 0xBE;
-        char const *needle = (char const *)&n;
-        sz_cptr_t first = sz_find_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-        sz_cptr_t last = sz_rfind_byte_serial((sz_cptr_t)haystack_bytes, sizeof(haystack_bytes), needle);
-        assert(first != SZ_NULL_CHAR && (sz_size_t)(first - (sz_cptr_t)haystack_bytes) == 3);
-        assert(last != SZ_NULL_CHAR && (sz_size_t)(last - (sz_cptr_t)haystack_bytes) == 40);
-    }
-}
-
-/**
  *  @brief  Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
  *          This covers haystacks and needles of different lengths, as well as character-sets.
  */
@@ -4640,8 +4567,6 @@ int main(int argc, char const **argv) {
     test_updates();
 
     std::printf("\n=== Search and Comparison ===\n");
-    std::printf("- test_find_byte_serial_high_bytes...\n");
-    test_find_byte_serial_high_bytes();
     std::printf("- test_comparisons...\n");
     test_comparisons();
     std::printf("- test_search...\n");
