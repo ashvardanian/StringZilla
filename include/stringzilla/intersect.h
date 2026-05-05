@@ -339,6 +339,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         }
     }
 
+    alloc->free(table_positions, hash_table_slots * bytes_per_entry, alloc);
     *intersection_count_ptr = intersection_count;
     return sz_success_k;
 }
@@ -721,6 +722,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     }
 
     // Finalize
+    alloc->free(table_positions, hash_table_slots * bytes_per_entry, alloc);
     *intersection_count_ptr = intersection_count;
     return sz_success_k;
 }
