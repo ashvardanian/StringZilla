@@ -377,32 +377,36 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memchr(haystack, needle[0], haystack_length)`.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h_chars, sz_size_t h_length, sz_cptr_t n_chars) {
 
     if (!h_length) return SZ_NULL_CHAR;
-    sz_cptr_t const h_end = h + h_length;
+    // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
+    // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
+    sz_u8_t const *h = (sz_u8_t const *)h_chars;
+    sz_u8_t const *const n = (sz_u8_t const *)n_chars;
+    sz_u8_t const *const h_end = h + h_length;
 
 #if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
-        if (*h == *n) return h;
+        if (*h == *n) return (sz_cptr_t)h;
 #endif
 
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
     sz_u64_vec_t h_vec, n_vec, match_vec;
     match_vec.u64 = 0;
-    n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
+    n_vec.u64 = (sz_u64_t)*n * 0x0101010101010101ull;
     for (; h + 8 <= h_end; h += 8) {
         h_vec.u64 = *(sz_u64_t const *)h;
         match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
-        if (match_vec.u64) return h + sz_u64_ctz(match_vec.u64) / 8;
+        if (match_vec.u64) return (sz_cptr_t)(h + sz_u64_ctz(match_vec.u64) / 8);
     }
 #endif
 
     // Handle the misaligned tail.
     for (; h < h_end; ++h)
-        if (*h == *n) return h;
+        if (*h == *n) return (sz_cptr_t)h;
     return SZ_NULL_CHAR;
 }
 
@@ -410,33 +414,36 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h_chars, sz_size_t h_length, sz_cptr_t n_chars) {
 
     if (!h_length) return SZ_NULL_CHAR;
-    sz_cptr_t const h_start = h;
+    // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
+    // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
+    sz_u8_t const *const h_start = (sz_u8_t const *)h_chars;
+    sz_u8_t const *const n = (sz_u8_t const *)n_chars;
 
     // Reposition the `h` pointer to the end, as we will be walking backwards.
-    h = h + h_length - 1;
+    sz_u8_t const *h = h_start + h_length - 1;
 
 #if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
-        if (*h == *n) return h;
+        if (*h == *n) return (sz_cptr_t)h;
 #endif
 
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
     sz_u64_vec_t h_vec, n_vec, match_vec;
-    n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
+    n_vec.u64 = (sz_u64_t)*n * 0x0101010101010101ull;
     for (; h >= h_start + 7; h -= 8) {
         h_vec.u64 = *(sz_u64_t const *)(h - 7);
         match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
-        if (match_vec.u64) return h - sz_u64_clz(match_vec.u64) / 8;
+        if (match_vec.u64) return (sz_cptr_t)(h - sz_u64_clz(match_vec.u64) / 8);
     }
 #endif
 
     for (; h >= h_start; --h)
-        if (*h == *n) return h;
+        if (*h == *n) return (sz_cptr_t)h;
     return SZ_NULL_CHAR;
 }
 
