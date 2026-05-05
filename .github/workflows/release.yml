@@ -22,12 +22,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v2.1.1
+        uses: ashvardanian/tinysemver@v3.0.1
         with:
           verbose: "true"
           version-file: "VERSION"
@@ -54,7 +54,7 @@ jobs:
     needs: versioning
     steps:
       - name: Checkout the latest code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
@@ -82,19 +82,19 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -102,7 +102,7 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
           SZ_TARGET: stringzilla
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzilla-ubuntu-24.04-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -117,17 +117,17 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -135,7 +135,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
           SZ_TARGET: stringzilla
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzilla-macos-15-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -150,24 +150,24 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           SZ_TARGET: stringzilla
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzilla-windows-2022-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -182,19 +182,19 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -203,7 +203,7 @@ jobs:
           SZ_TARGET: stringzillas-cpus
           CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzillas-cpus-ubuntu-24.04-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -218,17 +218,17 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -237,7 +237,7 @@ jobs:
           SZ_TARGET: stringzillas-cpus
           CIBW_ARCHS_MACOS: x86_64 arm64
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzillas-cpus-macos-15-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -252,17 +252,17 @@ jobs:
       matrix:
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -270,7 +270,7 @@ jobs:
           SZ_TARGET: stringzillas-cpus
           CIBW_ARCHS_WINDOWS: AMD64 ARM64
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzillas-cpus-windows-2022-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -286,19 +286,19 @@ jobs:
         os: [ubuntu-24.04] # Linux only
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -314,7 +314,7 @@ jobs:
           SZ_TARGET: stringzillas-cuda
           CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-stringzillas-cuda-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -325,12 +325,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -339,7 +339,7 @@ jobs:
         env:
           SZ_TARGET: stringzilla
       - name: Upload source distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdist-stringzilla
           path: dist/*.tar.gz
@@ -350,12 +350,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -364,7 +364,7 @@ jobs:
         env:
           SZ_TARGET: stringzillas-cpus
       - name: Upload source distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdist-stringzillas-cpus
           path: dist/*.tar.gz
@@ -375,12 +375,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v5.2.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -389,7 +389,7 @@ jobs:
         env:
           SZ_TARGET: stringzillas-cuda
       - name: Upload source distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdist-stringzillas-cuda
           path: dist/*.tar.gz
@@ -414,7 +414,7 @@ jobs:
         run: mkdir -p dist
 
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # unpacks all StringZilla wheel artifacts into dist/
           pattern: cibw-wheels-stringzilla-*
@@ -423,7 +423,7 @@ jobs:
           if-no-artifact-found: ignore
 
       - name: Download source distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sdist-stringzilla
           path: dist
@@ -459,7 +459,7 @@ jobs:
         run: mkdir -p dist
 
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # unpacks all StringZillas-CPUs wheel artifacts into dist/
           pattern: cibw-wheels-stringzillas-cpus-*
@@ -468,7 +468,7 @@ jobs:
           if-no-artifact-found: ignore
 
       - name: Download source distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sdist-stringzillas-cpus
           path: dist
@@ -496,7 +496,7 @@ jobs:
         run: mkdir -p dist
 
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # unpacks all StringZillas-CUDA wheel artifacts into dist/
           pattern: cibw-wheels-stringzillas-cuda-*
@@ -505,7 +505,7 @@ jobs:
           if-no-artifact-found: ignore
 
       - name: Download source distribution
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sdist-stringzillas-cuda
           path: dist
@@ -525,7 +525,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: "main"
           submodules: recursive
@@ -553,13 +553,13 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: "main"
       - name: Initialize submodules
         run: git submodule update --init --recursive
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
@@ -593,7 +593,7 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           ref: "main"
@@ -666,7 +666,7 @@ jobs:
           - arch: x64
             target: x64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           ref: "main"
@@ -707,7 +707,7 @@ jobs:
       matrix:
         arch: [arm64] # Only Apple Silicon for now
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           ref: "main"
