@@ -42,6 +42,7 @@ let package = Package(
             name: "StringZillaTests",
             dependencies: ["StringZilla"],
             path: "swift",
+            exclude: ["StringProtocol+StringZilla.swift"],
             sources: ["Test.swift"]
         ),
     ],
