@@ -40,3 +40,6 @@ node_modules/
 # StringZilla-specific log files
 /failed_sz_*
 /.cache/
+
+# Claude Code per-project settings (locally tracked in ~/.claude, not in repo)
+.claude/
