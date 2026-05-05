@@ -4195,6 +4195,17 @@ void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("abc\0", "abc\0");
     test_search_with_misaligned_repetitions("abcd\0", "abcd");
 
+    // When searching for all-null needles in a haystack with no null bytes.
+    // This exercises the SIMD tail path where masked-off lanes are zeroed:
+    // if the needle characters are also zero, spurious matches appear at
+    // invalid offsets beyond the haystack, causing OOB reads.
+    test_search_with_misaligned_repetitions("a", {"\0\0", 2});
+    test_search_with_misaligned_repetitions("a", {"\0\0\0", 3});
+    test_search_with_misaligned_repetitions("a", {"\0\0\0\0", 4});
+    test_search_with_misaligned_repetitions("a", {"\0\0\0\0\0", 5});
+    test_search_with_misaligned_repetitions("abcd", {"\0\0", 2});
+    test_search_with_misaligned_repetitions("abcd", {"\0\0\0\0", 4});
+
     // When haystack is formed of equidistant needles:
     test_search_with_misaligned_repetitions("ab", "a");
     test_search_with_misaligned_repetitions("abc", "a");

@@ -1374,6 +1374,7 @@ SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
                 _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                 _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
             _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
+        matches &= mask;
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
             if (n_length <= 3 || sz_equal_skylake(h + potential_offset, n, n_length)) return h + potential_offset;
@@ -1456,6 +1457,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
                 _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                 _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
             _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
+        matches &= mask;
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_skylake(h + 64 - potential_offset - 1, n, n_length))
