@@ -275,6 +275,74 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
  */
 SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
+/**
+ *  @brief  Computes many 64-bit unsigned hashes of @b 64-bit binary inputs in parallel. Useful for @b pointers.
+ *  @note   Provides the same output as `sz_hash` for each input, relevant only for optimization purposes.
+ *
+ *  @param[in] inputs Array of 64-bit integers or 8-byte strings to hash.
+ *  @param[in] count Number of elements in the array.
+ *  @param[in] seed 64-bit unsigned seed for the hash.
+ *  @param[out] hashes Output array to store the 64-bit hash values.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/hash.h>
+ *      int main() {
+ *          sz_b8x8_t inputs[2];
+ *          memcpy(&inputs[0], "DeadBeef", 8);
+ *          memcpy(&inputs[1], "CafeBabe", 8);
+ *          sz_u64_t hashes[2];
+ *          sz_hash_b8x8s(inputs, 2, 0, hashes);
+ *          return
+ *              hashes[0] == sz_hash("DeadBeef", 8, 0) &&
+ *              hashes[1] == sz_hash("CafeBabe", 8, 0) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_hash_b8x8s_serial, sz_hash_b8x8s_westmere, sz_hash_b8x8s_skylake, sz_hash_b8x8s_ice, sz_hash_b8x8s_neon,
+ *          sz_hash_b8x8s_sve
+ *
+ *  @note   Optimized variants for other input sizes are also available.
+ *  @sa     sz_hash_b8x16s
+ */
+SZ_DYNAMIC void sz_hash_b8x8s(sz_b8x8_t const *inputs, sz_size_t count, sz_u64_t seed, sz_u64_t *hashes);
+
+/**
+ *  @brief  Computes many 64-bit unsigned hashes of @b 128-bit binary inputs in parallel. Useful for @b UUIDs.
+ *  @note   Provides the same output as `sz_hash` for each input, relevant only for optimization purposes.
+ *
+ *  @param[in] inputs Array of 128-bit integers or 16-byte strings to hash.
+ *  @param[in] count Number of elements in the array.
+ *  @param[in] seed 64-bit unsigned seed for the hash.
+ *  @param[out] hashes Output array to store the 64-bit hash values.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/hash.h>
+ *      int main() {
+ *          sz_b8x16_t inputs[2];
+ *          memcpy(&inputs[0], "01234567890abcdef", 16);
+ *          memcpy(&inputs[1], "fedcba09876543210", 16);
+ *          sz_u64_t hashes[2];
+ *          sz_hash_b8x16s(inputs, 2, 0, hashes);
+ *          return
+ *              hashes[0] == sz_hash("01234567890abcdef", 16, 0) &&
+ *              hashes[1] == sz_hash("fedcba09876543210", 16, 0) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_hash_b8x16s_serial, sz_hash_b8x16s_westmere, sz_hash_b8x16s_skylake, sz_hash_b8x16s_ice,
+ *          sz_hash_b8x16s_neon, sz_hash_b8x16s_sve
+ *
+ *  @note   Optimized variants for other input sizes are also available.
+ *  @sa     sz_hash_b8x16s
+ */
+SZ_DYNAMIC void sz_hash_b8x16s(sz_b8x16_t const *inputs, sz_size_t count, sz_u64_t seed, sz_u64_t *hashes);
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
 
@@ -4069,9 +4137,9 @@ SZ_INTERNAL svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_vec, svuint8
 SZ_INTERNAL sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     svuint8_t state_aes, state_sum, state_key;
 
-    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
+    // To load and store the seed, we don't even need a `svwhilelt_b8x8(0, 2)`.
     state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
-    svbool_t const all64 = svptrue_b64();
+    svbool_t const all64 = svptrue_b8x8();
     svbool_t const all8 = svptrue_b8();
 
     // XOR the user-supplied keys with the two "pi" constants
