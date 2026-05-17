@@ -5848,176 +5848,91 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_le
             }
         }
 
-        // Cyrillic Supplement (D2): lowercase → uppercase (parity-based)
-        // U+0480-04BF = D2 80-BF. Lowercase letters: D2 81 (ҁ) plus odd second byte in 0x8B-0xBF.
-        // Bytes 0x82 (Thousands Sign) and 0x83-0x89 (combining marks) have no case mapping.
-        // Examples: ҳ (D2 B3) → Ҳ (D2 B2), ҷ (D2 B7) → Ҷ (D2 B6), ҁ (D2 81) → Ҁ (D2 80).
-        {
-            __mmask64 is_d2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD2));
-            __mmask64 d2_second_byte_positions = is_d2_mask << 1;
-
-            __mmask64 is_valid_d2_mix_mask = ~is_non_ascii | is_d2_mask | d2_second_byte_positions;
-            sz_size_t d2_length = sz_ice_first_invalid_(is_valid_d2_mix_mask, load_mask, chunk_size);
-            d2_length -= d2_length && ((is_d2_mask >> (d2_length - 1)) & 1);
-
-            if (d2_length >= 2) {
-                __mmask64 prefix_mask = sz_u64_mask_until_(d2_length);
-                __mmask64 is_after_d2_mask = (is_d2_mask << 1) & prefix_mask;
-
-                // ASCII uppercasing
-                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
-                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
-                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
-                                                      source_vec.zmm, ascii_case_offset);
-
-                // Odd second byte in 0x8B..0xBF (skips combining marks 0x83..0x89, even-only symbols)
-                __mmask64 is_in_range = _mm512_mask_cmpge_epu8_mask(is_after_d2_mask, source_vec.zmm,
-                                                                     _mm512_set1_epi8((char)0x8B));
-                is_in_range &= _mm512_mask_cmple_epu8_mask(is_after_d2_mask, source_vec.zmm,
-                                                           _mm512_set1_epi8((char)0xBF));
-                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
-                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
-                __mmask64 is_d2_lower = is_in_range & is_odd;
-                // Plus the irregular ҁ at D2 81
-                is_d2_lower |= is_after_d2_mask &
-                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x81));
-
-                upper = _mm512_mask_sub_epi8(upper, is_d2_lower, upper, _mm512_set1_epi8(1));
-
-                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
-                target += d2_length, source += d2_length, source_length -= d2_length;
-                continue;
-            }
-        }
-
-        // Cyrillic Supplement (D3): lowercase → uppercase
-        // U+04C0-04FF = D3 80-BF. Three patterns:
-        // - 0x04C2-0x04CE (D3 82-8E): even second byte is lowercase → subtract 1
-        // - 0x04CF (D3 8F): irregular — ӏ → Ӏ (U+04C0), subtract 0x0F
-        // - 0x04D1-0x04FF (D3 91-BF): odd second byte is lowercase → subtract 1
-        // Examples: ӣ (D3 A3) → Ӣ (D3 A2), ӎ (D3 8E) → Ӎ (D3 8D), ӏ (D3 8F) → Ӏ (D3 80)
-        {
-            __mmask64 is_d3_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD3));
-            __mmask64 d3_second_byte_positions = is_d3_mask << 1;
-
-            __mmask64 is_valid_d3_mix_mask = ~is_non_ascii | is_d3_mask | d3_second_byte_positions;
-            sz_size_t d3_length = sz_ice_first_invalid_(is_valid_d3_mix_mask, load_mask, chunk_size);
-            d3_length -= d3_length && ((is_d3_mask >> (d3_length - 1)) & 1);
-
-            if (d3_length >= 2) {
-                __mmask64 prefix_mask = sz_u64_mask_until_(d3_length);
-                __mmask64 is_after_d3_mask = (is_d3_mask << 1) & prefix_mask;
-
-                // ASCII uppercasing
-                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
-                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
-                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
-                                                      source_vec.zmm, ascii_case_offset);
-
-                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
-                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
-
-                // Range 1: D3 82-8E (0x04C2-0x04CE) — even is lowercase
-                __mmask64 is_range1 = _mm512_mask_cmpge_epu8_mask(is_after_d3_mask, source_vec.zmm,
-                                                                   _mm512_set1_epi8((char)0x82));
-                is_range1 &= _mm512_mask_cmple_epu8_mask(is_after_d3_mask, source_vec.zmm,
-                                                         _mm512_set1_epi8((char)0x8E));
-                __mmask64 is_d3_lower1 = is_range1 & ~is_odd;
-
-                // Range 2: D3 91-BF (0x04D1-0x04FF) — odd is lowercase
-                __mmask64 is_range2 = _mm512_mask_cmpge_epu8_mask(is_after_d3_mask, source_vec.zmm,
-                                                                   _mm512_set1_epi8((char)0x91));
-                is_range2 &= _mm512_mask_cmple_epu8_mask(is_after_d3_mask, source_vec.zmm,
-                                                         _mm512_set1_epi8((char)0xBF));
-                __mmask64 is_d3_lower2 = is_range2 & is_odd;
-
-                upper = _mm512_mask_sub_epi8(upper, is_d3_lower1 | is_d3_lower2, upper, _mm512_set1_epi8(1));
-
-                // Irregular: D3 8F (U+04CF) → D3 80 (U+04C0), subtract 0x0F from the second byte
-                __mmask64 is_d3_8f = is_after_d3_mask &
-                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x8F));
-                upper = _mm512_mask_sub_epi8(upper, is_d3_8f, upper, _mm512_set1_epi8(0x0F));
-
-                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
-                target += d3_length, source += d3_length, source_length -= d3_length;
-                continue;
-            }
-        }
-
-        // Cyrillic Extended D1 A0+ (0x0460-0x047F): lowercase → uppercase (parity-based)
-        // D1 A0-BF, odd second byte is lowercase → subtract 1
+        // Cyrillic Supplement / Extended (D1 A0-BF, D2, D3, D4): lowercase → uppercase.
+        //   D1 A0-BF odd  → -1 (Cyrillic Supplement extended, U+0460-047F)
+        //   D2 81         → -1 (irregular ҁ → Ҁ)
+        //   D2 8B-BF odd  → -1 (parity, U+0480-04BF)
+        //   D3 82-8E even → -1 (parity, range 1)
+        //   D3 8F         → -0xF (irregular ӏ → Ӏ, U+04CF → U+04C0)
+        //   D3 91-BF odd  → -1 (parity, range 2: U+04D1-04FF)
+        //   D4 81-AF odd  → -1 (parity, U+0501-052F)
+        // Combined into one branch since all four leads share the D-prefix structure and the
+        // transform is uniformly "-1 (or -0xF) on the second byte". Single mask computation
+        // processes mixed Cyrillic Supplement text in one chunk rather than four small advances.
         {
             __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
-            __mmask64 d1_second_byte_positions = is_d1_mask << 1;
-            // Only D1 A0+ (Extended Cyrillic)
-            __mmask64 is_d1_extended = d1_second_byte_positions &
-                _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
-
-            __mmask64 is_valid_d1ext_mix_mask = ~is_non_ascii | is_d1_mask | d1_second_byte_positions;
-            // Exclude non-extended D1 (D1 80-9F)
-            __mmask64 is_d1_basic = d1_second_byte_positions &
-                _mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
-            is_valid_d1ext_mix_mask &= ~is_d1_basic;
-
-            sz_size_t d1ext_length = sz_ice_first_invalid_(is_valid_d1ext_mix_mask, load_mask, chunk_size);
-            d1ext_length -= d1ext_length && ((is_d1_mask >> (d1ext_length - 1)) & 1);
-
-            if (d1ext_length >= 2) {
-                __mmask64 prefix_mask = sz_u64_mask_until_(d1ext_length);
-
-                // ASCII uppercasing
-                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
-                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
-                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
-                                                      source_vec.zmm, ascii_case_offset);
-
-                // Parity: odd second byte (A1,A3,...,BF) → subtract 1
-                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
-                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
-                __mmask64 is_d1ext_lower = is_d1_extended & prefix_mask & is_odd;
-
-                upper = _mm512_mask_sub_epi8(upper, is_d1ext_lower, upper, _mm512_set1_epi8(1));
-
-                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
-                target += d1ext_length, source += d1ext_length, source_length -= d1ext_length;
-                continue;
-            }
-        }
-
-        // Cyrillic Extended D4 (0x0500-0x052E): lowercase → uppercase (parity-based)
-        // D4 80-AE, odd second byte is lowercase → subtract 1
-        {
+            __mmask64 is_d2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD2));
+            __mmask64 is_d3_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD3));
             __mmask64 is_d4_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD4));
-            __mmask64 d4_second_byte_positions = is_d4_mask << 1;
+            __mmask64 is_sup_lead = is_d1_mask | is_d2_mask | is_d3_mask | is_d4_mask;
+            if (is_sup_lead) {
+                __mmask64 sup_second = is_sup_lead << 1;
+                // Exclude D1 80-9F (basic Cyrillic, handled above) from this branch's valid set.
+                __mmask64 is_d1_basic = (is_d1_mask << 1) &
+                    _mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+                __mmask64 is_valid_sup = (~is_non_ascii | is_sup_lead | sup_second) & ~is_d1_basic;
+                sz_size_t sup_length = sz_ice_first_invalid_(is_valid_sup, load_mask, chunk_size);
+                sup_length -= sup_length && ((is_sup_lead >> (sup_length - 1)) & 1);
 
-            __mmask64 is_valid_d4_mix_mask = ~is_non_ascii | is_d4_mask | d4_second_byte_positions;
-            sz_size_t d4_length = sz_ice_first_invalid_(is_valid_d4_mix_mask, load_mask, chunk_size);
-            d4_length -= d4_length && ((is_d4_mask >> (d4_length - 1)) & 1);
+                if (sup_length >= 2) {
+                    __mmask64 prefix_mask = sz_u64_mask_until_(sup_length);
+                    __mmask64 is_after_d1 = (is_d1_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d2 = (is_d2_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d3 = (is_d3_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d4 = (is_d4_mask << 1) & prefix_mask;
 
-            if (d4_length >= 2) {
-                __mmask64 prefix_mask = sz_u64_mask_until_(d4_length);
-                __mmask64 is_after_d4_mask = (is_d4_mask << 1) & prefix_mask;
+                    __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                        _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                    __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                          source_vec.zmm, ascii_case_offset);
 
-                // ASCII uppercasing
-                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
-                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
-                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
-                                                      source_vec.zmm, ascii_case_offset);
+                    __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                    __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                    __mmask64 is_even = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_setzero_si512());
 
-                // Range D4 81-AF (0x0501-0x052F): odd second byte is lowercase
-                __mmask64 is_in_range = _mm512_mask_cmpge_epu8_mask(is_after_d4_mask, source_vec.zmm,
-                                                                     _mm512_set1_epi8((char)0x81));
-                is_in_range &= _mm512_mask_cmple_epu8_mask(is_after_d4_mask, source_vec.zmm,
-                                                           _mm512_set1_epi8((char)0xAF));
-                __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
-                __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
-                __mmask64 is_d4_lower = is_in_range & is_odd;
+                    // D1 A0-BF odd → -1
+                    __mmask64 d1_ext_lo = _mm512_mask_cmpge_epu8_mask(is_after_d1, source_vec.zmm,
+                                                                       _mm512_set1_epi8((char)0xA0));
+                    d1_ext_lo &= is_odd;
 
-                upper = _mm512_mask_sub_epi8(upper, is_d4_lower, upper, _mm512_set1_epi8(1));
+                    // D2 81 irregular + D2 8B-BF odd
+                    __mmask64 d2_81 = _mm512_mask_cmpeq_epi8_mask(is_after_d2, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x81));
+                    __mmask64 d2_par = _mm512_mask_cmpge_epu8_mask(is_after_d2, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x8B));
+                    d2_par &= _mm512_mask_cmple_epu8_mask(d2_par, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xBF));
+                    d2_par &= is_odd;
+                    __mmask64 d2_lo = d2_81 | d2_par;
 
-                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
-                target += d4_length, source += d4_length, source_length -= d4_length;
-                continue;
+                    // D3 82-8E even (range 1) + D3 91-BF odd (range 2)
+                    __mmask64 d3_r1 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x82));
+                    d3_r1 &= _mm512_mask_cmple_epu8_mask(d3_r1, source_vec.zmm,
+                                                          _mm512_set1_epi8((char)0x8E));
+                    d3_r1 &= is_even;
+                    __mmask64 d3_r2 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x91));
+                    d3_r2 &= _mm512_mask_cmple_epu8_mask(d3_r2, source_vec.zmm,
+                                                          _mm512_set1_epi8((char)0xBF));
+                    d3_r2 &= is_odd;
+                    __mmask64 d3_lo = d3_r1 | d3_r2;
+                    __mmask64 d3_8f = _mm512_mask_cmpeq_epi8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x8F));
+
+                    // D4 81-AF odd → -1
+                    __mmask64 d4_lo = _mm512_mask_cmple_epu8_mask(is_after_d4, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0xAF));
+                    d4_lo &= is_odd;
+
+                    __mmask64 sub1_mask = d1_ext_lo | d2_lo | d3_lo | d4_lo;
+                    upper = _mm512_mask_sub_epi8(upper, sub1_mask, upper, _mm512_set1_epi8(1));
+                    upper = _mm512_mask_sub_epi8(upper, d3_8f, upper, _mm512_set1_epi8(0x0F));
+
+                    _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                    target += sup_length, source += sup_length, source_length -= sup_length;
+                    continue;
+                }
             }
         }
 
