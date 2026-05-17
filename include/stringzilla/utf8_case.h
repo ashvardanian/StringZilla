@@ -3302,6 +3302,221 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
             }
         }
 
+        // (6) Georgian Mkhedruli (E1 83 90-BA, BD-BF) → Mtavruli (E1 B2 ...). 3-byte branch:
+        //     second byte 0x83 → 0xB2 (+0x2F), lead and third unchanged. U+10FB/U+10FC (E1 83
+        //     BB/BC) are caseless paragraph separators — third-byte range excludes them.
+        //     Skip if any E1 lead is followed by non-0x83 (Cherokee E1 8E/8F, Latin Ext Add E1
+        //     B8-BB, Greek Extended E1 BC-BF) to avoid corrupting those scripts in mixed chunks.
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_unfiltered = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i has_e1_83 = _mm256_and_si256(e1_second_unfiltered, sz_haswell_eq_(src, 0x83));
+                if (_mm256_movemask_epi8(has_e1_83)) {
+                    __m256i is_83 = sz_haswell_eq_(src, 0x83);
+                    __m256i non_83_after_e1 = _mm256_andnot_si256(is_83, e1_second_unfiltered);
+                    __m256i e1_breaks_mkh = sz_haswell_byte_mask_shr1_(non_83_after_e1);
+
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                    valid = _mm256_andnot_si256(e1_breaks_mkh, valid);
+
+                    sz_size_t mkh_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    // Trim any E1 lead whose 3-byte rune doesn't fully fit (last 2 bytes of chunk).
+                    sz_u32_t leads_in_prefix = e1_bits & ((mkh_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << mkh_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)mkh_length) mkh_length = (sz_size_t)last_lead;
+                    }
+
+                    if (mkh_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(mkh_length);
+
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        // Find positions of the 0x83 second byte (after E1) within the prefix.
+                        __m256i e1_83_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_unfiltered, is_83), prefix_bytes);
+                        // Third byte = position after the 0x83.
+                        __m256i third_after_83 = sz_haswell_byte_mask_shl1_(e1_83_second);
+                        __m256i third_90_ba = _mm256_and_si256(third_after_83,
+                            sz_haswell_in_range_(src, 0x90, 0x2A));
+                        __m256i third_bd_bf = _mm256_and_si256(third_after_83,
+                            sz_haswell_in_range_(src, 0xBD, 0x2));
+                        __m256i is_mkh_third = _mm256_or_si256(third_90_ba, third_bd_bf);
+                        // Mark the 0x83 second byte (one position earlier).
+                        __m256i bump_mask = sz_haswell_byte_mask_shr1_(is_mkh_third);
+                        upper = sz_haswell_mask_add_(upper, bump_mask, 0x2F);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += mkh_length, target_ptr += mkh_length, source_length -= mkh_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (7) Georgian Nuskhuri (E2 B4) → Asomtavruli (E1 82/83). 3-byte transformation:
+        //     E2 B4 80-9F → E1 82 A0-BF (lead E2→E1, second B4→82, third +0x20)
+        //     E2 B4 A0-A5 → E1 83 80-85 (lead E2→E1, second B4→83, third -0x20)
+        //   Skip if any E2 B4 third byte ≥ 0xA6 (irregular U+2D27, U+2D2D need serial fallback).
+        {
+            __m256i is_e2 = sz_haswell_eq_(src, 0xE2);
+            sz_u32_t e2_bits = (sz_u32_t)_mm256_movemask_epi8(is_e2);
+            if (e2_bits) {
+                __m256i e2_second_pre = sz_haswell_byte_mask_shl1_(is_e2);
+                __m256i has_b4 = _mm256_and_si256(e2_second_pre, sz_haswell_eq_(src, 0xB4));
+                if (_mm256_movemask_epi8(has_b4)) {
+                    // Skip if any E2 B4 third byte >= 0xA6 (irregular Asomtavruli mappings)
+                    __m256i b4_third_pre = sz_haswell_byte_mask_shl1_(has_b4);
+                    __m256i is_irregular = _mm256_and_si256(b4_third_pre,
+                        sz_haswell_in_range_(src, 0xA6, 0x59));  // 0xA6..0xFF (catch-all for any byte ≥ 0xA6)
+                    if (!_mm256_movemask_epi8(is_irregular)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e2), is_cont);
+                        sz_size_t nu_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e2_bits & ((nu_length >= 32) ? 0xFFFFFFFFu
+                                                                                  : ((1u << nu_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)nu_length) nu_length = (sz_size_t)last_lead;
+                        }
+
+                        if (nu_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(nu_length);
+
+                            __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                            __m256i upper = sz_haswell_mask_sub_(
+                                src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                            // Recompute the b4_third within the prefix.
+                            __m256i is_b4_in_prefix = _mm256_and_si256(has_b4, prefix_bytes);
+                            __m256i third_after_b4 = sz_haswell_byte_mask_shl1_(is_b4_in_prefix);
+
+                            // Range 1: third 80-9F → +0x20; lead E2→E1 (-1); second B4→82 (-0x32)
+                            __m256i is_range1 = _mm256_and_si256(third_after_b4,
+                                sz_haswell_in_range_(src, 0x80, 0x1F));
+                            upper = sz_haswell_mask_add_(upper, is_range1, 0x20);
+                            __m256i r1_second = sz_haswell_byte_mask_shr1_(is_range1);
+                            upper = sz_haswell_mask_sub_(upper, r1_second, 0x32);
+                            __m256i r1_lead = sz_haswell_byte_mask_shr1_(r1_second);
+                            upper = sz_haswell_mask_sub_(upper, r1_lead, 1);
+
+                            // Range 2: third A0-A5 → -0x20; lead E2→E1; second B4→83 (-0x31)
+                            __m256i is_range2 = _mm256_and_si256(third_after_b4,
+                                sz_haswell_in_range_(src, 0xA0, 0x5));
+                            upper = sz_haswell_mask_sub_(upper, is_range2, 0x20);
+                            __m256i r2_second = sz_haswell_byte_mask_shr1_(is_range2);
+                            upper = sz_haswell_mask_sub_(upper, r2_second, 0x31);
+                            __m256i r2_lead = sz_haswell_byte_mask_shr1_(r2_second);
+                            upper = sz_haswell_mask_sub_(upper, r2_lead, 1);
+
+                            sz_haswell_store32_(target_ptr, upper);
+                            source_ptr += nu_length, target_ptr += nu_length, source_length -= nu_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (8) Latin Extended Additional (E1 B8-BB) — Vietnamese + extended Latin diacritics.
+        //     Parity-based: odd third byte is lowercase, subtract 1 to get uppercase.
+        //     Skip if any E1 BA 96..9F appears (SpecialCasing decomposed + irregular like U+1E9B).
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i is_latin_ext_second = _mm256_and_si256(e1_second_pre,
+                    sz_haswell_in_range_(src, 0xB8, 0x3));  // B8, B9, BA, BB
+                if (_mm256_movemask_epi8(is_latin_ext_second)) {
+                    // Tricky third: E1 BA 96..9F
+                    __m256i is_ba_second = _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0xBA));
+                    __m256i ba_third = sz_haswell_byte_mask_shl1_(is_ba_second);
+                    __m256i is_tricky = _mm256_and_si256(ba_third, sz_haswell_in_range_(src, 0x96, 0x9));
+                    if (!_mm256_movemask_epi8(is_tricky)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                        sz_size_t lext_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits & ((lext_length >= 32) ? 0xFFFFFFFFu
+                                                                                    : ((1u << lext_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)lext_length) lext_length = (sz_size_t)last_lead;
+                        }
+
+                        if (lext_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(lext_length);
+                            __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                            __m256i upper = sz_haswell_mask_sub_(
+                                src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                            __m256i e1_second_in_prefix = _mm256_and_si256(e1_second_pre, prefix_bytes);
+                            __m256i is_lext_second = _mm256_and_si256(e1_second_in_prefix,
+                                sz_haswell_in_range_(src, 0xB8, 0x3));
+                            __m256i third_after_lext = sz_haswell_byte_mask_shl1_(is_lext_second);
+                            __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                            __m256i is_odd = _mm256_cmpeq_epi8(byte_and_1, _mm256_set1_epi8(1));
+                            __m256i is_lowercase = _mm256_and_si256(third_after_lext, is_odd);
+                            upper = sz_haswell_mask_sub_(upper, is_lowercase, 1);
+
+                            sz_haswell_store32_(target_ptr, upper);
+                            source_ptr += lext_length, target_ptr += lext_length, source_length -= lext_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (9) Fullwidth (EF BD 81-9A) → (EF BC A1-BA): third +0x20, second BD→BC (-1).
+        {
+            __m256i is_ef = sz_haswell_eq_(src, 0xEF);
+            sz_u32_t ef_bits = (sz_u32_t)_mm256_movemask_epi8(is_ef);
+            if (ef_bits) {
+                __m256i ef_second_pre = sz_haswell_byte_mask_shl1_(is_ef);
+                __m256i has_bd = _mm256_and_si256(ef_second_pre, sz_haswell_eq_(src, 0xBD));
+                if (_mm256_movemask_epi8(has_bd)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_ef), is_cont);
+                    sz_size_t fw_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = ef_bits & ((fw_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << fw_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)fw_length) fw_length = (sz_size_t)last_lead;
+                    }
+
+                    if (fw_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(fw_length);
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        __m256i has_bd_in_prefix = _mm256_and_si256(has_bd, prefix_bytes);
+                        __m256i third_after_bd = sz_haswell_byte_mask_shl1_(has_bd_in_prefix);
+                        __m256i is_az = _mm256_and_si256(third_after_bd, sz_haswell_in_range_(src, 0x81, 0x19));
+                        upper = sz_haswell_mask_add_(upper, is_az, 0x20);
+                        __m256i bd_to_bump = sz_haswell_byte_mask_shr1_(is_az);
+                        upper = sz_haswell_mask_sub_(upper, bd_to_bump, 1);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += fw_length, target_ptr += fw_length, source_length -= fw_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
         // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
@@ -3480,6 +3695,156 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
 
                         sz_haswell_store32_(target_ptr, folded);
                         source_ptr += gr_length, target_ptr += gr_length, source_length -= gr_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (5) Georgian Asomtavruli (E1 82/83) → Nuskhuri (E2 B4). Inverse of upper Nuskhuri branch.
+        //     E1 82 A0-BF → E2 B4 80-9F: lead +1, second +0x32, third -0x20
+        //     E1 83 80-85 (also 87 and 8D irregular) → E2 B4 A0-A5: lead +1, second +0x31, third +0x20
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i has_82_or_83 = _mm256_and_si256(e1_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x82), sz_haswell_eq_(src, 0x83)));
+                if (_mm256_movemask_epi8(has_82_or_83)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                    sz_size_t aso_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = e1_bits & ((aso_length >= 32) ? 0xFFFFFFFFu
+                                                                                : ((1u << aso_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)aso_length) aso_length = (sz_size_t)last_lead;
+                    }
+
+                    if (aso_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(aso_length);
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        __m256i is_82_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0x82)), prefix_bytes);
+                        __m256i is_83_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0x83)), prefix_bytes);
+                        __m256i third_after_82 = sz_haswell_byte_mask_shl1_(is_82_second);
+                        __m256i third_after_83 = sz_haswell_byte_mask_shl1_(is_83_second);
+
+                        // Range 1: E1 82 A0-BF → E2 B4 80-9F: third -0x20, second +0x32, lead +1
+                        __m256i r1_third = _mm256_and_si256(third_after_82, sz_haswell_in_range_(src, 0xA0, 0x1F));
+                        folded = sz_haswell_mask_sub_(folded, r1_third, 0x20);
+                        __m256i r1_second = sz_haswell_byte_mask_shr1_(r1_third);
+                        folded = sz_haswell_mask_add_(folded, r1_second, 0x32);
+                        __m256i r1_lead = sz_haswell_byte_mask_shr1_(r1_second);
+                        folded = sz_haswell_mask_add_(folded, r1_lead, 1);
+
+                        // Range 2: E1 83 (80-85 / 87 / 8D) → E2 B4 (A0-A5 / A7 / AD): third +0x20,
+                        // second +0x31, lead +1. Combine 80-8D and rely on valid input not having
+                        // reserved 86/88-8C positions.
+                        __m256i r2_third = _mm256_and_si256(third_after_83, sz_haswell_in_range_(src, 0x80, 0xD));
+                        folded = sz_haswell_mask_add_(folded, r2_third, 0x20);
+                        __m256i r2_second = sz_haswell_byte_mask_shr1_(r2_third);
+                        folded = sz_haswell_mask_add_(folded, r2_second, 0x31);
+                        __m256i r2_lead = sz_haswell_byte_mask_shr1_(r2_second);
+                        folded = sz_haswell_mask_add_(folded, r2_lead, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += aso_length, target_ptr += aso_length, source_length -= aso_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (6) Latin Extended Additional (E1 B8-BB) fold: even third byte is uppercase → +1.
+        //     Skip if E1 BA 96..9F appears (SpecialCasing decomposed targets in fold direction too).
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i is_lext_second = _mm256_and_si256(e1_second_pre,
+                    sz_haswell_in_range_(src, 0xB8, 0x3));
+                if (_mm256_movemask_epi8(is_lext_second)) {
+                    __m256i is_ba_second = _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0xBA));
+                    __m256i ba_third = sz_haswell_byte_mask_shl1_(is_ba_second);
+                    __m256i is_tricky = _mm256_and_si256(ba_third, sz_haswell_in_range_(src, 0x96, 0x9));
+                    if (!_mm256_movemask_epi8(is_tricky)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                        sz_size_t lext_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits & ((lext_length >= 32) ? 0xFFFFFFFFu
+                                                                                    : ((1u << lext_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)lext_length) lext_length = (sz_size_t)last_lead;
+                        }
+
+                        if (lext_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(lext_length);
+                            __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                            __m256i folded = sz_haswell_mask_add_(
+                                src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                            __m256i e1_second_in_prefix = _mm256_and_si256(e1_second_pre, prefix_bytes);
+                            __m256i is_lext_in = _mm256_and_si256(e1_second_in_prefix,
+                                sz_haswell_in_range_(src, 0xB8, 0x3));
+                            __m256i third_after = sz_haswell_byte_mask_shl1_(is_lext_in);
+                            __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                            __m256i is_even = _mm256_cmpeq_epi8(byte_and_1, _mm256_setzero_si256());
+                            __m256i is_uppercase = _mm256_and_si256(third_after, is_even);
+                            folded = sz_haswell_mask_add_(folded, is_uppercase, 1);
+
+                            sz_haswell_store32_(target_ptr, folded);
+                            source_ptr += lext_length, target_ptr += lext_length, source_length -= lext_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (7) Fullwidth fold: EF BC A1-BA (Ａ-Ｚ) → EF BD 81-9A (ａ-ｚ): second BC→BD (+1), third -0x20.
+        {
+            __m256i is_ef = sz_haswell_eq_(src, 0xEF);
+            sz_u32_t ef_bits = (sz_u32_t)_mm256_movemask_epi8(is_ef);
+            if (ef_bits) {
+                __m256i ef_second_pre = sz_haswell_byte_mask_shl1_(is_ef);
+                __m256i has_bc = _mm256_and_si256(ef_second_pre, sz_haswell_eq_(src, 0xBC));
+                if (_mm256_movemask_epi8(has_bc)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_ef), is_cont);
+                    sz_size_t fw_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = ef_bits & ((fw_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << fw_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)fw_length) fw_length = (sz_size_t)last_lead;
+                    }
+
+                    if (fw_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(fw_length);
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        __m256i has_bc_in_prefix = _mm256_and_si256(has_bc, prefix_bytes);
+                        __m256i third_after_bc = sz_haswell_byte_mask_shl1_(has_bc_in_prefix);
+                        __m256i is_AZ = _mm256_and_si256(third_after_bc, sz_haswell_in_range_(src, 0xA1, 0x19));
+                        folded = sz_haswell_mask_sub_(folded, is_AZ, 0x20);
+                        __m256i bc_to_bump = sz_haswell_byte_mask_shr1_(is_AZ);
+                        folded = sz_haswell_mask_add_(folded, bc_to_bump, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += fw_length, target_ptr += fw_length, source_length -= fw_length;
                         continue;
                     }
                 }
