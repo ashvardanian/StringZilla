@@ -2938,47 +2938,175 @@ SZ_INTERNAL __m256i sz_haswell_in_range_(__m256i bytes, sz_u8_t low, sz_u8_t spa
     return _mm256_cmpeq_epi8(shifted, capped);
 }
 
+/**
+ *  @brief  Bytewise variant of cmpeq for a single constant: returns 0xFF where each byte equals `c`.
+ */
+SZ_INTERNAL __m256i sz_haswell_eq_(__m256i bytes, sz_u8_t c) {
+    return _mm256_cmpeq_epi8(bytes, _mm256_set1_epi8((char)c));
+}
+
+/**
+ *  @brief  Counterpart to `sz_ice_first_invalid_` for AVX2: convert the byte-wise validity mask
+ *          to a 32-bit bitmask, OR in the "outside chunk" positions, then count trailing zeros.
+ *
+ *  @param[in] valid_bytes  Byte mask: 0xFF where the byte is allowed in the fast path, 0x00 otherwise.
+ *  @param[in] load_mask    Lower-`chunk_size` bits are 1, the rest 0 (matches `sz_u64_mask_until_` style).
+ *  @param[in] chunk_size   Number of valid bytes in the loaded chunk (1..32).
+ */
+SZ_INTERNAL sz_size_t sz_haswell_first_invalid_(__m256i valid_bytes, sz_u32_t load_mask, sz_size_t chunk_size) {
+    sz_u32_t valid_bits = (sz_u32_t)_mm256_movemask_epi8(valid_bytes);
+    sz_u32_t invalid_mask = (~valid_bits) & load_mask;
+    if (!invalid_mask) return chunk_size;
+    return (sz_size_t)__builtin_ctz(invalid_mask);
+}
+
+/**
+ *  @brief  Shift the YMM byte vector left by one byte (each byte position increases by 1);
+ *          position 0 becomes 0.
+ *
+ *  Used to derive a "is this position one byte AFTER a lead byte" mask from a lead-byte mask.
+ *  AVX2 lacks a direct cross-lane byte shift, so we stitch two halves with `permute2x128` + `alignr`.
+ */
+SZ_INTERNAL __m256i sz_haswell_byte_mask_shl1_(__m256i mask) {
+    __m256i combined = _mm256_permute2x128_si256(_mm256_setzero_si256(), mask, 0x20);
+    return _mm256_alignr_epi8(mask, combined, 15);
+}
+
+/**
+ *  @brief  Shift the YMM byte vector right by one byte (each byte position decreases by 1);
+ *          position 31 becomes 0.
+ */
+SZ_INTERNAL __m256i sz_haswell_byte_mask_shr1_(__m256i mask) {
+    __m256i combined = _mm256_permute2x128_si256(mask, _mm256_setzero_si256(), 0x21);
+    return _mm256_alignr_epi8(combined, mask, 1);
+}
+
+/**
+ *  @brief  Conditional subtract: for every byte where `mask` is 0xFF, subtract `delta`; elsewhere keep `v`.
+ *
+ *  Emulates `_mm512_mask_sub_epi8` on AVX2 by computing the unconditional subtract and blending.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_sub_(__m256i v, __m256i mask, sz_u8_t delta) {
+    __m256i subbed = _mm256_sub_epi8(v, _mm256_set1_epi8((char)delta));
+    return _mm256_blendv_epi8(v, subbed, mask);
+}
+
+/**
+ *  @brief  Conditional add: for every byte where `mask` is 0xFF, add `delta`; elsewhere keep `v`.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_add_(__m256i v, __m256i mask, sz_u8_t delta) {
+    __m256i added = _mm256_add_epi8(v, _mm256_set1_epi8((char)delta));
+    return _mm256_blendv_epi8(v, added, mask);
+}
+
+/**
+ *  @brief  Conditional overwrite: for every byte where `mask` is 0xFF, replace with `c`; elsewhere keep `v`.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_set1_(__m256i v, __m256i mask, sz_u8_t c) {
+    return _mm256_blendv_epi8(v, _mm256_set1_epi8((char)c), mask);
+}
+
+/**
+ *  @brief  Store only the first `prefix_length` (<= 32) bytes of `v` to `dst`.
+ *
+ *  AVX2 has no direct byte-granular masked store. The simplest correct path for our case is to
+ *  store the full 32 bytes when prefix_length == 32, otherwise spill the prefix byte-by-byte —
+ *  but the fast paths only call this with prefix_length in [2..32], and a full 32-byte store is
+ *  always safe because the output buffer is sized to allow it (the surplus bytes are overwritten
+ *  on the next iteration). So we just emit the wide store and let the caller advance only by
+ *  `prefix_length`. This matches what the Latin-1 / Cyrillic / Greek branches in `_ice` do via
+ *  the `_mm512_mask_storeu_epi8` mechanism.
+ */
+SZ_INTERNAL void sz_haswell_store32_(sz_u8_t *dst, __m256i v) {
+    _mm256_storeu_si256((__m256i *)dst, v);
+}
+
+/**
+ *  @brief  Byte mask with 0xFF in positions [0, length) and 0 in [length, 32).
+ *
+ *  Built from the byte-index identity vector and a signed `cmpgt`; works for length in [0, 32].
+ */
+SZ_INTERNAL __m256i sz_haswell_prefix_bytes_(sz_size_t length) {
+    __m256i const idx = _mm256_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7,                  //
+                                          8, 9, 10, 11, 12, 13, 14, 15,           //
+                                          16, 17, 18, 19, 20, 21, 22, 23,         //
+                                          24, 25, 26, 27, 28, 29, 30, 31);
+    return _mm256_cmpgt_epi8(_mm256_set1_epi8((char)length), idx);
+}
+
 SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t *target_ptr = (sz_u8_t *)destination;
-    __m256i const ascii_offset = _mm256_set1_epi8(0x20);
 
     while (source_length >= 32) {
-        // Skip the SIMD load entirely when the chunk starts on a multi-byte rune — pure non-ASCII
-        // text otherwise pays a 32-byte load + movemask per codepoint with no transform applied.
-        if (*source_ptr >= 0x80) {
-            sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
-                                             sz_unicode_upper_codepoint_);
-            continue;
-        }
         __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
-        int high_bits = _mm256_movemask_epi8(src);
+        sz_u32_t high_bits = (sz_u32_t)_mm256_movemask_epi8(src);
 
+        // (1) Pure ASCII chunk: subtract 0x20 from each a-z.
         if (high_bits == 0) {
-            // Pure ASCII chunk: subtract 0x20 from each a-z. min_epu8 trick = unsigned range check.
             __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
-            __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
-            __m256i upper = _mm256_sub_epi8(src, delta);
-            _mm256_storeu_si256((__m256i *)target_ptr, upper);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_sub_(src, is_lower, 0x20));
             source_ptr += 32, target_ptr += 32, source_length -= 32;
             continue;
         }
 
-        unsigned int first_high = (unsigned int)__builtin_ctz((unsigned int)high_bits);
+        // (2) Latin-1 (C3): a-z → A-Z plus à-þ → À-Þ (excl. ÷); inline ß→SS and ÿ→Ÿ.
+        __m256i is_c3 = sz_haswell_eq_(src, 0xC3);
+        sz_u32_t c3_bits = (sz_u32_t)_mm256_movemask_epi8(is_c3);
+        if (c3_bits) {
+            __m256i c3_second = sz_haswell_byte_mask_shl1_(is_c3);
+            __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+            __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_c3), c3_second);
+            sz_size_t latin1_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+            // Strip hanging C3 lead at last position so we don't split a 2-byte rune.
+            if (latin1_length && ((c3_bits >> (latin1_length - 1)) & 1u)) latin1_length--;
+
+            if (latin1_length >= 2) {
+                __m256i prefix_bytes = sz_haswell_prefix_bytes_(latin1_length);
+
+                // ASCII a-z → A-Z and Latin-1 à-þ → À-Þ both use -0x20 on the relevant byte.
+                __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                // Latin-1 lowercase: second byte in 0xA0..0xBE excluding 0xB7 (÷).
+                __m256i is_latin1_range = sz_haswell_in_range_(src, 0xA0, 0xBE - 0xA0);
+                __m256i is_div = sz_haswell_eq_(src, 0xB7);
+                __m256i is_latin1_lower = _mm256_andnot_si256(is_div, is_latin1_range);
+                is_latin1_lower = _mm256_and_si256(is_latin1_lower, c3_second);
+
+                __m256i sub20_mask = _mm256_or_si256(is_lower_ascii, is_latin1_lower);
+                sub20_mask = _mm256_and_si256(sub20_mask, prefix_bytes);
+                __m256i upper = sz_haswell_mask_sub_(src, sub20_mask, 0x20);
+
+                // ß (C3 9F) → SS: overwrite both the lead C3 and the 9F with 'S'.
+                __m256i is_9f = _mm256_and_si256(sz_haswell_eq_(src, 0x9F), c3_second);
+                __m256i sharp_s_pair = _mm256_or_si256(is_9f, sz_haswell_byte_mask_shr1_(is_9f));
+                sharp_s_pair = _mm256_and_si256(sharp_s_pair, prefix_bytes);
+                upper = sz_haswell_mask_set1_(upper, sharp_s_pair, 'S');
+
+                // ÿ (C3 BF) → Ÿ (C5 B8): lead +2, second -7.
+                __m256i is_bf = _mm256_and_si256(sz_haswell_eq_(src, 0xBF), c3_second);
+                is_bf = _mm256_and_si256(is_bf, prefix_bytes);
+                __m256i is_y_lead = sz_haswell_byte_mask_shr1_(is_bf);
+                upper = sz_haswell_mask_add_(upper, is_y_lead, 2);
+                upper = sz_haswell_mask_sub_(upper, is_bf, 7);
+
+                sz_haswell_store32_(target_ptr, upper);
+                source_ptr += latin1_length, target_ptr += latin1_length, source_length -= latin1_length;
+                continue;
+            }
+        }
+
+        // (3) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
-            // Mixed chunk with a leading ASCII run — transform & store just that prefix.
             __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
-            __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
-            __m256i upper = _mm256_sub_epi8(src, delta);
-            _mm256_storeu_si256((__m256i *)target_ptr, upper);  // safe to over-store; we advance only `first_high`
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_sub_(src, is_lower, 0x20));
             source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
         }
-        // Drain the multi-byte rune that starts at the first high-bit byte.
         sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
                                          sz_unicode_upper_codepoint_);
     }
 
-    // Tail under 32 bytes: small ASCII inline loop, drain runes one-by-one as soon as we hit non-ASCII.
+    // Tail < 32 bytes: byte-by-byte ASCII, drain runes one at a time on non-ASCII.
     while (source_length) {
         if (*source_ptr < 0x80) {
             *target_ptr++ = sz_ascii_upper_(*source_ptr);
@@ -2995,35 +3123,60 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t *target_ptr = (sz_u8_t *)destination;
-    __m256i const ascii_offset = _mm256_set1_epi8(0x20);
 
     while (source_length >= 32) {
-        // Skip the SIMD load entirely when the chunk starts on a multi-byte rune — pure non-ASCII
-        // text otherwise pays a 32-byte load + movemask per codepoint with no transform applied.
-        if (*source_ptr >= 0x80) {
-            sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
-                                             sz_unicode_fold_codepoint_);
-            continue;
-        }
         __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
-        int high_bits = _mm256_movemask_epi8(src);
+        sz_u32_t high_bits = (sz_u32_t)_mm256_movemask_epi8(src);
 
+        // (1) Pure ASCII: add 0x20 to A-Z.
         if (high_bits == 0) {
-            // Pure ASCII chunk: A-Z → a-z, add 0x20 to each upper letter.
             __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
-            __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
-            __m256i folded = _mm256_add_epi8(src, delta);
-            _mm256_storeu_si256((__m256i *)target_ptr, folded);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_add_(src, is_upper, 0x20));
             source_ptr += 32, target_ptr += 32, source_length -= 32;
             continue;
         }
 
-        unsigned int first_high = (unsigned int)__builtin_ctz((unsigned int)high_bits);
+        // (2) Latin-1 (C3): A-Z → a-z and À-Þ → à-þ (+0x20, excl. ×=0x97); inline ß→ss.
+        __m256i is_c3 = sz_haswell_eq_(src, 0xC3);
+        sz_u32_t c3_bits = (sz_u32_t)_mm256_movemask_epi8(is_c3);
+        if (c3_bits) {
+            __m256i c3_second = sz_haswell_byte_mask_shl1_(is_c3);
+            __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+            __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_c3), c3_second);
+            sz_size_t latin1_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+            if (latin1_length && ((c3_bits >> (latin1_length - 1)) & 1u)) latin1_length--;
+
+            if (latin1_length >= 2) {
+                __m256i prefix_bytes = sz_haswell_prefix_bytes_(latin1_length);
+
+                // ASCII A-Z and Latin-1 À-Þ both +0x20. Latin-1 upper second byte: 0x80..0x9E excl. 0x97 (×).
+                __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                __m256i is_latin1_range = sz_haswell_in_range_(src, 0x80, 0x9E - 0x80);
+                __m256i is_times = sz_haswell_eq_(src, 0x97);
+                __m256i is_latin1_upper = _mm256_andnot_si256(is_times, is_latin1_range);
+                is_latin1_upper = _mm256_and_si256(is_latin1_upper, c3_second);
+
+                __m256i add20_mask = _mm256_or_si256(is_upper_ascii, is_latin1_upper);
+                add20_mask = _mm256_and_si256(add20_mask, prefix_bytes);
+                __m256i folded = sz_haswell_mask_add_(src, add20_mask, 0x20);
+
+                // ß (C3 9F) → ss: overwrite both bytes with 's'.
+                __m256i is_9f = _mm256_and_si256(sz_haswell_eq_(src, 0x9F), c3_second);
+                __m256i sharp_s_pair = _mm256_or_si256(is_9f, sz_haswell_byte_mask_shr1_(is_9f));
+                sharp_s_pair = _mm256_and_si256(sharp_s_pair, prefix_bytes);
+                folded = sz_haswell_mask_set1_(folded, sharp_s_pair, 's');
+
+                sz_haswell_store32_(target_ptr, folded);
+                source_ptr += latin1_length, target_ptr += latin1_length, source_length -= latin1_length;
+                continue;
+            }
+        }
+
+        // (3) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
             __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
-            __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
-            __m256i folded = _mm256_add_epi8(src, delta);
-            _mm256_storeu_si256((__m256i *)target_ptr, folded);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_add_(src, is_upper, 0x20));
             source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
         }
         sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
