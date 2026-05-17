@@ -3095,7 +3095,59 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
             }
         }
 
-        // (3) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        // (3) Cyrillic basic (D0/D1): а-я → А-Я. Lowercase forms split into three sub-ranges:
+        //     D0 B0-BF (а-п)  → D0 90-9F (А-П):  second -0x20
+        //     D1 80-8F (р-я)  → D0 A0-AF (Р-Я):  second +0x20, lead D1→D0 (-1)
+        //     D1 90-9F (ѐ-џ)  → D0 80-8F (Ѐ-Џ):  second -0x10, lead D1→D0 (-1)
+        //   D1 A0-BF is Cyrillic Supplement extended (parity-based) — excluded from this branch
+        //   so it can be picked up later by a dedicated D1-ext branch (TODO).
+        {
+            __m256i is_d0 = sz_haswell_eq_(src, 0xD0);
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_cyr_lead = _mm256_or_si256(is_d0, is_d1);
+            sz_u32_t cyr_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_cyr_lead);
+            if (cyr_lead_bits) {
+                __m256i cyr_second = sz_haswell_byte_mask_shl1_(is_cyr_lead);
+                __m256i d1_second = sz_haswell_byte_mask_shl1_(is_d1);
+                __m256i is_d1_ext = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0xA0, 0x1F));
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_cyr_lead), cyr_second);
+                valid = _mm256_andnot_si256(is_d1_ext, valid);
+                sz_size_t cyr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (cyr_length && ((cyr_lead_bits >> (cyr_length - 1)) & 1u)) cyr_length--;
+
+                if (cyr_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cyr_length);
+                    __m256i d0_second = sz_haswell_byte_mask_shl1_(is_d0);
+
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                    // D0 B0-BF → -0x20 on the second byte
+                    __m256i d0_lower = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0xB0, 0xF));
+                    upper = sz_haswell_mask_sub_(upper, _mm256_and_si256(d0_lower, prefix_bytes), 0x20);
+
+                    // D1 80-8F → second +0x20, lead -1
+                    __m256i d1_lower1 = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0x80, 0xF));
+                    d1_lower1 = _mm256_and_si256(d1_lower1, prefix_bytes);
+                    upper = sz_haswell_mask_add_(upper, d1_lower1, 0x20);
+                    upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(d1_lower1), 1);
+
+                    // D1 90-9F → second -0x10, lead -1
+                    __m256i d1_lower2 = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0x90, 0xF));
+                    d1_lower2 = _mm256_and_si256(d1_lower2, prefix_bytes);
+                    upper = sz_haswell_mask_sub_(upper, d1_lower2, 0x10);
+                    upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(d1_lower2), 1);
+
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += cyr_length, target_ptr += cyr_length, source_length -= cyr_length;
+                    continue;
+                }
+            }
+        }
+
+        // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
             __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
@@ -3172,7 +3224,55 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
             }
         }
 
-        // (3) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        // (3) Cyrillic basic (D0/D1) fold: А-Я → а-я. Uppercase forms split into three sub-ranges:
+        //     D0 90-9F (А-П)  → D0 B0-BF (а-п):  second +0x20
+        //     D0 A0-AF (Р-Я)  → D1 80-8F (р-я):  second -0x20, lead D0→D1 (+1)
+        //     D0 80-8F (Ѐ-Џ)  → D1 90-9F (ѐ-џ):  second +0x10, lead D0→D1 (+1)
+        //   Exclude D1 (any second byte) since fold's D1 80-BF is already lowercase / extended.
+        {
+            __m256i is_d0 = sz_haswell_eq_(src, 0xD0);
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_cyr_lead = _mm256_or_si256(is_d0, is_d1);
+            sz_u32_t cyr_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_cyr_lead);
+            if (cyr_lead_bits) {
+                __m256i cyr_second = sz_haswell_byte_mask_shl1_(is_cyr_lead);
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_cyr_lead), cyr_second);
+                sz_size_t cyr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (cyr_length && ((cyr_lead_bits >> (cyr_length - 1)) & 1u)) cyr_length--;
+
+                if (cyr_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cyr_length);
+                    __m256i d0_second = sz_haswell_byte_mask_shl1_(is_d0);
+
+                    __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                    __m256i folded = sz_haswell_mask_add_(
+                        src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                    // D0 90-9F → second +0x20
+                    __m256i d0_upper1 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0x90, 0xF));
+                    folded = sz_haswell_mask_add_(folded, _mm256_and_si256(d0_upper1, prefix_bytes), 0x20);
+
+                    // D0 A0-AF → second -0x20, lead +1
+                    __m256i d0_upper2 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0xA0, 0xF));
+                    d0_upper2 = _mm256_and_si256(d0_upper2, prefix_bytes);
+                    folded = sz_haswell_mask_sub_(folded, d0_upper2, 0x20);
+                    folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(d0_upper2), 1);
+
+                    // D0 80-8F → second +0x10, lead +1
+                    __m256i d0_upper3 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0x80, 0xF));
+                    d0_upper3 = _mm256_and_si256(d0_upper3, prefix_bytes);
+                    folded = sz_haswell_mask_add_(folded, d0_upper3, 0x10);
+                    folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(d0_upper3), 1);
+
+                    sz_haswell_store32_(target_ptr, folded);
+                    source_ptr += cyr_length, target_ptr += cyr_length, source_length -= cyr_length;
+                    continue;
+                }
+            }
+        }
+
+        // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
             __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
