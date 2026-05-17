@@ -3147,6 +3147,87 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
             }
         }
 
+        // (4) Cyrillic Supplement / Extended (D1 A0-BF, D2, D3, D4):
+        //     D1 A0-BF odd  → -1 (Cyrillic Supplement extended, U+0460-047F)
+        //     D2 81         → -1 (irregular ҁ→Ҁ)
+        //     D2 8B-BF odd  → -1 (parity, U+0480-04BF)
+        //     D3 82-8E even → -1 (parity)
+        //     D3 8F         → -0xF (irregular ӏ→Ӏ, U+04CF→U+04C0)
+        //     D3 91-BF odd  → -1 (parity, U+04D1-04FF)
+        //     D4 81-AF odd  → -1 (parity, U+0501-052F)
+        //   Combined into one branch since they all share the D-lead 2-byte structure and the
+        //   transform is always "-1 (or -0xF) on the second byte".
+        {
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_d2 = sz_haswell_eq_(src, 0xD2);
+            __m256i is_d3 = sz_haswell_eq_(src, 0xD3);
+            __m256i is_d4 = sz_haswell_eq_(src, 0xD4);
+            __m256i is_sup_lead = _mm256_or_si256(_mm256_or_si256(is_d1, is_d2),
+                                                   _mm256_or_si256(is_d3, is_d4));
+            sz_u32_t sup_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_sup_lead);
+            if (sup_lead_bits) {
+                __m256i sup_second = sz_haswell_byte_mask_shl1_(is_sup_lead);
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_sup_lead), sup_second);
+                sz_size_t sup_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (sup_length && ((sup_lead_bits >> (sup_length - 1)) & 1u)) sup_length--;
+
+                if (sup_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(sup_length);
+
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                    // Second-byte position masks per lead
+                    __m256i d1_second = sz_haswell_byte_mask_shl1_(is_d1);
+                    __m256i d2_second = sz_haswell_byte_mask_shl1_(is_d2);
+                    __m256i d3_second = sz_haswell_byte_mask_shl1_(is_d3);
+                    __m256i d4_second = sz_haswell_byte_mask_shl1_(is_d4);
+
+                    // Parity of the current byte (true if low bit set)
+                    __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                    __m256i is_odd = _mm256_cmpeq_epi8(byte_and_1, _mm256_set1_epi8(1));
+                    __m256i is_even = _mm256_cmpeq_epi8(byte_and_1, _mm256_setzero_si256());
+
+                    // D1 A0-BF odd → -1
+                    __m256i d1_ext_lo = _mm256_and_si256(d1_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0xA0, 0x1F), is_odd));
+
+                    // D2 81 (irregular) + D2 8B-BF odd
+                    __m256i d2_81 = _mm256_and_si256(d2_second, sz_haswell_eq_(src, 0x81));
+                    __m256i d2_par = _mm256_and_si256(d2_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x8B, 0x34), is_odd));
+                    __m256i d2_lo = _mm256_or_si256(d2_81, d2_par);
+
+                    // D3 82-8E even + D3 91-BF odd
+                    __m256i d3_lo1 = _mm256_and_si256(d3_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x82, 0xC), is_even));
+                    __m256i d3_lo2 = _mm256_and_si256(d3_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x91, 0x2E), is_odd));
+                    __m256i d3_lo = _mm256_or_si256(d3_lo1, d3_lo2);
+                    __m256i d3_8f = _mm256_and_si256(d3_second, sz_haswell_eq_(src, 0x8F));
+
+                    // D4 81-AF odd → -1
+                    __m256i d4_lo = _mm256_and_si256(d4_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x81, 0x2E), is_odd));
+
+                    // Combined -1 mask
+                    __m256i sub1_mask = _mm256_or_si256(
+                        _mm256_or_si256(d1_ext_lo, d2_lo), _mm256_or_si256(d3_lo, d4_lo));
+                    sub1_mask = _mm256_and_si256(sub1_mask, prefix_bytes);
+                    upper = sz_haswell_mask_sub_(upper, sub1_mask, 1);
+
+                    // D3 8F → D3 80 (irregular -0xF on the second byte)
+                    upper = sz_haswell_mask_sub_(upper, _mm256_and_si256(d3_8f, prefix_bytes), 0xF);
+
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += sup_length, target_ptr += sup_length, source_length -= sup_length;
+                    continue;
+                }
+            }
+        }
+
         // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
