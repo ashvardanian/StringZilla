@@ -3517,6 +3517,38 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
             }
         }
 
+        // (10) 3-byte caseless content (CJK, Hangul, Hiragana, Katakana, Thai, Hindi, Arabic, ...).
+        //      E0, E3-E9, EB-EE always caseless; we bail if E1/E2/EA/EF appear (those have
+        //      case-bearing sub-ranges handled by branches above — if we reach here they must
+        //      have failed the length check, so just drain through serial below).
+        {
+            __m256i is_bicameral_lead = _mm256_or_si256(
+                _mm256_or_si256(sz_haswell_eq_(src, 0xE1), sz_haswell_eq_(src, 0xE2)),
+                _mm256_or_si256(sz_haswell_eq_(src, 0xEA), sz_haswell_eq_(src, 0xEF)));
+            if (!_mm256_movemask_epi8(is_bicameral_lead)) {
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i is_3byte_lead = sz_haswell_in_range_(src, 0xE0, 0xF);
+                __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_3byte_lead), is_cont);
+                sz_size_t cl_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                sz_u32_t leads3_bits = (sz_u32_t)_mm256_movemask_epi8(is_3byte_lead) &
+                    ((cl_length >= 32) ? 0xFFFFFFFFu : ((1u << cl_length) - 1));
+                if (leads3_bits) {
+                    int last_lead = 31 - __builtin_clz(leads3_bits);
+                    if (last_lead + 3 > (int)cl_length) cl_length = (sz_size_t)last_lead;
+                }
+                if (cl_length) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cl_length);
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += cl_length, target_ptr += cl_length, source_length -= cl_length;
+                    continue;
+                }
+            }
+        }
+
         // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
@@ -3847,6 +3879,35 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
                         source_ptr += fw_length, target_ptr += fw_length, source_length -= fw_length;
                         continue;
                     }
+                }
+            }
+        }
+
+        // (8) 3-byte caseless content fast path — same idea as the upper path.
+        {
+            __m256i is_bicameral_lead = _mm256_or_si256(
+                _mm256_or_si256(sz_haswell_eq_(src, 0xE1), sz_haswell_eq_(src, 0xE2)),
+                _mm256_or_si256(sz_haswell_eq_(src, 0xEA), sz_haswell_eq_(src, 0xEF)));
+            if (!_mm256_movemask_epi8(is_bicameral_lead)) {
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i is_3byte_lead = sz_haswell_in_range_(src, 0xE0, 0xF);
+                __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_3byte_lead), is_cont);
+                sz_size_t cl_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                sz_u32_t leads3_bits = (sz_u32_t)_mm256_movemask_epi8(is_3byte_lead) &
+                    ((cl_length >= 32) ? 0xFFFFFFFFu : ((1u << cl_length) - 1));
+                if (leads3_bits) {
+                    int last_lead = 31 - __builtin_clz(leads3_bits);
+                    if (last_lead + 3 > (int)cl_length) cl_length = (sz_size_t)last_lead;
+                }
+                if (cl_length) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cl_length);
+                    __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                    __m256i folded = sz_haswell_mask_add_(
+                        src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+                    sz_haswell_store32_(target_ptr, folded);
+                    source_ptr += cl_length, target_ptr += cl_length, source_length -= cl_length;
+                    continue;
                 }
             }
         }
