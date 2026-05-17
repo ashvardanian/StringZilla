@@ -892,10 +892,8 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         case 0xA7C9: folded[0] = 0xA7CA; return 1; // 'Ꟊ' (U+A7C9, EA 9F 89) → 'ꟊ' (U+A7CA, EA 9F 8A)
         case 0xA7CB: folded[0] = 0x0264; return 1; // 'Ɤ' (U+A7CB, EA 9F 8B) → 'ɤ' (U+0264, C9 A4)
         case 0xA7CC: folded[0] = 0xA7CD; return 1; // 'Ꟍ' (U+A7CC, EA 9F 8C) → 'ꟍ' (U+A7CD, EA 9F 8D)
-        case 0xA7CE: folded[0] = 0xA7CF; return 1; // '꟎' (U+A7CE, EA 9F 8E) → '꟏' (U+A7CF, EA 9F 8F)
+        // U+A7CE, U+A7D2, U+A7D4 are unassigned in Unicode 16.0 (Cn) — no case mapping exists.
         case 0xA7D0: folded[0] = 0xA7D1; return 1; // 'Ꟑ' (U+A7D0, EA 9F 90) → 'ꟑ' (U+A7D1, EA 9F 91)
-        case 0xA7D2: folded[0] = 0xA7D3; return 1; // '꟒' (U+A7D2, EA 9F 92) → 'ꟓ' (U+A7D3, EA 9F 93)
-        case 0xA7D4: folded[0] = 0xA7D5; return 1; // '꟔' (U+A7D4, EA 9F 94) → 'ꟕ' (U+A7D5, EA 9F 95)
         case 0xA7D6: folded[0] = 0xA7D7; return 1; // 'Ꟗ' (U+A7D6, EA 9F 96) → 'ꟗ' (U+A7D7, EA 9F 97)
         case 0xA7D8: folded[0] = 0xA7D9; return 1; // 'Ꟙ' (U+A7D8, EA 9F 98) → 'ꟙ' (U+A7D9, EA 9F 99)
         case 0xA7DA: folded[0] = 0xA7DB; return 1; // 'Ꟛ' (U+A7DA, EA 9F 9A) → 'ꟛ' (U+A7DB, EA 9F 9B)
@@ -1153,10 +1151,7 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         sz_assert_(sz_is_in_range_(rune, 0x16E40, 0x16E5F));
         folded[0] = rune + 0x20; return 1; }
 
-    // Beria Erfe: 0x16EA0-0x16EB8 (+27)
-    if ((sz_u32_t)(rune - 0x16EA0) <= 0x18) {
-        sz_assert_(sz_is_in_range_(rune, 0x16EA0, 0x16EB8));
-        folded[0] = rune + 0x1B; return 1; }
+    // (0x16EA0-0x16EB8 is unassigned in Unicode 16.0 — intentionally left without a fold mapping.)
 
     // Adlam: 0x1E900-0x1E921 (+34)
     if ((sz_u32_t)(rune - 0x1E900) <= 0x21) {
