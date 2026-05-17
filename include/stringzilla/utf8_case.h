@@ -349,6 +349,18 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
 /** @copydoc sz_utf8_case_invariant */
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length);
 
+#if SZ_USE_HASWELL
+
+/** @copydoc sz_utf8_case_fold */
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+#endif
+
 #if SZ_USE_ICE
 
 /** @copydoc sz_utf8_case_fold */
@@ -2880,6 +2892,127 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_si
 }
 
 #pragma endregion // Serial Implementation
+
+#pragma region Haswell Implementation
+#if SZ_USE_HASWELL
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx2,bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx2", "bmi", "bmi2")
+#endif
+
+/**
+ *  @brief  Helper for the Haswell case-changing kernels: drains a single non-ASCII rune through
+ *          the serial codepoint mapper and advances both `source` and `target` cursors.
+ *
+ *  The Haswell paths fast-track pure-ASCII chunks with AVX2 and fall back to the per-rune mapper
+ *  whenever the leading byte has the high bit set. Two helpers (upper/fold) share this driver via
+ *  a function-pointer argument so the same scaffolding handles both directions.
+ */
+SZ_INTERNAL void sz_utf8_case_haswell_drain_rune_(                  //
+    sz_u8_t const **source_ptr, sz_size_t *source_length_ptr,       //
+    sz_u8_t **target_ptr,                                           //
+    sz_size_t (*map_codepoint)(sz_rune_t, sz_rune_t *)) {
+    sz_rune_t rune;
+    sz_rune_length_t rune_length;
+    sz_rune_parse((sz_cptr_t)*source_ptr, &rune, &rune_length);
+    sz_rune_t mapped_runes[3];
+    sz_size_t mapped_count = map_codepoint(rune, mapped_runes);
+    for (sz_size_t i = 0; i != mapped_count; ++i)
+        *target_ptr += sz_rune_export(mapped_runes[i], *target_ptr);
+    *source_ptr += rune_length;
+    *source_length_ptr -= rune_length;
+}
+
+/**
+ *  @brief  Branchless YMM helper: for every byte, returns `0xFF` where the byte falls into the
+ *          unsigned interval `[low, low + span_minus_one]` and `0x00` elsewhere.
+ *
+ *  AVX2 has no native unsigned compare, so we use the `min_epu8` trick:
+ *  `(byte - low) <= span_minus_one`  is equivalent to  `min_epu8(byte - low, span_minus_one) == (byte - low)`.
+ */
+SZ_INTERNAL __m256i sz_haswell_in_range_(__m256i bytes, sz_u8_t low, sz_u8_t span_minus_one) {
+    __m256i shifted = _mm256_sub_epi8(bytes, _mm256_set1_epi8((char)low));
+    __m256i capped = _mm256_min_epu8(shifted, _mm256_set1_epi8((char)span_minus_one));
+    return _mm256_cmpeq_epi8(shifted, capped);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t *target_ptr = (sz_u8_t *)destination;
+    __m256i const ascii_offset = _mm256_set1_epi8(0x20);
+
+    while (source_length >= 32) {
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        // If any byte has the high bit set, the chunk has multi-byte UTF-8 — fall back per-rune.
+        if (_mm256_movemask_epi8(src) != 0) {
+            sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                             sz_unicode_upper_codepoint_);
+            continue;
+        }
+        // Pure ASCII chunk: subtract 0x20 from each a-z. min_epu8 trick gives unsigned range check.
+        __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
+        __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
+        __m256i upper = _mm256_sub_epi8(src, delta);
+        _mm256_storeu_si256((__m256i *)target_ptr, upper);
+        source_ptr += 32, target_ptr += 32, source_length -= 32;
+    }
+
+    // Tail under 32 bytes: small ASCII inline loop, drain runes one-by-one as soon as we hit non-ASCII.
+    while (source_length) {
+        if (*source_ptr < 0x80) {
+            *target_ptr++ = sz_ascii_upper_(*source_ptr);
+            source_ptr++, source_length--;
+            continue;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_upper_codepoint_);
+    }
+
+    return (sz_size_t)(target_ptr - (sz_u8_t *)destination);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t *target_ptr = (sz_u8_t *)destination;
+    __m256i const ascii_offset = _mm256_set1_epi8(0x20);
+
+    while (source_length >= 32) {
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        if (_mm256_movemask_epi8(src) != 0) {
+            sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                             sz_unicode_fold_codepoint_);
+            continue;
+        }
+        // Pure ASCII chunk: A-Z → a-z, add 0x20 to each upper letter.
+        __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
+        __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
+        __m256i folded = _mm256_add_epi8(src, delta);
+        _mm256_storeu_si256((__m256i *)target_ptr, folded);
+        source_ptr += 32, target_ptr += 32, source_length -= 32;
+    }
+
+    while (source_length) {
+        if (*source_ptr < 0x80) {
+            *target_ptr++ = sz_ascii_fold_(*source_ptr);
+            source_ptr++, source_length--;
+            continue;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_fold_codepoint_);
+    }
+
+    return (sz_size_t)(target_ptr - (sz_u8_t *)destination);
+}
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_HASWELL
+#pragma endregion // Haswell Implementation
 
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
@@ -9753,6 +9886,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
 SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICE
     return sz_utf8_case_fold_ice(source, source_length, destination);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_fold_haswell(source, source_length, destination);
 #else
     return sz_utf8_case_fold_serial(source, source_length, destination);
 #endif
@@ -9761,6 +9896,8 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length
 SZ_DYNAMIC sz_size_t sz_utf8_case_upper(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICE
     return sz_utf8_case_upper_ice(source, source_length, destination);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_upper_haswell(source, source_length, destination);
 #else
     return sz_utf8_case_upper_serial(source, source_length, destination);
 #endif
