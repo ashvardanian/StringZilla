@@ -3228,6 +3228,80 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
             }
         }
 
+        // (5) Greek (CE/CF): full set of bicameral transforms with tonos and sigma. Skip when the
+        //     chunk contains CE 90/B0 (SpecialCasing, ΐ/ΰ decompose) or CF 90+ (symbols / archaic
+        //     parity / irregular caps) — those need per-rune serial fallback.
+        {
+            __m256i is_ce = sz_haswell_eq_(src, 0xCE);
+            __m256i is_cf = sz_haswell_eq_(src, 0xCF);
+            __m256i is_greek_lead = _mm256_or_si256(is_ce, is_cf);
+            sz_u32_t greek_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_greek_lead);
+            if (greek_lead_bits) {
+                __m256i greek_second = sz_haswell_byte_mask_shl1_(is_greek_lead);
+                __m256i ce_second_pre = sz_haswell_byte_mask_shl1_(is_ce);
+                __m256i cf_second_pre = sz_haswell_byte_mask_shl1_(is_cf);
+
+                // Tricky bytes: CE 90, CE B0, CF 90..BF — defer to serial fallback if present.
+                __m256i is_ce_specialcasing = _mm256_and_si256(ce_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x90), sz_haswell_eq_(src, 0xB0)));
+                __m256i is_cf_tricky = _mm256_and_si256(cf_second_pre,
+                    sz_haswell_in_range_(src, 0x90, 0x2F));
+                sz_u32_t skip_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_or_si256(is_ce_specialcasing, is_cf_tricky));
+
+                if (!skip_bits) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_greek_lead), greek_second);
+                    sz_size_t gr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    if (gr_length && ((greek_lead_bits >> (gr_length - 1)) & 1u)) gr_length--;
+
+                    if (gr_length >= 2) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(gr_length);
+                        __m256i ce_second = _mm256_and_si256(ce_second_pre, prefix_bytes);
+                        __m256i cf_second = _mm256_and_si256(cf_second_pre, prefix_bytes);
+
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        // CE B1-BF (α-ο) → CE 91-9F: second -0x20
+                        __m256i ce_b1_bf = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xB1, 0xE));
+                        upper = sz_haswell_mask_sub_(upper, ce_b1_bf, 0x20);
+
+                        // CE AC (ά) → CE 86: -0x26
+                        __m256i ce_ac = _mm256_and_si256(ce_second, sz_haswell_eq_(src, 0xAC));
+                        upper = sz_haswell_mask_sub_(upper, ce_ac, 0x26);
+
+                        // CE AD-AF (έ ή ί) → CE 88-8A: -0x25
+                        __m256i ce_ad_af = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xAD, 0x2));
+                        upper = sz_haswell_mask_sub_(upper, ce_ad_af, 0x25);
+
+                        // CF 80-8B (π-ϋ) → CE A0-AB: lead -1, second +0x20
+                        __m256i cf_80_8b = _mm256_and_si256(cf_second, sz_haswell_in_range_(src, 0x80, 0xB));
+                        upper = sz_haswell_mask_add_(upper, cf_80_8b, 0x20);
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_80_8b), 1);
+
+                        // CF 82 (final sigma ς) → CE A3 (Σ): +1 extra on the second byte (after +0x20)
+                        __m256i cf_82 = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x82));
+                        upper = sz_haswell_mask_add_(upper, cf_82, 1);
+
+                        // CF 8C (ό) → CE 8C (Ό): lead -1 only, second unchanged
+                        __m256i cf_8c = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x8C));
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_8c), 1);
+
+                        // CF 8D-8E (ύ ώ) → CE 8E-8F: lead -1, second +1
+                        __m256i cf_8d_8e = _mm256_and_si256(cf_second, sz_haswell_in_range_(src, 0x8D, 0x1));
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_8d_8e), 1);
+                        upper = sz_haswell_mask_add_(upper, cf_8d_8e, 1);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += gr_length, target_ptr += gr_length, source_length -= gr_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
         // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
         unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
         if (first_high) {
@@ -3349,6 +3423,65 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
                     sz_haswell_store32_(target_ptr, folded);
                     source_ptr += cyr_length, target_ptr += cyr_length, source_length -= cyr_length;
                     continue;
+                }
+            }
+        }
+
+        // (4) Greek (CE/CF) fold: basic bicameral letters plus final-sigma normalization.
+        //     CE 91-9F (Α-Ο)  → CE B1-BF (α-ο):  second +0x20
+        //     CE A0-AB (Π-Ϋ)  → CF 80-8B (π-ϋ):  lead +1, second -0x20  (A2 reserved; harmless to touch)
+        //     CF 82    (ς)    → CF 83    (σ):    second +1 (Final_Sigma normalisation)
+        //   Tonos, archaic, and symbol variants need per-rune handling — skip if any are present.
+        {
+            __m256i is_ce = sz_haswell_eq_(src, 0xCE);
+            __m256i is_cf = sz_haswell_eq_(src, 0xCF);
+            __m256i is_greek_lead = _mm256_or_si256(is_ce, is_cf);
+            sz_u32_t greek_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_greek_lead);
+            if (greek_lead_bits) {
+                __m256i greek_second = sz_haswell_byte_mask_shl1_(is_greek_lead);
+                __m256i ce_second_pre = sz_haswell_byte_mask_shl1_(is_ce);
+                __m256i cf_second_pre = sz_haswell_byte_mask_shl1_(is_cf);
+
+                // Skip if CE 90/B0 (SpecialCasing) or CF 90+ (symbols/archaic) appear in chunk.
+                __m256i is_ce_specialcasing = _mm256_and_si256(ce_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x90), sz_haswell_eq_(src, 0xB0)));
+                __m256i is_cf_tricky = _mm256_and_si256(cf_second_pre,
+                    sz_haswell_in_range_(src, 0x90, 0x2F));
+                sz_u32_t skip_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_or_si256(is_ce_specialcasing, is_cf_tricky));
+
+                if (!skip_bits) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_greek_lead), greek_second);
+                    sz_size_t gr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    if (gr_length && ((greek_lead_bits >> (gr_length - 1)) & 1u)) gr_length--;
+
+                    if (gr_length >= 2) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(gr_length);
+                        __m256i ce_second = _mm256_and_si256(ce_second_pre, prefix_bytes);
+                        __m256i cf_second = _mm256_and_si256(cf_second_pre, prefix_bytes);
+
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        // CE 91-9F → +0x20
+                        __m256i ce_91_9f = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0x91, 0xE));
+                        folded = sz_haswell_mask_add_(folded, ce_91_9f, 0x20);
+
+                        // CE A0-AB → lead +1, second -0x20
+                        __m256i ce_a0_ab = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xA0, 0xB));
+                        folded = sz_haswell_mask_sub_(folded, ce_a0_ab, 0x20);
+                        folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(ce_a0_ab), 1);
+
+                        // CF 82 (ς) → CF 83 (σ): +1
+                        __m256i cf_82 = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x82));
+                        folded = sz_haswell_mask_add_(folded, cf_82, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += gr_length, target_ptr += gr_length, source_length -= gr_length;
+                        continue;
+                    }
                 }
             }
         }
