@@ -2944,19 +2944,38 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t sourc
     __m256i const ascii_offset = _mm256_set1_epi8(0x20);
 
     while (source_length >= 32) {
-        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
-        // If any byte has the high bit set, the chunk has multi-byte UTF-8 — fall back per-rune.
-        if (_mm256_movemask_epi8(src) != 0) {
+        // Skip the SIMD load entirely when the chunk starts on a multi-byte rune — pure non-ASCII
+        // text otherwise pays a 32-byte load + movemask per codepoint with no transform applied.
+        if (*source_ptr >= 0x80) {
             sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
                                              sz_unicode_upper_codepoint_);
             continue;
         }
-        // Pure ASCII chunk: subtract 0x20 from each a-z. min_epu8 trick gives unsigned range check.
-        __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
-        __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
-        __m256i upper = _mm256_sub_epi8(src, delta);
-        _mm256_storeu_si256((__m256i *)target_ptr, upper);
-        source_ptr += 32, target_ptr += 32, source_length -= 32;
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        int high_bits = _mm256_movemask_epi8(src);
+
+        if (high_bits == 0) {
+            // Pure ASCII chunk: subtract 0x20 from each a-z. min_epu8 trick = unsigned range check.
+            __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
+            __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
+            __m256i upper = _mm256_sub_epi8(src, delta);
+            _mm256_storeu_si256((__m256i *)target_ptr, upper);
+            source_ptr += 32, target_ptr += 32, source_length -= 32;
+            continue;
+        }
+
+        unsigned int first_high = (unsigned int)__builtin_ctz((unsigned int)high_bits);
+        if (first_high) {
+            // Mixed chunk with a leading ASCII run — transform & store just that prefix.
+            __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
+            __m256i delta = _mm256_and_si256(is_lower, ascii_offset);
+            __m256i upper = _mm256_sub_epi8(src, delta);
+            _mm256_storeu_si256((__m256i *)target_ptr, upper);  // safe to over-store; we advance only `first_high`
+            source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
+        }
+        // Drain the multi-byte rune that starts at the first high-bit byte.
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_upper_codepoint_);
     }
 
     // Tail under 32 bytes: small ASCII inline loop, drain runes one-by-one as soon as we hit non-ASCII.
@@ -2979,18 +2998,36 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
     __m256i const ascii_offset = _mm256_set1_epi8(0x20);
 
     while (source_length >= 32) {
-        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
-        if (_mm256_movemask_epi8(src) != 0) {
+        // Skip the SIMD load entirely when the chunk starts on a multi-byte rune — pure non-ASCII
+        // text otherwise pays a 32-byte load + movemask per codepoint with no transform applied.
+        if (*source_ptr >= 0x80) {
             sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
                                              sz_unicode_fold_codepoint_);
             continue;
         }
-        // Pure ASCII chunk: A-Z → a-z, add 0x20 to each upper letter.
-        __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
-        __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
-        __m256i folded = _mm256_add_epi8(src, delta);
-        _mm256_storeu_si256((__m256i *)target_ptr, folded);
-        source_ptr += 32, target_ptr += 32, source_length -= 32;
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        int high_bits = _mm256_movemask_epi8(src);
+
+        if (high_bits == 0) {
+            // Pure ASCII chunk: A-Z → a-z, add 0x20 to each upper letter.
+            __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
+            __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
+            __m256i folded = _mm256_add_epi8(src, delta);
+            _mm256_storeu_si256((__m256i *)target_ptr, folded);
+            source_ptr += 32, target_ptr += 32, source_length -= 32;
+            continue;
+        }
+
+        unsigned int first_high = (unsigned int)__builtin_ctz((unsigned int)high_bits);
+        if (first_high) {
+            __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
+            __m256i delta = _mm256_and_si256(is_upper, ascii_offset);
+            __m256i folded = _mm256_add_epi8(src, delta);
+            _mm256_storeu_si256((__m256i *)target_ptr, folded);
+            source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_fold_codepoint_);
     }
 
     while (source_length) {
@@ -4507,17 +4544,12 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_le
             }
         }
 
-        // Latin-1 Supplement (C3): à-þ → À-Þ (excluding ß=0x9F which expands to SS,
-        // and ÿ=0xBF which has the irregular mapping ÿ → Ÿ at U+0178)
+        // Latin-1 Supplement (C3): à-þ → À-Þ, plus two in-place SIMD-friendly specials:
+        //   ß (C3 9F) → SS — second byte stays 2 bytes wide; just overwrite both with 'S'.
+        //   ÿ (C3 BF) → Ÿ (C5 B8) — lead +2, second -7; one masked add + sub.
         __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
         __mmask64 latin1_second_byte_positions = is_latin1_lead << 1;
-        // Stop before ß (C3 9F → SS via SpecialCasing) and ÿ (C3 BF → Ÿ irregular)
-        __mmask64 is_sharp_s = latin1_second_byte_positions &
-            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x9F));
-        __mmask64 is_y_diaeresis = latin1_second_byte_positions &
-            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBF));
         __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | latin1_second_byte_positions;
-        is_valid_latin1_mix &= ~(is_sharp_s | is_y_diaeresis);
         sz_size_t latin1_length = sz_ice_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
         latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1);
 
@@ -4528,7 +4560,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_le
             // ASCII a-z and Latin-1 à-þ (second byte 0xA0-0xBE excl. ÷=0xB7) get -0x20
             __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
                 _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
-            // Latin-1 lowercase: second byte 0xA0-0xBE (à-þ), excluding ÷ at 0xB7
             __mmask64 is_latin1_lower = _mm512_mask_cmpge_epu8_mask(latin1_second_bytes, source_vec.zmm,
                                                                      _mm512_set1_epi8((char)0xA0));
             is_latin1_lower &= _mm512_mask_cmple_epu8_mask(latin1_second_bytes, source_vec.zmm,
@@ -4538,6 +4569,18 @@ SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_le
 
             __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, (is_lower_ascii | is_latin1_lower) & prefix_mask,
                                                   source_vec.zmm, ascii_case_offset);
+
+            // ß: overwrite both lead C3 and the 9F with 'S' (UTF-8 narrows naturally from 2 bytes to 2).
+            __mmask64 is_sharp_s = latin1_second_bytes &
+                _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x9F));
+            upper = _mm512_mask_set1_epi8(upper, is_sharp_s | (is_sharp_s >> 1), 'S');
+
+            // ÿ → Ÿ: C3 BF → C5 B8. Lead +2, second -7.
+            __mmask64 is_y_diaeresis = latin1_second_bytes &
+                _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBF));
+            upper = _mm512_mask_add_epi8(upper, is_y_diaeresis >> 1, upper, _mm512_set1_epi8(2));
+            upper = _mm512_mask_sub_epi8(upper, is_y_diaeresis, upper, _mm512_set1_epi8(7));
+
             _mm512_mask_storeu_epi8(target, prefix_mask, upper);
             target += latin1_length, source += latin1_length, source_length -= latin1_length;
             continue;
