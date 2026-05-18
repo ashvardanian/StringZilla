@@ -130,6 +130,30 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
     sz_ptr_t destination);
 
 /**
+ *  @brief  Convert a UTF-8 string to uppercase using Full Unicode Case Mapping.
+ *
+ *  Applies the simple 1:1 mappings from UnicodeData.txt and the Unconditional Full mappings
+ *  from SpecialCasing.txt. Conditional mappings (Final_Sigma, After_Soft_Dotted, Lithuanian /
+ *  Turkic / Azeri locale rules) are NOT applied — uppercase is computed without context.
+ *
+ *  One source codepoint can produce up to 3 output codepoints, each up to 4 UTF-8 bytes. No ASCII
+ *  codepoint has a multi-codepoint uppercase mapping, so the realistic worst case is a 2-byte
+ *  Greek codepoint expanding into a 6-byte decomposed sequence (e.g. 'ΐ' → "Ϊ́"). Examples:
+ *      - 'ß' (2 B) → "SS" (2 B)
+ *      - 'ﬃ' (3 B) → "FFI" (3 B)
+ *      - 'ΐ' (2 B) → "Ϊ́" (6 B, decomposed) — the 6× ratio that bounds the output
+ *
+ *  @param source         Source UTF-8 string. Assumed valid; use `sz_utf8_valid` to validate.
+ *  @param source_length  Source length in bytes.
+ *  @param destination    Output buffer. Allocate `source_length * 6` bytes — enough for every
+ *                        valid UTF-8 input.
+ *  @return               Number of bytes written to `destination`.
+ */
+SZ_DYNAMIC sz_size_t sz_utf8_case_upper(       //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
+
+/**
  *  @brief  Case-insensitive substring search in UTF-8 strings.
  *
  *  In applications where the haystack remains largely static and memory/storage is cheap, it is recommended
@@ -307,6 +331,11 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(  //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_serial(  //
+    sz_cptr_t source, sz_size_t source_length, //
+    sz_ptr_t destination);
+
 /** @copydoc sz_utf8_case_insensitive_find */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
@@ -320,10 +349,26 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
 /** @copydoc sz_utf8_case_invariant */
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length);
 
+#if SZ_USE_HASWELL
+
+/** @copydoc sz_utf8_case_fold */
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+#endif
+
 #if SZ_USE_ICE
 
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_case_insensitive_find */
@@ -345,6 +390,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length);
 
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_case_upper */
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 
 /** @copydoc sz_utf8_case_insensitive_find */
@@ -855,10 +904,8 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         case 0xA7C9: folded[0] = 0xA7CA; return 1; // 'Ꟊ' (U+A7C9, EA 9F 89) → 'ꟊ' (U+A7CA, EA 9F 8A)
         case 0xA7CB: folded[0] = 0x0264; return 1; // 'Ɤ' (U+A7CB, EA 9F 8B) → 'ɤ' (U+0264, C9 A4)
         case 0xA7CC: folded[0] = 0xA7CD; return 1; // 'Ꟍ' (U+A7CC, EA 9F 8C) → 'ꟍ' (U+A7CD, EA 9F 8D)
-        case 0xA7CE: folded[0] = 0xA7CF; return 1; // '꟎' (U+A7CE, EA 9F 8E) → '꟏' (U+A7CF, EA 9F 8F)
+        // U+A7CE, U+A7D2, U+A7D4 are unassigned in Unicode 16.0 (Cn) — no case mapping exists.
         case 0xA7D0: folded[0] = 0xA7D1; return 1; // 'Ꟑ' (U+A7D0, EA 9F 90) → 'ꟑ' (U+A7D1, EA 9F 91)
-        case 0xA7D2: folded[0] = 0xA7D3; return 1; // '꟒' (U+A7D2, EA 9F 92) → 'ꟓ' (U+A7D3, EA 9F 93)
-        case 0xA7D4: folded[0] = 0xA7D5; return 1; // '꟔' (U+A7D4, EA 9F 94) → 'ꟕ' (U+A7D5, EA 9F 95)
         case 0xA7D6: folded[0] = 0xA7D7; return 1; // 'Ꟗ' (U+A7D6, EA 9F 96) → 'ꟗ' (U+A7D7, EA 9F 97)
         case 0xA7D8: folded[0] = 0xA7D9; return 1; // 'Ꟙ' (U+A7D8, EA 9F 98) → 'ꟙ' (U+A7D9, EA 9F 99)
         case 0xA7DA: folded[0] = 0xA7DB; return 1; // 'Ꟛ' (U+A7DA, EA 9F 9A) → 'ꟛ' (U+A7DB, EA 9F 9B)
@@ -1116,10 +1163,7 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
         sz_assert_(sz_is_in_range_(rune, 0x16E40, 0x16E5F));
         folded[0] = rune + 0x20; return 1; }
 
-    // Beria Erfe: 0x16EA0-0x16EB8 (+27)
-    if ((sz_u32_t)(rune - 0x16EA0) <= 0x18) {
-        sz_assert_(sz_is_in_range_(rune, 0x16EA0, 0x16EB8));
-        folded[0] = rune + 0x1B; return 1; }
+    // (0x16EA0-0x16EB8 is unassigned in Unicode 16.0 — intentionally left without a fold mapping.)
 
     // Adlam: 0x1E900-0x1E921 (+34)
     if ((sz_u32_t)(rune - 0x1E900) <= 0x21) {
@@ -1138,10 +1182,563 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
 }
 
 /**
+ *  @brief  Convert a Unicode codepoint to uppercase, applying both the simple 1:1 mappings
+ *          from UnicodeData.txt and the Unconditional Full mappings from SpecialCasing.txt.
+ *
+ *  Each input codepoint yields 1, 2, or 3 output codepoints. Examples:
+ *  - 'a' (U+0061) → 'A' (U+0041)                                 — 1 codepoint
+ *  - 'ß' (U+00DF) → "SS" (U+0053 U+0053)                         — 2 codepoints
+ *  - 'ﬃ' (U+FB03) → "FFI" (U+0046 U+0046 U+0049)                 — 3 codepoints
+ *  - 'ΐ' (U+0390) → "Ϊ́" (U+0399 U+0308 U+0301)                   — 3 codepoints (decomposed)
+ *
+ *  Conditional mappings (Final_Sigma, After_Soft_Dotted, locale-dependent Lithuanian/Turkic/Azeri)
+ *  are intentionally NOT applied — the function is context-free. Final sigma 'ς' (U+03C2) is
+ *  uppercased to 'Σ' (U+03A3) just like medial sigma.
+ *
+ *  @param[in]  rune   Input codepoint.
+ *  @param[out] upper  Output array, must hold at least 3 entries.
+ *  @return            Number of codepoints written (1-3).
+ */
+SZ_INTERNAL sz_size_t sz_unicode_upper_codepoint_(sz_rune_t rune, sz_rune_t *upper) {
+    // clang-format off
+
+    // ASCII a-z → A-Z
+    if (rune <= 0x7F) {
+        if ((sz_u32_t)(rune - 0x61) <= 25) {
+            upper[0] = rune - 0x20; return 1; }
+        upper[0] = rune; return 1;
+    }
+
+    // 2-byte UTF-8 (U+0080-07FF)
+    if (rune <= 0x7FF) {
+        // Cyrillic а-я (0x0430-0x044F) → А-Я (- 0x20)
+        if ((sz_u32_t)(rune - 0x0430) <= 0x1F) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Latin-1 à-þ (0x00E0-0x00FE) → À-Þ (- 0x20), excluding ÷ (0x00F7, math symbol, no case)
+        if ((sz_u32_t)(rune - 0x00E0) <= 0x1E && rune != 0x00F7) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Greek α-ρ (0x03B1-0x03C1) → Α-Ρ (- 0x20). Note: 0x03A2 is a reserved hole, but the
+        // lowercase side has no corresponding codepoint so the range is naturally well-formed.
+        if ((sz_u32_t)(rune - 0x03B1) <= 0x10) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Greek σ-ϋ (0x03C3-0x03CB) → Σ-Ϋ (- 0x20)
+        if ((sz_u32_t)(rune - 0x03C3) <= 0x8) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Cyrillic Supplement ѐ-џ (0x0450-0x045F) → Ѐ-Џ (- 0x50)
+        if ((sz_u32_t)(rune - 0x0450) <= 0xF) {
+            upper[0] = rune - 0x50; return 1; }
+
+        // Armenian ա-ֆ (0x0561-0x0586) → Ա-Ֆ (- 0x30)
+        if ((sz_u32_t)(rune - 0x0561) <= 0x25) {
+            upper[0] = rune - 0x30; return 1; }
+
+        // Greek tonos vowels έ-ί (0x03AD-0x03AF) → Έ-Ί (- 0x25)
+        if ((sz_u32_t)(rune - 0x03AD) <= 0x2) {
+            upper[0] = rune - 0x25; return 1; }
+
+        // Greek archaic ͻ-ͽ (0x037B-0x037D) → Ͻ-Ͽ (+ 0x82)
+        if ((sz_u32_t)(rune - 0x037B) <= 0x2) {
+            upper[0] = rune + 0x82; return 1; }
+
+        // Parity-based ranges: lowercase is the odd codepoint of each pair, uppercase = lower - 1.
+        sz_u32_t is_odd = (rune & 1);
+
+        // Latin Extended-A ā-į (0x0101-0x012F, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0101) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A ĳ-ķ (0x0133-0x0137, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0133) <= 0x4 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A ĺ-ň (0x013A-0x0148, even lowercase)
+        if ((sz_u32_t)(rune - 0x013A) <= 0xE && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A ŋ-ŷ (0x014B-0x0177, odd lowercase)
+        if ((sz_u32_t)(rune - 0x014B) <= 0x2C && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-A ź-ž (0x017A-0x017E, even lowercase)
+        if ((sz_u32_t)(rune - 0x017A) <= 0x4 && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ǎ-ǜ (0x01CE-0x01DC, even lowercase)
+        if ((sz_u32_t)(rune - 0x01CE) <= 0xE && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ǟ-ǯ (0x01DF-0x01EF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x01DF) <= 0x10 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ǹ-ǿ (0x01F9-0x01FF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x01F9) <= 0x6 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ȁ-ȟ (0x0201-0x021F, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0201) <= 0x1E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ȣ-ȳ (0x0223-0x0233, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0223) <= 0x10 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-B ɇ-ɏ (0x0247-0x024F, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0247) <= 0x8 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Greek archaic ͱ-ͳ (0x0371-0x0373, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0371) <= 0x2 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Greek archaic ϙ-ϯ (0x03D9-0x03EF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x03D9) <= 0x16 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Supplement ѡ-ҁ (0x0461-0x0481, odd lowercase). Includes U+0481 (ҁ → Ҁ).
+        if ((sz_u32_t)(rune - 0x0461) <= 0x20 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Supplement ҋ-ҿ (0x048B-0x04BF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x048B) <= 0x34 && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Supplement ӂ-ӎ (0x04C2-0x04CE, even lowercase)
+        if ((sz_u32_t)(rune - 0x04C2) <= 0xC && !is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Supplement ӑ-ӿ (0x04D1-0x04FF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x04D1) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Supplement ԁ-ԯ (0x0501-0x052F, odd lowercase)
+        if ((sz_u32_t)(rune - 0x0501) <= 0x2E && is_odd) {
+            upper[0] = rune - 1; return 1; }
+
+        // Irregular simple mappings and Unconditional SpecialCasing expansions.
+        switch (rune) {
+        case 0x00B5: upper[0] = 0x039C; return 1; // µ MICRO SIGN → Μ (Greek capital Mu)
+        case 0x00FF: upper[0] = 0x0178; return 1;
+        case 0x0131: upper[0] = 0x0049; return 1; // ı dotless i → I
+        case 0x017F: upper[0] = 0x0053; return 1; // long s → S
+        case 0x0180: upper[0] = 0x0243; return 1;
+        case 0x0183: upper[0] = 0x0182; return 1;
+        case 0x0185: upper[0] = 0x0184; return 1;
+        case 0x0188: upper[0] = 0x0187; return 1;
+        case 0x018C: upper[0] = 0x018B; return 1;
+        case 0x0192: upper[0] = 0x0191; return 1;
+        case 0x0195: upper[0] = 0x01F6; return 1;
+        case 0x0199: upper[0] = 0x0198; return 1;
+        case 0x019A: upper[0] = 0x023D; return 1;
+        case 0x019B: upper[0] = 0xA7DC; return 1;
+        case 0x019E: upper[0] = 0x0220; return 1;
+        case 0x01A1: upper[0] = 0x01A0; return 1;
+        case 0x01A3: upper[0] = 0x01A2; return 1;
+        case 0x01A5: upper[0] = 0x01A4; return 1;
+        case 0x01A8: upper[0] = 0x01A7; return 1;
+        case 0x01AD: upper[0] = 0x01AC; return 1;
+        case 0x01B0: upper[0] = 0x01AF; return 1;
+        case 0x01B4: upper[0] = 0x01B3; return 1;
+        case 0x01B6: upper[0] = 0x01B5; return 1;
+        case 0x01B9: upper[0] = 0x01B8; return 1;
+        case 0x01BD: upper[0] = 0x01BC; return 1;
+        case 0x01BF: upper[0] = 0x01F7; return 1;
+        case 0x01C5: upper[0] = 0x01C4; return 1; // ǅ titlecase → Ǆ
+        case 0x01C6: upper[0] = 0x01C4; return 1;
+        case 0x01C8: upper[0] = 0x01C7; return 1; // ǈ titlecase → Ǉ
+        case 0x01C9: upper[0] = 0x01C7; return 1;
+        case 0x01CB: upper[0] = 0x01CA; return 1; // ǋ titlecase → Ǌ
+        case 0x01CC: upper[0] = 0x01CA; return 1;
+        case 0x01DD: upper[0] = 0x018E; return 1;
+        case 0x01F2: upper[0] = 0x01F1; return 1; // ǲ titlecase → Ǳ
+        case 0x01F3: upper[0] = 0x01F1; return 1;
+        case 0x01F5: upper[0] = 0x01F4; return 1;
+        case 0x023C: upper[0] = 0x023B; return 1;
+        case 0x023F: upper[0] = 0x2C7E; return 1;
+        case 0x0240: upper[0] = 0x2C7F; return 1;
+        case 0x0242: upper[0] = 0x0241; return 1;
+        case 0x0250: upper[0] = 0x2C6F; return 1;
+        case 0x0251: upper[0] = 0x2C6D; return 1;
+        case 0x0252: upper[0] = 0x2C70; return 1;
+        case 0x0253: upper[0] = 0x0181; return 1;
+        case 0x0254: upper[0] = 0x0186; return 1;
+        case 0x0256: upper[0] = 0x0189; return 1;
+        case 0x0257: upper[0] = 0x018A; return 1;
+        case 0x0259: upper[0] = 0x018F; return 1;
+        case 0x025B: upper[0] = 0x0190; return 1;
+        case 0x025C: upper[0] = 0xA7AB; return 1;
+        case 0x0260: upper[0] = 0x0193; return 1;
+        case 0x0261: upper[0] = 0xA7AC; return 1;
+        case 0x0263: upper[0] = 0x0194; return 1;
+        case 0x0264: upper[0] = 0xA7CB; return 1;
+        case 0x0265: upper[0] = 0xA78D; return 1;
+        case 0x0266: upper[0] = 0xA7AA; return 1;
+        case 0x0268: upper[0] = 0x0197; return 1;
+        case 0x0269: upper[0] = 0x0196; return 1;
+        case 0x026A: upper[0] = 0xA7AE; return 1;
+        case 0x026B: upper[0] = 0x2C62; return 1;
+        case 0x026C: upper[0] = 0xA7AD; return 1;
+        case 0x026F: upper[0] = 0x019C; return 1;
+        case 0x0271: upper[0] = 0x2C6E; return 1;
+        case 0x0272: upper[0] = 0x019D; return 1;
+        case 0x0275: upper[0] = 0x019F; return 1;
+        case 0x027D: upper[0] = 0x2C64; return 1;
+        case 0x0280: upper[0] = 0x01A6; return 1;
+        case 0x0282: upper[0] = 0xA7C5; return 1;
+        case 0x0283: upper[0] = 0x01A9; return 1;
+        case 0x0287: upper[0] = 0xA7B1; return 1;
+        case 0x0288: upper[0] = 0x01AE; return 1;
+        case 0x0289: upper[0] = 0x0244; return 1;
+        case 0x028A: upper[0] = 0x01B1; return 1;
+        case 0x028B: upper[0] = 0x01B2; return 1;
+        case 0x028C: upper[0] = 0x0245; return 1;
+        case 0x0292: upper[0] = 0x01B7; return 1;
+        case 0x029D: upper[0] = 0xA7B2; return 1;
+        case 0x029E: upper[0] = 0xA7B0; return 1;
+        case 0x0345: upper[0] = 0x0399; return 1; // combining ypogegrammeni → Ι
+        case 0x0377: upper[0] = 0x0376; return 1;
+        case 0x03AC: upper[0] = 0x0386; return 1;
+        case 0x03C2: upper[0] = 0x03A3; return 1; // final sigma → Σ (Final_Sigma condition not applied —
+                                                  // both U+03C2 and U+03C3 always uppercase to Σ here)
+        case 0x03CC: upper[0] = 0x038C; return 1;
+        case 0x03CD: upper[0] = 0x038E; return 1;
+        case 0x03CE: upper[0] = 0x038F; return 1;
+        case 0x03D0: upper[0] = 0x0392; return 1; // β symbol → Β
+        case 0x03D1: upper[0] = 0x0398; return 1; // θ symbol → Θ
+        case 0x03D5: upper[0] = 0x03A6; return 1; // φ symbol → Φ
+        case 0x03D6: upper[0] = 0x03A0; return 1; // π symbol → Π
+        case 0x03D7: upper[0] = 0x03CF; return 1;
+        case 0x03F0: upper[0] = 0x039A; return 1; // κ symbol → Κ
+        case 0x03F1: upper[0] = 0x03A1; return 1; // ρ symbol → Ρ
+        case 0x03F2: upper[0] = 0x03F9; return 1;
+        case 0x03F3: upper[0] = 0x037F; return 1;
+        case 0x03F5: upper[0] = 0x0395; return 1; // ε lunate symbol → Ε
+        case 0x03F8: upper[0] = 0x03F7; return 1;
+        case 0x03FB: upper[0] = 0x03FA; return 1;
+        case 0x04CF: upper[0] = 0x04C0; return 1; // ӏ → Ӏ (Palochka, irregular)
+
+        // Unconditional Full mappings from SpecialCasing.txt
+        case 0x00DF: upper[0] = 0x0053; upper[1] = 0x0053; return 2;                      // ß → SS
+        case 0x0149: upper[0] = 0x02BC; upper[1] = 0x004E; return 2;                      // ŉ → ʼN
+        case 0x01F0: upper[0] = 0x004A; upper[1] = 0x030C; return 2;                      // ǰ → J + ̌
+        case 0x0390: upper[0] = 0x0399; upper[1] = 0x0308; upper[2] = 0x0301; return 3;   // ΐ → Ϊ + ́
+        case 0x03B0: upper[0] = 0x03A5; upper[1] = 0x0308; upper[2] = 0x0301; return 3;   // ΰ → Ϋ + ́
+        case 0x0587: upper[0] = 0x0535; upper[1] = 0x0552; return 2;                      // և → ԵՒ
+        }
+
+        upper[0] = rune; return 1;
+    }
+
+    // 3-byte UTF-8 (U+0800-FFFF)
+    if (rune <= 0xFFFF) {
+        // Georgian Nuskhuri (0x2D00-0x2D25) → Asomtavruli (0x10A0-0x10C5), -0x1C60
+        if ((sz_u32_t)(rune - 0x2D00) <= 0x25) {
+            upper[0] = rune - 0x1C60; return 1; }
+
+        // Georgian Mkhedruli (0x10D0-0x10FA) → Mtavruli (0x1C90-0x1CBA), +0xBC0
+        if ((sz_u32_t)(rune - 0x10D0) <= 0x2A) {
+            upper[0] = rune + 0xBC0; return 1; }
+
+        // Georgian Mkhedruli tail (0x10FD-0x10FF) → Mtavruli (0x1CBD-0x1CBF), +0xBC0
+        if ((sz_u32_t)(rune - 0x10FD) <= 0x2) {
+            upper[0] = rune + 0xBC0; return 1; }
+
+        // Cherokee small (0x13F8-0x13FD) → Cherokee capital (0x13F0-0x13F5), -0x8
+        if ((sz_u32_t)(rune - 0x13F8) <= 0x5) {
+            upper[0] = rune - 0x8; return 1; }
+
+        // Cherokee Supplement small (0xAB70-0xABBF) → Cherokee capital (0x13A0-0x13EF), -0x97D0
+        if ((sz_u32_t)(rune - 0xAB70) <= 0x4F) {
+            upper[0] = rune - 0x97D0; return 1; }
+
+        // Greek Extended small (+8 to uppercase). The block has eight contiguous runs of pairs
+        // separated by gaps (mainly missing 0x1F08 entries and reserved slots).
+        if (((sz_u32_t)(rune - 0x1F00) <= 0x7) || ((sz_u32_t)(rune - 0x1F10) <= 0x5) ||
+            ((sz_u32_t)(rune - 0x1F20) <= 0x7) || ((sz_u32_t)(rune - 0x1F30) <= 0x7) ||
+            ((sz_u32_t)(rune - 0x1F40) <= 0x5) || ((sz_u32_t)(rune - 0x1F60) <= 0x7)) {
+            upper[0] = rune + 0x8; return 1; }
+
+        // Greek Extended vowels with varia: ὲ-ή (0x1F72-0x1F75) → Ὲ-Ή (0x1FC8-0x1FCB), +0x56
+        if ((sz_u32_t)(rune - 0x1F72) <= 0x3) {
+            upper[0] = rune + 0x56; return 1; }
+
+        // Roman numeral smalls ⅰ-ⅿ (0x2170-0x217F) → Ⅰ-Ⅿ (0x2160-0x216F), -0x10
+        if ((sz_u32_t)(rune - 0x2170) <= 0xF) {
+            upper[0] = rune - 0x10; return 1; }
+
+        // Circled small ⓐ-ⓩ (0x24D0-0x24E9) → Ⓐ-Ⓩ (0x24B6-0x24CF), -0x1A
+        if ((sz_u32_t)(rune - 0x24D0) <= 0x19) {
+            upper[0] = rune - 0x1A; return 1; }
+
+        // Glagolitic small ⰰ-ⱟ (0x2C30-0x2C5F) → Ⰰ-Ⱟ (0x2C00-0x2C2F), -0x30
+        if ((sz_u32_t)(rune - 0x2C30) <= 0x2F) {
+            upper[0] = rune - 0x30; return 1; }
+
+        // Fullwidth small ａ-ｚ (0xFF41-0xFF5A) → Ａ-Ｚ (0xFF21-0xFF3A), -0x20
+        if ((sz_u32_t)(rune - 0xFF41) <= 0x19) {
+            upper[0] = rune - 0x20; return 1; }
+
+        // Parity-based ranges: lowercase is the odd codepoint of each pair, uppercase = lower - 1.
+        sz_u32_t is_odd_3 = (rune & 1);
+
+        // Latin Extended Additional ḁ-ẕ (0x1E01-0x1E95, odd lowercase). U+1E96-U+1E9A are skipped
+        // here because their case mapping is decomposed (handled in the switch below); 0x1E9B
+        // (long s with dot) and 0x1E9E (capital sharp s) are also outside the parity sweep.
+        if ((sz_u32_t)(rune - 0x1E01) <= 0x94 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended Additional (Vietnamese) ạ-ỿ (0x1EA1-0x1EFF, odd lowercase)
+        if ((sz_u32_t)(rune - 0x1EA1) <= 0x5E && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Coptic ⲁ-ⳣ (0x2C81-0x2CE3, odd lowercase)
+        if ((sz_u32_t)(rune - 0x2C81) <= 0x62 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Extended-B ꙁ-ꙭ (0xA641-0xA66D, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA641) <= 0x2C && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Cyrillic Extended-B ꚁ-ꚛ (0xA681-0xA69B, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA681) <= 0x1A && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ꜣ-ꜯ (0xA723-0xA72F, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA723) <= 0xC && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ꜳ-ꝯ (0xA733-0xA76F, odd lowercase). A730/A731 (small caps) are caseless,
+        // A732 is uppercase, so the parity pairs resume cleanly at A733.
+        if ((sz_u32_t)(rune - 0xA733) <= 0x3C && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ꝿ-ꞇ (0xA77F-0xA787, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA77F) <= 0x8 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ꞑ-ꞓ (0xA791-0xA793, odd lowercase). A795 is caseless and excluded.
+        if ((sz_u32_t)(rune - 0xA791) <= 0x2 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-D ꞗ-ꞩ (0xA797-0xA7A9, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA797) <= 0x12 && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Latin Extended-E ꞵ-ꟃ (0xA7B5-0xA7C3, odd lowercase)
+        if ((sz_u32_t)(rune - 0xA7B5) <= 0xE && is_odd_3) {
+            upper[0] = rune - 1; return 1; }
+
+        // Greek Extended with iota subscript: 1F80-1FAF maps to upper alpha/eta/omega + ι (U+0399).
+        // The lowercase block (1F80-1F87, 1F90-1F97, 1FA0-1FA7) and the titlecase block
+        // (1F88-1F8F, 1F98-1F9F, 1FA8-1FAF) both uppercase identically — strip the iota subscript,
+        // restore the bare capital from 1F08/1F28/1F68 + low 3 bits, then append U+0399.
+        if ((sz_u32_t)(rune - 0x1F80) <= 0x2F) {
+            sz_u32_t group = (rune >> 4) & 0x3;          // 0:1F8x, 1:1F9x, 2:1FAx
+            sz_u32_t base = (group == 0) ? 0x1F08 : (group == 1) ? 0x1F28 : 0x1F68;
+            upper[0] = base + (rune & 0x7);
+            upper[1] = 0x0399; return 2;
+        }
+
+        // 3-byte irregular and SpecialCasing mappings.
+        switch (rune) {
+        // Cyrillic Extended-C historical alternates (U+1C80-U+1C88)
+        case 0x1C80: upper[0] = 0x0412; return 1; // ᲀ → В
+        case 0x1C81: upper[0] = 0x0414; return 1; // ᲁ → Д
+        case 0x1C82: upper[0] = 0x041E; return 1; // ᲂ → О
+        case 0x1C83: upper[0] = 0x0421; return 1; // ᲃ → С
+        case 0x1C84: upper[0] = 0x0422; return 1; // ᲄ → Т
+        case 0x1C85: upper[0] = 0x0422; return 1; // ᲅ → Т
+        case 0x1C86: upper[0] = 0x042A; return 1; // ᲆ → Ъ
+        case 0x1C87: upper[0] = 0x0462; return 1; // ᲇ → Ѣ
+        case 0x1C88: upper[0] = 0xA64A; return 1; // ᲈ → Ꙋ
+        case 0x1C8A: upper[0] = 0x1C89; return 1;
+        case 0x1D79: upper[0] = 0xA77D; return 1;
+        case 0x1D7D: upper[0] = 0x2C63; return 1;
+        case 0x1D8E: upper[0] = 0xA7C6; return 1;
+        case 0x1E9B: upper[0] = 0x1E60; return 1; // long s with dot → Ṡ
+        case 0x1F51: upper[0] = 0x1F59; return 1;
+        case 0x1F53: upper[0] = 0x1F5B; return 1;
+        case 0x1F55: upper[0] = 0x1F5D; return 1;
+        case 0x1F57: upper[0] = 0x1F5F; return 1;
+        case 0x1F70: upper[0] = 0x1FBA; return 1;
+        case 0x1F71: upper[0] = 0x1FBB; return 1;
+        case 0x1F76: upper[0] = 0x1FDA; return 1;
+        case 0x1F77: upper[0] = 0x1FDB; return 1;
+        case 0x1F78: upper[0] = 0x1FF8; return 1;
+        case 0x1F79: upper[0] = 0x1FF9; return 1;
+        case 0x1F7A: upper[0] = 0x1FEA; return 1;
+        case 0x1F7B: upper[0] = 0x1FEB; return 1;
+        case 0x1F7C: upper[0] = 0x1FFA; return 1;
+        case 0x1F7D: upper[0] = 0x1FFB; return 1;
+        case 0x1FB0: upper[0] = 0x1FB8; return 1;
+        case 0x1FB1: upper[0] = 0x1FB9; return 1;
+        case 0x1FD0: upper[0] = 0x1FD8; return 1;
+        case 0x1FD1: upper[0] = 0x1FD9; return 1;
+        case 0x1FE0: upper[0] = 0x1FE8; return 1;
+        case 0x1FE1: upper[0] = 0x1FE9; return 1;
+        case 0x1FE5: upper[0] = 0x1FEC; return 1;
+        case 0x214E: upper[0] = 0x2132; return 1;
+        case 0x2184: upper[0] = 0x2183; return 1;
+        case 0x2C61: upper[0] = 0x2C60; return 1;
+        case 0x2C65: upper[0] = 0x023A; return 1;
+        case 0x2C66: upper[0] = 0x023E; return 1;
+        case 0x2C68: upper[0] = 0x2C67; return 1;
+        case 0x2C6A: upper[0] = 0x2C69; return 1;
+        case 0x2C6C: upper[0] = 0x2C6B; return 1;
+        case 0x1FBE: upper[0] = 0x0399; return 1; // Greek prosgegrammeni → Ι
+        case 0x2C73: upper[0] = 0x2C72; return 1;
+        case 0x2C76: upper[0] = 0x2C75; return 1;
+        case 0x2CEC: upper[0] = 0x2CEB; return 1;
+        case 0x2CEE: upper[0] = 0x2CED; return 1;
+        case 0x2CF3: upper[0] = 0x2CF2; return 1;
+        case 0x2D27: upper[0] = 0x10C7; return 1;
+        case 0x2D2D: upper[0] = 0x10CD; return 1;
+        case 0xA77A: upper[0] = 0xA779; return 1;
+        case 0xA77C: upper[0] = 0xA77B; return 1;
+        case 0xA78C: upper[0] = 0xA78B; return 1;
+        case 0xA794: upper[0] = 0xA7C4; return 1;
+        case 0xA7C8: upper[0] = 0xA7C7; return 1;
+        case 0xA7CA: upper[0] = 0xA7C9; return 1;
+        case 0xA7CD: upper[0] = 0xA7CC; return 1;
+        case 0xA7D1: upper[0] = 0xA7D0; return 1;
+        // U+A7CF, U+A7D3, U+A7D5 are caseless in Unicode 16.0 (Cn or Ll without an uppercase
+        // pair) — they must fall through to "upper = rune" rather than gain a synthetic mapping.
+        case 0xA7D7: upper[0] = 0xA7D6; return 1;
+        case 0xA7D9: upper[0] = 0xA7D8; return 1;
+        case 0xA7DB: upper[0] = 0xA7DA; return 1;
+        case 0xA7F6: upper[0] = 0xA7F5; return 1;
+        case 0xAB53: upper[0] = 0xA7B3; return 1;
+
+        // Unconditional Full mappings from SpecialCasing.txt — Latin Extended Additional
+        case 0x1E96: upper[0] = 0x0048; upper[1] = 0x0331; return 2;                      // ẖ → H + ̱
+        case 0x1E97: upper[0] = 0x0054; upper[1] = 0x0308; return 2;                      // ẗ → T + ̈
+        case 0x1E98: upper[0] = 0x0057; upper[1] = 0x030A; return 2;                      // ẘ → W + ̊
+        case 0x1E99: upper[0] = 0x0059; upper[1] = 0x030A; return 2;                      // ẙ → Y + ̊
+        case 0x1E9A: upper[0] = 0x0041; upper[1] = 0x02BE; return 2;                      // ẚ → A + ʾ
+
+        // Unconditional Full mappings from SpecialCasing.txt — Greek upsilon with psili
+        case 0x1F50: upper[0] = 0x03A5; upper[1] = 0x0313; return 2;                      // ὐ → Υ + ̓
+        case 0x1F52: upper[0] = 0x03A5; upper[1] = 0x0313; upper[2] = 0x0300; return 3;   // ὒ
+        case 0x1F54: upper[0] = 0x03A5; upper[1] = 0x0313; upper[2] = 0x0301; return 3;   // ὔ
+        case 0x1F56: upper[0] = 0x03A5; upper[1] = 0x0313; upper[2] = 0x0342; return 3;   // ὖ
+
+        // Unconditional Full mappings from SpecialCasing.txt — Greek with prosgegrammeni (iota subscript)
+        // Note: 1F80-1FAF handled by the loop above. Remaining cases below: 1FB2-1FB7, 1FBC, 1FC2-1FC7,
+        // 1FCC, 1FD2-1FD7, 1FE2-1FE7, 1FF2-1FF7, 1FFC.
+        case 0x1FB2: upper[0] = 0x1FBA; upper[1] = 0x0399; return 2;
+        case 0x1FB3: upper[0] = 0x0391; upper[1] = 0x0399; return 2;
+        case 0x1FB4: upper[0] = 0x0386; upper[1] = 0x0399; return 2;
+        case 0x1FB6: upper[0] = 0x0391; upper[1] = 0x0342; return 2;
+        case 0x1FB7: upper[0] = 0x0391; upper[1] = 0x0342; upper[2] = 0x0399; return 3;
+        case 0x1FBC: upper[0] = 0x0391; upper[1] = 0x0399; return 2;
+        case 0x1FC2: upper[0] = 0x1FCA; upper[1] = 0x0399; return 2;
+        case 0x1FC3: upper[0] = 0x0397; upper[1] = 0x0399; return 2;
+        case 0x1FC4: upper[0] = 0x0389; upper[1] = 0x0399; return 2;
+        case 0x1FC6: upper[0] = 0x0397; upper[1] = 0x0342; return 2;
+        case 0x1FC7: upper[0] = 0x0397; upper[1] = 0x0342; upper[2] = 0x0399; return 3;
+        case 0x1FCC: upper[0] = 0x0397; upper[1] = 0x0399; return 2;
+        case 0x1FD2: upper[0] = 0x0399; upper[1] = 0x0308; upper[2] = 0x0300; return 3;
+        case 0x1FD3: upper[0] = 0x0399; upper[1] = 0x0308; upper[2] = 0x0301; return 3;
+        case 0x1FD6: upper[0] = 0x0399; upper[1] = 0x0342; return 2;
+        case 0x1FD7: upper[0] = 0x0399; upper[1] = 0x0308; upper[2] = 0x0342; return 3;
+        case 0x1FE2: upper[0] = 0x03A5; upper[1] = 0x0308; upper[2] = 0x0300; return 3;
+        case 0x1FE3: upper[0] = 0x03A5; upper[1] = 0x0308; upper[2] = 0x0301; return 3;
+        case 0x1FE4: upper[0] = 0x03A1; upper[1] = 0x0313; return 2;
+        case 0x1FE6: upper[0] = 0x03A5; upper[1] = 0x0342; return 2;
+        case 0x1FE7: upper[0] = 0x03A5; upper[1] = 0x0308; upper[2] = 0x0342; return 3;
+        case 0x1FF2: upper[0] = 0x1FFA; upper[1] = 0x0399; return 2;
+        case 0x1FF3: upper[0] = 0x03A9; upper[1] = 0x0399; return 2;
+        case 0x1FF4: upper[0] = 0x038F; upper[1] = 0x0399; return 2;
+        case 0x1FF6: upper[0] = 0x03A9; upper[1] = 0x0342; return 2;
+        case 0x1FF7: upper[0] = 0x03A9; upper[1] = 0x0342; upper[2] = 0x0399; return 3;
+        case 0x1FFC: upper[0] = 0x03A9; upper[1] = 0x0399; return 2;
+
+        // Typographic ligatures → uppercase expansion
+        case 0xFB00: upper[0] = 0x0046; upper[1] = 0x0046; return 2;                              // ﬀ → FF
+        case 0xFB01: upper[0] = 0x0046; upper[1] = 0x0049; return 2;                              // ﬁ → FI
+        case 0xFB02: upper[0] = 0x0046; upper[1] = 0x004C; return 2;                              // ﬂ → FL
+        case 0xFB03: upper[0] = 0x0046; upper[1] = 0x0046; upper[2] = 0x0049; return 3;           // ﬃ → FFI
+        case 0xFB04: upper[0] = 0x0046; upper[1] = 0x0046; upper[2] = 0x004C; return 3;           // ﬄ → FFL
+        case 0xFB05: upper[0] = 0x0053; upper[1] = 0x0054; return 2;                              // ﬅ → ST
+        case 0xFB06: upper[0] = 0x0053; upper[1] = 0x0054; return 2;                              // ﬆ → ST
+
+        // Armenian ligatures
+        case 0xFB13: upper[0] = 0x0544; upper[1] = 0x0546; return 2;                              // ﬓ → ՄՆ
+        case 0xFB14: upper[0] = 0x0544; upper[1] = 0x0535; return 2;                              // ﬔ → ՄԵ
+        case 0xFB15: upper[0] = 0x0544; upper[1] = 0x053B; return 2;                              // ﬕ → ՄԻ
+        case 0xFB16: upper[0] = 0x054E; upper[1] = 0x0546; return 2;                              // ﬖ → ՎՆ
+        case 0xFB17: upper[0] = 0x0544; upper[1] = 0x053D; return 2;                              // ﬗ → ՄԽ
+        }
+
+        upper[0] = rune; return 1;
+    }
+
+    // 4-byte UTF-8 (U+10000+)
+    // Deseret small (0x10428-0x1044F) → Deseret capital (0x10400-0x10427), -0x28
+    if ((sz_u32_t)(rune - 0x10428) <= 0x27) {
+        upper[0] = rune - 0x28; return 1; }
+
+    // Osage small (0x104D8-0x104FB) → Osage capital (0x104B0-0x104D3), -0x28
+    if ((sz_u32_t)(rune - 0x104D8) <= 0x23) {
+        upper[0] = rune - 0x28; return 1; }
+
+    // Vithkuqi small → capital, -0x27. Three contiguous blocks separated by reserved slots
+    // (0x105A2 and 0x105B2). The two outliers 0x105BB-0x105BC fall through to the switch below.
+    if ((sz_u32_t)(rune - 0x10597) <= 0xA) {
+        upper[0] = rune - 0x27; return 1; }
+    if ((sz_u32_t)(rune - 0x105A3) <= 0xE) {
+        upper[0] = rune - 0x27; return 1; }
+    if ((sz_u32_t)(rune - 0x105B3) <= 0x6) {
+        upper[0] = rune - 0x27; return 1; }
+
+    // Old Hungarian small (0x10CC0-0x10CF2) → capital (0x10C80-0x10CB2), -0x40
+    if ((sz_u32_t)(rune - 0x10CC0) <= 0x32) {
+        upper[0] = rune - 0x40; return 1; }
+
+    // Garay small (0x10D70-0x10D85) → capital (0x10D50-0x10D65), -0x20
+    if ((sz_u32_t)(rune - 0x10D70) <= 0x15) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // Warang Citi small (0x118C0-0x118DF) → capital (0x118A0-0x118BF), -0x20
+    if ((sz_u32_t)(rune - 0x118C0) <= 0x1F) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // Medefaidrin small (0x16E60-0x16E7F) → capital (0x16E40-0x16E5F), -0x20
+    if ((sz_u32_t)(rune - 0x16E60) <= 0x1F) {
+        upper[0] = rune - 0x20; return 1; }
+
+    // (0x16EBB-0x16ED3 is unassigned in Unicode 16.0 and intentionally left without a mapping.)
+
+    // Adlam small (0x1E922-0x1E943) → capital (0x1E900-0x1E921), -0x22
+    if ((sz_u32_t)(rune - 0x1E922) <= 0x21) {
+        upper[0] = rune - 0x22; return 1; }
+
+    // 4-byte irregular mappings (Vithkuqi outliers past the contiguous block above)
+    switch (rune) {
+    case 0x105BB: upper[0] = 0x10594; return 1;
+    case 0x105BC: upper[0] = 0x10595; return 1;
+    }
+
+    upper[0] = rune; return 1;
+
+    // clang-format on
+}
+
+/**
  *  @brief  Branchless ASCII case fold - converts A-Z to a-z.
  *  Uses unsigned subtraction trick: (c - 'A') <= 25 is true only for uppercase letters.
  */
 SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
+
+/**
+ *  @brief  Branchless ASCII uppercase - converts a-z to A-Z.
+ *  Uses unsigned subtraction trick: (c - 'a') <= 25 is true only for lowercase letters.
+ */
+SZ_INTERNAL sz_u8_t sz_ascii_upper_(sz_u8_t c) { return c - (((sz_u8_t)(c - 'a') <= 25u) * 0x20); }
 
 /**
  *  @brief  Iterator state for streaming through folded UTF-8 runes.
@@ -2248,6 +2845,34 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
     return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
 }
 
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t const *source_end = source_ptr + source_length;
+    sz_u8_t *destination_ptr = (sz_u8_t *)destination;
+
+    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation is needed.
+    while (source_ptr < source_end) {
+        // ASCII fast-path: process consecutive ASCII bytes without UTF-8 decode/encode overhead.
+        // This handles ~95% of typical text content with minimal branching.
+        while (source_ptr < source_end && *source_ptr < 0x80) *destination_ptr++ = sz_ascii_upper_(*source_ptr++);
+        if (source_ptr >= source_end) break;
+
+        // Multi-byte UTF-8 sequence: use full decode/upper/encode path
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse((sz_cptr_t)source_ptr, &rune, &rune_length);
+        source_ptr += rune_length;
+
+        sz_rune_t upper_runes[3]; // Unicode uppercasing produces at most 3 runes (e.g., ﬃ → FFI)
+        sz_size_t upper_count = sz_unicode_upper_codepoint_(rune, upper_runes);
+        for (sz_size_t i = 0; i != upper_count; ++i)
+            destination_ptr += sz_rune_export(upper_runes[i], destination_ptr);
+    }
+
+    return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
+}
+
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                               sz_size_t b_length) {
     sz_utf8_folded_iter_t_ a_iterator, b_iterator;
@@ -2267,6 +2892,1224 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_si
 }
 
 #pragma endregion // Serial Implementation
+
+#pragma region Haswell Implementation
+#if SZ_USE_HASWELL
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx2,bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx2", "bmi", "bmi2")
+#endif
+
+/**
+ *  @brief  Helper for the Haswell case-changing kernels: drains a single non-ASCII rune through
+ *          the serial codepoint mapper and advances both `source` and `target` cursors.
+ *
+ *  The Haswell paths fast-track pure-ASCII chunks with AVX2 and fall back to the per-rune mapper
+ *  whenever the leading byte has the high bit set. Two helpers (upper/fold) share this driver via
+ *  a function-pointer argument so the same scaffolding handles both directions.
+ */
+SZ_INTERNAL void sz_utf8_case_haswell_drain_rune_(                  //
+    sz_u8_t const **source_ptr, sz_size_t *source_length_ptr,       //
+    sz_u8_t **target_ptr,                                           //
+    sz_size_t (*map_codepoint)(sz_rune_t, sz_rune_t *)) {
+    sz_rune_t rune;
+    sz_rune_length_t rune_length;
+    sz_rune_parse((sz_cptr_t)*source_ptr, &rune, &rune_length);
+    sz_rune_t mapped_runes[3];
+    sz_size_t mapped_count = map_codepoint(rune, mapped_runes);
+    for (sz_size_t i = 0; i != mapped_count; ++i)
+        *target_ptr += sz_rune_export(mapped_runes[i], *target_ptr);
+    *source_ptr += rune_length;
+    *source_length_ptr -= rune_length;
+}
+
+/**
+ *  @brief  Branchless YMM helper: for every byte, returns `0xFF` where the byte falls into the
+ *          unsigned interval `[low, low + span_minus_one]` and `0x00` elsewhere.
+ *
+ *  AVX2 has no native unsigned compare, so we use the `min_epu8` trick:
+ *  `(byte - low) <= span_minus_one`  is equivalent to  `min_epu8(byte - low, span_minus_one) == (byte - low)`.
+ */
+SZ_INTERNAL __m256i sz_haswell_in_range_(__m256i bytes, sz_u8_t low, sz_u8_t span_minus_one) {
+    __m256i shifted = _mm256_sub_epi8(bytes, _mm256_set1_epi8((char)low));
+    __m256i capped = _mm256_min_epu8(shifted, _mm256_set1_epi8((char)span_minus_one));
+    return _mm256_cmpeq_epi8(shifted, capped);
+}
+
+/**
+ *  @brief  Bytewise variant of cmpeq for a single constant: returns 0xFF where each byte equals `c`.
+ */
+SZ_INTERNAL __m256i sz_haswell_eq_(__m256i bytes, sz_u8_t c) {
+    return _mm256_cmpeq_epi8(bytes, _mm256_set1_epi8((char)c));
+}
+
+/**
+ *  @brief  Counterpart to `sz_ice_first_invalid_` for AVX2: convert the byte-wise validity mask
+ *          to a 32-bit bitmask, OR in the "outside chunk" positions, then count trailing zeros.
+ *
+ *  @param[in] valid_bytes  Byte mask: 0xFF where the byte is allowed in the fast path, 0x00 otherwise.
+ *  @param[in] load_mask    Lower-`chunk_size` bits are 1, the rest 0 (matches `sz_u64_mask_until_` style).
+ *  @param[in] chunk_size   Number of valid bytes in the loaded chunk (1..32).
+ */
+SZ_INTERNAL sz_size_t sz_haswell_first_invalid_(__m256i valid_bytes, sz_u32_t load_mask, sz_size_t chunk_size) {
+    sz_u32_t valid_bits = (sz_u32_t)_mm256_movemask_epi8(valid_bytes);
+    sz_u32_t invalid_mask = (~valid_bits) & load_mask;
+    if (!invalid_mask) return chunk_size;
+    return (sz_size_t)__builtin_ctz(invalid_mask);
+}
+
+/**
+ *  @brief  Shift the YMM byte vector left by one byte (each byte position increases by 1);
+ *          position 0 becomes 0.
+ *
+ *  Used to derive a "is this position one byte AFTER a lead byte" mask from a lead-byte mask.
+ *  AVX2 lacks a direct cross-lane byte shift, so we stitch two halves with `permute2x128` + `alignr`.
+ */
+SZ_INTERNAL __m256i sz_haswell_byte_mask_shl1_(__m256i mask) {
+    __m256i combined = _mm256_permute2x128_si256(_mm256_setzero_si256(), mask, 0x20);
+    return _mm256_alignr_epi8(mask, combined, 15);
+}
+
+/**
+ *  @brief  Shift the YMM byte vector right by one byte (each byte position decreases by 1);
+ *          position 31 becomes 0.
+ */
+SZ_INTERNAL __m256i sz_haswell_byte_mask_shr1_(__m256i mask) {
+    __m256i combined = _mm256_permute2x128_si256(mask, _mm256_setzero_si256(), 0x21);
+    return _mm256_alignr_epi8(combined, mask, 1);
+}
+
+/**
+ *  @brief  Conditional subtract: for every byte where `mask` is 0xFF, subtract `delta`; elsewhere keep `v`.
+ *
+ *  Emulates `_mm512_mask_sub_epi8` on AVX2 by computing the unconditional subtract and blending.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_sub_(__m256i v, __m256i mask, sz_u8_t delta) {
+    __m256i subbed = _mm256_sub_epi8(v, _mm256_set1_epi8((char)delta));
+    return _mm256_blendv_epi8(v, subbed, mask);
+}
+
+/**
+ *  @brief  Conditional add: for every byte where `mask` is 0xFF, add `delta`; elsewhere keep `v`.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_add_(__m256i v, __m256i mask, sz_u8_t delta) {
+    __m256i added = _mm256_add_epi8(v, _mm256_set1_epi8((char)delta));
+    return _mm256_blendv_epi8(v, added, mask);
+}
+
+/**
+ *  @brief  Conditional overwrite: for every byte where `mask` is 0xFF, replace with `c`; elsewhere keep `v`.
+ */
+SZ_INTERNAL __m256i sz_haswell_mask_set1_(__m256i v, __m256i mask, sz_u8_t c) {
+    return _mm256_blendv_epi8(v, _mm256_set1_epi8((char)c), mask);
+}
+
+/**
+ *  @brief  Store only the first `prefix_length` (<= 32) bytes of `v` to `dst`.
+ *
+ *  AVX2 has no direct byte-granular masked store. The simplest correct path for our case is to
+ *  store the full 32 bytes when prefix_length == 32, otherwise spill the prefix byte-by-byte —
+ *  but the fast paths only call this with prefix_length in [2..32], and a full 32-byte store is
+ *  always safe because the output buffer is sized to allow it (the surplus bytes are overwritten
+ *  on the next iteration). So we just emit the wide store and let the caller advance only by
+ *  `prefix_length`. This matches what the Latin-1 / Cyrillic / Greek branches in `_ice` do via
+ *  the `_mm512_mask_storeu_epi8` mechanism.
+ */
+SZ_INTERNAL void sz_haswell_store32_(sz_u8_t *dst, __m256i v) {
+    _mm256_storeu_si256((__m256i *)dst, v);
+}
+
+/**
+ *  @brief  Byte mask with 0xFF in positions [0, length) and 0 in [length, 32).
+ *
+ *  Built from the byte-index identity vector and a signed `cmpgt`; works for length in [0, 32].
+ */
+SZ_INTERNAL __m256i sz_haswell_prefix_bytes_(sz_size_t length) {
+    __m256i const idx = _mm256_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7,                  //
+                                          8, 9, 10, 11, 12, 13, 14, 15,           //
+                                          16, 17, 18, 19, 20, 21, 22, 23,         //
+                                          24, 25, 26, 27, 28, 29, 30, 31);
+    return _mm256_cmpgt_epi8(_mm256_set1_epi8((char)length), idx);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t *target_ptr = (sz_u8_t *)destination;
+
+    while (source_length >= 32) {
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        sz_u32_t high_bits = (sz_u32_t)_mm256_movemask_epi8(src);
+
+        // (1) Pure ASCII chunk: subtract 0x20 from each a-z.
+        if (high_bits == 0) {
+            __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_sub_(src, is_lower, 0x20));
+            source_ptr += 32, target_ptr += 32, source_length -= 32;
+            continue;
+        }
+
+        // (2) Latin-1 (C3): a-z → A-Z plus à-þ → À-Þ (excl. ÷); inline ß→SS and ÿ→Ÿ.
+        __m256i is_c3 = sz_haswell_eq_(src, 0xC3);
+        sz_u32_t c3_bits = (sz_u32_t)_mm256_movemask_epi8(is_c3);
+        if (c3_bits) {
+            __m256i c3_second = sz_haswell_byte_mask_shl1_(is_c3);
+            __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+            __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_c3), c3_second);
+            sz_size_t latin1_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+            // Strip hanging C3 lead at last position so we don't split a 2-byte rune.
+            if (latin1_length && ((c3_bits >> (latin1_length - 1)) & 1u)) latin1_length--;
+
+            if (latin1_length >= 2) {
+                __m256i prefix_bytes = sz_haswell_prefix_bytes_(latin1_length);
+
+                // ASCII a-z → A-Z and Latin-1 à-þ → À-Þ both use -0x20 on the relevant byte.
+                __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                // Latin-1 lowercase: second byte in 0xA0..0xBE excluding 0xB7 (÷).
+                __m256i is_latin1_range = sz_haswell_in_range_(src, 0xA0, 0xBE - 0xA0);
+                __m256i is_div = sz_haswell_eq_(src, 0xB7);
+                __m256i is_latin1_lower = _mm256_andnot_si256(is_div, is_latin1_range);
+                is_latin1_lower = _mm256_and_si256(is_latin1_lower, c3_second);
+
+                __m256i sub20_mask = _mm256_or_si256(is_lower_ascii, is_latin1_lower);
+                sub20_mask = _mm256_and_si256(sub20_mask, prefix_bytes);
+                __m256i upper = sz_haswell_mask_sub_(src, sub20_mask, 0x20);
+
+                // ß (C3 9F) → SS: overwrite both the lead C3 and the 9F with 'S'.
+                __m256i is_9f = _mm256_and_si256(sz_haswell_eq_(src, 0x9F), c3_second);
+                __m256i sharp_s_pair = _mm256_or_si256(is_9f, sz_haswell_byte_mask_shr1_(is_9f));
+                sharp_s_pair = _mm256_and_si256(sharp_s_pair, prefix_bytes);
+                upper = sz_haswell_mask_set1_(upper, sharp_s_pair, 'S');
+
+                // ÿ (C3 BF) → Ÿ (C5 B8): lead +2, second -7.
+                __m256i is_bf = _mm256_and_si256(sz_haswell_eq_(src, 0xBF), c3_second);
+                is_bf = _mm256_and_si256(is_bf, prefix_bytes);
+                __m256i is_y_lead = sz_haswell_byte_mask_shr1_(is_bf);
+                upper = sz_haswell_mask_add_(upper, is_y_lead, 2);
+                upper = sz_haswell_mask_sub_(upper, is_bf, 7);
+
+                sz_haswell_store32_(target_ptr, upper);
+                source_ptr += latin1_length, target_ptr += latin1_length, source_length -= latin1_length;
+                continue;
+            }
+        }
+
+        // (3) Cyrillic basic (D0/D1): а-я → А-Я. Lowercase forms split into three sub-ranges:
+        //     D0 B0-BF (а-п)  → D0 90-9F (А-П):  second -0x20
+        //     D1 80-8F (р-я)  → D0 A0-AF (Р-Я):  second +0x20, lead D1→D0 (-1)
+        //     D1 90-9F (ѐ-џ)  → D0 80-8F (Ѐ-Џ):  second -0x10, lead D1→D0 (-1)
+        //   D1 A0-BF is Cyrillic Supplement extended (parity-based) — excluded from this branch
+        //   so it can be picked up later by a dedicated D1-ext branch (TODO).
+        {
+            __m256i is_d0 = sz_haswell_eq_(src, 0xD0);
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_cyr_lead = _mm256_or_si256(is_d0, is_d1);
+            sz_u32_t cyr_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_cyr_lead);
+            if (cyr_lead_bits) {
+                __m256i cyr_second = sz_haswell_byte_mask_shl1_(is_cyr_lead);
+                __m256i d1_second = sz_haswell_byte_mask_shl1_(is_d1);
+                __m256i is_d1_ext = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0xA0, 0x1F));
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_cyr_lead), cyr_second);
+                valid = _mm256_andnot_si256(is_d1_ext, valid);
+                sz_size_t cyr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (cyr_length && ((cyr_lead_bits >> (cyr_length - 1)) & 1u)) cyr_length--;
+
+                if (cyr_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cyr_length);
+                    __m256i d0_second = sz_haswell_byte_mask_shl1_(is_d0);
+
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                    // D0 B0-BF → -0x20 on the second byte
+                    __m256i d0_lower = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0xB0, 0xF));
+                    upper = sz_haswell_mask_sub_(upper, _mm256_and_si256(d0_lower, prefix_bytes), 0x20);
+
+                    // D1 80-8F → second +0x20, lead -1
+                    __m256i d1_lower1 = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0x80, 0xF));
+                    d1_lower1 = _mm256_and_si256(d1_lower1, prefix_bytes);
+                    upper = sz_haswell_mask_add_(upper, d1_lower1, 0x20);
+                    upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(d1_lower1), 1);
+
+                    // D1 90-9F → second -0x10, lead -1
+                    __m256i d1_lower2 = _mm256_and_si256(d1_second, sz_haswell_in_range_(src, 0x90, 0xF));
+                    d1_lower2 = _mm256_and_si256(d1_lower2, prefix_bytes);
+                    upper = sz_haswell_mask_sub_(upper, d1_lower2, 0x10);
+                    upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(d1_lower2), 1);
+
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += cyr_length, target_ptr += cyr_length, source_length -= cyr_length;
+                    continue;
+                }
+            }
+        }
+
+        // (4) Greek (CE/CF): full set of bicameral transforms with tonos and sigma. Skip when the
+        //     chunk contains CE 90/B0 (SpecialCasing, ΐ/ΰ decompose) or CF 90+ (symbols / archaic
+        //     parity / irregular caps) — those need per-rune serial fallback.
+        {
+            __m256i is_ce = sz_haswell_eq_(src, 0xCE);
+            __m256i is_cf = sz_haswell_eq_(src, 0xCF);
+            __m256i is_greek_lead = _mm256_or_si256(is_ce, is_cf);
+            sz_u32_t greek_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_greek_lead);
+            if (greek_lead_bits) {
+                __m256i greek_second = sz_haswell_byte_mask_shl1_(is_greek_lead);
+                __m256i ce_second_pre = sz_haswell_byte_mask_shl1_(is_ce);
+                __m256i cf_second_pre = sz_haswell_byte_mask_shl1_(is_cf);
+
+                // Tricky bytes: CE 90, CE B0, CF 90..BF — defer to serial fallback if present.
+                __m256i is_ce_specialcasing = _mm256_and_si256(ce_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x90), sz_haswell_eq_(src, 0xB0)));
+                __m256i is_cf_tricky = _mm256_and_si256(cf_second_pre,
+                    sz_haswell_in_range_(src, 0x90, 0x2F));
+                sz_u32_t skip_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_or_si256(is_ce_specialcasing, is_cf_tricky));
+
+                if (!skip_bits) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_greek_lead), greek_second);
+                    sz_size_t gr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    if (gr_length && ((greek_lead_bits >> (gr_length - 1)) & 1u)) gr_length--;
+
+                    if (gr_length >= 2) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(gr_length);
+                        __m256i ce_second = _mm256_and_si256(ce_second_pre, prefix_bytes);
+                        __m256i cf_second = _mm256_and_si256(cf_second_pre, prefix_bytes);
+
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        // CE B1-BF (α-ο) → CE 91-9F: second -0x20
+                        __m256i ce_b1_bf = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xB1, 0xE));
+                        upper = sz_haswell_mask_sub_(upper, ce_b1_bf, 0x20);
+
+                        // CE AC (ά) → CE 86: -0x26
+                        __m256i ce_ac = _mm256_and_si256(ce_second, sz_haswell_eq_(src, 0xAC));
+                        upper = sz_haswell_mask_sub_(upper, ce_ac, 0x26);
+
+                        // CE AD-AF (έ ή ί) → CE 88-8A: -0x25
+                        __m256i ce_ad_af = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xAD, 0x2));
+                        upper = sz_haswell_mask_sub_(upper, ce_ad_af, 0x25);
+
+                        // CF 80-8B (π-ϋ) → CE A0-AB: lead -1, second +0x20
+                        __m256i cf_80_8b = _mm256_and_si256(cf_second, sz_haswell_in_range_(src, 0x80, 0xB));
+                        upper = sz_haswell_mask_add_(upper, cf_80_8b, 0x20);
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_80_8b), 1);
+
+                        // CF 82 (final sigma ς) → CE A3 (Σ): +1 extra on the second byte (after +0x20)
+                        __m256i cf_82 = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x82));
+                        upper = sz_haswell_mask_add_(upper, cf_82, 1);
+
+                        // CF 8C (ό) → CE 8C (Ό): lead -1 only, second unchanged
+                        __m256i cf_8c = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x8C));
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_8c), 1);
+
+                        // CF 8D-8E (ύ ώ) → CE 8E-8F: lead -1, second +1
+                        __m256i cf_8d_8e = _mm256_and_si256(cf_second, sz_haswell_in_range_(src, 0x8D, 0x1));
+                        upper = sz_haswell_mask_sub_(upper, sz_haswell_byte_mask_shr1_(cf_8d_8e), 1);
+                        upper = sz_haswell_mask_add_(upper, cf_8d_8e, 1);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += gr_length, target_ptr += gr_length, source_length -= gr_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (5) Cyrillic Supplement / Extended (D1 A0-BF, D2, D3, D4):
+        //     D1 A0-BF odd  → -1 (Cyrillic Supplement extended, U+0460-047F)
+        //     D2 81         → -1 (irregular ҁ→Ҁ)
+        //     D2 8B-BF odd  → -1 (parity, U+0480-04BF)
+        //     D3 82-8E even → -1 (parity)
+        //     D3 8F         → -0xF (irregular ӏ→Ӏ, U+04CF→U+04C0)
+        //     D3 91-BF odd  → -1 (parity, U+04D1-04FF)
+        //     D4 81-AF odd  → -1 (parity, U+0501-052F)
+        //   Combined into one branch since they all share the D-lead 2-byte structure and the
+        //   transform is always "-1 (or -0xF) on the second byte".
+        {
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_d2 = sz_haswell_eq_(src, 0xD2);
+            __m256i is_d3 = sz_haswell_eq_(src, 0xD3);
+            __m256i is_d4 = sz_haswell_eq_(src, 0xD4);
+            __m256i is_sup_lead = _mm256_or_si256(_mm256_or_si256(is_d1, is_d2),
+                                                   _mm256_or_si256(is_d3, is_d4));
+            sz_u32_t sup_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_sup_lead);
+            if (sup_lead_bits) {
+                __m256i sup_second = sz_haswell_byte_mask_shl1_(is_sup_lead);
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_sup_lead), sup_second);
+                sz_size_t sup_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (sup_length && ((sup_lead_bits >> (sup_length - 1)) & 1u)) sup_length--;
+
+                if (sup_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(sup_length);
+
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                    __m256i d1_second = sz_haswell_byte_mask_shl1_(is_d1);
+                    __m256i d2_second = sz_haswell_byte_mask_shl1_(is_d2);
+                    __m256i d3_second = sz_haswell_byte_mask_shl1_(is_d3);
+                    __m256i d4_second = sz_haswell_byte_mask_shl1_(is_d4);
+
+                    __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                    __m256i is_odd = _mm256_cmpeq_epi8(byte_and_1, _mm256_set1_epi8(1));
+                    __m256i is_even = _mm256_cmpeq_epi8(byte_and_1, _mm256_setzero_si256());
+
+                    __m256i d1_ext_lo = _mm256_and_si256(d1_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0xA0, 0x1F), is_odd));
+
+                    __m256i d2_81 = _mm256_and_si256(d2_second, sz_haswell_eq_(src, 0x81));
+                    __m256i d2_par = _mm256_and_si256(d2_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x8B, 0x34), is_odd));
+                    __m256i d2_lo = _mm256_or_si256(d2_81, d2_par);
+
+                    __m256i d3_lo1 = _mm256_and_si256(d3_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x82, 0xC), is_even));
+                    __m256i d3_lo2 = _mm256_and_si256(d3_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x91, 0x2E), is_odd));
+                    __m256i d3_lo = _mm256_or_si256(d3_lo1, d3_lo2);
+                    __m256i d3_8f = _mm256_and_si256(d3_second, sz_haswell_eq_(src, 0x8F));
+
+                    __m256i d4_lo = _mm256_and_si256(d4_second,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x81, 0x2E), is_odd));
+
+                    __m256i sub1_mask = _mm256_or_si256(
+                        _mm256_or_si256(d1_ext_lo, d2_lo), _mm256_or_si256(d3_lo, d4_lo));
+                    sub1_mask = _mm256_and_si256(sub1_mask, prefix_bytes);
+                    upper = sz_haswell_mask_sub_(upper, sub1_mask, 1);
+
+                    upper = sz_haswell_mask_sub_(upper, _mm256_and_si256(d3_8f, prefix_bytes), 0xF);
+
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += sup_length, target_ptr += sup_length, source_length -= sup_length;
+                    continue;
+                }
+            }
+        }
+
+        // (6) 3-byte caseless content fast path (CJK, Hangul, Hiragana, Katakana, Thai, Hindi, ...).
+        //     Bulk-copy with just ASCII a-z → A-Z. Skip if any bicameral 3-byte lead (E1/E2/EA/EF)
+        //     is present — those have their own dedicated branches below.
+        {
+            __m256i is_bicameral_lead = _mm256_or_si256(
+                _mm256_or_si256(sz_haswell_eq_(src, 0xE1), sz_haswell_eq_(src, 0xE2)),
+                _mm256_or_si256(sz_haswell_eq_(src, 0xEA), sz_haswell_eq_(src, 0xEF)));
+            if (!_mm256_movemask_epi8(is_bicameral_lead)) {
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i is_3byte_lead = sz_haswell_in_range_(src, 0xE0, 0xF);
+                __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_3byte_lead), is_cont);
+                sz_size_t cl_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                sz_u32_t leads3_bits = (sz_u32_t)_mm256_movemask_epi8(is_3byte_lead) &
+                    ((cl_length >= 32) ? 0xFFFFFFFFu : ((1u << cl_length) - 1));
+                if (leads3_bits) {
+                    int last_lead = 31 - __builtin_clz(leads3_bits);
+                    if (last_lead + 3 > (int)cl_length) cl_length = (sz_size_t)last_lead;
+                }
+                if (cl_length) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cl_length);
+                    __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                    __m256i upper = sz_haswell_mask_sub_(
+                        src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+                    sz_haswell_store32_(target_ptr, upper);
+                    source_ptr += cl_length, target_ptr += cl_length, source_length -= cl_length;
+                    continue;
+                }
+            }
+        }
+
+        // (7) Georgian Nuskhuri (E2 B4) → Asomtavruli (E1 82/83). 3-byte transformation:
+        //     E2 B4 80-9F → E1 82 A0-BF (lead E2→E1, second B4→82, third +0x20)
+        //     E2 B4 A0-A5 → E1 83 80-85 (lead E2→E1, second B4→83, third -0x20)
+        //   Skip if any E2 B4 third byte ≥ 0xA6 (irregular U+2D27, U+2D2D need serial fallback).
+        {
+            __m256i is_e2 = sz_haswell_eq_(src, 0xE2);
+            sz_u32_t e2_bits = (sz_u32_t)_mm256_movemask_epi8(is_e2);
+            if (e2_bits) {
+                __m256i e2_second_pre = sz_haswell_byte_mask_shl1_(is_e2);
+                __m256i has_b4 = _mm256_and_si256(e2_second_pre, sz_haswell_eq_(src, 0xB4));
+                if (_mm256_movemask_epi8(has_b4)) {
+                    // Skip if any E2 B4 third byte >= 0xA6 (irregular Asomtavruli mappings)
+                    __m256i b4_third_pre = sz_haswell_byte_mask_shl1_(has_b4);
+                    __m256i is_irregular = _mm256_and_si256(b4_third_pre,
+                        sz_haswell_in_range_(src, 0xA6, 0x59));  // 0xA6..0xFF (catch-all for any byte ≥ 0xA6)
+                    if (!_mm256_movemask_epi8(is_irregular)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e2), is_cont);
+                        sz_size_t nu_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e2_bits & ((nu_length >= 32) ? 0xFFFFFFFFu
+                                                                                  : ((1u << nu_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)nu_length) nu_length = (sz_size_t)last_lead;
+                        }
+
+                        if (nu_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(nu_length);
+
+                            __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                            __m256i upper = sz_haswell_mask_sub_(
+                                src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                            // Recompute the b4_third within the prefix.
+                            __m256i is_b4_in_prefix = _mm256_and_si256(has_b4, prefix_bytes);
+                            __m256i third_after_b4 = sz_haswell_byte_mask_shl1_(is_b4_in_prefix);
+
+                            // Range 1: third 80-9F → +0x20; lead E2→E1 (-1); second B4→82 (-0x32)
+                            __m256i is_range1 = _mm256_and_si256(third_after_b4,
+                                sz_haswell_in_range_(src, 0x80, 0x1F));
+                            upper = sz_haswell_mask_add_(upper, is_range1, 0x20);
+                            __m256i r1_second = sz_haswell_byte_mask_shr1_(is_range1);
+                            upper = sz_haswell_mask_sub_(upper, r1_second, 0x32);
+                            __m256i r1_lead = sz_haswell_byte_mask_shr1_(r1_second);
+                            upper = sz_haswell_mask_sub_(upper, r1_lead, 1);
+
+                            // Range 2: third A0-A5 → -0x20; lead E2→E1; second B4→83 (-0x31)
+                            __m256i is_range2 = _mm256_and_si256(third_after_b4,
+                                sz_haswell_in_range_(src, 0xA0, 0x5));
+                            upper = sz_haswell_mask_sub_(upper, is_range2, 0x20);
+                            __m256i r2_second = sz_haswell_byte_mask_shr1_(is_range2);
+                            upper = sz_haswell_mask_sub_(upper, r2_second, 0x31);
+                            __m256i r2_lead = sz_haswell_byte_mask_shr1_(r2_second);
+                            upper = sz_haswell_mask_sub_(upper, r2_lead, 1);
+
+                            sz_haswell_store32_(target_ptr, upper);
+                            source_ptr += nu_length, target_ptr += nu_length, source_length -= nu_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (8) Georgian Mkhedruli (E1 83 90-BA, BD-BF) → Mtavruli (E1 B2 ...). 3-byte branch:
+        //     second byte 0x83 → 0xB2 (+0x2F), lead and third unchanged. U+10FB/U+10FC (E1 83
+        //     BB/BC) are caseless paragraph separators — third-byte range excludes them.
+        //     Skip if any E1 lead is followed by non-0x83 (Cherokee E1 8E/8F, Latin Ext Add E1
+        //     B8-BB, Greek Extended E1 BC-BF) to avoid corrupting those scripts in mixed chunks.
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_unfiltered = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i has_e1_83 = _mm256_and_si256(e1_second_unfiltered, sz_haswell_eq_(src, 0x83));
+                if (_mm256_movemask_epi8(has_e1_83)) {
+                    __m256i is_83 = sz_haswell_eq_(src, 0x83);
+                    __m256i non_83_after_e1 = _mm256_andnot_si256(is_83, e1_second_unfiltered);
+                    __m256i e1_breaks_mkh = sz_haswell_byte_mask_shr1_(non_83_after_e1);
+
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                    valid = _mm256_andnot_si256(e1_breaks_mkh, valid);
+
+                    sz_size_t mkh_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = e1_bits & ((mkh_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << mkh_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)mkh_length) mkh_length = (sz_size_t)last_lead;
+                    }
+
+                    if (mkh_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(mkh_length);
+
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        __m256i e1_83_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_unfiltered, is_83), prefix_bytes);
+                        __m256i third_after_83 = sz_haswell_byte_mask_shl1_(e1_83_second);
+                        __m256i third_90_ba = _mm256_and_si256(third_after_83,
+                            sz_haswell_in_range_(src, 0x90, 0x2A));
+                        __m256i third_bd_bf = _mm256_and_si256(third_after_83,
+                            sz_haswell_in_range_(src, 0xBD, 0x2));
+                        __m256i is_mkh_third = _mm256_or_si256(third_90_ba, third_bd_bf);
+                        __m256i bump_mask = sz_haswell_byte_mask_shr1_(is_mkh_third);
+                        upper = sz_haswell_mask_add_(upper, bump_mask, 0x2F);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += mkh_length, target_ptr += mkh_length, source_length -= mkh_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (8.5) Mtavruli passthrough (E1 B2 90-BA, BD-BF). Already uppercase → upper(Mtavruli) =
+        //       Mtavruli. Triggers only when all E1 leads are followed by B2 AND all E1 B2 third
+        //       bytes are in the Mtavruli range (excludes Cyrillic Extended-C E1 B2 80..8F).
+        {
+            __m256i is_e1_mt = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits_mt = (sz_u32_t)_mm256_movemask_epi8(is_e1_mt);
+            if (e1_bits_mt) {
+                __m256i e1_second_mt = sz_haswell_byte_mask_shl1_(is_e1_mt);
+                __m256i is_b2_byte = sz_haswell_eq_(src, 0xB2);
+                __m256i has_e1_b2 = _mm256_and_si256(e1_second_mt, is_b2_byte);
+                __m256i non_b2_after_e1 = _mm256_andnot_si256(is_b2_byte, e1_second_mt);
+                if (_mm256_movemask_epi8(has_e1_b2) && !_mm256_movemask_epi8(non_b2_after_e1)) {
+                    __m256i e1_b2_third_pre = sz_haswell_byte_mask_shl1_(has_e1_b2);
+                    __m256i in_90_ba = _mm256_and_si256(e1_b2_third_pre,
+                        sz_haswell_in_range_(src, 0x90, 0x2A));
+                    __m256i in_bd_bf = _mm256_and_si256(e1_b2_third_pre,
+                        sz_haswell_in_range_(src, 0xBD, 0x2));
+                    __m256i is_safe_third = _mm256_or_si256(in_90_ba, in_bd_bf);
+                    __m256i is_out_of_mt = _mm256_andnot_si256(is_safe_third, e1_b2_third_pre);
+                    if (!_mm256_movemask_epi8(is_out_of_mt)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1_mt), is_cont);
+                        sz_size_t mt_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits_mt & ((mt_length >= 32) ? 0xFFFFFFFFu
+                                                                                     : ((1u << mt_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)mt_length) mt_length = (sz_size_t)last_lead;
+                        }
+                        if (mt_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(mt_length);
+                            __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                            __m256i upper = sz_haswell_mask_sub_(
+                                src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+                            sz_haswell_store32_(target_ptr, upper);
+                            source_ptr += mt_length, target_ptr += mt_length, source_length -= mt_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (9) Latin Extended Additional (E1 B8-BB) — Vietnamese + extended Latin diacritics.
+        //     Parity-based: odd third byte is lowercase, subtract 1 to get uppercase.
+        //     Skip if any E1 BA 96..9F appears (SpecialCasing decomposed + irregular like U+1E9B).
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i is_latin_ext_second = _mm256_and_si256(e1_second_pre,
+                    sz_haswell_in_range_(src, 0xB8, 0x3));  // B8, B9, BA, BB
+                if (_mm256_movemask_epi8(is_latin_ext_second)) {
+                    // Tricky third: E1 BA 96..9F
+                    __m256i is_ba_second = _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0xBA));
+                    __m256i ba_third = sz_haswell_byte_mask_shl1_(is_ba_second);
+                    __m256i is_tricky = _mm256_and_si256(ba_third, sz_haswell_in_range_(src, 0x96, 0x9));
+                    if (!_mm256_movemask_epi8(is_tricky)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                        sz_size_t lext_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits & ((lext_length >= 32) ? 0xFFFFFFFFu
+                                                                                    : ((1u << lext_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)lext_length) lext_length = (sz_size_t)last_lead;
+                        }
+
+                        if (lext_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(lext_length);
+                            __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                            __m256i upper = sz_haswell_mask_sub_(
+                                src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                            __m256i e1_second_in_prefix = _mm256_and_si256(e1_second_pre, prefix_bytes);
+                            __m256i is_lext_second = _mm256_and_si256(e1_second_in_prefix,
+                                sz_haswell_in_range_(src, 0xB8, 0x3));
+                            __m256i third_after_lext = sz_haswell_byte_mask_shl1_(is_lext_second);
+                            __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                            __m256i is_odd = _mm256_cmpeq_epi8(byte_and_1, _mm256_set1_epi8(1));
+                            __m256i is_lowercase = _mm256_and_si256(third_after_lext, is_odd);
+                            upper = sz_haswell_mask_sub_(upper, is_lowercase, 1);
+
+                            sz_haswell_store32_(target_ptr, upper);
+                            source_ptr += lext_length, target_ptr += lext_length, source_length -= lext_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (10) Fullwidth (EF BD 81-9A) → (EF BC A1-BA): third +0x20, second BD→BC (-1).
+        {
+            __m256i is_ef = sz_haswell_eq_(src, 0xEF);
+            sz_u32_t ef_bits = (sz_u32_t)_mm256_movemask_epi8(is_ef);
+            if (ef_bits) {
+                __m256i ef_second_pre = sz_haswell_byte_mask_shl1_(is_ef);
+                __m256i has_bd = _mm256_and_si256(ef_second_pre, sz_haswell_eq_(src, 0xBD));
+                if (_mm256_movemask_epi8(has_bd)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_ef), is_cont);
+                    sz_size_t fw_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = ef_bits & ((fw_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << fw_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)fw_length) fw_length = (sz_size_t)last_lead;
+                    }
+
+                    if (fw_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(fw_length);
+                        __m256i is_lower_ascii = sz_haswell_in_range_(src, 'a', 25);
+                        __m256i upper = sz_haswell_mask_sub_(
+                            src, _mm256_and_si256(is_lower_ascii, prefix_bytes), 0x20);
+
+                        __m256i has_bd_in_prefix = _mm256_and_si256(has_bd, prefix_bytes);
+                        __m256i third_after_bd = sz_haswell_byte_mask_shl1_(has_bd_in_prefix);
+                        __m256i is_az = _mm256_and_si256(third_after_bd, sz_haswell_in_range_(src, 0x81, 0x19));
+                        upper = sz_haswell_mask_add_(upper, is_az, 0x20);
+                        __m256i bd_to_bump = sz_haswell_byte_mask_shr1_(is_az);
+                        upper = sz_haswell_mask_sub_(upper, bd_to_bump, 1);
+
+                        sz_haswell_store32_(target_ptr, upper);
+                        source_ptr += fw_length, target_ptr += fw_length, source_length -= fw_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
+        if (first_high) {
+            __m256i is_lower = sz_haswell_in_range_(src, 'a', 25);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_sub_(src, is_lower, 0x20));
+            source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_upper_codepoint_);
+    }
+
+    // Tail < 32 bytes: byte-by-byte ASCII, drain runes one at a time on non-ASCII.
+    while (source_length) {
+        if (*source_ptr < 0x80) {
+            *target_ptr++ = sz_ascii_upper_(*source_ptr);
+            source_ptr++, source_length--;
+            continue;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_upper_codepoint_);
+    }
+
+    return (sz_size_t)(target_ptr - (sz_u8_t *)destination);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t *target_ptr = (sz_u8_t *)destination;
+
+    while (source_length >= 32) {
+        __m256i src = _mm256_loadu_si256((__m256i const *)source_ptr);
+        sz_u32_t high_bits = (sz_u32_t)_mm256_movemask_epi8(src);
+
+        // (1) Pure ASCII: add 0x20 to A-Z.
+        if (high_bits == 0) {
+            __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_add_(src, is_upper, 0x20));
+            source_ptr += 32, target_ptr += 32, source_length -= 32;
+            continue;
+        }
+
+        // (2) Latin-1 (C3): A-Z → a-z and À-Þ → à-þ (+0x20, excl. ×=0x97); inline ß→ss.
+        __m256i is_c3 = sz_haswell_eq_(src, 0xC3);
+        sz_u32_t c3_bits = (sz_u32_t)_mm256_movemask_epi8(is_c3);
+        if (c3_bits) {
+            __m256i c3_second = sz_haswell_byte_mask_shl1_(is_c3);
+            __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+            __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_c3), c3_second);
+            sz_size_t latin1_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+            if (latin1_length && ((c3_bits >> (latin1_length - 1)) & 1u)) latin1_length--;
+
+            if (latin1_length >= 2) {
+                __m256i prefix_bytes = sz_haswell_prefix_bytes_(latin1_length);
+
+                // ASCII A-Z and Latin-1 À-Þ both +0x20. Latin-1 upper second byte: 0x80..0x9E excl. 0x97 (×).
+                __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                __m256i is_latin1_range = sz_haswell_in_range_(src, 0x80, 0x9E - 0x80);
+                __m256i is_times = sz_haswell_eq_(src, 0x97);
+                __m256i is_latin1_upper = _mm256_andnot_si256(is_times, is_latin1_range);
+                is_latin1_upper = _mm256_and_si256(is_latin1_upper, c3_second);
+
+                __m256i add20_mask = _mm256_or_si256(is_upper_ascii, is_latin1_upper);
+                add20_mask = _mm256_and_si256(add20_mask, prefix_bytes);
+                __m256i folded = sz_haswell_mask_add_(src, add20_mask, 0x20);
+
+                // ß (C3 9F) → ss: overwrite both bytes with 's'.
+                __m256i is_9f = _mm256_and_si256(sz_haswell_eq_(src, 0x9F), c3_second);
+                __m256i sharp_s_pair = _mm256_or_si256(is_9f, sz_haswell_byte_mask_shr1_(is_9f));
+                sharp_s_pair = _mm256_and_si256(sharp_s_pair, prefix_bytes);
+                folded = sz_haswell_mask_set1_(folded, sharp_s_pair, 's');
+
+                sz_haswell_store32_(target_ptr, folded);
+                source_ptr += latin1_length, target_ptr += latin1_length, source_length -= latin1_length;
+                continue;
+            }
+        }
+
+        // (3) Cyrillic basic (D0/D1) fold: А-Я → а-я. Uppercase forms split into three sub-ranges:
+        //     D0 90-9F (А-П)  → D0 B0-BF (а-п):  second +0x20
+        //     D0 A0-AF (Р-Я)  → D1 80-8F (р-я):  second -0x20, lead D0→D1 (+1)
+        //     D0 80-8F (Ѐ-Џ)  → D1 90-9F (ѐ-џ):  second +0x10, lead D0→D1 (+1)
+        //   Exclude D1 (any second byte) since fold's D1 80-BF is already lowercase / extended.
+        {
+            __m256i is_d0 = sz_haswell_eq_(src, 0xD0);
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_cyr_lead = _mm256_or_si256(is_d0, is_d1);
+            sz_u32_t cyr_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_cyr_lead);
+            if (cyr_lead_bits) {
+                __m256i cyr_second = sz_haswell_byte_mask_shl1_(is_cyr_lead);
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_cyr_lead), cyr_second);
+                sz_size_t cyr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (cyr_length && ((cyr_lead_bits >> (cyr_length - 1)) & 1u)) cyr_length--;
+
+                if (cyr_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cyr_length);
+                    __m256i d0_second = sz_haswell_byte_mask_shl1_(is_d0);
+
+                    __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                    __m256i folded = sz_haswell_mask_add_(
+                        src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                    // D0 90-9F → second +0x20
+                    __m256i d0_upper1 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0x90, 0xF));
+                    folded = sz_haswell_mask_add_(folded, _mm256_and_si256(d0_upper1, prefix_bytes), 0x20);
+
+                    // D0 A0-AF → second -0x20, lead +1
+                    __m256i d0_upper2 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0xA0, 0xF));
+                    d0_upper2 = _mm256_and_si256(d0_upper2, prefix_bytes);
+                    folded = sz_haswell_mask_sub_(folded, d0_upper2, 0x20);
+                    folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(d0_upper2), 1);
+
+                    // D0 80-8F → second +0x10, lead +1
+                    __m256i d0_upper3 = _mm256_and_si256(d0_second, sz_haswell_in_range_(src, 0x80, 0xF));
+                    d0_upper3 = _mm256_and_si256(d0_upper3, prefix_bytes);
+                    folded = sz_haswell_mask_add_(folded, d0_upper3, 0x10);
+                    folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(d0_upper3), 1);
+
+                    sz_haswell_store32_(target_ptr, folded);
+                    source_ptr += cyr_length, target_ptr += cyr_length, source_length -= cyr_length;
+                    continue;
+                }
+            }
+        }
+
+        // (4) Greek (CE/CF) fold: basic bicameral letters plus final-sigma normalization.
+        //     CE 91-9F (Α-Ο)  → CE B1-BF (α-ο):  second +0x20
+        //     CE A0-AB (Π-Ϋ)  → CF 80-8B (π-ϋ):  lead +1, second -0x20  (A2 reserved; harmless to touch)
+        //     CF 82    (ς)    → CF 83    (σ):    second +1 (Final_Sigma normalisation)
+        //   Tonos, archaic, and symbol variants need per-rune handling — skip if any are present.
+        {
+            __m256i is_ce = sz_haswell_eq_(src, 0xCE);
+            __m256i is_cf = sz_haswell_eq_(src, 0xCF);
+            __m256i is_greek_lead = _mm256_or_si256(is_ce, is_cf);
+            sz_u32_t greek_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_greek_lead);
+            if (greek_lead_bits) {
+                __m256i greek_second = sz_haswell_byte_mask_shl1_(is_greek_lead);
+                __m256i ce_second_pre = sz_haswell_byte_mask_shl1_(is_ce);
+                __m256i cf_second_pre = sz_haswell_byte_mask_shl1_(is_cf);
+
+                // Skip if CE 90/B0 (SpecialCasing) or CF 90+ (symbols/archaic) appear in chunk.
+                __m256i is_ce_specialcasing = _mm256_and_si256(ce_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x90), sz_haswell_eq_(src, 0xB0)));
+                __m256i is_cf_tricky = _mm256_and_si256(cf_second_pre,
+                    sz_haswell_in_range_(src, 0x90, 0x2F));
+                sz_u32_t skip_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_or_si256(is_ce_specialcasing, is_cf_tricky));
+
+                if (!skip_bits) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_greek_lead), greek_second);
+                    sz_size_t gr_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    if (gr_length && ((greek_lead_bits >> (gr_length - 1)) & 1u)) gr_length--;
+
+                    if (gr_length >= 2) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(gr_length);
+                        __m256i ce_second = _mm256_and_si256(ce_second_pre, prefix_bytes);
+                        __m256i cf_second = _mm256_and_si256(cf_second_pre, prefix_bytes);
+
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        // CE 91-9F → +0x20
+                        __m256i ce_91_9f = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0x91, 0xE));
+                        folded = sz_haswell_mask_add_(folded, ce_91_9f, 0x20);
+
+                        // CE A0-AB → lead +1, second -0x20
+                        __m256i ce_a0_ab = _mm256_and_si256(ce_second, sz_haswell_in_range_(src, 0xA0, 0xB));
+                        folded = sz_haswell_mask_sub_(folded, ce_a0_ab, 0x20);
+                        folded = sz_haswell_mask_add_(folded, sz_haswell_byte_mask_shr1_(ce_a0_ab), 1);
+
+                        // CF 82 (ς) → CF 83 (σ): +1
+                        __m256i cf_82 = _mm256_and_si256(cf_second, sz_haswell_eq_(src, 0x82));
+                        folded = sz_haswell_mask_add_(folded, cf_82, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += gr_length, target_ptr += gr_length, source_length -= gr_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (5) Cyrillic Supplement / Extended fold (D1 A0-BE even, D2 80/8A-BE even, D3 81-8D odd,
+        //     D3 80→D3 8F irregular, D3 90-BE even, D4 80-AE even). Excludes D1 80-9F (basic
+        //     Cyrillic, handled above) and D4 B0+ (Armenian).
+        {
+            __m256i is_d1 = sz_haswell_eq_(src, 0xD1);
+            __m256i is_d2 = sz_haswell_eq_(src, 0xD2);
+            __m256i is_d3 = sz_haswell_eq_(src, 0xD3);
+            __m256i is_d4 = sz_haswell_eq_(src, 0xD4);
+            __m256i is_sup_lead = _mm256_or_si256(_mm256_or_si256(is_d1, is_d2),
+                                                   _mm256_or_si256(is_d3, is_d4));
+            sz_u32_t sup_lead_bits = (sz_u32_t)_mm256_movemask_epi8(is_sup_lead);
+            if (sup_lead_bits) {
+                __m256i sup_second_pre = sz_haswell_byte_mask_shl1_(is_sup_lead);
+                __m256i d1_second_pre = sz_haswell_byte_mask_shl1_(is_d1);
+                __m256i d4_second_pre = sz_haswell_byte_mask_shl1_(is_d4);
+                // Exclude D1 80-9F (basic Cyrillic) and D4 B0+ (Armenian) from valid mask.
+                __m256i is_d1_basic = _mm256_and_si256(d1_second_pre, sz_haswell_in_range_(src, 0x80, 0x1F));
+                __m256i is_d4_armenian = _mm256_and_si256(d4_second_pre,
+                    sz_haswell_in_range_(src, 0xB0, 0xF));
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_sup_lead), sup_second_pre);
+                valid = _mm256_andnot_si256(_mm256_or_si256(is_d1_basic, is_d4_armenian), valid);
+                sz_size_t sup_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                if (sup_length && ((sup_lead_bits >> (sup_length - 1)) & 1u)) sup_length--;
+
+                if (sup_length >= 2) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(sup_length);
+
+                    __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                    __m256i folded = sz_haswell_mask_add_(
+                        src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                    __m256i d1_after = _mm256_and_si256(d1_second_pre, prefix_bytes);
+                    __m256i d2_after = _mm256_and_si256(sz_haswell_byte_mask_shl1_(is_d2), prefix_bytes);
+                    __m256i d3_after = _mm256_and_si256(sz_haswell_byte_mask_shl1_(is_d3), prefix_bytes);
+                    __m256i d4_after = _mm256_and_si256(d4_second_pre, prefix_bytes);
+
+                    __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                    __m256i is_odd = _mm256_cmpeq_epi8(byte_and_1, _mm256_set1_epi8(1));
+                    __m256i is_even = _mm256_cmpeq_epi8(byte_and_1, _mm256_setzero_si256());
+
+                    // D1 A0-BE even
+                    __m256i d1_ext = _mm256_and_si256(d1_after,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0xA0, 0x1E), is_even));
+
+                    // D2 80 irregular + D2 8A-BE even
+                    __m256i d2_80 = _mm256_and_si256(d2_after, sz_haswell_eq_(src, 0x80));
+                    __m256i d2_par = _mm256_and_si256(d2_after,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x8A, 0x34), is_even));
+                    __m256i d2_up = _mm256_or_si256(d2_80, d2_par);
+
+                    // D3 81-8D odd
+                    __m256i d3_r1 = _mm256_and_si256(d3_after,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x81, 0xC), is_odd));
+                    // D3 80 irregular (Palochka)
+                    __m256i d3_80 = _mm256_and_si256(d3_after, sz_haswell_eq_(src, 0x80));
+                    // D3 90-BE even
+                    __m256i d3_r2 = _mm256_and_si256(d3_after,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x90, 0x2E), is_even));
+
+                    // D4 80-AE even
+                    __m256i d4_up = _mm256_and_si256(d4_after,
+                        _mm256_and_si256(sz_haswell_in_range_(src, 0x80, 0x2E), is_even));
+
+                    __m256i add1_mask = _mm256_or_si256(
+                        _mm256_or_si256(d1_ext, d2_up), _mm256_or_si256(d3_r1, _mm256_or_si256(d3_r2, d4_up)));
+                    folded = sz_haswell_mask_add_(folded, add1_mask, 1);
+                    folded = sz_haswell_mask_add_(folded, d3_80, 0x0F);
+
+                    sz_haswell_store32_(target_ptr, folded);
+                    source_ptr += sup_length, target_ptr += sup_length, source_length -= sup_length;
+                    continue;
+                }
+            }
+        }
+
+        // (6) 3-byte caseless content fast path (CJK, Hangul, Hiragana, Katakana, Thai, Hindi, ...).
+        //     Bulk-copy with just ASCII A-Z → a-z. Skip if any bicameral 3-byte lead (E1/E2/EA/EF)
+        //     is present — those have their own dedicated branches below.
+        {
+            __m256i is_bicameral_lead = _mm256_or_si256(
+                _mm256_or_si256(sz_haswell_eq_(src, 0xE1), sz_haswell_eq_(src, 0xE2)),
+                _mm256_or_si256(sz_haswell_eq_(src, 0xEA), sz_haswell_eq_(src, 0xEF)));
+            if (!_mm256_movemask_epi8(is_bicameral_lead)) {
+                __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                __m256i is_3byte_lead = sz_haswell_in_range_(src, 0xE0, 0xF);
+                __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_3byte_lead), is_cont);
+                sz_size_t cl_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                sz_u32_t leads3_bits = (sz_u32_t)_mm256_movemask_epi8(is_3byte_lead) &
+                    ((cl_length >= 32) ? 0xFFFFFFFFu : ((1u << cl_length) - 1));
+                if (leads3_bits) {
+                    int last_lead = 31 - __builtin_clz(leads3_bits);
+                    if (last_lead + 3 > (int)cl_length) cl_length = (sz_size_t)last_lead;
+                }
+                if (cl_length) {
+                    __m256i prefix_bytes = sz_haswell_prefix_bytes_(cl_length);
+                    __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                    __m256i folded = sz_haswell_mask_add_(
+                        src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+                    sz_haswell_store32_(target_ptr, folded);
+                    source_ptr += cl_length, target_ptr += cl_length, source_length -= cl_length;
+                    continue;
+                }
+            }
+        }
+
+        // (7) Georgian Asomtavruli (E1 82/83) → Nuskhuri (E2 B4). Inverse of upper Nuskhuri branch.
+        //     E1 82 A0-BF → E2 B4 80-9F: lead +1, second +0x32, third -0x20
+        //     E1 83 80-85 (also 87 and 8D irregular) → E2 B4 A0-A5: lead +1, second +0x31, third +0x20
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i has_82_or_83 = _mm256_and_si256(e1_second_pre,
+                    _mm256_or_si256(sz_haswell_eq_(src, 0x82), sz_haswell_eq_(src, 0x83)));
+                if (_mm256_movemask_epi8(has_82_or_83)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                    sz_size_t aso_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = e1_bits & ((aso_length >= 32) ? 0xFFFFFFFFu
+                                                                                : ((1u << aso_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)aso_length) aso_length = (sz_size_t)last_lead;
+                    }
+
+                    if (aso_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(aso_length);
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        __m256i is_82_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0x82)), prefix_bytes);
+                        __m256i is_83_second = _mm256_and_si256(
+                            _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0x83)), prefix_bytes);
+                        __m256i third_after_82 = sz_haswell_byte_mask_shl1_(is_82_second);
+                        __m256i third_after_83 = sz_haswell_byte_mask_shl1_(is_83_second);
+
+                        // Range 1: E1 82 A0-BF → E2 B4 80-9F: third -0x20, second +0x32, lead +1
+                        __m256i r1_third = _mm256_and_si256(third_after_82, sz_haswell_in_range_(src, 0xA0, 0x1F));
+                        folded = sz_haswell_mask_sub_(folded, r1_third, 0x20);
+                        __m256i r1_second = sz_haswell_byte_mask_shr1_(r1_third);
+                        folded = sz_haswell_mask_add_(folded, r1_second, 0x32);
+                        __m256i r1_lead = sz_haswell_byte_mask_shr1_(r1_second);
+                        folded = sz_haswell_mask_add_(folded, r1_lead, 1);
+
+                        // Range 2: E1 83 (80-85 / 87 / 8D) → E2 B4 (A0-A5 / A7 / AD): third +0x20,
+                        // second +0x31, lead +1. Combine 80-8D and rely on valid input not having
+                        // reserved 86/88-8C positions.
+                        __m256i r2_third = _mm256_and_si256(third_after_83, sz_haswell_in_range_(src, 0x80, 0xD));
+                        folded = sz_haswell_mask_add_(folded, r2_third, 0x20);
+                        __m256i r2_second = sz_haswell_byte_mask_shr1_(r2_third);
+                        folded = sz_haswell_mask_add_(folded, r2_second, 0x31);
+                        __m256i r2_lead = sz_haswell_byte_mask_shr1_(r2_second);
+                        folded = sz_haswell_mask_add_(folded, r2_lead, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += aso_length, target_ptr += aso_length, source_length -= aso_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (5.5) Mtavruli → Mkhedruli fold (E1 B2 90-BA, BD-BF → E1 83 ...). Inverse of Mkhedruli
+        //       upper: second byte B2 → 83 (-0x2F). Skip if E1 B2 third byte outside Mtavruli
+        //       range (E1 B2 80-8F = U+1C80-1C8F Cyrillic Extended-C with irregular folds; BB/BC
+        //       reserved) or any E1 lead has non-B2 second.
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i is_b2 = sz_haswell_eq_(src, 0xB2);
+                __m256i has_e1_b2 = _mm256_and_si256(e1_second_pre, is_b2);
+                if (_mm256_movemask_epi8(has_e1_b2)) {
+                    // Third byte after E1 B2 must be in [90..BA] ∪ [BD..BF].
+                    __m256i e1_b2_third_pre = sz_haswell_byte_mask_shl1_(has_e1_b2);
+                    __m256i in_90_ba = _mm256_and_si256(e1_b2_third_pre, sz_haswell_in_range_(src, 0x90, 0x2A));
+                    __m256i in_bd_bf = _mm256_and_si256(e1_b2_third_pre, sz_haswell_in_range_(src, 0xBD, 0x2));
+                    __m256i is_safe_third = _mm256_or_si256(in_90_ba, in_bd_bf);
+                    __m256i is_out_of_mt = _mm256_andnot_si256(is_safe_third, e1_b2_third_pre);
+                    if (!_mm256_movemask_epi8(is_out_of_mt)) {
+                        __m256i non_b2_after_e1 = _mm256_andnot_si256(is_b2, e1_second_pre);
+                        __m256i e1_breaks_mt = sz_haswell_byte_mask_shr1_(non_b2_after_e1);
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                        valid = _mm256_andnot_si256(e1_breaks_mt, valid);
+                        sz_size_t mt_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits & ((mt_length >= 32) ? 0xFFFFFFFFu
+                                                                                  : ((1u << mt_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)mt_length) mt_length = (sz_size_t)last_lead;
+                        }
+                        if (mt_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(mt_length);
+                            __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                            __m256i folded = sz_haswell_mask_add_(
+                                src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                            // Mark the B2 second byte to subtract 0x2F.
+                            __m256i e1_b2_in_prefix = _mm256_and_si256(has_e1_b2, prefix_bytes);
+                            __m256i third_after = sz_haswell_byte_mask_shl1_(e1_b2_in_prefix);
+                            __m256i third_90_ba = _mm256_and_si256(third_after,
+                                sz_haswell_in_range_(src, 0x90, 0x2A));
+                            __m256i third_bd_bf = _mm256_and_si256(third_after,
+                                sz_haswell_in_range_(src, 0xBD, 0x2));
+                            __m256i is_mt_third = _mm256_or_si256(third_90_ba, third_bd_bf);
+                            __m256i bump_mask = sz_haswell_byte_mask_shr1_(is_mt_third);
+                            folded = sz_haswell_mask_sub_(folded, bump_mask, 0x2F);
+
+                            sz_haswell_store32_(target_ptr, folded);
+                            source_ptr += mt_length, target_ptr += mt_length, source_length -= mt_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (6) Latin Extended Additional (E1 B8-BB) fold: even third byte is uppercase → +1.
+        //     Skip if E1 BA 96..9F appears (SpecialCasing decomposed targets in fold direction too).
+        {
+            __m256i is_e1 = sz_haswell_eq_(src, 0xE1);
+            sz_u32_t e1_bits = (sz_u32_t)_mm256_movemask_epi8(is_e1);
+            if (e1_bits) {
+                __m256i e1_second_pre = sz_haswell_byte_mask_shl1_(is_e1);
+                __m256i is_lext_second = _mm256_and_si256(e1_second_pre,
+                    sz_haswell_in_range_(src, 0xB8, 0x3));
+                if (_mm256_movemask_epi8(is_lext_second)) {
+                    __m256i is_ba_second = _mm256_and_si256(e1_second_pre, sz_haswell_eq_(src, 0xBA));
+                    __m256i ba_third = sz_haswell_byte_mask_shl1_(is_ba_second);
+                    __m256i is_tricky = _mm256_and_si256(ba_third, sz_haswell_in_range_(src, 0x96, 0x9));
+                    if (!_mm256_movemask_epi8(is_tricky)) {
+                        __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                        __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                        __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_e1), is_cont);
+                        sz_size_t lext_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                        sz_u32_t leads_in_prefix = e1_bits & ((lext_length >= 32) ? 0xFFFFFFFFu
+                                                                                    : ((1u << lext_length) - 1));
+                        if (leads_in_prefix) {
+                            int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                            if (last_lead + 3 > (int)lext_length) lext_length = (sz_size_t)last_lead;
+                        }
+
+                        if (lext_length >= 3) {
+                            __m256i prefix_bytes = sz_haswell_prefix_bytes_(lext_length);
+                            __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                            __m256i folded = sz_haswell_mask_add_(
+                                src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                            __m256i e1_second_in_prefix = _mm256_and_si256(e1_second_pre, prefix_bytes);
+                            __m256i is_lext_in = _mm256_and_si256(e1_second_in_prefix,
+                                sz_haswell_in_range_(src, 0xB8, 0x3));
+                            __m256i third_after = sz_haswell_byte_mask_shl1_(is_lext_in);
+                            __m256i byte_and_1 = _mm256_and_si256(src, _mm256_set1_epi8(1));
+                            __m256i is_even = _mm256_cmpeq_epi8(byte_and_1, _mm256_setzero_si256());
+                            __m256i is_uppercase = _mm256_and_si256(third_after, is_even);
+                            folded = sz_haswell_mask_add_(folded, is_uppercase, 1);
+
+                            sz_haswell_store32_(target_ptr, folded);
+                            source_ptr += lext_length, target_ptr += lext_length, source_length -= lext_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (7) Fullwidth fold: EF BC A1-BA (Ａ-Ｚ) → EF BD 81-9A (ａ-ｚ): second BC→BD (+1), third -0x20.
+        {
+            __m256i is_ef = sz_haswell_eq_(src, 0xEF);
+            sz_u32_t ef_bits = (sz_u32_t)_mm256_movemask_epi8(is_ef);
+            if (ef_bits) {
+                __m256i ef_second_pre = sz_haswell_byte_mask_shl1_(is_ef);
+                __m256i has_bc = _mm256_and_si256(ef_second_pre, sz_haswell_eq_(src, 0xBC));
+                if (_mm256_movemask_epi8(has_bc)) {
+                    __m256i is_ascii = sz_haswell_in_range_(src, 0, 0x7F);
+                    __m256i is_cont = sz_haswell_in_range_(src, 0x80, 0xBF - 0x80);
+                    __m256i valid = _mm256_or_si256(_mm256_or_si256(is_ascii, is_ef), is_cont);
+                    sz_size_t fw_length = sz_haswell_first_invalid_(valid, 0xFFFFFFFFu, 32);
+                    sz_u32_t leads_in_prefix = ef_bits & ((fw_length >= 32) ? 0xFFFFFFFFu
+                                                                              : ((1u << fw_length) - 1));
+                    if (leads_in_prefix) {
+                        int last_lead = 31 - __builtin_clz(leads_in_prefix);
+                        if (last_lead + 3 > (int)fw_length) fw_length = (sz_size_t)last_lead;
+                    }
+
+                    if (fw_length >= 3) {
+                        __m256i prefix_bytes = sz_haswell_prefix_bytes_(fw_length);
+                        __m256i is_upper_ascii = sz_haswell_in_range_(src, 'A', 25);
+                        __m256i folded = sz_haswell_mask_add_(
+                            src, _mm256_and_si256(is_upper_ascii, prefix_bytes), 0x20);
+
+                        __m256i has_bc_in_prefix = _mm256_and_si256(has_bc, prefix_bytes);
+                        __m256i third_after_bc = sz_haswell_byte_mask_shl1_(has_bc_in_prefix);
+                        __m256i is_AZ = _mm256_and_si256(third_after_bc, sz_haswell_in_range_(src, 0xA1, 0x19));
+                        folded = sz_haswell_mask_sub_(folded, is_AZ, 0x20);
+                        __m256i bc_to_bump = sz_haswell_byte_mask_shr1_(is_AZ);
+                        folded = sz_haswell_mask_add_(folded, bc_to_bump, 1);
+
+                        sz_haswell_store32_(target_ptr, folded);
+                        source_ptr += fw_length, target_ptr += fw_length, source_length -= fw_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // (last) Other multi-byte chunk: transform leading ASCII via SIMD, drain one rune via serial.
+        unsigned int first_high = (unsigned int)__builtin_ctz(high_bits);
+        if (first_high) {
+            __m256i is_upper = sz_haswell_in_range_(src, 'A', 25);
+            sz_haswell_store32_(target_ptr, sz_haswell_mask_add_(src, is_upper, 0x20));
+            source_ptr += first_high, target_ptr += first_high, source_length -= first_high;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_fold_codepoint_);
+    }
+
+    while (source_length) {
+        if (*source_ptr < 0x80) {
+            *target_ptr++ = sz_ascii_fold_(*source_ptr);
+            source_ptr++, source_length--;
+            continue;
+        }
+        sz_utf8_case_haswell_drain_rune_(&source_ptr, &source_length, &target_ptr,
+                                         sz_unicode_fold_codepoint_);
+    }
+
+    return (sz_size_t)(target_ptr - (sz_u8_t *)destination);
+}
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif            // SZ_USE_HASWELL
+#pragma endregion // Haswell Implementation
 
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
@@ -2863,6 +4706,95 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
             }
         }
 
+        // 2.4.5. Cyrillic Supplement / Extended fold (D1 A0-BF, D2, D3, D4 80-AF only)
+        //   D1 A0-BE even → +1     (U+0460-047F historical Slavonic)
+        //   D2 80          → +1     (U+0480 Ҁ → U+0481 ҁ, irregular)
+        //   D2 8A-BE even  → +1     (U+0480-04BF parity)
+        //   D3 80          → +0xF   (U+04C0 Ӏ Palochka → U+04CF ӏ, irregular)
+        //   D3 81-8D odd   → +1     (range 1: odd cap, even small)
+        //   D3 90-BE even  → +1     (range 2: even cap, odd small)
+        //   D4 80-AE even  → +1     (U+0500-052F parity). D4 B0+ is Armenian — excluded so the
+        //                            universal 2.5 path handles it.
+        {
+            __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
+            __mmask64 is_d2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD2));
+            __mmask64 is_d3_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD3));
+            __mmask64 is_d4_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD4));
+            __mmask64 is_sup_lead = is_d1_mask | is_d2_mask | is_d3_mask | is_d4_mask;
+            if (is_sup_lead) {
+                __mmask64 sup_second = is_sup_lead << 1;
+                // Exclude D4 B0+ (Armenian) and D1 80-9F (basic Cyrillic, handled by 2.2) from
+                // our valid mask so the chunk truncates before the universal path's territory.
+                __mmask64 is_d1_basic = (is_d1_mask << 1) &
+                    _mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+                __mmask64 is_d4_armenian = (is_d4_mask << 1) &
+                    _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB0));
+                __mmask64 is_valid_sup = (~is_non_ascii | is_sup_lead | sup_second) &
+                                          ~(is_d1_basic | is_d4_armenian);
+                sz_size_t sup_length = sz_ice_first_invalid_(is_valid_sup, load_mask, chunk_size);
+                sup_length -= sup_length && ((is_sup_lead >> (sup_length - 1)) & 1);
+
+                if (sup_length >= 2) {
+                    __mmask64 prefix_mask = sz_u64_mask_until_(sup_length);
+                    __mmask64 is_after_d1 = (is_d1_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d2 = (is_d2_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d3 = (is_d3_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d4 = (is_d4_mask << 1) & prefix_mask;
+
+                    __mmask64 is_upper_ascii = sz_ice_is_ascii_upper_(source_vec.zmm);
+                    __m512i folded = sz_ice_fold_ascii_(source_vec.zmm, is_upper_ascii, prefix_mask);
+
+                    __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                    __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                    __mmask64 is_even = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_setzero_si512());
+
+                    // D1 A0-BE even
+                    __mmask64 d1_ext = _mm512_mask_cmpge_epu8_mask(is_after_d1, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0xA0));
+                    d1_ext &= _mm512_mask_cmple_epu8_mask(d1_ext, source_vec.zmm, _mm512_set1_epi8((char)0xBE));
+                    d1_ext &= is_even;
+
+                    // D2 80 irregular + D2 8A-BE even
+                    __mmask64 d2_80 = _mm512_mask_cmpeq_epi8_mask(is_after_d2, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x80));
+                    __mmask64 d2_par = _mm512_mask_cmpge_epu8_mask(is_after_d2, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x8A));
+                    d2_par &= _mm512_mask_cmple_epu8_mask(d2_par, source_vec.zmm, _mm512_set1_epi8((char)0xBE));
+                    d2_par &= is_even;
+                    __mmask64 d2_up = d2_80 | d2_par;
+
+                    // D3 81-8D odd (range 1)
+                    __mmask64 d3_r1 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x81));
+                    d3_r1 &= _mm512_mask_cmple_epu8_mask(d3_r1, source_vec.zmm, _mm512_set1_epi8((char)0x8D));
+                    d3_r1 &= is_odd;
+
+                    // D3 80 irregular (Palochka)
+                    __mmask64 d3_80 = _mm512_mask_cmpeq_epi8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x80));
+
+                    // D3 90-BE even (range 2)
+                    __mmask64 d3_r2 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x90));
+                    d3_r2 &= _mm512_mask_cmple_epu8_mask(d3_r2, source_vec.zmm, _mm512_set1_epi8((char)0xBE));
+                    d3_r2 &= is_even;
+
+                    // D4 80-AE even
+                    __mmask64 d4_up = _mm512_mask_cmple_epu8_mask(is_after_d4, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0xAE));
+                    d4_up &= is_even;
+
+                    __mmask64 add1_mask = d1_ext | d2_up | d3_r1 | d3_r2 | d4_up;
+                    folded = _mm512_mask_add_epi8(folded, add1_mask, folded, _mm512_set1_epi8(1));
+                    folded = _mm512_mask_add_epi8(folded, d3_80, folded, _mm512_set1_epi8(0x0F));
+
+                    _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                    target += sup_length, source += sup_length, source_length -= sup_length;
+                    continue;
+                }
+            }
+        }
+
         // 2.5. Other 2-byte scripts (Latin Extended, Greek, Cyrillic, Armenian)
         //
         // Unlike Latin-1 where folding is a simple +0x20 to the second byte in-place, these scripts
@@ -3358,6 +5290,65 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
                 }
             }
 
+            // 3.3.5. Mtavruli → Mkhedruli fold (E1 B2 90-BA, BD-BF → E1 83 same third)
+            // Inverse of Mkhedruli upper: second byte B2 → 83 (-0x2F). Lead and third unchanged.
+            // Skip if any E1 B2 third byte is outside the Mtavruli range — codepoints like U+1C80..
+            // U+1C8F (Cyrillic Extended-C, E1 B2 80-8F) need irregular per-rune folds and must go
+            // through the serial fallback. Also skip if E1 lead has non-B2 second to avoid mixing
+            // with Cherokee / Latin Ext Add / Greek Ext / basic Mkhedruli (E1 83) chunks.
+            {
+                __mmask64 e1_second_pre = is_e1_lead << 1;
+                __mmask64 has_e1_b2 = e1_second_pre &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB2));
+                if (has_e1_b2) {
+                    __mmask64 is_b2 = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB2));
+                    // Third byte position after E1 B2 — check it's strictly in [90..BA] ∪ [BD..BF].
+                    __mmask64 e1_b2_third_pre = has_e1_b2 << 1;
+                    __mmask64 is_in_90_ba = _mm512_mask_cmpge_epu8_mask(e1_b2_third_pre, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0x90));
+                    is_in_90_ba &= _mm512_mask_cmple_epu8_mask(is_in_90_ba, source_vec.zmm,
+                                                                _mm512_set1_epi8((char)0xBA));
+                    __mmask64 is_in_bd_bf = _mm512_mask_cmpge_epu8_mask(e1_b2_third_pre, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0xBD));
+                    __mmask64 is_out_of_mt = e1_b2_third_pre & ~(is_in_90_ba | is_in_bd_bf);
+                    if (is_out_of_mt) goto mtavruli_skip_;
+                    __mmask64 non_b2_after_e1 = e1_second_pre & ~is_b2;
+                    __mmask64 e1_breaks_mt = non_b2_after_e1 >> 1;
+                    __mmask64 is_valid_mt =
+                        (~is_non_ascii | is_e1_lead | is_cont_mask) & ~e1_breaks_mt;
+                    sz_size_t mt_length = sz_ice_first_invalid_(is_valid_mt, load_mask, chunk_size);
+                    __mmask64 leads_in_mt = is_e1_lead & sz_u64_mask_until_(mt_length);
+                    if (leads_in_mt) {
+                        int last_lead = 63 - sz_u64_clz(leads_in_mt);
+                        if (last_lead + 3 > (int)mt_length) mt_length = (sz_size_t)last_lead;
+                    }
+                    if (mt_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(mt_length);
+                        __m512i folded = source_vec.zmm;
+                        folded = _mm512_mask_add_epi8(folded,
+                            sz_ice_is_ascii_upper_(source_vec.zmm) & prefix_mask,
+                            folded, ascii_case_offset);
+
+                        __mmask64 is_e1_b2_in = (is_e1_lead << 1) & prefix_mask & is_b2;
+                        __mmask64 third_pos = (is_e1_b2_in << 1) & prefix_mask;
+                        __mmask64 third_90_ba = _mm512_mask_cmpge_epu8_mask(third_pos, source_vec.zmm,
+                            _mm512_set1_epi8((char)0x90));
+                        third_90_ba &= _mm512_mask_cmple_epu8_mask(third_90_ba, source_vec.zmm,
+                            _mm512_set1_epi8((char)0xBA));
+                        __mmask64 third_bd_bf = _mm512_mask_cmpge_epu8_mask(third_pos, source_vec.zmm,
+                            _mm512_set1_epi8((char)0xBD));
+                        __mmask64 is_mt_third = third_90_ba | third_bd_bf;
+                        __mmask64 bump_mask = is_mt_third >> 1; // mark the B2 second byte
+                        folded = _mm512_mask_sub_epi8(folded, bump_mask, folded, _mm512_set1_epi8(0x2F));
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+                        target += mt_length, source += mt_length, source_length -= mt_length;
+                        continue;
+                    }
+                }
+            mtavruli_skip_:;
+            }
+
             // ┌──────────────────────────────────────────────────────────────────────────────┐
             // │ 3.4. Slow Path: Mixed 3-byte content with E1/E2/EF leads                      │
             // │                                                                               │
@@ -3663,6 +5654,694 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_ice(sz_cptr_t source, sz_size_t source_len
 #undef sz_ice_fold_ascii_
 #undef sz_ice_fold_ascii_in_prefix_
 #undef sz_ice_transform_georgian_
+
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_ice(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+    // This is the inverse of sz_utf8_case_fold_ice - converts lowercase to uppercase.
+    //
+    // Key inversions:
+    // 1. ASCII: a-z (0x61-0x7A) → A-Z (0x41-0x5A): subtract 0x20
+    // 2. Latin-1 (C3): à-þ (A0-BE) → À-Þ (80-9E): subtract 0x20 from second byte
+    // 3. Cyrillic (D0/D1):
+    //    - D0 B0-BF (а-п) → D0 90-9F (А-П): -0x20
+    //    - D1 80-8F (р-я) → D0 A0-AF (Р-Я): +0x20, D1→D0
+    //    - D1 90-9F (ѐ-џ) → D0 80-8F (Ѐ-Џ): -0x10, D1→D0
+    // 4. Greek (CE/CF):
+    //    - CE B1-BF (α-ο) → CE 91-9F (Α-Ο): -0x20
+    //    - CF 80-8B (π-ϋ) → CE A0-AB (Π-Ϋ): +0x20, CF→CE
+    // 5. Fullwidth: ａ-ｚ (EF BD 81-9A) → Ａ-Ｚ (EF BC A1-BA): -0x20 third, BD→BC
+    //
+    sz_u512_vec_t source_vec;
+    sz_ptr_t target_start = target;
+
+    __m512i const a_lower_vec = _mm512_set1_epi8('a');
+    __m512i const subtract26_vec = _mm512_set1_epi8(26);
+    __m512i const ascii_case_offset = _mm512_set1_epi8(0x20);
+
+    __m512i const utf8_cont_test_mask = _mm512_set1_epi8((char)0xC0);
+    __m512i const utf8_cont_pattern = _mm512_set1_epi8((char)0x80);
+    __m512i const utf8_3byte_test_mask = _mm512_set1_epi8((char)0xF0);
+    __m512i const utf8_3byte_pattern = _mm512_set1_epi8((char)0xE0);
+    __m512i const utf8_4byte_test_mask = _mm512_set1_epi8((char)0xF8);
+
+    while (source_length) {
+        _mm_prefetch(source + 1024, _MM_HINT_T1);
+        _mm_prefetch(source + 512, _MM_HINT_T0);
+
+        sz_size_t chunk_size = sz_min_of_two(source_length, 64);
+        __mmask64 load_mask = sz_u64_mask_until_(chunk_size);
+        source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source);
+        __mmask64 is_non_ascii = _mm512_movepi8_mask(source_vec.zmm);
+
+        // FAST PATH: Pure ASCII - uppercase a-z to A-Z
+        if (is_non_ascii == 0) {
+            __mmask64 is_lower = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+            __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower, source_vec.zmm, ascii_case_offset);
+            _mm512_mask_storeu_epi8(target, load_mask, upper);
+            target += chunk_size, source += chunk_size, source_length -= chunk_size;
+            continue;
+        }
+
+        // Compute lead byte masks
+        __m512i masked_cont = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_cont_test_mask, utf8_cont_test_mask, 0x80);
+        __m512i masked_3byte = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_3byte_test_mask, utf8_3byte_test_mask, 0x80);
+        __m512i masked_4byte = _mm512_ternarylogic_epi64(source_vec.zmm, utf8_4byte_test_mask, utf8_4byte_test_mask, 0x80);
+        __mmask64 is_cont_mask = _mm512_cmpeq_epi8_mask(masked_cont, utf8_cont_pattern);
+        __mmask64 is_three_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_3byte, utf8_3byte_pattern);
+        __mmask64 is_four_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_4byte, utf8_3byte_test_mask);
+
+        // Latin-1 Supplement (C3): à-þ → À-Þ, plus two in-place SIMD-friendly specials:
+        //   ß (C3 9F) → SS — second byte stays 2 bytes wide; just overwrite both with 'S'.
+        //   ÿ (C3 BF) → Ÿ (C5 B8) — lead +2, second -7; one masked add + sub.
+        __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
+        __mmask64 latin1_second_byte_positions = is_latin1_lead << 1;
+        __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | latin1_second_byte_positions;
+        sz_size_t latin1_length = sz_ice_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
+        latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1);
+
+        if (latin1_length >= 2) {
+            __mmask64 prefix_mask = sz_u64_mask_until_(latin1_length);
+            __mmask64 latin1_second_bytes = latin1_second_byte_positions & prefix_mask;
+
+            // ASCII a-z and Latin-1 à-þ (second byte 0xA0-0xBE excl. ÷=0xB7) get -0x20
+            __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+            __mmask64 is_latin1_lower = _mm512_mask_cmpge_epu8_mask(latin1_second_bytes, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0xA0));
+            is_latin1_lower &= _mm512_mask_cmple_epu8_mask(latin1_second_bytes, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xBE));
+            is_latin1_lower ^= _mm512_mask_cmpeq_epi8_mask(is_latin1_lower, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xB7)); // Exclude ÷
+
+            __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, (is_lower_ascii | is_latin1_lower) & prefix_mask,
+                                                  source_vec.zmm, ascii_case_offset);
+
+            // ß: overwrite both lead C3 and the 9F with 'S' (UTF-8 narrows naturally from 2 bytes to 2).
+            __mmask64 is_sharp_s = latin1_second_bytes &
+                _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x9F));
+            upper = _mm512_mask_set1_epi8(upper, is_sharp_s | (is_sharp_s >> 1), 'S');
+
+            // ÿ → Ÿ: C3 BF → C5 B8. Lead +2, second -7.
+            __mmask64 is_y_diaeresis = latin1_second_bytes &
+                _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBF));
+            upper = _mm512_mask_add_epi8(upper, is_y_diaeresis >> 1, upper, _mm512_set1_epi8(2));
+            upper = _mm512_mask_sub_epi8(upper, is_y_diaeresis, upper, _mm512_set1_epi8(7));
+
+            _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+            target += latin1_length, source += latin1_length, source_length -= latin1_length;
+            continue;
+        }
+
+        // Cyrillic (D0/D1): lowercase → uppercase
+        {
+            __mmask64 is_cyrillic_lead_mask = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xD0)), _mm512_set1_epi8(2));
+            __mmask64 is_d0_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD0));
+            __mmask64 is_d1_mask = _kand_mask64(is_cyrillic_lead_mask, _knot_mask64(is_d0_mask));
+            __mmask64 cyrillic_second_byte_positions = is_cyrillic_lead_mask << 1;
+
+            // Exclude D1 A0+ (Extended Cyrillic)
+            __mmask64 is_d1_extended_mask =
+                (is_d1_mask << 1) & _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+
+            __mmask64 is_valid_cyrillic_mix_mask =
+                ~is_non_ascii | is_cyrillic_lead_mask | cyrillic_second_byte_positions;
+            is_valid_cyrillic_mix_mask &= ~is_d1_extended_mask;
+            sz_size_t cyrillic_length = sz_ice_first_invalid_(is_valid_cyrillic_mix_mask, load_mask, chunk_size);
+            cyrillic_length -= cyrillic_length && ((is_cyrillic_lead_mask >> (cyrillic_length - 1)) & 1);
+
+            if (cyrillic_length >= 2) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(cyrillic_length);
+                __mmask64 is_after_d0_mask = (is_d0_mask << 1) & prefix_mask;
+                __mmask64 is_after_d1_mask = (is_d1_mask << 1) & prefix_mask;
+
+                // Start with source, apply ASCII uppercasing
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                // D0 B0-BF (а-п) → D0 90-9F (А-П): -0x20 to second byte
+                __mmask64 is_d0_lower_mask = _mm512_mask_cmpge_epu8_mask(is_after_d0_mask, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0xB0));
+                upper = _mm512_mask_sub_epi8(upper, is_d0_lower_mask, upper, _mm512_set1_epi8(0x20));
+
+                // D1 80-8F (р-я) → D0 A0-AF (Р-Я): +0x20 to second byte, D1→D0 for lead
+                __mmask64 is_d1_lower1_mask = _mm512_mask_cmplt_epu8_mask(is_after_d1_mask, source_vec.zmm,
+                                                                           _mm512_set1_epi8((char)0x90));
+                upper = _mm512_mask_add_epi8(upper, is_d1_lower1_mask, upper, _mm512_set1_epi8(0x20));
+                // Change lead byte D1→D0
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower1_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                // D1 90-9F (ѐ-џ) → D0 80-8F (Ѐ-Џ): -0x10 to second byte, D1→D0 for lead
+                __mmask64 is_d1_lower2_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_d1_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x90)),
+                    _mm512_set1_epi8(0x10));
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower2_mask, upper, _mm512_set1_epi8(0x10));
+                // Change lead byte D1→D0
+                upper = _mm512_mask_sub_epi8(upper, is_d1_lower2_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += cyrillic_length, source += cyrillic_length, source_length -= cyrillic_length;
+                continue;
+            }
+        }
+
+        // Greek (CE/CF): lowercase → uppercase
+        //   CE B1-BF (α-ο)        → CE 91-9F (Α-Ο):     -0x20
+        //   CE AC    (ά)          → CE 86    (Ά):       -0x26 (tonos alpha)
+        //   CE AD-AF (έ ή ί)      → CE 88-8A (Έ Ή Ί):   -0x25 (tonos vowels)
+        //   CF 80-8B (π-ϋ)        → CE A0-AB (Π-Ϋ):     CF→CE, second +0x20
+        //   CF 82    (ς, sigma)   → CE A3    (Σ):       CF→CE, second +0x21 (Final_Sigma not applied)
+        //   CF 8C    (ό)          → CE 8C    (Ό):       CF→CE, second unchanged (-0x40 net)
+        //   CF 8D-8E (ύ ώ)        → CE 8E-8F (Ύ Ώ):     CF→CE, second +1 (-0x3F net)
+        //   CE 90 (ΐ), CE B0 (ΰ): SpecialCasing decompose to 3 runes — handled by serial fallback.
+        {
+            __mmask64 is_greek_lead_mask = _mm512_cmplt_epu8_mask(
+                _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xCE)), _mm512_set1_epi8(2));
+            __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCE));
+            __mmask64 is_cf_mask = _kand_mask64(is_greek_lead_mask, _knot_mask64(is_ce_mask));
+            __mmask64 greek_second_byte_positions = is_greek_lead_mask << 1;
+
+            // Codepoints outside the fast-path coverage need serial fallback:
+            //   CE 90 (ΐ), CE B0 (ΰ)          — 3-rune SpecialCasing
+            //   CF 90..BF                     — Greek symbols (β/θ/φ/π/κ/ρ/ε variants), archaic
+            //                                   parity pairs (Ϙ-Ϯ), and irregular caps (Sho, San,
+            //                                   lunate sigma, yot, etc.) all live here
+            __mmask64 ce_unfiltered = (is_ce_mask << 1) & load_mask;
+            __mmask64 cf_unfiltered = (is_cf_mask << 1) & load_mask;
+            __mmask64 is_ce_specialcasing = ce_unfiltered &
+                (_mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x90)) |
+                 _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB0)));
+            __mmask64 is_cf_tricky = cf_unfiltered &
+                _mm512_mask_cmpge_epu8_mask(cf_unfiltered, source_vec.zmm, _mm512_set1_epi8((char)0x90));
+
+            __mmask64 is_valid_greek_mix_mask =
+                ~is_non_ascii | is_greek_lead_mask | greek_second_byte_positions;
+            sz_size_t greek_length = sz_ice_first_invalid_(is_valid_greek_mix_mask, load_mask, chunk_size);
+            greek_length -= greek_length && ((is_greek_lead_mask >> (greek_length - 1)) & 1);
+
+            if (greek_length >= 2 && !is_ce_specialcasing && !is_cf_tricky) {
+                __mmask64 prefix_mask = sz_u64_mask_until_(greek_length);
+                __mmask64 is_after_ce_mask = (is_ce_mask << 1) & prefix_mask;
+                __mmask64 is_after_cf_mask = (is_cf_mask << 1) & prefix_mask;
+
+                __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                      source_vec.zmm, ascii_case_offset);
+
+                __mmask64 is_ce_lower_mask = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, source_vec.zmm,
+                                                                          _mm512_set1_epi8((char)0xB1));
+                upper = _mm512_mask_sub_epi8(upper, is_ce_lower_mask, upper, _mm512_set1_epi8(0x20));
+
+                __mmask64 is_ce_ac = is_after_ce_mask &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xAC));
+                upper = _mm512_mask_sub_epi8(upper, is_ce_ac, upper, _mm512_set1_epi8(0x26));
+
+                __mmask64 is_ce_ad_af = _mm512_mask_cmpge_epu8_mask(is_after_ce_mask, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0xAD));
+                is_ce_ad_af &= _mm512_mask_cmple_epu8_mask(is_after_ce_mask, source_vec.zmm,
+                                                            _mm512_set1_epi8((char)0xAF));
+                upper = _mm512_mask_sub_epi8(upper, is_ce_ad_af, upper, _mm512_set1_epi8(0x25));
+
+                __mmask64 is_cf_lower_mask = _mm512_mask_cmplt_epu8_mask(
+                    is_after_cf_mask, _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                    _mm512_set1_epi8(0x0C));
+                upper = _mm512_mask_add_epi8(upper, is_cf_lower_mask, upper, _mm512_set1_epi8(0x20));
+                upper = _mm512_mask_sub_epi8(upper, is_cf_lower_mask >> 1, upper, _mm512_set1_epi8(1));
+
+                __mmask64 is_final_sigma = is_after_cf_mask &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x82));
+                upper = _mm512_mask_add_epi8(upper, is_final_sigma, upper, _mm512_set1_epi8(1));
+
+                __mmask64 is_cf_8c = is_after_cf_mask &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x8C));
+                upper = _mm512_mask_sub_epi8(upper, is_cf_8c >> 1, upper, _mm512_set1_epi8(1));
+
+                __mmask64 is_cf_8d_8e = _mm512_mask_cmpge_epu8_mask(is_after_cf_mask, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x8D));
+                is_cf_8d_8e &= _mm512_mask_cmple_epu8_mask(is_after_cf_mask, source_vec.zmm,
+                                                            _mm512_set1_epi8((char)0x8E));
+                upper = _mm512_mask_sub_epi8(upper, is_cf_8d_8e >> 1, upper, _mm512_set1_epi8(1));
+                upper = _mm512_mask_add_epi8(upper, is_cf_8d_8e, upper, _mm512_set1_epi8(1));
+
+                _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                target += greek_length, source += greek_length, source_length -= greek_length;
+                continue;
+            }
+        }
+
+        // Cyrillic Supplement / Extended (D1 A0-BF, D2, D3, D4): lowercase → uppercase.
+        //   D1 A0-BF odd  → -1 (Cyrillic Supplement extended, U+0460-047F)
+        //   D2 81         → -1 (irregular ҁ → Ҁ)
+        //   D2 8B-BF odd  → -1 (parity, U+0480-04BF)
+        //   D3 82-8E even → -1 (parity, range 1)
+        //   D3 8F         → -0xF (irregular ӏ → Ӏ, U+04CF → U+04C0)
+        //   D3 91-BF odd  → -1 (parity, range 2: U+04D1-04FF)
+        //   D4 81-AF odd  → -1 (parity, U+0501-052F)
+        // Combined into one branch since all four leads share the D-prefix structure and the
+        // transform is uniformly "-1 (or -0xF) on the second byte". Single mask computation
+        // processes mixed Cyrillic Supplement text in one chunk rather than four small advances.
+        {
+            __mmask64 is_d1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD1));
+            __mmask64 is_d2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD2));
+            __mmask64 is_d3_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD3));
+            __mmask64 is_d4_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD4));
+            __mmask64 is_sup_lead = is_d1_mask | is_d2_mask | is_d3_mask | is_d4_mask;
+            if (is_sup_lead) {
+                __mmask64 sup_second = is_sup_lead << 1;
+                // Exclude D1 80-9F (basic Cyrillic, handled above) from this branch's valid set.
+                __mmask64 is_d1_basic = (is_d1_mask << 1) &
+                    _mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xA0));
+                __mmask64 is_valid_sup = (~is_non_ascii | is_sup_lead | sup_second) & ~is_d1_basic;
+                sz_size_t sup_length = sz_ice_first_invalid_(is_valid_sup, load_mask, chunk_size);
+                sup_length -= sup_length && ((is_sup_lead >> (sup_length - 1)) & 1);
+
+                if (sup_length >= 2) {
+                    __mmask64 prefix_mask = sz_u64_mask_until_(sup_length);
+                    __mmask64 is_after_d1 = (is_d1_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d2 = (is_d2_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d3 = (is_d3_mask << 1) & prefix_mask;
+                    __mmask64 is_after_d4 = (is_d4_mask << 1) & prefix_mask;
+
+                    __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                        _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                    __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                          source_vec.zmm, ascii_case_offset);
+
+                    __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                    __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                    __mmask64 is_even = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_setzero_si512());
+
+                    // D1 A0-BF odd → -1
+                    __mmask64 d1_ext_lo = _mm512_mask_cmpge_epu8_mask(is_after_d1, source_vec.zmm,
+                                                                       _mm512_set1_epi8((char)0xA0));
+                    d1_ext_lo &= is_odd;
+
+                    // D2 81 irregular + D2 8B-BF odd
+                    __mmask64 d2_81 = _mm512_mask_cmpeq_epi8_mask(is_after_d2, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x81));
+                    __mmask64 d2_par = _mm512_mask_cmpge_epu8_mask(is_after_d2, source_vec.zmm,
+                                                                     _mm512_set1_epi8((char)0x8B));
+                    d2_par &= _mm512_mask_cmple_epu8_mask(d2_par, source_vec.zmm,
+                                                           _mm512_set1_epi8((char)0xBF));
+                    d2_par &= is_odd;
+                    __mmask64 d2_lo = d2_81 | d2_par;
+
+                    // D3 82-8E even (range 1) + D3 91-BF odd (range 2)
+                    __mmask64 d3_r1 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x82));
+                    d3_r1 &= _mm512_mask_cmple_epu8_mask(d3_r1, source_vec.zmm,
+                                                          _mm512_set1_epi8((char)0x8E));
+                    d3_r1 &= is_even;
+                    __mmask64 d3_r2 = _mm512_mask_cmpge_epu8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x91));
+                    d3_r2 &= _mm512_mask_cmple_epu8_mask(d3_r2, source_vec.zmm,
+                                                          _mm512_set1_epi8((char)0xBF));
+                    d3_r2 &= is_odd;
+                    __mmask64 d3_lo = d3_r1 | d3_r2;
+                    __mmask64 d3_8f = _mm512_mask_cmpeq_epi8_mask(is_after_d3, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0x8F));
+
+                    // D4 81-AF odd → -1
+                    __mmask64 d4_lo = _mm512_mask_cmple_epu8_mask(is_after_d4, source_vec.zmm,
+                                                                    _mm512_set1_epi8((char)0xAF));
+                    d4_lo &= is_odd;
+
+                    __mmask64 sub1_mask = d1_ext_lo | d2_lo | d3_lo | d4_lo;
+                    upper = _mm512_mask_sub_epi8(upper, sub1_mask, upper, _mm512_set1_epi8(1));
+                    upper = _mm512_mask_sub_epi8(upper, d3_8f, upper, _mm512_set1_epi8(0x0F));
+
+                    _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                    target += sup_length, source += sup_length, source_length -= sup_length;
+                    continue;
+                }
+            }
+        }
+
+        // 3-byte caseless fast path (CJK, Thai, Hindi, etc.)
+        // Bulk-copy with just ASCII a-z → A-Z. Skip if any bicameral 3-byte lead with case
+        // implications is present (E1, plus EA second 0x99-0x9F/0xAD-0xAE, plus EF, plus E2
+        // with second 0x80-0x83 catches Letterlike etc.) — those have dedicated branches below.
+        {
+            __mmask64 is_valid_pure_3byte_mask = is_three_byte_lead_mask | is_cont_mask;
+            if ((is_valid_pure_3byte_mask & load_mask) == (is_non_ascii & load_mask) && !is_four_byte_lead_mask) {
+                __mmask64 is_e1_e2_mask = _mm512_cmplt_epu8_mask(
+                    _mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xE1)), _mm512_set1_epi8(2));
+                __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+                __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+                __mmask64 is_e2_mask = _kand_mask64(is_e1_e2_mask, _knot_mask64(is_e1_mask));
+                __mmask64 e2_second_byte_positions = is_e2_mask << 1;
+                __mmask64 is_e2_upper_mask = e2_second_byte_positions &
+                    ~_mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                            _mm512_set1_epi8(0x04));
+                __mmask64 is_ea_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEA));
+                __mmask64 ea_second_byte_positions = is_ea_mask << 1;
+                __mmask64 is_ea_upper_mask = ea_second_byte_positions &
+                    (_mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x99)),
+                                            _mm512_set1_epi8(0x07)) |
+                     _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
+                                            _mm512_set1_epi8(0x02)));
+                if (!(is_e1_mask | is_e2_upper_mask | is_ea_upper_mask | is_ef_mask)) {
+                    sz_size_t copy_len = chunk_size;
+                    __mmask64 leads_in_chunk_mask = is_three_byte_lead_mask & load_mask;
+                    if (leads_in_chunk_mask) {
+                        int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_mask);
+                        if (last_lead_pos + 3 > (int)copy_len) copy_len = last_lead_pos;
+                    }
+                    if (copy_len > 0) {
+                        __mmask64 copy_mask = sz_u64_mask_until_(copy_len);
+                        __mmask64 is_lower = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower & copy_mask,
+                                                             source_vec.zmm, ascii_case_offset);
+                        _mm512_mask_storeu_epi8(target, copy_mask, upper);
+                        target += copy_len, source += copy_len, source_length -= copy_len;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Georgian lowercase (E2 B4) → uppercase (E1 82/83)
+        // Inverse of fold: E1 82 A0-BF → E2 B4 80-9F, E1 83 80-85 → E2 B4 A0-A5
+        // For upper: E2 B4 80-9F → E1 82 A0-BF, E2 B4 A0-A5 → E1 83 80-85
+        {
+            __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE2));
+            if (is_e2_mask) {
+                __mmask64 e2_second_positions = is_e2_mask << 1;
+                // Check for B4 second byte (Georgian lowercase range)
+                __mmask64 is_b4_second = e2_second_positions &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB4));
+
+                // Skip fast path if any Nuskhuri third byte is in the irregular tail (E2 B4 A6+):
+                //   U+2D27 → U+10C7 and U+2D2D → U+10CD are switch-table mappings the parallel
+                //   ranges-based transform below does not cover.
+                __mmask64 is_b4_second_unfiltered = (is_e2_mask << 1) & load_mask &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB4));
+                __mmask64 nuskhuri_third_unfiltered = (is_b4_second_unfiltered << 1) & load_mask;
+                __mmask64 is_nuskhuri_irregular = nuskhuri_third_unfiltered &
+                    _mm512_mask_cmpge_epu8_mask(nuskhuri_third_unfiltered, source_vec.zmm,
+                                                 _mm512_set1_epi8((char)0xA6));
+
+                if (is_b4_second && !is_nuskhuri_irregular) {
+                    __mmask64 is_valid_georgian = ~is_non_ascii | is_e2_mask | is_cont_mask;
+                    sz_size_t georgian_length = sz_ice_first_invalid_(is_valid_georgian, load_mask, chunk_size);
+                    // Trim hanging 3-byte runes (lead in last 2 bytes of chunk) — see Mkhedruli note.
+                    {
+                        __mmask64 leads_e2 = is_e2_mask & sz_u64_mask_until_(georgian_length);
+                        if (leads_e2) {
+                            int last_lead_pos = 63 - sz_u64_clz(leads_e2);
+                            if (last_lead_pos + 3 > (int)georgian_length) georgian_length = last_lead_pos;
+                        }
+                    }
+
+                    if (georgian_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(georgian_length);
+                        __mmask64 is_after_e2_mask = (is_e2_mask << 1) & prefix_mask;
+                        __mmask64 third_positions = (is_e2_mask << 2) & prefix_mask;
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Check if B4 second byte (only process Georgian lowercase)
+                        __mmask64 is_georgian_lower = is_after_e2_mask &
+                            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB4));
+
+                        // Third byte 80-9F → E1 82 A0-BF (add 0x20 to third, change E2→E1, B4→82)
+                        // Third byte A0-A5 → E1 83 80-85 (subtract 0x20 from third, change E2→E1, B4→83)
+                        __mmask64 third_after_b4 = (is_georgian_lower << 1) & prefix_mask;
+                        __mmask64 is_range1 = third_after_b4 &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x80)),
+                                                   _mm512_set1_epi8(0x20)); // 80-9F
+                        __mmask64 is_range2 = third_after_b4 &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xA0)),
+                                                   _mm512_set1_epi8(0x06)); // A0-A5
+
+                        // Transform range1: third +0x20, lead E2→E1, second B4→82
+                        upper = _mm512_mask_add_epi8(upper, is_range1, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_range1 >> 2, upper, _mm512_set1_epi8(1)); // E2→E1
+                        upper = _mm512_mask_sub_epi8(upper, is_range1 >> 1, upper, _mm512_set1_epi8(0x32)); // B4→82
+
+                        // Transform range2: third -0x20, lead E2→E1, second B4→83
+                        upper = _mm512_mask_sub_epi8(upper, is_range2, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_range2 >> 2, upper, _mm512_set1_epi8(1)); // E2→E1
+                        upper = _mm512_mask_sub_epi8(upper, is_range2 >> 1, upper, _mm512_set1_epi8(0x31)); // B4→83
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += georgian_length, source += georgian_length, source_length -= georgian_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Georgian Mkhedruli (E1 83 90-BA, BD-BF) → Mtavruli (E1 B2 90-BA, BD-BF)
+        // The mapping is purely "second byte 83 → B2"; lead and third byte are preserved.
+        // U+10FB and U+10FC (E1 83 BB/BC, paragraph separator and modifier-nar) are caseless
+        // and intentionally skipped. To keep mixed-E1 chunks safe (Cherokee E1 8E/8F, Greek
+        // Extended E1 BC-BF, Latin Extended Additional E1 B8-BB), we cut the fast path at
+        // any E1 lead whose second byte is not 0x83.
+        {
+            __mmask64 is_e1_mask_g = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+            __mmask64 has_83_second_g = (is_e1_mask_g << 1) & load_mask &
+                _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x83));
+            if (has_83_second_g) {
+                __mmask64 after_e1_g = (is_e1_mask_g << 1) & load_mask;
+                __mmask64 non_83_after_e1 = after_e1_g & ~_mm512_cmpeq_epi8_mask(
+                    source_vec.zmm, _mm512_set1_epi8((char)0x83));
+                __mmask64 e1_breaks_mkhedruli = non_83_after_e1 >> 1; // the E1 lead itself
+
+                __mmask64 is_valid_mkhedruli =
+                    (~is_non_ascii | is_e1_mask_g | is_cont_mask) & ~e1_breaks_mkhedruli;
+                sz_size_t mkhedruli_length = sz_ice_first_invalid_(is_valid_mkhedruli, load_mask, chunk_size);
+                {
+                    __mmask64 leads_g = is_e1_mask_g & sz_u64_mask_until_(mkhedruli_length);
+                    if (leads_g) {
+                        int last_lead_pos = 63 - sz_u64_clz(leads_g);
+                        if (last_lead_pos + 3 > (int)mkhedruli_length) mkhedruli_length = last_lead_pos;
+                    }
+                }
+
+                if (mkhedruli_length >= 3) {
+                    __mmask64 prefix_mask = sz_u64_mask_until_(mkhedruli_length);
+
+                    __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                        _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                    __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                          source_vec.zmm, ascii_case_offset);
+
+                    __mmask64 is_e1_83_second = (is_e1_mask_g << 1) & prefix_mask &
+                        _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x83));
+                    __mmask64 third_after_83 = (is_e1_83_second << 1) & prefix_mask;
+
+                    __mmask64 third_in_90_BA = third_after_83 &
+                        _mm512_mask_cmpge_epu8_mask(third_after_83, source_vec.zmm, _mm512_set1_epi8((char)0x90)) &
+                        _mm512_mask_cmple_epu8_mask(third_after_83, source_vec.zmm, _mm512_set1_epi8((char)0xBA));
+                    __mmask64 third_in_BD_BF = third_after_83 &
+                        _mm512_mask_cmpge_epu8_mask(third_after_83, source_vec.zmm, _mm512_set1_epi8((char)0xBD));
+                    __mmask64 is_mkhedruli_third = third_in_90_BA | third_in_BD_BF;
+
+                    upper = _mm512_mask_add_epi8(upper, is_mkhedruli_third >> 1, upper, _mm512_set1_epi8(0x2F));
+
+                    _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                    target += mkhedruli_length, source += mkhedruli_length, source_length -= mkhedruli_length;
+                    continue;
+                }
+            }
+        }
+
+        // Mtavruli passthrough (E1 B2 90-BA, BD-BF). Mtavruli is already uppercase, so
+        // upper(Mtavruli) = Mtavruli — just bulk-copy with ASCII A-Z transform. Triggers only
+        // when every E1 lead is followed by B2 AND every E1 B2 third byte is in the Mtavruli
+        // range (excludes Cyrillic Extended-C E1 B2 80..8F, which needs serial drain for the
+        // irregular U+1C80-U+1C88 lowercase folds).
+        {
+            __mmask64 is_e1_mask_mt = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+            if (is_e1_mask_mt) {
+                __mmask64 e1_second_mt = (is_e1_mask_mt << 1) & load_mask;
+                __mmask64 is_b2_byte = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB2));
+                __mmask64 has_e1_b2 = e1_second_mt & is_b2_byte;
+                __mmask64 non_b2_after_e1 = e1_second_mt & ~is_b2_byte;
+                if (has_e1_b2 && !non_b2_after_e1) {
+                    __mmask64 e1_b2_third_pre = (has_e1_b2 << 1) & load_mask;
+                    __mmask64 in_90_ba = _mm512_mask_cmpge_epu8_mask(e1_b2_third_pre, source_vec.zmm,
+                                                                       _mm512_set1_epi8((char)0x90));
+                    in_90_ba &= _mm512_mask_cmple_epu8_mask(in_90_ba, source_vec.zmm,
+                                                              _mm512_set1_epi8((char)0xBA));
+                    __mmask64 in_bd_bf = _mm512_mask_cmpge_epu8_mask(e1_b2_third_pre, source_vec.zmm,
+                                                                       _mm512_set1_epi8((char)0xBD));
+                    __mmask64 is_out_of_mt = e1_b2_third_pre & ~(in_90_ba | in_bd_bf);
+                    if (!is_out_of_mt) {
+                        __mmask64 is_valid_mt = ~is_non_ascii | is_e1_mask_mt | is_cont_mask;
+                        sz_size_t mt_length = sz_ice_first_invalid_(is_valid_mt, load_mask, chunk_size);
+                        __mmask64 leads_mt = is_e1_mask_mt & sz_u64_mask_until_(mt_length);
+                        if (leads_mt) {
+                            int last_lead = 63 - sz_u64_clz(leads_mt);
+                            if (last_lead + 3 > (int)mt_length) mt_length = (sz_size_t)last_lead;
+                        }
+                        if (mt_length >= 3) {
+                            __mmask64 prefix_mask = sz_u64_mask_until_(mt_length);
+                            __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                                _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                            __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                                  source_vec.zmm, ascii_case_offset);
+                            _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                            target += mt_length, source += mt_length, source_length -= mt_length;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Latin Extended Additional (E1 B8-BB): lowercase → uppercase (parity-based)
+        // Odd codepoints in U+1E00-U+1EFF are lowercase, with the uppercase one codepoint below.
+        // Exceptions in the 0x1E96-0x1E9F window need SpecialCasing or irregular mappings:
+        //   1E97/1E99/1E9D/1E9F — keep as-is (their uppercase is themselves at the simple level)
+        //   1E9B — maps to U+1E60 (irregular)
+        //   1E96/1E98/1E9A — even, parity sweep wouldn't touch them anyway
+        // If any such codepoint appears in the chunk, defer to the serial fallback for correctness.
+        {
+            __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xE1));
+            if (is_e1_mask) {
+                __mmask64 e1_second_positions = is_e1_mask << 1;
+                // Check for B8-BB second byte (Latin Extended Additional)
+                __mmask64 is_latin_ext = e1_second_positions &
+                    _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xB8)),
+                                           _mm512_set1_epi8(0x04)); // B8, B9, BA, BB
+
+                // Exclude Georgian (82/83) - they need different handling
+                __mmask64 is_georgian = e1_second_positions &
+                    _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x82)),
+                                           _mm512_set1_epi8(0x02)); // 82, 83
+
+                // Tricky window: E1 BA 96..9F (SpecialCasing / irregular / no-mapping). Skip fast
+                // path if any such third byte is present. Upper bound 0x9F is important — without
+                // it the entire Vietnamese block (E1 BA A0..BF) would fall to per-rune fallback.
+                __mmask64 is_e1_ba_second = e1_second_positions &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBA));
+                __mmask64 e1_ba_third = (is_e1_ba_second << 1) & load_mask;
+                __mmask64 is_tricky_third = e1_ba_third &
+                    _mm512_mask_cmpge_epu8_mask(e1_ba_third, source_vec.zmm, _mm512_set1_epi8((char)0x96)) &
+                    _mm512_mask_cmple_epu8_mask(e1_ba_third, source_vec.zmm, _mm512_set1_epi8((char)0x9F));
+
+                if (is_latin_ext && !is_georgian && !is_tricky_third) {
+                    __mmask64 is_valid_latin_ext = ~is_non_ascii | is_e1_mask | is_cont_mask;
+                    sz_size_t latin_ext_length = sz_ice_first_invalid_(is_valid_latin_ext, load_mask, chunk_size);
+                    // Trim hanging 3-byte runes (lead in last 2 bytes of chunk) — see Mkhedruli note.
+                    {
+                        __mmask64 leads_e1 = is_e1_mask & sz_u64_mask_until_(latin_ext_length);
+                        if (leads_e1) {
+                            int last_lead_pos = 63 - sz_u64_clz(leads_e1);
+                            if (last_lead_pos + 3 > (int)latin_ext_length) latin_ext_length = last_lead_pos;
+                        }
+                    }
+
+                    if (latin_ext_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(latin_ext_length);
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Parity: odd third byte is lowercase → subtract 1
+                        __mmask64 is_latin_ext_second = (is_e1_mask << 1) & prefix_mask &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xB8)),
+                                                   _mm512_set1_epi8(0x04));
+                        __mmask64 third_after_latin = (is_latin_ext_second << 1) & prefix_mask;
+                        __m512i byte_and_1 = _mm512_and_si512(source_vec.zmm, _mm512_set1_epi8(1));
+                        __mmask64 is_odd = _mm512_cmpeq_epi8_mask(byte_and_1, _mm512_set1_epi8(1));
+                        __mmask64 is_lowercase = third_after_latin & is_odd;
+
+                        upper = _mm512_mask_sub_epi8(upper, is_lowercase, upper, _mm512_set1_epi8(1));
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += latin_ext_length, source += latin_ext_length, source_length -= latin_ext_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fullwidth lowercase (EF BD 81-9A) → uppercase (EF BC A1-BA)
+        // Inverse of fold: third byte -0x20, second byte BD→BC
+        {
+            __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xEF));
+            if (is_ef_mask) {
+                __mmask64 ef_second_positions = is_ef_mask << 1;
+                // Check for BD second byte (Fullwidth lowercase)
+                __mmask64 is_bd_second = ef_second_positions &
+                    _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBD));
+
+                if (is_bd_second) {
+                    __mmask64 is_valid_fullwidth = ~is_non_ascii | is_ef_mask | is_cont_mask;
+                    sz_size_t fullwidth_length = sz_ice_first_invalid_(is_valid_fullwidth, load_mask, chunk_size);
+                    // Trim hanging 3-byte runes (lead in last 2 bytes of chunk) — see Mkhedruli note.
+                    {
+                        __mmask64 leads_ef = is_ef_mask & sz_u64_mask_until_(fullwidth_length);
+                        if (leads_ef) {
+                            int last_lead_pos = 63 - sz_u64_clz(leads_ef);
+                            if (last_lead_pos + 3 > (int)fullwidth_length) fullwidth_length = last_lead_pos;
+                        }
+                    }
+
+                    if (fullwidth_length >= 3) {
+                        __mmask64 prefix_mask = sz_u64_mask_until_(fullwidth_length);
+
+                        // Start with source, apply ASCII uppercasing
+                        __mmask64 is_lower_ascii = _mm512_cmplt_epu8_mask(
+                            _mm512_sub_epi8(source_vec.zmm, a_lower_vec), subtract26_vec);
+                        __m512i upper = _mm512_mask_sub_epi8(source_vec.zmm, is_lower_ascii & prefix_mask,
+                                                              source_vec.zmm, ascii_case_offset);
+
+                        // Check for BD second byte after EF
+                        __mmask64 is_fullwidth_lower = ((is_ef_mask << 1) & prefix_mask) &
+                            _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xBD));
+
+                        // Third byte 81-9A → A1-BA (lowercase ａ-ｚ → uppercase Ａ-Ｚ)
+                        __mmask64 third_after_bd = (is_fullwidth_lower << 1) & prefix_mask;
+                        __mmask64 is_fullwidth_az = third_after_bd &
+                            _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0x81)),
+                                                   _mm512_set1_epi8(0x1A)); // 81-9A (26 letters)
+
+                        // Transform: third +0x20, second BD→BC
+                        upper = _mm512_mask_add_epi8(upper, is_fullwidth_az, upper, _mm512_set1_epi8(0x20));
+                        upper = _mm512_mask_sub_epi8(upper, is_fullwidth_az >> 1, upper, _mm512_set1_epi8(1)); // BD→BC
+
+                        _mm512_mask_storeu_epi8(target, prefix_mask, upper);
+                        target += fullwidth_length, source += fullwidth_length, source_length -= fullwidth_length;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback to serial for complex cases
+        {
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)source, &rune, &rune_length);
+            source += rune_length;
+            source_length -= rune_length;
+
+            sz_rune_t upper_runes[3];
+            sz_size_t upper_count = sz_unicode_upper_codepoint_(rune, upper_runes);
+            for (sz_size_t i = 0; i != upper_count; ++i)
+                target += sz_rune_export(upper_runes[i], target);
+        }
+    }
+
+    return (sz_size_t)(target - target_start);
+}
+
+
 
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_ice(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *ptr = (sz_u8_t const *)str;
@@ -8369,6 +11048,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
     return sz_utf8_case_fold_serial(source, source_length, destination);
 }
 
+SZ_PUBLIC sz_size_t sz_utf8_case_upper_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+    return sz_utf8_case_upper_serial(source, source_length, destination);
+}
+
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
     sz_cptr_t haystack, sz_size_t haystack_length,      //
     sz_cptr_t needle, sz_size_t needle_length,          //
@@ -8400,8 +11083,20 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
 SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICE
     return sz_utf8_case_fold_ice(source, source_length, destination);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_fold_haswell(source, source_length, destination);
 #else
     return sz_utf8_case_fold_serial(source, source_length, destination);
+#endif
+}
+
+SZ_DYNAMIC sz_size_t sz_utf8_case_upper(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+#if SZ_USE_ICE
+    return sz_utf8_case_upper_ice(source, source_length, destination);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_upper_haswell(source, source_length, destination);
+#else
+    return sz_utf8_case_upper_serial(source, source_length, destination);
 #endif
 }
 
