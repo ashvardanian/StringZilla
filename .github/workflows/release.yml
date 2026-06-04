@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -148,7 +148,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -180,7 +180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -216,7 +216,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -250,7 +250,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -284,7 +284,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04] # Linux only
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:

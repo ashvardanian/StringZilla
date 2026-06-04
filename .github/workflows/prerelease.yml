@@ -9,7 +9,7 @@ on:
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
-  PYTHON_VERSION: 3.12
+  PYTHON_VERSION: 3.13
   SWIFT_VERSION: 6.0
   PYTHONUTF8: 1
 
@@ -794,7 +794,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
         with:
