@@ -561,7 +561,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
         run: npm install
@@ -700,7 +700,7 @@ jobs:
 
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
-    runs-on: macos-14
+    runs-on: macos-15
     needs: versioning
     strategy:
       fail-fast: false
