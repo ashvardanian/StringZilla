@@ -118,30 +118,6 @@ static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
 /**
- *  @brief  Thread-local storage macro for free-threaded Python compatibility.
- *
- *  In free-threaded builds, each thread gets its own temporary_memory buffer
- *  to avoid data races. The buffers are leaked when threads exit (bounded leak).
- */
-#ifdef Py_GIL_DISABLED
-    #if defined(__cplusplus) && __cplusplus >= 201103L
-        #define SZ_THREAD_LOCAL thread_local
-    #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-        #define SZ_THREAD_LOCAL _Thread_local
-    #elif defined(__GNUC__) || defined(__clang__)
-        #define SZ_THREAD_LOCAL __thread
-    #elif defined(_MSC_VER)
-        #define SZ_THREAD_LOCAL __declspec(thread)
-    #else
-        #error "No thread-local storage support available for free-threaded Python"
-    #endif
-#else
-    #define SZ_THREAD_LOCAL
-#endif
-
-static SZ_THREAD_LOCAL sz_string_view_t temporary_memory = {NULL, 0};
-
-/**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
  *          native `mmap` module, as it exposes the address of the mapping in memory.
  */
@@ -376,21 +352,6 @@ typedef struct {
 #pragma endregion
 
 #pragma region Helpers
-
-static sz_ptr_t temporary_memory_allocate(sz_size_t size, sz_string_view_t *existing) {
-    if (existing->length < size) {
-        sz_cptr_t new_start = realloc(existing->start, size);
-        if (!new_start) {
-            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
-            return NULL;
-        }
-        existing->start = new_start;
-        existing->length = size;
-    }
-    return existing->start;
-}
-
-static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view_t *existing) {}
 
 static sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i) {
     Strs *strs = (Strs *)handle;
@@ -6338,25 +6299,12 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         new_spans[i].length = length;
     }
 
-    // Determine memory needed for sorting.
-    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
-    sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * substrings_count;
-    if (temporary_memory.length < memory_needed) {
-        void *new_memory = realloc(temporary_memory.start, memory_needed);
-        if (!new_memory) {
-            allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
-            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-            return NULL;
-        }
-        temporary_memory.start = new_memory;
-        temporary_memory.length = memory_needed;
-    }
-    if (!temporary_memory.start) {
+    sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * substrings_count);
+    if (!order) {
         allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
         return NULL;
     }
-    sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
@@ -6375,6 +6323,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     sz_string_view_t *sorted_spans =
         (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
     if (sorted_spans == NULL) {
+        free(order);
         allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for sorted slices");
         return NULL;
@@ -6382,6 +6331,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 
     // Apply the permutation
     for (sz_size_t i = 0; i < substrings_count; ++i) sorted_spans[i] = new_spans[order[i]];
+    free(order);
 
     // Free the temporary spans array
     allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
@@ -6439,24 +6389,12 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    // Determine the amount of memory needed.
-    // In free-threaded builds, temporary_memory is thread-local so each thread has its own buffer.
     sz_size_t const count = Strs_len(self);
-    sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * count;
-    if (temporary_memory.length < memory_needed) {
-        void *new_memory = realloc(temporary_memory.start, memory_needed);
-        if (!new_memory) {
-            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-            return 0;
-        }
-        temporary_memory.start = new_memory;
-        temporary_memory.length = memory_needed;
-    }
-    if (!temporary_memory.start) {
+    sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * count);
+    if (!order) {
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-        return 0;
+        return NULL;
     }
-    sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
@@ -6488,18 +6426,21 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
     // So instead of NumPy, let's produce a tuple of integers.
     PyObject *tuple = PyTuple_New(count);
     if (!tuple) {
+        free(order);
         PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple");
         return NULL;
     }
     for (sz_size_t i = 0; i < count; ++i) {
         PyObject *index = PyLong_FromUnsignedLong(order[i]);
         if (!index) {
+            free(order);
             PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple element");
             Py_DECREF(tuple);
             return NULL;
         }
         PyTuple_SET_ITEM(tuple, i, index);
     }
+    free(order);
     return tuple;
 }
 
@@ -7804,13 +7745,7 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static void stringzilla_cleanup(PyObject *m) {
-    // Free the temporary buffer. In GIL-enabled builds this is the single shared buffer.
-    // In free-threaded builds this frees only the current thread's buffer.
-    if (temporary_memory.start) free(temporary_memory.start);
-    temporary_memory.start = NULL;
-    temporary_memory.length = 0;
-}
+static void stringzilla_cleanup(PyObject *m) { sz_unused_(m); }
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
@@ -8058,9 +7993,5 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    // Pre-allocate the temporary buffer for the main thread.
-    // In free-threaded builds, other threads will lazily allocate.
-    temporary_memory.start = malloc(4096);
-    temporary_memory.length = 4096 * (temporary_memory.start != NULL);
     return m;
 }
