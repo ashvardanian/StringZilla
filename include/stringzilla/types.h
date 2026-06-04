@@ -372,18 +372,6 @@
 #endif
 
 /**
- *  Hopper-generation logic requires SM90+ (i.e. `__CUDA_ARCH__ >= 900`).
- *  For dynamic dispatch, however, it's more sensible to check the CUDA version (i.e. `__CUDACC_VER_MAJOR__ >= 11`).
- */
-#if !defined(SZ_USE_HOPPER)
-#if defined(__NVCC__) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
-#define SZ_USE_HOPPER (1)
-#else
-#define SZ_USE_HOPPER (0)
-#endif
-#endif
-
-/**
  *  Kepler-generation logic requires SM30+ (i.e. `__CUDA_ARCH__ >= 300`).
  *  For dynamic dispatch, however, it's more sensible to check the CUDA version (i.e. `__CUDACC_VER_MAJOR__ >= 11`).
  */
@@ -392,6 +380,18 @@
 #define SZ_USE_KEPLER (1)
 #else
 #define SZ_USE_KEPLER (0)
+#endif
+#endif
+
+/**
+ *  Hopper-generation logic requires SM90+ (i.e. `__CUDA_ARCH__ >= 900`).
+ *  For dynamic dispatch, however, it's more sensible to check the CUDA version (i.e. `__CUDACC_VER_MAJOR__ >= 11`).
+ */
+#if !defined(SZ_USE_HOPPER)
+#if defined(__NVCC__) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
+#define SZ_USE_HOPPER (1)
+#else
+#define SZ_USE_HOPPER (0)
 #endif
 #endif
 

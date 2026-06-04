@@ -57,6 +57,7 @@
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include "bench.hpp"
+#include "test_stringzilla.hpp" // `log_environment`
 #include "test_stringzilla.hpp" // `global_random_generator`
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -435,6 +436,7 @@ void bench_intersections(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla!\n");
+    if (auto code = log_environment(); code != 0) return code;
 
     std::printf("Building up the environment...\n");
     environment_t env = build_environment( //

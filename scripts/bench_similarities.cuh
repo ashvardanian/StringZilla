@@ -16,8 +16,47 @@
 #include "bench.hpp"
 
 namespace ashvardanian {
-namespace stringzillas {
+namespace stringzilla {
 namespace scripts {
+
+// StringZillas library symbols available on every backend:
+using ashvardanian::stringzillas::affine_gap_costs_t;
+using ashvardanian::stringzillas::affine_levenshtein_ice_t;
+using ashvardanian::stringzillas::affine_levenshtein_serial_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_serial_t;
+using ashvardanian::stringzillas::affine_smith_waterman_serial_t;
+using ashvardanian::stringzillas::error_costs_256x256_t;
+using ashvardanian::stringzillas::error_costs_26x26ascii_t;
+using ashvardanian::stringzillas::levenshtein_ice_t;
+using ashvardanian::stringzillas::levenshtein_serial_t;
+using ashvardanian::stringzillas::levenshtein_utf8_ice_t;
+using ashvardanian::stringzillas::levenshtein_utf8_serial_t;
+using ashvardanian::stringzillas::linear_gap_costs_t;
+using ashvardanian::stringzillas::needleman_wunsch_ice_t;
+using ashvardanian::stringzillas::needleman_wunsch_serial_t;
+using ashvardanian::stringzillas::smith_waterman_ice_t;
+using ashvardanian::stringzillas::smith_waterman_serial_t;
+using ashvardanian::stringzillas::uniform_substitution_costs_t;
+
+// StringZillas library symbols provided only by the CUDA backend:
+#if SZ_USE_CUDA
+using ashvardanian::stringzillas::affine_levenshtein_cuda_t;
+using ashvardanian::stringzillas::affine_levenshtein_hopper_t;
+using ashvardanian::stringzillas::affine_levenshtein_kepler_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_cuda_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_hopper_t;
+using ashvardanian::stringzillas::affine_smith_waterman_cuda_t;
+using ashvardanian::stringzillas::affine_smith_waterman_hopper_t;
+using ashvardanian::stringzillas::cuda_executor_t;
+using ashvardanian::stringzillas::gpu_specs_fetch;
+using ashvardanian::stringzillas::levenshtein_cuda_t;
+using ashvardanian::stringzillas::levenshtein_hopper_t;
+using ashvardanian::stringzillas::levenshtein_kepler_t;
+using ashvardanian::stringzillas::needleman_wunsch_cuda_t;
+using ashvardanian::stringzillas::needleman_wunsch_hopper_t;
+using ashvardanian::stringzillas::smith_waterman_cuda_t;
+using ashvardanian::stringzillas::smith_waterman_hopper_t;
+#endif
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -408,5 +447,5 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #pragma endregion
 
 } // namespace scripts
-} // namespace stringzillas
+} // namespace stringzilla
 } // namespace ashvardanian

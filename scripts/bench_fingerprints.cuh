@@ -17,8 +17,23 @@
 #include "bench.hpp"
 
 namespace ashvardanian {
-namespace stringzillas {
+namespace stringzilla {
 namespace scripts {
+
+// StringZillas library symbols available on every backend:
+using ashvardanian::stringzillas::basic_rolling_hashers;
+using ashvardanian::stringzillas::buz_rolling_hasher;
+using ashvardanian::stringzillas::floating_rolling_hasher;
+using ashvardanian::stringzillas::floating_rolling_hashers;
+using ashvardanian::stringzillas::multiplying_rolling_hasher;
+using ashvardanian::stringzillas::rabin_karp_rolling_hasher;
+
+// StringZillas library symbols provided only by the CUDA backend:
+#if SZ_USE_CUDA
+using ashvardanian::stringzillas::cuda_executor_t;
+using ashvardanian::stringzillas::gpu_specs_fetch;
+using ashvardanian::stringzillas::unified_alloc_t;
+#endif
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -268,5 +283,5 @@ void bench_fingerprints(environment_t const &env) {
 #pragma endregion
 
 } // namespace scripts
-} // namespace stringzillas
+} // namespace stringzilla
 } // namespace ashvardanian
