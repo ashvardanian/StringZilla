@@ -94,7 +94,8 @@ struct similarities_callable {
         do_not_optimize(status);
 
         if (static_cast<status_t>(status) != status_t::success_k)
-            throw std::runtime_error("Failed to compute Levenshtein distance.");
+            throw std::runtime_error(std::string("Failed to compute Levenshtein distance: ") +
+                                     status_name(static_cast<status_t>(status)));
         do_not_optimize(results);
         std::size_t bytes_passed = 0, cells_passed = 0;
         for (std::size_t i = 0; i < results.size(); ++i) {

@@ -74,7 +74,9 @@ struct fingerprint_callable {
                 for (auto &scalar : fingerprints_counts) do_not_optimize(scalar);
             },
             extra_args);
-        if (static_cast<status_t>(result) != status_t::success_k) throw std::runtime_error("Failed fingerprinting.");
+        if (static_cast<status_t>(result) != status_t::success_k)
+            throw std::runtime_error(std::string("Failed fingerprinting: ") +
+                                     status_name(static_cast<status_t>(result)));
 
         std::size_t bytes_passed = 0;
         for (std::size_t i = 0; i < tape.size(); ++i) bytes_passed += tape[i].size();

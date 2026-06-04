@@ -243,6 +243,22 @@ inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &a
     sz_assert_(status == status_t::success_k);
 }
 
+inline char const *status_name(status_t s) noexcept {
+    switch (s) {
+    case status_t::success_k: return "success";
+    case status_t::bad_alloc_k: return "bad_alloc";
+    case status_t::invalid_utf8_k: return "invalid_utf8";
+    case status_t::contains_duplicates_k: return "contains_duplicates";
+    case status_t::overflow_risk_k: return "overflow_risk";
+    case status_t::unexpected_dimensions_k: return "unexpected_dimensions";
+    case status_t::missing_gpu_k: return "missing_gpu";
+    case status_t::device_code_mismatch_k: return "device_code_mismatch";
+    case status_t::device_memory_mismatch_k: return "device_memory_mismatch";
+    case status_t::unknown_k: return "unknown";
+    default: return "unrecognized";
+    }
+}
+
 inline int log_environment() {
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
