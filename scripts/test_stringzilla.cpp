@@ -788,7 +788,7 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
     char const *char_pool[] = {
         // Normal ASCII (individual characters for mixing)
         // clang-format off
-        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", 
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
         "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
         "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
         "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
@@ -4467,36 +4467,6 @@ int main(int argc, char const **argv) {
     std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
-
-    // Call it once again at start - temporary measure to debug Ice Lake vs Serial differences
-    test_utf8_case();
-
-#if SZ_USE_CUDA
-    cudaError_t cuda_error = cudaFree(0); // Force context initialization
-    if (cuda_error != cudaSuccess) {
-        std::printf("CUDA initialization error: %s\n", cudaGetErrorString(cuda_error));
-        return 1;
-    }
-    int device_count = 0;
-    cuda_error = cudaGetDeviceCount(&device_count);
-    if (cuda_error != cudaSuccess) {
-        std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
-        return 1;
-    }
-    std::printf("CUDA device count: %d\n", device_count);
-    if (device_count == 0) {
-        std::printf("No CUDA devices found.\n");
-        return 1;
-    }
-    std::printf("- CUDA devices:\n");
-    cudaDeviceProp prop;
-    for (int i = 0; i < device_count; ++i) {
-        cuda_error = cudaGetDeviceProperties(&prop, i);
-        std::printf("  - %s\n", prop.name);
-    }
-    std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
-    std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
-#endif
 
     std::printf("\n=== Basic Utilities ===\n");
     std::printf("- test_arithmetical_utilities...\n");

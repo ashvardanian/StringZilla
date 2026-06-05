@@ -33,6 +33,7 @@
  *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
+#include "test_stringzilla.hpp" // `log_environment`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -145,6 +146,7 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla Unicode Benchmarks!\n");
+    if (auto code = log_environment(); code != 0) return code;
 
     std::printf("Building up the environment...\n");
     environment_t env = build_environment( //

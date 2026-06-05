@@ -39,12 +39,14 @@
  *  This file is a sibling of `bench_similarities.cpp`.
  */
 #include "bench_fingerprints.cuh"
+#include "test_stringzilla.hpp" // `log_environment`
 
 namespace szs = ashvardanian::stringzillas;
-using namespace szs::scripts;
+using namespace sz::scripts;
 
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZillas on CPU!\n");
+    if (auto code = log_environment(); code != 0) return code;
 
     try {
         std::printf("Building up the environment...\n");

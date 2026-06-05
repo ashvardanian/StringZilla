@@ -9,8 +9,8 @@ on:
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
-  PYTHON_VERSION: 3.12
-  SWIFT_VERSION: 6.0
+  PYTHON_VERSION: 3.13
+  SWIFT_VERSION: 6.2
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -23,12 +23,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v2.1.1
+        uses: ashvardanian/tinysemver@v3.0.1
         with:
           verbose: "true"
           version-file: "VERSION"
@@ -56,7 +56,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -141,7 +141,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -163,9 +163,9 @@ jobs:
 
         # JavaScript
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
       - name: Build and test JavaScript
         run: npm install && npm test
 
@@ -185,7 +185,7 @@ jobs:
       CXX: clang++-16
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -261,7 +261,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -288,7 +288,7 @@ jobs:
         # Swift
         # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
       # - name: Set up Swift ${{ env.SWIFT_VERSION }}
-      #   uses: swift-actions/setup-swift@v2.3.0
+      #   uses: swift-actions/setup-swift@v2.4.0
       #   with:
       #     swift-version: ${{ env.SWIFT_VERSION }}
       # - name: Build Swift
@@ -304,7 +304,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -351,7 +351,7 @@ jobs:
 
         # Python StringZillas-CPUs
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
         # Ensure modern build backend is available for editable installs
@@ -384,13 +384,13 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
         # Install CUDA Toolkit
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.26
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: "12.9.1"
           method: "network"
@@ -446,7 +446,7 @@ jobs:
 
         # Python StringZillas-CUDA
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
         # Ensure modern build backend is available for editable installs
@@ -478,7 +478,7 @@ jobs:
     runs-on: ubuntu-22.04
     container: swift:latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -522,7 +522,7 @@ jobs:
       RANLIB: llvm-ranlib-16
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -572,10 +572,10 @@ jobs:
 
   test_macos:
     name: MacOS
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -619,7 +619,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -634,7 +634,7 @@ jobs:
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v2.3.0
+        uses: swift-actions/setup-swift@v2.4.0
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
       - name: Build Swift
@@ -658,7 +658,7 @@ jobs:
           - os: windows-11-arm
             arch: arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
@@ -709,7 +709,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -736,7 +736,7 @@ jobs:
         run: |
           echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
           git --version || echo "git not installed"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -794,22 +794,22 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
-        python-version: ["38", "39", "310", "311", "312", "313"]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
 
         # We only need QEMU for Linux builds
       - name: Setup QEMU
         if: matrix.os == 'ubuntu-24.04'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.21.3
+        run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:

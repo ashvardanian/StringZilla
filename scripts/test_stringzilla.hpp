@@ -34,16 +34,15 @@
  *  @endcode
  */
 #pragma once
-#include <cstdio>     // `std::printf`, `std::fflush`
-#include <cstdlib>    // `std::getenv`, `std::strtoul`
-#include <fstream>    // `std::ifstream`
-#include <iostream>   // `std::cout`, `std::endl`
-#include <random>     // `std::random_device`
-#include <string>     // `std::string`
-#include <vector>     // `std::vector`
-#include <array>      // `std::array`
-#include <functional> // `std::function`
-#include <algorithm>  // `std::copy`, `std::generate`
+#include <cstdio>  // `std::printf`, `std::fflush`
+#include <cstdlib> // `std::getenv`, `std::strtoul`
+#include <cstring> // `std::strcmp`
+
+#include <fstream>   // `std::ifstream`
+#include <random>    // `std::random_device`
+#include <string>    // `std::string`
+#include <vector>    // `std::vector`
+#include <algorithm> // `std::copy`, `std::generate`
 
 #include "stringzilla/types.hpp"
 #if SZ_USE_CUDA
@@ -96,7 +95,7 @@ inline std::mt19937::result_type global_random_seed() noexcept {
     return seed;
 }
 
-/// @brief Returns true if the seed was set via environment variable.
+/** @brief Returns true if the seed was set via environment variable. */
 inline bool global_random_seed_from_env() noexcept {
     char const *seed_env = std::getenv("SZ_TESTS_SEED");
     return seed_env && seed_env[0] != '\0';
@@ -129,21 +128,6 @@ inline double get_iterations_multiplier() noexcept {
         return 1.0;
     }();
     return multiplier;
-}
-
-/**
- *  @brief  Prints test environment configuration (seed and multiplier).
- *
- *  Call this at the start of main() to display test configuration alongside
- *  other environment info. Format matches capability flags style.
- */
-inline void print_test_environment() noexcept {
-    auto seed = global_random_seed();
-    bool from_env = global_random_seed_from_env();
-    std::printf("- Test seed: %u%s\n", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
-    double multiplier = get_iterations_multiplier();
-    if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
-    std::fflush(stdout); // Ensure output is visible even on crash
 }
 
 /**
@@ -233,7 +217,7 @@ struct fuzzy_config_t {
     std::size_t max_string_length = 200;
 };
 
-void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, bool unique = false) {
     array.resize(config.batch_size);
 
     std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
@@ -249,14 +233,107 @@ void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, b
     }
 }
 
-void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
-                       bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
+                              bool unique = false) {
 
     randomize_strings(config, array, unique);
 
     // Convert to a GPU-friendly layout
     status_t status = tape.try_assign(array.data(), array.data() + array.size());
     sz_assert_(status == status_t::success_k);
+}
+
+inline char const *status_name(status_t s) noexcept {
+    switch (s) {
+    case status_t::success_k: return "success";
+    case status_t::bad_alloc_k: return "bad_alloc";
+    case status_t::invalid_utf8_k: return "invalid_utf8";
+    case status_t::contains_duplicates_k: return "contains_duplicates";
+    case status_t::overflow_risk_k: return "overflow_risk";
+    case status_t::unexpected_dimensions_k: return "unexpected_dimensions";
+    case status_t::missing_gpu_k: return "missing_gpu";
+    case status_t::device_code_mismatch_k: return "device_code_mismatch";
+    case status_t::device_memory_mismatch_k: return "device_memory_mismatch";
+    case status_t::unknown_k: return "unknown";
+    default: return "unrecognized";
+    }
+}
+
+inline int log_environment() {
+    std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
+    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
+    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
+    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
+    std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
+    std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
+    std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
+
+#if SZ_USE_CUDA
+    cudaError_t cuda_error = cudaFree(0); // Force context initialization
+    if (cuda_error != cudaSuccess) {
+        std::printf("CUDA initialization error: %s\n", cudaGetErrorString(cuda_error));
+        return 1;
+    }
+    int device_count = 0;
+    cuda_error = cudaGetDeviceCount(&device_count);
+    if (cuda_error != cudaSuccess) {
+        std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
+        return 1;
+    }
+    std::printf("CUDA device count: %d\n", device_count);
+    if (device_count == 0) {
+        std::printf("No CUDA devices found.\n");
+        return 1;
+    }
+    std::printf("- CUDA devices:\n");
+    for (int i = 0; i < device_count; ++i) {
+        cudaDeviceProp prop;
+        cuda_error = cudaGetDeviceProperties(&prop, i);
+        if (cuda_error != cudaSuccess) {
+            std::printf("Error retrieving properties for device %d: %s\n", i, cudaGetErrorString(cuda_error));
+            continue;
+        }
+        int count = 1;
+        for (int j = i + 1; j < device_count; ++j) {
+            cudaDeviceProp next;
+            if (cudaGetDeviceProperties(&next, j) == cudaSuccess && std::strcmp(next.name, prop.name) == 0) { ++count; }
+            else { break; }
+        }
+        int warps_per_sm = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+        int shared_memory_per_warp = (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / warps_per_sm) : 0;
+        std::printf("  - %d x %s\n", count, prop.name);
+        std::printf("    Shared Memory per SM: %zu bytes\n", prop.sharedMemPerMultiprocessor);
+        std::printf("    Maximum Threads per SM: %d\n", prop.maxThreadsPerMultiProcessor);
+        std::printf("    Warp Size: %d threads\n", prop.warpSize);
+        std::printf("    Max Warps per SM: %d warps\n", warps_per_sm);
+        std::printf("    Shared Memory per Warp: %d bytes\n", shared_memory_per_warp);
+        std::printf("    Managed memory: %s\n", prop.managedMemory ? "yes" : "no");
+        std::printf("    Unified addressing: %s\n", prop.unifiedAddressing ? "yes" : "no");
+        i += count - 1;
+    }
+#endif
+    return 0;
+}
+
+/**
+ *  @brief  Prints test environment configuration (seed and multiplier).
+ *
+ *  Call this at the start of main() to display test configuration alongside
+ *  other environment info. Format matches capability flags style.
+ */
+inline void print_test_environment() noexcept {
+    auto seed = global_random_seed();
+    bool from_env = global_random_seed_from_env();
+    std::printf("- Test seed: %u%s\n", static_cast<unsigned>(seed), from_env ? " (from SZ_TESTS_SEED)" : "");
+    double multiplier = get_iterations_multiplier();
+    if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
+    std::fflush(stdout); // Ensure output is visible even on crash
 }
 
 } // namespace scripts

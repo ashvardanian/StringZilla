@@ -71,11 +71,12 @@ def log_test_environment():
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
     if is_qemu:
         sve_like = {"sve", "sve2", "sve2+aes"}
-        current = list(getattr(sz, "__capabilities__", ()))
-        desired = tuple(c for c in current if c.lower() not in sve_like)
-        if len(desired) != len(current):
-            print(f"QEMU env detected; disabling {sve_like} for stability")
-            sz.reset_capabilities(desired)
+        for module in (sz, szs):
+            current = list(getattr(module, "__capabilities__", ()))
+            desired = tuple(c for c in current if c.lower() not in sve_like)
+            if len(desired) != len(current):
+                print(f"QEMU env detected; disabling {sve_like} in {module.__name__} for stability")
+                module.reset_capabilities(desired)
 
     print("=" * 40)
     print()  # New line for better readability

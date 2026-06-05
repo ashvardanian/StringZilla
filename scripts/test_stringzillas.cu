@@ -28,23 +28,25 @@
 #endif
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
-#include "test_stringzillas.cuh"
+#include "test_stringzilla.hpp"
 
 #include "test_fingerprints.cuh"
 #include "test_similarities.cuh"
 
-namespace szs = ashvardanian::stringzillas;
+namespace sz = ashvardanian::stringzilla;
+using namespace sz::scripts;
 
 int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
-    if (auto code = szs::scripts::log_environment(); code != 0) return code;
+    if (auto code = log_environment(); code != 0) return code;
+    print_test_environment();
 
     try {
-        szs::scripts::test_rolling_hashers_equivalence();
-        szs::scripts::test_rolling_hasher();
-        szs::scripts::test_similarity_scores_equivalence();
-        szs::scripts::test_similarity_scores_memory_usage();
+        test_rolling_hashers_equivalence();
+        test_rolling_hasher();
+        test_similarity_scores_equivalence();
+        test_similarity_scores_memory_usage();
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());

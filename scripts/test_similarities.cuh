@@ -18,8 +18,27 @@
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
 
 namespace ashvardanian {
-namespace stringzillas {
+namespace stringzilla {
 namespace scripts {
+
+// StringZillas library symbols available on every backend:
+using ashvardanian::stringzillas::affine_gap_costs_t;
+using ashvardanian::stringzillas::error_costs_256x256_t;
+using ashvardanian::stringzillas::error_costs_26x26ascii_t;
+using ashvardanian::stringzillas::levenshtein_distances;
+using ashvardanian::stringzillas::levenshtein_distances_utf8;
+using ashvardanian::stringzillas::linear_gap_costs_t;
+using ashvardanian::stringzillas::malloc_t;
+using ashvardanian::stringzillas::needleman_wunsch_scores;
+using ashvardanian::stringzillas::smith_waterman_scores;
+using ashvardanian::stringzillas::uniform_substitution_costs_t;
+
+// StringZillas library symbols provided only by the CUDA backend:
+#if SZ_USE_CUDA
+using ashvardanian::stringzillas::cuda_executor_t;
+using ashvardanian::stringzillas::gpu_specs_fetch;
+using ashvardanian::stringzillas::ualloc_t;
+#endif
 
 /**
  *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
@@ -54,9 +73,10 @@ inline std::size_t levenshtein_baseline(                                //
  *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
+template <typename substituter_type_>
 inline std::ptrdiff_t needleman_wunsch_baseline(                        //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
-    std::function<error_cost_t(char, char)> substitution_cost_for, error_cost_t gap_cost) noexcept(false) {
+    substituter_type_ substitution_cost_for, error_cost_t gap_cost) noexcept(false) {
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
@@ -85,8 +105,9 @@ inline std::ptrdiff_t needleman_wunsch_baseline(                        //
  *  @brief Inefficient baseline Smith-Waterman local alignment score computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
+template <typename substituter_type_>
 inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
-                                              std::function<error_cost_t(char, char)> substitution_cost_for,
+                                              substituter_type_ substitution_cost_for,
                                               error_cost_t gap_cost) noexcept(false) {
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
@@ -175,9 +196,10 @@ inline std::size_t levenshtein_gotoh_baseline(                          //
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  *  @see https://github.com/gata-bio/affine-gaps
  */
+template <typename substituter_type_>
 inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
-    std::function<error_cost_t(char, char)> substitution_cost_for,      //
+    substituter_type_ substitution_cost_for,                            //
     error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
 
     std::size_t const rows = len1 + 1;
@@ -226,9 +248,10 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  *  @see https://github.com/gata-bio/affine-gaps
  */
+template <typename substituter_type_>
 inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
-    std::function<error_cost_t(char, char)> substitution_cost_for,      //
+    substituter_type_ substitution_cost_for,                            //
     error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
 
     std::size_t const rows = len1 + 1;
@@ -932,5 +955,5 @@ void test_similarity_scores_memory_usage() {
 }
 
 } // namespace scripts
-} // namespace stringzillas
+} // namespace stringzilla
 } // namespace ashvardanian

@@ -56,6 +56,7 @@
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include "bench.hpp"
+#include "test_stringzilla.hpp" // `log_environment`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -700,6 +701,7 @@ void bench_utf8_find_boundary(environment_t const &env) {
 
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla!\n");
+    if (auto code = log_environment(); code != 0) return code;
 
     std::printf("Building up the environment...\n");
     environment_t env = build_environment( //
