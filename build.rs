@@ -27,7 +27,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        .flag("-O2")
+        .flag("-O3")
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
@@ -162,7 +162,7 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        .flag("-O2");
+        .flag("-O3");
 
     // Nvidia GPU backend
     if is_cuda {
