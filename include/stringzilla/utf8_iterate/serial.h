@@ -1,142 +1,212 @@
 /**
- *  @brief  Unicode TR29 Word Boundary detection for UTF-8 text.
- *  @file   utf8_word.h
+ *  @brief Serial backend for UTF-8 traversal.
+ *  @file include/stringzilla/utf8_iterate/serial.h
  *  @author Ash Vardanian
- *
- *  Includes core APIs:
- *
- *  - `sz_rune_word_break_property` - get TR29 Word_Break property for a codepoint (16 values)
- *  - `sz_utf8_word_find_boundary` - find next word boundary position (TR29 compliant)
- *  - `sz_utf8_word_rfind_boundary` - find previous word boundary position
- *
- *  StringZilla implements full Unicode TR29 word boundary detection:
- *  - 16 Word_Break property values encoded in 4 bits
- *  - ASCII: 128-byte direct table for O(1) lookup
- *  - BMP: Two-stage table with nibble-packed blocks (~6.4 KB)
- *  - SMP: Transition-based encoding (~3.4 KB)
- *  Total table size is approximately 10 KB, providing 100% TR29 compliance.
+ *  @sa utf8.h
  */
-#ifndef STRINGZILLA_UTF8_WORD_H_
-#define STRINGZILLA_UTF8_WORD_H_
+#ifndef STRINGZILLA_UTF8_ITERATE_SERIAL_H_
+#define STRINGZILLA_UTF8_ITERATE_SERIAL_H_
 
-#include "types.h"
+#include "stringzilla/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#pragma region Word_Break Property Encoding
+SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    // TODO: Optimize with a SWAR variant
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    while (text_u8 != end_u8) {
+        sz_u8_t const c = *text_u8;
+        switch (c) {
+        case '\n':
+        case '\v':
+        case '\f': *matched_length = 1; return (sz_cptr_t)text_u8;
+        // Differentiate between "\r" and "\r\n"
+        case '\r':
+            if (text_u8 + 1 != end_u8 && text_u8[1] == '\n') {
+                *matched_length = 2;
+                return (sz_cptr_t)text_u8;
+            }
+            else {
+                *matched_length = 1;
+                return (sz_cptr_t)text_u8;
+            }
+        // Matching the 0xC285 character
+        case 0xC2:
+            if (text_u8 + 1 != end_u8 && text_u8[1] == 0x85) {
+                *matched_length = 2;
+                return (sz_cptr_t)text_u8;
+            }
+            else {
+                ++text_u8;
+                continue;
+            }
+        // Matching 3-byte newline characters
+        case 0xE2:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
+                *matched_length = 3;
+                return (sz_cptr_t)text_u8;
+            }
+            else if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
+                *matched_length = 3;
+                return (sz_cptr_t)text_u8;
+            }
+            else {
+                ++text_u8;
+                continue;
+            }
+        default: ++text_u8; continue;
+        }
+    }
+    *matched_length = 0;
+    return SZ_NULL_CHAR;
+}
 
-/**
- *  @brief Unicode TR29 Word_Break property values (4-bit encoding, 0-15).
- *
- *  These values correspond to the Word_Break property from Unicode TR29.
- *  Used by `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
- */
-typedef enum sz_tr29_word_break_t {
-    sz_tr29_word_break_other_k = 0,         /**< Default - creates word boundary */
-    sz_tr29_word_break_cr_k = 1,            /**< Carriage Return (U+000D) */
-    sz_tr29_word_break_lf_k = 2,            /**< Line Feed (U+000A) */
-    sz_tr29_word_break_newline_k = 3,       /**< Other newlines (VT, FF, NEL, LS, PS) */
-    sz_tr29_word_break_extend_k = 4,        /**< Combining marks (Mn, Me, Mc) */
-    sz_tr29_word_break_zwj_k = 5,           /**< Zero Width Joiner (U+200D) */
-    sz_tr29_word_break_format_k = 6,        /**< Format characters (Cf) */
-    sz_tr29_word_break_regional_ind_k = 7,  /**< Regional Indicator (U+1F1E6-U+1F1FF) */
-    sz_tr29_word_break_aletter_k = 8,       /**< Alphabetic letters */
-    sz_tr29_word_break_hebrew_letter_k = 9, /**< Hebrew script letters */
-    sz_tr29_word_break_numeric_k = 10,      /**< Digits (0-9 and other scripts) */
-    sz_tr29_word_break_katakana_k = 11,     /**< Japanese Katakana */
-    sz_tr29_word_break_extendnumlet_k = 12, /**< Underscore, connector punctuation */
-    sz_tr29_word_break_midletter_k = 13,    /**< Mid-letter punctuation (colon, etc.) */
-    sz_tr29_word_break_midnum_k = 14,       /**< Mid-number punctuation (comma, etc.) */
-    sz_tr29_word_break_mid_quotes_k = 15,   /**< MidNumLet + Single_Quote + Double_Quote */
-} sz_tr29_word_break_t;
+SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+    // TODO: Optimize with a SWAR variant
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    while (text_u8 != end_u8) {
+        sz_u8_t const c = *text_u8;
+        switch (c) {
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\v':
+        case '\f':
+        case '\r': *matched_length = 1; return (sz_cptr_t)text_u8;
+        // Matching 2-byte whitespace characters
+        case 0xC2:
+            if (text_u8 + 1 != end_u8) {
+                // U+0085: NEXT LINE (NEL)
+                if (text_u8[1] == 0x85) {
+                    *matched_length = 2;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+00A0: NO-BREAK SPACE
+                else if (text_u8[1] == 0xA0) {
+                    *matched_length = 2;
+                    return (sz_cptr_t)text_u8;
+                }
+            }
+            ++text_u8;
+            continue;
+        // Matching the 0xE19A80 ogham space mark
+        case 0xE1:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x9A && text_u8[2] == 0x80) {
+                *matched_length = 3;
+                return (sz_cptr_t)text_u8;
+            }
+            else {
+                ++text_u8;
+                continue;
+            }
+        // Match the 3-byte whitespace characters starting with 0xE2
+        case 0xE2:
+            if (text_u8 + 2 < end_u8) {
+                // U+2000 to U+200D: 0xE28080 to 0xE2808D
+                if (text_u8[1] == 0x80 && text_u8[2] >= 0x80 && text_u8[2] <= 0x8D) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+2028: LINE SEPARATOR (0xE280A8)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+2029: PARAGRAPH SEPARATOR (0xE280A9)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+202F: NARROW NO-BREAK SPACE (0xE280AF)
+                else if (text_u8[1] == 0x80 && text_u8[2] == 0xAF) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+                // U+205F: MEDIUM MATHEMATICAL SPACE (0xE2819F)
+                else if (text_u8[1] == 0x81 && text_u8[2] == 0x9F) {
+                    *matched_length = 3;
+                    return (sz_cptr_t)text_u8;
+                }
+            }
+            ++text_u8;
+            continue;
+        // Match the 3-byte ideographic space
+        case 0xE3:
+            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0x80) {
+                *matched_length = 3;
+                return (sz_cptr_t)text_u8;
+            }
+            else {
+                ++text_u8;
+                continue;
+            }
+        }
+        ++text_u8;
+    }
+    *matched_length = 0;
+    return SZ_NULL_CHAR;
+}
 
-#pragma endregion
+SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    sz_size_t char_count = 0;
 
-#pragma region Core API
+    while (text_u8 < end_u8) {
+        // Count this byte if it's NOT a continuation byte
+        if ((*text_u8 & 0xC0) != 0x80) char_count++;
+        text_u8++;
+    }
 
-/**
- *  @brief  Get the Unicode TR29 Word_Break property for a codepoint.
- *
- *  Returns one of the 16 Word_Break property values (sz_tr29_word_break_other_k through
- *  sz_tr29_word_break_mid_quotes_k). This is the foundation for TR29-compliant word boundary detection.
- *
- *  @param[in] rune The Unicode codepoint to classify.
- *  @return The Word_Break property value (0-15).
- *
- *  @see https://www.unicode.org/reports/tr29/ - Unicode Text Segmentation
- */
-SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
+    return char_count;
+}
 
-/**
- *  @brief  Check if a codepoint is a "word character" (has word-forming property).
- *
- *  Returns true if the codepoint has a Word_Break property that typically forms words:
- *  ALetter, Hebrew_Letter, Numeric, Katakana, ExtendNumLet, or mid-word punctuation.
- *
- *  @param[in] rune The Unicode codepoint to check.
- *  @return sz_true_k if the codepoint is a word character, sz_false_k otherwise.
- */
-SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    sz_size_t char_count = 0;
 
-/**
- *  @brief  Find the next word boundary in UTF-8 text (dispatch function).
- *
- *  Scans forward from the start of text to find the first word boundary position.
- *  Returns a pointer to the boundary position and optionally outputs the boundary width.
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Optional output: bytes spanning the boundary.
- *  @return Pointer to boundary position, or text+length at end.
- */
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+    while (text_u8 < end_u8) {
+        // Check if this is NOT a continuation byte
+        if ((*text_u8 & 0xC0) != 0x80) {
+            if (char_count == n) return (sz_cptr_t)text_u8;
+            char_count++;
+        }
+        text_u8++;
+    }
 
-/**
- *  @brief  Find the previous word boundary in UTF-8 text (dispatch function).
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Optional output: bytes spanning the boundary.
- *  @return Pointer to boundary position, or text at start.
- */
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+    // If we reached the end without finding the nth character, return NULL
+    return SZ_NULL_CHAR;
+}
 
-/**
- *  @brief  Check if a position in UTF-8 text is a word boundary per Unicode TR29.
- *
- *  Implements the full TR29 word boundary algorithm including:
- *  - WB3: Do not break between CR and LF
- *  - WB4: Ignore Extend/Format/ZWJ characters for boundary purposes
- *  - WB5-WB13: Letter, number, and punctuation rules
- *  - WB15-WB16: Regional Indicator pair rules
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[in] pos Byte offset to check (must be start of a UTF-8 codepoint).
- *  @return sz_true_k if pos is a word boundary, sz_false_k otherwise.
- *
- *  @note Position 0 and position == length are always boundaries (SOT/EOT).
- *  @note This is an internal helper used by the iterators; not part of stable ABI.
- */
-SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t pos);
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
+    sz_cptr_t text, sz_size_t length,            //
+    sz_rune_t *runes, sz_size_t runes_capacity,  //
+    sz_size_t *runes_unpacked) {
 
-/*  Serial implementations */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+    sz_cptr_t src = text;
+    sz_cptr_t src_end = text + length;
+    sz_size_t runes_written = 0;
 
-/*  Ice Lake (AVX-512) implementations - placeholders for future */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_ice(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_ice(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+    // Process up to runes_capacity codepoints or end of input.
+    while (src < src_end && runes_written < runes_capacity) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(src, &rune, &rune_length);
+        if (src + rune_length > src_end) break; // Incomplete sequence at buffer boundary
+        runes[runes_written++] = rune;
+        src += rune_length;
+    }
 
-#pragma endregion
+    *runes_unpacked = runes_written;
+    return src;
+}
 
-/*  Implementation Section
- *  Following the same pattern as find.h with implementations in the header file.
- */
-
-#pragma region Serial Implementation
+#pragma region UAX-29 Word Boundaries
 
 /**
  *  Unicode 17.0 TR29 Word_Break property tables (~10 KB, full 4-bit property encoding).
@@ -728,7 +798,7 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
 }
 
 /**
- *  @brief  Check if a codepoint is a "word character" (has word-forming property).
+ *  @brief Check if a codepoint is a "word character" (has word-forming property).
  *
  *  This is a convenience function that returns true if the codepoint has a
  *  Word_Break property that typically forms words (ALetter, Hebrew_Letter,
@@ -745,7 +815,7 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
 }
 
 /**
- *  @brief  Decode a UTF-8 codepoint starting at the given position.
+ *  @brief Decode a UTF-8 codepoint starting at the given position.
  *  @return The decoded codepoint, or 0xFFFD on error. Updates pos to next codepoint.
  */
 SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_t *pos) {
@@ -776,7 +846,7 @@ SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_
 }
 
 /**
- *  @brief  Get UTF-8 sequence length from lead byte.
+ *  @brief Get UTF-8 sequence length from lead byte.
  */
 SZ_INTERNAL sz_size_t sz_utf8_char_length_(sz_u8_t lead) {
     if (lead < 0x80) return 1;
@@ -787,7 +857,7 @@ SZ_INTERNAL sz_size_t sz_utf8_char_length_(sz_u8_t lead) {
 }
 
 /**
- *  @brief  Check if property is WB4-ignorable (Extend, Format, ZWJ).
+ *  @brief Check if property is WB4-ignorable (Extend, Format, ZWJ).
  */
 SZ_INTERNAL sz_bool_t sz_wb_is_ignorable_(sz_u8_t prop) {
     return (sz_bool_t)(prop == sz_tr29_word_break_extend_k || prop == sz_tr29_word_break_format_k ||
@@ -795,22 +865,22 @@ SZ_INTERNAL sz_bool_t sz_wb_is_ignorable_(sz_u8_t prop) {
 }
 
 /**
- *  @brief  Check if property is AHLetter (ALetter or Hebrew_Letter).
+ *  @brief Check if property is AHLetter (ALetter or Hebrew_Letter).
  */
 SZ_INTERNAL sz_bool_t sz_wb_is_ahletter_(sz_u8_t prop) {
     return (sz_bool_t)(prop == sz_tr29_word_break_aletter_k || prop == sz_tr29_word_break_hebrew_letter_k);
 }
 
 /**
- *  @brief  Check if property is MidNumLetQ (MidNumLet or Single_Quote).
- *          In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
+ *  @brief Check if property is MidNumLetQ (MidNumLet or Single_Quote).
+ *         In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
  */
 SZ_INTERNAL sz_bool_t sz_wb_is_midnumletq_(sz_u8_t prop) {
     return (sz_bool_t)(prop == sz_tr29_word_break_mid_quotes_k);
 }
 
 /**
- *  @brief  Skip forward past WB4-ignorable characters (Extend, Format, ZWJ).
+ *  @brief Skip forward past WB4-ignorable characters (Extend, Format, ZWJ).
  *  @return Position after ignorables, or original position if none.
  */
 SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t pos) {
@@ -825,8 +895,8 @@ SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t
 }
 
 /**
- *  @brief  Get the effective property at position, skipping WB4 ignorables.
- *          Returns the property and updates next_pos to position after ignorables.
+ *  @brief Get the effective property at position, skipping WB4 ignorables.
+ *         Returns the property and updates next_pos to position after ignorables.
  */
 SZ_INTERNAL sz_u8_t sz_wb_get_effective_prop_(sz_cptr_t text, sz_size_t length, sz_size_t pos, sz_size_t *next_pos) {
     sz_size_t cur = pos;
@@ -844,7 +914,7 @@ SZ_INTERNAL sz_u8_t sz_wb_get_effective_prop_(sz_cptr_t text, sz_size_t length, 
 }
 
 /**
- *  @brief  Look back to find the previous non-ignorable property.
+ *  @brief Look back to find the previous non-ignorable property.
  *  @return The property of the previous significant character, or sz_tr29_word_break_other_k if none.
  */
 SZ_INTERNAL sz_u8_t sz_wb_prev_prop_(sz_cptr_t text, sz_size_t pos) {
@@ -872,7 +942,7 @@ SZ_INTERNAL sz_u8_t sz_wb_prev_prop_(sz_cptr_t text, sz_size_t pos) {
 }
 
 /**
- *  @brief  Count Regional Indicators before position (for WB15/16).
+ *  @brief Count Regional Indicators before position (for WB15/16).
  */
 SZ_INTERNAL sz_size_t sz_wb_count_ri_before_(sz_cptr_t text, sz_size_t pos) {
     sz_size_t count = 0;
@@ -900,7 +970,7 @@ SZ_INTERNAL sz_size_t sz_wb_count_ri_before_(sz_cptr_t text, sz_size_t pos) {
 }
 
 /**
- *  @brief  Check if position is a word boundary per Unicode TR29.
+ *  @brief Check if position is a word boundary per Unicode TR29.
  *
  *  Implements the TR29 word boundary algorithm. Position 0 and position == length
  *  are always boundaries (WB1/WB2).
@@ -1048,7 +1118,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
 }
 
 /**
- *  @brief  Find the next word boundary in UTF-8 text.
+ *  @brief Find the next word boundary in UTF-8 text.
  *
  *  Scans forward from the start of text to find the first word boundary position
  *  after position 0 (since position 0 is always a boundary).
@@ -1083,7 +1153,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t 
 }
 
 /**
- *  @brief  Find the previous word boundary in UTF-8 text (reverse search).
+ *  @brief Find the previous word boundary in UTF-8 text (reverse search).
  *
  *  Scans backward from the end of text to find the last word boundary position
  *  before position length (since position length is always a boundary).
@@ -1121,30 +1191,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t
     return text;
 }
 
-#pragma endregion // Serial Implementation
-
-#pragma region Dynamic Dispatch
-
-/**
- *  When dynamic dispatch is disabled, the SZ_DYNAMIC functions simply forward to serial implementations.
- *  When dynamic dispatch is enabled, these are provided by the shared library.
- */
-#if !SZ_DYNAMIC_DISPATCH
-
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_utf8_word_find_boundary_serial(text, length, boundary_width);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_utf8_word_rfind_boundary_serial(text, length, boundary_width);
-}
-
-#endif // !SZ_DYNAMIC_DISPATCH
-
-#pragma endregion // Dynamic Dispatch
+#pragma endregion // UAX-29 Word Boundaries
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORD_H_
+#endif // STRINGZILLA_UTF8_ITERATE_SERIAL_H_

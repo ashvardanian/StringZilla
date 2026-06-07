@@ -1,27 +1,27 @@
 /**
- *  @brief  StringZilla C++ wrapper improving over the performance of `std::string_view` and `std::string`,
- *          mostly for substring search, adding approximate matching functionality, and C++23 functionality
- *          to a C++11 compatible implementation.
+ *  @brief StringZilla C++ wrapper improving over the performance of `std::string_view` and `std::string`,
+ *         mostly for substring search, adding approximate matching functionality, and C++23 functionality
+ *         to a C++11 compatible implementation.
  *
  *  This implementation is aiming to be compatible with C++11, while implementing the C++23 functionality.
  *  By default, it includes C++ STL headers, but that can be avoided to minimize compilation overhead.
  *  https://artificial-mind.net/projects/compile-health/
  *
- *  @see    StringZilla: https://github.com/ashvardanian/StringZilla/blob/main/README.md
- *  @see    C++ Standard String: https://en.cppreference.com/w/cpp/header/string
+ *  @see StringZilla: https://github.com/ashvardanian/StringZilla/blob/main/README.md
+ *  @see C++ Standard String: https://en.cppreference.com/w/cpp/header/string
  *
- *  @file   stringzilla.hpp
+ *  @file include/stringzilla/stringzilla.hpp
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_HPP_
 #define STRINGZILLA_HPP_
 
-#include "types.hpp"
+#include "stringzilla/types.hpp"
 
 /**
- *  @brief  For higher safety, we annotate the lifetime bound of the returned string slices.
- *          https://clang.llvm.org/docs/AttributeReference.html#id11
- *          https://lemire.me/blog/2024/07/26/safer-code-in-c-with-lifetime-bounds/
+ *  @brief For higher safety, we annotate the lifetime bound of the returned string slices.
+ *         https://clang.llvm.org/docs/AttributeReference.html#id11
+ *         https://lemire.me/blog/2024/07/26/safer-code-in-c-with-lifetime-bounds/
  */
 #if !defined(__has_cpp_attribute)
 #define sz_lifetime_bound_
@@ -838,7 +838,9 @@ class range_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -956,7 +958,9 @@ class range_rsplits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1109,7 +1113,9 @@ class range_utf8_chars {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -1233,7 +1239,9 @@ class range_utf8_line_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Copies the lines into a container. */
@@ -1336,7 +1344,9 @@ class range_utf8_whitespace_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Copies the words into a container. */
@@ -1565,8 +1575,8 @@ static status_t _with_alloc(allocator_callback_ &&callback) noexcept {
 #pragma region Helper Template Classes
 
 /**
- *  @brief  A result of split a string once, containing the string slice ::before,
- *          the ::match itself, and the slice ::after.
+ *  @brief A result of split a string once, containing the string slice ::before,
+ *         the ::match itself, and the slice ::after.
  */
 template <typename string_>
 struct string_partition_result {
@@ -1576,8 +1586,8 @@ struct string_partition_result {
 };
 
 /**
- *  @brief  A reverse iterator for mutable and immutable character buffers.
- *          Replaces `std::reverse_iterator` to avoid including `<iterator>`.
+ *  @brief A reverse iterator for mutable and immutable character buffers.
+ *         Replaces `std::reverse_iterator` to avoid including `<iterator>`.
  */
 template <typename value_type_>
 class reversed_iterator_for {
@@ -1669,7 +1679,7 @@ struct concatenation {
 #pragma region Case-Insensitive Search Pattern
 
 /**
- *  @brief  Pre-compiled case-insensitive search pattern for UTF-8 strings.
+ *  @brief Pre-compiled case-insensitive search pattern for UTF-8 strings.
  *
  *  Caches metadata for efficient repeated searches with the same needle.
  *  Useful when searching multiple haystacks for the same pattern.
@@ -1715,9 +1725,9 @@ class utf8_case_insensitive_needle {
 #pragma region String Views and Spans
 
 /**
- *  @brief  A string slice (view/span) class implementing a superset of C++23 functionality
- *          with much faster SIMD-accelerated substring search and approximate matching.
- *          Constructors are `constexpr` enabling `_sz` literals.
+ *  @brief A string slice (view/span) class implementing a superset of C++23 functionality
+ *         with much faster SIMD-accelerated substring search and approximate matching.
+ *         Constructors are `constexpr` enabling `_sz` literals.
  *
  *  @tparam char_type_ The character type, usually `char const` or `char`. Must be a single byte long.
  */
@@ -1859,8 +1869,8 @@ class basic_string_slice {
 #pragma region Safe and Signed Extensions
 
     /**
-     *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
-     *          Supports signed and unsigned intervals.
+     *  @brief Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
+     *         Supports signed and unsigned intervals.
      */
     string_slice operator[](std::initializer_list<difference_type> signed_offsets) const noexcept {
         assert(signed_offsets.size() == 2 && "operator[] can't take more than 2 offsets");
@@ -1878,8 +1888,8 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  The slice that would be dropped by `remove_prefix`, that accepts signed arguments
-     *          and does no bounds checking. Equivalent to Python's `"abc"[:2]` and `"abc"[:-1]`.
+     *  @brief The slice that would be dropped by `remove_prefix`, that accepts signed arguments
+     *         and does no bounds checking. Equivalent to Python's `"abc"[:2]` and `"abc"[:-1]`.
      *
      *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
@@ -1890,8 +1900,8 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  The slice that would be dropped by `remove_suffix`, that accepts signed arguments
-     *          and does no bounds checking. Equivalent to Python's `"abc"[2:]` and `"abc"[-1:]`.
+     *  @brief The slice that would be dropped by `remove_suffix`, that accepts signed arguments
+     *         and does no bounds checking. Equivalent to Python's `"abc"[2:]` and `"abc"[-1:]`.
      *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
     string_slice back(difference_type signed_offset) const noexcept {
@@ -1901,8 +1911,8 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
-     *          Supports signed and unsigned intervals.
+     *  @brief Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
+     *         Supports signed and unsigned intervals.
      */
     string_slice sub(difference_type signed_start_offset, difference_type signed_end_offset = npos) const noexcept {
         sz_size_t normalized_offset, normalized_length;
@@ -1912,8 +1922,8 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  Exports this entire view. Not an STL function, but useful for concatenations.
-     *          The STL variant expects at least two arguments.
+     *  @brief Exports this entire view. Not an STL function, but useful for concatenations.
+     *         The STL variant expects at least two arguments.
      */
     size_type copy(value_type *destination) const noexcept {
         sz_copy((sz_ptr_t)destination, start_, length_);
@@ -2557,10 +2567,14 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     using split_type = range_splits<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = range_rsplits<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -2575,10 +2589,14 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -2746,8 +2764,8 @@ class basic_string {
     static constexpr size_type npos = SZ_SSIZE_MAX;
 
     /**
-     *  @brief  The number of characters that can be stored in the internal buffer.
-     *          Depends on the size of the internal buffer for the "Small String Optimization".
+     *  @brief The number of characters that can be stored in the internal buffer.
+     *         Depends on the size of the internal buffer for the "Small String Optimization".
      */
     static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
 
@@ -2951,8 +2969,8 @@ class basic_string {
 #pragma region Safe and Signed Extensions
 
     /**
-     *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
-     *          Supports signed and unsigned intervals.
+     *  @brief Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
+     *         Supports signed and unsigned intervals.
      */
     string_view operator[](std::initializer_list<difference_type> offsets) const noexcept sz_lifetime_bound_ {
         return view()[offsets];
@@ -2983,8 +3001,8 @@ class basic_string {
     string_span back(difference_type n) noexcept sz_lifetime_bound_ { return span().back(n); }
 
     /**
-     *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
-     *          Supports signed and unsigned intervals. @b Doesn't copy or allocate memory!
+     *  @brief Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
+     *         Supports signed and unsigned intervals. @b Doesn't copy or allocate memory!
      */
     string_view sub(difference_type start, difference_type end = npos) const noexcept sz_lifetime_bound_ {
         return view().sub(start, end);
@@ -2994,8 +3012,8 @@ class basic_string {
     }
 
     /**
-     *  @brief  Exports this entire view. Not an STL function, but useful for concatenations.
-     *          The STL variant expects at least two arguments.
+     *  @brief Exports this entire view. Not an STL function, but useful for concatenations.
+     *         The STL variant expects at least two arguments.
      */
     size_type copy(value_type *destination) const noexcept { return view().copy(destination); }
 
@@ -3372,7 +3390,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Python-like convenience function, dropping suffix formed of given characters.
+     *  @brief Python-like convenience function, dropping suffix formed of given characters.
      *  @see Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
     basic_string &rstrip(byteset set) noexcept {
@@ -3568,7 +3586,7 @@ class basic_string {
     void clear() noexcept { sz_string_erase(&string_, 0, SZ_SIZE_MAX); }
 
     /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
+     *  @brief Erases ( @b in-place ) the given range of characters.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator first, const_iterator last) noexcept sz_lifetime_bound_ {
@@ -4072,8 +4090,8 @@ class basic_string {
     }
 
     /**
-     *  @brief  Overwrites the string with random binary data.
-     *  @sa     sz_fill_random
+     *  @brief Overwrites the string with random binary data.
+     *  @sa sz_fill_random
      *
      *  This overload produces the nonce from a static variable, incrementing it each time.
      *  In this case the undefined behaviour in concurrent environments may play in our favor,
@@ -4662,10 +4680,10 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
 }
 
 /**
- *  @brief  Computes the permutation of an array, that would lead to sorted order.
- *          The elements of the array must be convertible to a `string_view` with the given extractor.
- *          Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
- *  @sa     sz_sequence_argsort
+ *  @brief Computes the permutation of an array, that would lead to sorted order.
+ *         The elements of the array must be convertible to a `string_view` with the given extractor.
+ *         Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
+ *  @sa sz_sequence_argsort
  *
  *  @param[in] begin The pointer to the first element of the array.
  *  @param[in] end The pointer to the element after the last element of the array.

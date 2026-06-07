@@ -1,9 +1,7 @@
+// Only the C API umbrella is exposed as a Clang module for now. The C++ wrapper
+// (stringzilla.hpp) and the heavy templated headers don't build cleanly as Clang
+// modules against current libstdc++ yet, so C++ stays on textual includes.
 module StringZillaC {
     header "stringzilla.h"
-    export *
-}
-
-module StringZillaCpp {
-    header "stringzilla.hpp"
     export *
 }

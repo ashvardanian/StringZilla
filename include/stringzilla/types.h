@@ -1,6 +1,6 @@
 /**
- *  @brief  Shared definitions for the StringZilla library.
- *  @file   types.h
+ *  @brief Shared definitions for the StringZilla library.
+ *  @file include/stringzilla/types.h
  *  @author Ash Vardanian
  *
  *  Includes the following types:
@@ -39,8 +39,8 @@
 #endif
 
 /**
- *  @brief  When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
- *          In debug builds (SZ_DEBUG=1), the library will also include <stdio.h> and <stdlib.h>.
+ *  @brief When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
+ *         In debug builds (SZ_DEBUG=1), the library will also include <stdio.h> and <stdlib.h>.
  *
  *  You may want to disable this compiling for use in the kernel, or in embedded systems.
  *  You may also avoid them, if you are very sensitive to compilation time and avoid pre-compiled headers.
@@ -51,18 +51,18 @@
 #endif
 
 /**
- *  @brief  Removes compile-time dispatching, and replaces it with runtime dispatching.
- *          So the `sz_find` function will invoke the most advanced backend supported by the CPU,
- *          that runs the program, rather than the most advanced backend supported by the CPU
- *          used to compile the library or the downstream application.
+ *  @brief Removes compile-time dispatching, and replaces it with runtime dispatching.
+ *         So the `sz_find` function will invoke the most advanced backend supported by the CPU,
+ *         that runs the program, rather than the most advanced backend supported by the CPU
+ *         used to compile the library or the downstream application.
  */
 #if !defined(SZ_DYNAMIC_DISPATCH)
 #define SZ_DYNAMIC_DISPATCH (0) // true or false
 #endif
 
 /**
- *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
- *          that is not divisible by eight. On x86 enabled by default. On ARM it's not.
+ *  @brief A misaligned load can be - trying to fetch eight consecutive bytes from an address
+ *         that is not divisible by eight. On x86 enabled by default. On ARM it's not.
  *
  *  Most platforms support it, but there is no industry standard way to check for those.
  *  This value will mostly affect the performance of the serial (SWAR) backend.
@@ -76,12 +76,12 @@
 #endif
 
 /**
- *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
- *          64-bit on most platforms where pointers are 64-bit.
- *          32-bit on platforms where pointers are 32-bit.
+ *  @brief Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
+ *         64-bit on most platforms where pointers are 64-bit.
+ *         32-bit on platforms where pointers are 32-bit.
  *
- *  @note   Do not use `defined(SZ_IS_64BIT_X86_)` or `defined(SZ_IS_64BIT_ARM_)` here — those indicate
- *          the CPU family, not pointer width. Rely on compiler/OS macros only.
+ *  @note Do not use `defined(SZ_IS_64BIT_X86_)` or `defined(SZ_IS_64BIT_ARM_)` here — those indicate
+ *        the CPU family, not pointer width. Rely on compiler/OS macros only.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || \
     defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
@@ -91,9 +91,9 @@
 #endif
 
 /**
- *  @brief  On Big-Endian machines StringZilla will work in compatibility mode.
- *          This disables SWAR hacks to minimize code duplication, assuming practically
- *          all modern popular platforms are Little-Endian.
+ *  @brief On Big-Endian machines StringZilla will work in compatibility mode.
+ *         This disables SWAR hacks to minimize code duplication, assuming practically
+ *         all modern popular platforms are Little-Endian.
  *
  *  This variable is hard to infer from macros reliably. It's best to set it manually.
  *  For that CMake provides the `TestBigEndian` and `CMAKE_<LANG>_BYTE_ORDER` (from 3.20 onwards).
@@ -115,8 +115,8 @@
 #endif
 
 /**
- *  @brief  Infer the target architecture, unless it's overriden by the build system.
- *          At this point we only provide optimized backends for x86_64 and ARM64.
+ *  @brief Infer the target architecture, unless it's overriden by the build system.
+ *         At this point we only provide optimized backends for x86_64 and ARM64.
  */
 #if !defined(SZ_IS_64BIT_X86_)
 #if defined(__x86_64__) || defined(_M_X64)
@@ -134,9 +134,9 @@
 #endif
 
 /**
- *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
- *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
- *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
+ *  @brief Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
+ *         On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
+ *         Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
  */
 #if !defined(SZ_SWAR_THRESHOLD)
 #if SZ_DEBUG
@@ -180,7 +180,7 @@
 #endif // SZ_DYNAMIC_DISPATCH
 
 /**
- *  @brief  Disables stack protection for performance-critical functions.
+ *  @brief Disables stack protection for performance-critical functions.
  *
  *  GCC's `-fstack-protector-strong` inserts stack canary checks for functions with local arrays
  *  or buffers. For hash functions that use fixed-size state structures, this is unnecessary
@@ -193,7 +193,7 @@
 #endif
 
 /**
- *  @brief  Alignment macro for N-byte alignment.
+ *  @brief Alignment macro for N-byte alignment.
  */
 #if defined(_MSC_VER)
 #define sz_align_(n) __declspec(align(n))
@@ -204,11 +204,11 @@
 #endif
 
 /**
- *  @brief  C99 static array parameter annotation for minimum array size.
- *          In C, expands to `static n` enabling compiler bounds checking.
- *          In C++, expands to nothing as this syntax is not supported.
+ *  @brief C99 static array parameter annotation for minimum array size.
+ *         In C, expands to `static n` enabling compiler bounds checking.
+ *         In C++, expands to nothing as this syntax is not supported.
  *
- *  @see    https://lwn.net/Articles/1046840/
+ *  @see https://lwn.net/Articles/1046840/
  *
  *  Example usage:
  *  @code{.c}
@@ -223,18 +223,18 @@
 #endif
 
 /**
- *  @brief  Largest prime number that fits into 16 bits.
+ *  @brief Largest prime number that fits into 16 bits.
  */
 #define SZ_U16_MAX_PRIME (65521u)
 
 /**
- *  @brief  Largest prime number that fits into 31 bits.
+ *  @brief Largest prime number that fits into 31 bits.
  */
 #define SZ_U32_MAX_PRIME (2147483647u)
 
 /**
- *  @brief  Largest prime number that fits into 64 bits.
- *  @see    https://mersenneforum.org/showthread.php?t=3471
+ *  @brief Largest prime number that fits into 64 bits.
+ *  @see https://mersenneforum.org/showthread.php?t=3471
  *
  *  2^64 = 18,446,744,073,709,551,616
  *  this = 18,446,744,073,709,551,557
@@ -292,13 +292,13 @@
 #endif
 #endif
 
-#if !defined(SZ_USE_ICE)
+#if !defined(SZ_USE_ICELAKE)
 #if SZ_IS_64BIT_X86_ && defined(__AVX512BW__) && defined(__VAES__)
-#define SZ_USE_ICE (1)
+#define SZ_USE_ICELAKE (1)
 #elif SZ_IS_64BIT_X86_ && defined(_MSC_VER) && defined(__AVX512BW__)
-#define SZ_USE_ICE (1) // ! MSVC doesn't expose `__VAES__` macros
+#define SZ_USE_ICELAKE (1) // ! MSVC doesn't expose `__VAES__` macros
 #else
-#define SZ_USE_ICE (0)
+#define SZ_USE_ICELAKE (0)
 #endif
 #endif
 
@@ -332,29 +332,29 @@
 #endif
 
 /*  AES is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
-#if !defined(SZ_USE_NEON_AES)
+#if !defined(SZ_USE_NEONAES)
 #if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
-#define SZ_USE_NEON_AES (1)
+#define SZ_USE_NEONAES (1)
 #else
-#define SZ_USE_NEON_AES (0)
+#define SZ_USE_NEONAES (0)
 #endif
 #endif
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory and MSVC has no way to probe for it. */
-#if !defined(SZ_USE_NEON_SHA)
+#if !defined(SZ_USE_NEONSHA)
 #if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
-#define SZ_USE_NEON_SHA (1)
+#define SZ_USE_NEONSHA (1)
 #else
-#define SZ_USE_NEON_SHA (0)
+#define SZ_USE_NEONSHA (0)
 #endif
 #endif
 
 /*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
-#if !defined(SZ_USE_SVE2_AES)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2_AES)
-#define SZ_USE_SVE2_AES (1)
+#if !defined(SZ_USE_SVE2AES)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2AES)
+#define SZ_USE_SVE2AES (1)
 #else
-#define SZ_USE_SVE2_AES (0)
+#define SZ_USE_SVE2AES (0)
 #endif
 #endif
 
@@ -395,11 +395,71 @@
 #endif
 #endif
 
+/*  WebAssembly SIMD128 — opt-in at compile time via `-msimd128`; there is no runtime probe. */
+#if !defined(SZ_USE_V128)
+#if defined(__wasm__) && defined(__wasm_simd128__)
+#define SZ_USE_V128 (1)
+#else
+#define SZ_USE_V128 (0)
+#endif
+#endif
+
+/*  WebAssembly @b relaxed SIMD — opt-in via `-mrelaxed-simd`; a level above baseline SIMD128 adding
+ *  relaxed swizzle, fused multiply-add, lane-select, and integer dot-products. Some runtimes lower a
+ *  few relaxed ops sub-optimally, but the level is exposed so native engines can use them. */
+#if !defined(SZ_USE_V128RELAXED)
+#if defined(__wasm__) && defined(__wasm_relaxed_simd__)
+#define SZ_USE_V128RELAXED (1)
+#else
+#define SZ_USE_V128RELAXED (0)
+#endif
+#endif
+
+/*  RISC-V Vector extension (RVV 1.0) — `-march=rv64gcv`. Length-agnostic registers. */
+#if !defined(SZ_USE_RVV)
+#if defined(__riscv) && (__riscv_xlen == 64) && defined(__riscv_vector)
+#define SZ_USE_RVV (1)
+#else
+#define SZ_USE_RVV (0)
+#endif
+#endif
+
+/*  LoongArch Advanced SIMD eXtension (LASX, 256-bit) — `-mlasx`. */
+#if !defined(SZ_USE_LASX)
+#if defined(__loongarch__) && defined(__loongarch_asx)
+#define SZ_USE_LASX (1)
+#else
+#define SZ_USE_LASX (0)
+#endif
+#endif
+
+/*  IBM Power Vector-Scalar eXtension (VSX, Power8+) — `-mvsx`. */
+#if !defined(SZ_USE_POWERVSX)
+#if (defined(__powerpc__) || defined(__powerpc64__)) && defined(__VSX__)
+#define SZ_USE_POWERVSX (1)
+#else
+#define SZ_USE_POWERVSX (0)
+#endif
+#endif
+
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_V128
+#include <wasm_simd128.h>
+#endif // SZ_USE_V128
+#if SZ_USE_RVV
+#include <riscv_vector.h>
+#endif // SZ_USE_RVV
+#if SZ_USE_LASX
+#include <lasxintrin.h> // 256-bit `__lasx_*` intrinsics and the `__m256i` register type
+#include <lsxintrin.h>  // 128-bit `__lsx_*` intrinsics and the `__m128i` register type, for sub-32-byte inputs
+#endif                  // SZ_USE_LASX
+#if SZ_USE_POWERVSX
+#include <altivec.h>
+#endif // SZ_USE_POWERVSX
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 #include <immintrin.h>
-#endif // SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#endif // SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 #if SZ_USE_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
@@ -513,7 +573,7 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 #endif // SZ_AVOID_LIBC
 
 /**
- *  @brief  Compile-time assert macro similar to `static_assert` in C++.
+ *  @brief Compile-time assert macro similar to `static_assert` in C++.
  */
 #define sz_static_assert(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
 
@@ -600,43 +660,51 @@ typedef enum sz_status_t {
 } sz_status_t;
 
 /**
- *  @brief  Enumeration of SIMD capabilities of the target architecture.
- *          Used to introspect the supported functionality of the dynamic library.
+ *  @brief Enumeration of SIMD capabilities of the target architecture.
+ *         Used to introspect the supported functionality of the dynamic library.
  */
 typedef enum sz_capability_t {
     sz_cap_serial_k = 1,        ///< Serial (non-SIMD) capability
     sz_cap_parallel_k = 1 << 2, ///< Multi-threading via Fork Union or other OpenMP-like engines
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
 
+    sz_cap_goldmont_k = 1 << 3, ///< x86 SHA-NI capability for accelerated SHA-256 hashing
+    sz_cap_westmere_k = 1 << 4, ///< x86 SSE4.2 + AES-NI capability
     sz_cap_haswell_k = 1 << 5,  ///< x86 AVX2 capability with FMA and F16C extensions
     sz_cap_skylake_k = 1 << 6,  ///< x86 AVX512 baseline capability
-    sz_cap_ice_k = 1 << 7,      ///< x86 AVX512 capability with advanced integer algos and AES extensions
-    sz_cap_westmere_k = 1 << 8, ///< x86 SSE4.2 + AES-NI capability
-    sz_cap_goldmont_k = 1 << 9, ///< x86 SHA-NI capability for accelerated SHA-256 hashing
+    sz_cap_icelake_k = 1 << 7,  ///< x86 AVX512 capability with advanced integer algos and AES extensions
 
-    sz_cap_neon_k = 1 << 10,     ///< ARM NEON baseline capability
-    sz_cap_neon_aes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
-    sz_cap_neon_sha_k = 1 << 15, ///< ARM NEON baseline capability with SHA2 extensions
-    sz_cap_sve_k = 1 << 12,      ///< ARM SVE baseline capability
-    sz_cap_sve2_k = 1 << 13,     ///< ARM SVE2 capability
-    sz_cap_sve2_aes_k = 1 << 14, ///< ARM SVE2 capability with AES extensions
+    sz_cap_neon_k = 1 << 10,    ///< ARM NEON baseline capability
+    sz_cap_neonaes_k = 1 << 11, ///< ARM NEON baseline capability with AES extensions
+    sz_cap_neonsha_k = 1 << 15, ///< ARM NEON baseline capability with SHA2 extensions
+    sz_cap_sve_k = 1 << 12,     ///< ARM SVE baseline capability
+    sz_cap_sve2_k = 1 << 13,    ///< ARM SVE2 capability
+    sz_cap_sve2aes_k = 1 << 14, ///< ARM SVE2 capability with AES extensions
 
-    sz_cap_cuda_k = 1 << 20,   ///< CUDA capability
-    sz_cap_kepler_k = 1 << 21, ///< CUDA capability with support with in-warp register shuffles
-    sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
+    sz_cap_v128_k = 1 << 16,        ///< WebAssembly SIMD128 capability
+    sz_cap_v128relaxed_k = 1 << 17, ///< WebAssembly relaxed-SIMD capability (above SIMD128)
+    sz_cap_lasx_k = 1 << 18,        ///< LoongArch LASX (256-bit) capability
+    sz_cap_powervsx_k = 1 << 19,    ///< IBM Power VSX capability
+    sz_cap_rvv_k = 1 << 20,         ///< RISC-V Vector (RVV 1.0) capability
+
+    sz_cap_cuda_k = 1 << 21,   ///< CUDA capability
+    sz_cap_kepler_k = 1 << 22, ///< CUDA capability with support with in-warp register shuffles
+    sz_cap_hopper_k = 1 << 23, ///< CUDA capability with support for Hopper's DPX instructions
 
     sz_caps_none_k = 0,
-    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with Fork Union
-    sz_caps_si_k = sz_cap_serial_k | sz_cap_ice_k,                      ///< Serial code with Ice Lake
-    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with Fork Union and Ice Lake
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
+    sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
+    sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
+        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
-    sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
-                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_neon_sha_k |
-                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
+    sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
+        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
+        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_lasx_k |
+        sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -645,7 +713,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 16
+#define SZ_CAPABILITIES_COUNT 21
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
@@ -757,9 +825,9 @@ typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
 typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
 
 /**
- *  @brief  Some complex pattern matching algorithms may require memory allocations.
- *          This structure is used to pass the memory allocator to those functions.
- *  @sa     sz_memory_allocator_init_fixed
+ *  @brief Some complex pattern matching algorithms may require memory allocations.
+ *         This structure is used to pass the memory allocator to those functions.
+ *  @sa sz_memory_allocator_init_fixed
  */
 typedef struct sz_memory_allocator_t {
     sz_memory_allocate_t allocate;
@@ -941,9 +1009,9 @@ typedef union sz_u64_vec_t {
 } sz_u64_vec_t;
 
 /**
- *  @brief  Helper structure to simplify work with @b 128-bit registers.
- *          It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
- *          as well as 1x XMM register.
+ *  @brief Helper structure to simplify work with @b 128-bit registers.
+ *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
+ *         as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
 #if SZ_USE_WESTMERE || SZ_USE_HASWELL
@@ -956,6 +1024,18 @@ typedef union sz_u128_vec_t {
     uint16x8_t u16x8;
     uint32x4_t u32x4;
     uint64x2_t u64x2;
+#endif
+#if SZ_USE_LASX
+    __m128i lsx;
+#endif
+#if SZ_USE_V128
+    v128_t v128;
+#endif
+#if SZ_USE_POWERVSX
+    __vector unsigned char vsx_u8;
+    __vector unsigned short vsx_u16;
+    __vector unsigned int vsx_u32;
+    __vector unsigned long long vsx_u64;
 #endif
     sz_f64_t f64s[2];
     sz_f32_t f32s[4];
@@ -970,9 +1050,9 @@ typedef union sz_u128_vec_t {
 } sz_u128_vec_t;
 
 /**
- *  @brief  Helper structure to simplify work with @b 256-bit registers.
- *          It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
- *          as well as 2x XMM registers or 1x YMM register.
+ *  @brief Helper structure to simplify work with @b 256-bit registers.
+ *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
+ *         as well as 2x XMM registers or 1x YMM register.
  */
 typedef union sz_u256_vec_t {
 #if SZ_USE_HASWELL
@@ -989,6 +1069,12 @@ typedef union sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
+#if SZ_USE_LASX
+    __m256i lasx;
+#endif
+#if SZ_USE_V128
+    v128_t v128s[2];
+#endif
     sz_f64_t f64s[4];
     sz_f32_t f32s[8];
     sz_u64_t u64s[4];
@@ -1002,20 +1088,20 @@ typedef union sz_u256_vec_t {
 } sz_u256_vec_t;
 
 /**
- *  @brief  Helper structure to simplify work with @b 512-bit registers.
- *          It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
- *          as well as 4x XMM registers or 2x YMM registers or 1x ZMM register.
+ *  @brief Helper structure to simplify work with @b 512-bit registers.
+ *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
+ *         as well as 4x XMM registers or 2x YMM registers or 1x ZMM register.
  */
 typedef union sz_u512_vec_t {
-#if SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m512i zmm;
     __m512d zmm_pd;
     __m512 zmm_ps;
 #endif
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m256i ymms[2];
 #endif
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m128i xmms[4];
 #endif
 #if SZ_USE_NEON
@@ -1046,10 +1132,10 @@ typedef sz_cptr_t (*sz_sequence_member_start_t)(void const *, sz_sorted_idx_t);
 typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_sorted_idx_t);
 
 /**
- *  @brief  Structure to represent an ordered collection of strings.
- *          It's a generic structure that can be used to represent a sequence of strings in different layouts.
- *          It can be easily combined with Apache Arrow and its tape-like concatenated strings.
- *  @sa     sz_sequence_from_null_terminated_strings
+ *  @brief Structure to represent an ordered collection of strings.
+ *         It's a generic structure that can be used to represent a sequence of strings in different layouts.
+ *         It can be easily combined with Apache Arrow and its tape-like concatenated strings.
+ *  @sa sz_sequence_from_null_terminated_strings
  */
 typedef struct sz_sequence_t {
     void const *handle;
@@ -1104,9 +1190,9 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #endif
 
 /**
- *  @brief  Defines `SZ_NULL`, analogous to `NULL`.
- *          The default often comes from locale.h, stddef.h,
- *          stdio.h, stdlib.h, string.h, time.h, or wchar.h.
+ *  @brief Defines `SZ_NULL`, analogous to `NULL`.
+ *         The default often comes from locale.h, stddef.h,
+ *         stdio.h, stdlib.h, string.h, time.h, or wchar.h.
  */
 #ifdef __GNUG__
 #define SZ_NULL __null
@@ -1117,8 +1203,8 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #endif
 
 /**
- *  @brief  Cache-line width, that will affect the execution of some algorithms,
- *          like equality checks and relative order computing.
+ *  @brief Cache-line width, that will affect the execution of some algorithms,
+ *         like equality checks and relative order computing.
  */
 #define SZ_CACHE_LINE_WIDTH (64)   // bytes
 #define SZ_MAX_REGISTER_WIDTH (64) // bytes
@@ -1130,9 +1216,9 @@ SZ_INTERNAL sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
 SZ_INTERNAL sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
 
 /**
- *  @brief  Similar to `assert`, the `sz_assert_` is used in the `SZ_DEBUG` mode
- *          to check the invariants of the library. It's a no-op in the "Release" mode.
- *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
+ *  @brief Similar to `assert`, the `sz_assert_` is used in the `SZ_DEBUG` mode
+ *         to check the invariants of the library. It's a no-op in the "Release" mode.
+ *  @note If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC) && \
     !defined(__CUDA_ARCH__) // ? CPU code w/out LibC access
@@ -1237,7 +1323,7 @@ SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /**
- *  @brief  Select bits from either @p a or @p b depending on the value of @p mask bits.
+ *  @brief Select bits from either @p a or @p b depending on the value of @p mask bits.
  *
  *  Similar to `_mm_blend_epi16` intrinsic on x86.
  *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
@@ -1303,7 +1389,7 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
  *  It, however, induces undefined behavior if `N == 64` or `N == 32` on 64-bit or 32-bit systems respectively.
  *  Alternatively, the BZHI instruction can be used to clear the bits above N.
  */
-#if SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1327,10 +1413,10 @@ SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // SZ_USE_SKYLAKE || SZ_USE_ICE
+#endif // SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 
 /**
- *  @brief  Byte-level equality comparison between two 64-bit integers.
+ *  @brief Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
 SZ_INTERNAL sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
@@ -1344,7 +1430,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b)
 }
 
 /**
- *  @brief  Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
+ *  @brief Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
  */
 SZ_INTERNAL void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
@@ -1378,8 +1464,8 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
- *  @note  Uses LZCNT/CLZ for efficient computation on modern CPUs.
- *         Edge cases: bit_ceil(0) = 0, bit_ceil(1) = 1.
+ *  @note Uses LZCNT/CLZ for efficient computation on modern CPUs.
+ *        Edge cases: bit_ceil(0) = 0, bit_ceil(1) = 1.
  *  @see https://stackoverflow.com/a/10143264
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
