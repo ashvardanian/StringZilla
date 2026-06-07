@@ -1,8 +1,8 @@
 /**
- *  @file   bench_find.cpp
- *  @brief  Benchmarks for bidirectional string search operations.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_find.cpp
+ *  @brief Benchmarks for bidirectional string search operations.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - Substring search: find all inclusions of a token in the dataset - @b find & @b rfind.
@@ -63,8 +63,8 @@ using namespace ashvardanian::stringzilla::scripts;
 #pragma region Substring Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_t find_func_>
 struct matcher_from_sz_find {
@@ -85,8 +85,8 @@ struct matcher_from_sz_find {
 static std::string strstr_needle_copy_ {}; //! Reuse the same memory for all needles, potentially causing allocations
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strstr_t {
     using size_type = std::size_t;
@@ -104,8 +104,8 @@ struct matcher_strstr_t {
 
 #if defined(_GNU_SOURCE)
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_memmem_t {
     using size_type = std::size_t;
@@ -125,8 +125,8 @@ struct matcher_memmem_t {
 
 #if __cpp_lib_boyer_moore_searcher
 /**
- *  @brief  Wraps the C++20 @b Boyer-Moore algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++20 @b Boyer-Moore algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  *  @tparam searcher_type_ Can be `std::boyer_moore_searcher` or `std::boyer_moore_horspool_searcher`.
  *          Both should be instantiated with the `std::string_view::const_iterator` type.
  */
@@ -281,8 +281,8 @@ void bench_substring_search(environment_t const &env) {
 #pragma region Byte Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_byte_t find_func_>
 struct matcher_from_sz_find_byte {
@@ -301,8 +301,8 @@ struct matcher_from_sz_find_byte {
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strchr_t {
     using size_type = std::size_t;
@@ -320,8 +320,8 @@ struct matcher_strchr_t {
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_memchr_t {
     using size_type = std::size_t;
@@ -339,8 +339,8 @@ struct matcher_memchr_t {
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_from_std_find {
     using size_type = std::size_t;
@@ -448,8 +448,8 @@ void bench_byte_search(environment_t const &env) {
 #pragma region Byteset Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_byteset_t find_func_>
 struct matcher_from_sz_find_byteset {
@@ -468,8 +468,8 @@ struct matcher_from_sz_find_byteset {
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strcspn_t {
     using size_type = std::size_t;
@@ -487,8 +487,8 @@ struct matcher_strcspn_t {
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++11 @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_std_string_first_of_t {
     using size_type = std::size_t;
@@ -501,8 +501,8 @@ struct matcher_std_string_first_of_t {
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::range_rmatches`.
+ *  @brief Wraps the C++11 @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::range_rmatches`.
  */
 struct matcher_std_string_last_of_t {
     using size_type = std::size_t;
@@ -567,15 +567,15 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     bench_unary( //
-        env, "sz_find_byteset_ice", base_call,
-        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_ice>, sz::byteset>(
-            env))
+        env, "sz_find_byteset_icelake", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_icelake>,
+                                    sz::byteset>(env))
         .log(base);
     bench_unary( //
-        env, "sz_rfind_byteset_ice", base_call,
-        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_ice>,
+        env, "sz_rfind_byteset_icelake", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_icelake>,
                                     sz::byteset>(env))
         .log(base_reverse);
 #endif
@@ -610,8 +610,8 @@ void bench_byteset_search(environment_t const &env) {
 #pragma region UTF8 Tokenization
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_utf8_find_boundary_t find_func_>
 struct matcher_from_sz_utf8_find_boundary {
@@ -659,16 +659,16 @@ void bench_utf8_find_boundary(environment_t const &env) {
     bench_result_t base_whitespace = bench_unary(env, "sz_utf8_find_whitespace_serial", base_whitespace_call).log();
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     bench_unary( //
-        env, "sz_utf8_find_newline_ice", base_newline_call,
+        env, "sz_utf8_find_newline_icelake", base_newline_call,
         callable_for_utf8_find_boundary<sz::range_matches,
-                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_ice>>(env))
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_icelake>>(env))
         .log(base_newline);
     bench_unary( //
-        env, "sz_utf8_find_whitespace_ice", base_whitespace_call,
+        env, "sz_utf8_find_whitespace_icelake", base_whitespace_call,
         callable_for_utf8_find_boundary<sz::range_matches,
-                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_ice>>(env))
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_icelake>>(env))
         .log(base_whitespace);
 #endif
 #if SZ_USE_NEON

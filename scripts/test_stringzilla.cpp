@@ -1,12 +1,12 @@
 /**
- *  @brief   Extensive @b unit-testing suite for StringZilla, written in C++.
- *  @note    It mostly tests one target hardware platform at a time and should be compiled and run separately for each.
- *           To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
+ *  @brief Extensive @b unit-testing suite for StringZilla, written in C++.
+ *  @note It mostly tests one target hardware platform at a time and should be compiled and run separately for each.
+ *      To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
  *
- *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_stringzilla.cpp
- *  @author  Ash Vardanian
+ *  @file scripts/test_stringzilla.cpp
+ *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -28,7 +28,7 @@
  #define SZ_USE_HASWELL 0
  #define SZ_USE_GOLDMONT 0
  #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICE 0
+ #define SZ_USE_ICELAKE 0
  #define SZ_USE_NEON 0
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
@@ -104,8 +104,8 @@ template class std::map<sz::string_view, int>;
 template class std::unordered_map<sz::string_view, int>;
 
 /**
- *  @brief  Several string processing operations rely on computing integer logarithms.
- *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
+ *  @brief Several string processing operations rely on computing integer logarithms.
+ *         Failures in such operations will result in wrong `resize` outcomes and heap corruption.
  */
 void test_arithmetical_utilities() {
 
@@ -253,7 +253,7 @@ void test_byteset_struct() {
 }
 
 /**
- *  @brief  Hashes a string and compares the output between a serial and hardware-specific SIMD backend.
+ *  @brief Hashes a string and compares the output between a serial and hardware-specific SIMD backend.
  *
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
@@ -323,8 +323,8 @@ void test_hash_equivalence(                                               //
 }
 
 /**
- *  @brief  Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
- *          produces exactly the same output across different SIMD implementations.
+ *  @brief Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
+ *         produces exactly the same output across different SIMD implementations.
  */
 void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
 
@@ -350,8 +350,8 @@ void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_r
 }
 
 /**
- *  @brief  Tests SHA256 implementations, comparing serial and SIMD variants
- *          against known FIPS 180-4 test vectors.
+ *  @brief Tests SHA256 implementations, comparing serial and SIMD variants
+ *         against known FIPS 180-4 test vectors.
  */
 void test_sha256_equivalence(                                                                                     //
     sz_sha256_state_init_t init_base, sz_sha256_state_update_t update_base, sz_sha256_state_digest_t digest_base, //
@@ -388,7 +388,7 @@ void test_sha256_equivalence(                                                   
 }
 
 /**
- *  @brief  Tests UTF-8 functions across different SIMD backends against the serial implementation.
+ *  @brief Tests UTF-8 functions across different SIMD backends against the serial implementation.
  *
  *  Generates random strings containing:
  *  - ASCII content (1-byte)
@@ -531,7 +531,7 @@ void test_utf8_equivalence(                                 //
 }
 
 /**
- *  @brief  Tests equivalence of case folding implementations (serial vs SIMD).
+ *  @brief Tests equivalence of case folding implementations (serial vs SIMD).
  *
  *  Generates random UTF-8 strings containing:
  *  - ASCII text (uppercase and lowercase)
@@ -670,7 +670,7 @@ void test_utf8_case_fold_equivalence(                             //
 }
 
 /**
- *  @brief  Exhaustive fuzz test for UTF-8 case folding using all Unicode codepoints.
+ *  @brief Exhaustive fuzz test for UTF-8 case folding using all Unicode codepoints.
  *
  *  - First run: Tests all valid codepoints in order (0x0 to 0x10FFFF).
  *  - Subsequent runs: Shuffles the codepoints to create random sequences.
@@ -757,7 +757,7 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
 }
 
 /**
- *  @brief  Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
+ *  @brief Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
  *
  *  Uses two verification modes:
  *  - Exhaustive (max_needles_per_haystack == 0): Tests ALL N*(N+1)/2 substrings of each folded haystack
@@ -1081,15 +1081,15 @@ void test_equivalence() {
         sz_hash_state_update_skylake, sz_hash_state_digest_skylake);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_skylake);
 #endif
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_ice, sz_hash_state_init_ice,                      //
-        sz_hash_state_update_ice, sz_hash_state_digest_ice);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_ice);
+        sz_hash_icelake, sz_hash_state_init_icelake,              //
+        sz_hash_state_update_icelake, sz_hash_state_digest_icelake);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_icelake);
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
@@ -1097,7 +1097,7 @@ void test_equivalence() {
         sz_hash_state_update_neon, sz_hash_state_digest_neon);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
 #endif
-#if SZ_USE_SVE2_AES
+#if SZ_USE_SVE2AES
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
@@ -1107,10 +1107,10 @@ void test_equivalence() {
 #endif
 
     // Test SHA256 implementations
-#if SZ_USE_ICE
-    test_sha256_equivalence(                                                                       //
-        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
-        sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice           //
+#if SZ_USE_ICELAKE
+    test_sha256_equivalence(                                                                         //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,   //
+        sz_sha256_state_init_icelake, sz_sha256_state_update_icelake, sz_sha256_state_digest_icelake //
     );
 #endif
 #if SZ_USE_GOLDMONT
@@ -1119,7 +1119,7 @@ void test_equivalence() {
         sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, sz_sha256_state_digest_goldmont //
     );
 #endif
-#if SZ_USE_NEON_SHA
+#if SZ_USE_NEONSHA
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
@@ -1135,16 +1135,16 @@ void test_equivalence() {
         sz_utf8_find_whitespace_serial,              //
         sz_utf8_find_whitespace_haswell);
 #endif
-#if SZ_USE_ICE
-    test_utf8_equivalence(                       //
-        sz_utf8_count_serial, sz_utf8_count_ice, //
-        sz_utf8_find_newline_serial,             //
-        sz_utf8_find_newline_ice,                //
-        sz_utf8_find_whitespace_serial,          //
-        sz_utf8_find_whitespace_ice);
+#if SZ_USE_ICELAKE
+    test_utf8_equivalence(                           //
+        sz_utf8_count_serial, sz_utf8_count_icelake, //
+        sz_utf8_find_newline_serial,                 //
+        sz_utf8_find_newline_icelake,                //
+        sz_utf8_find_whitespace_serial,              //
+        sz_utf8_find_whitespace_icelake);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
 
     // Fuzz testing with different haystack sizes and sampling strategies:
     // - (16, 0, N): Exhaustive on tiny haystacks (~136 needles each)
@@ -1153,16 +1153,16 @@ void test_equivalence() {
     // - (200, 100, N): Sampled on larger haystacks (100 random needles)
     std::size_t fuzz_queries = scale_iterations(100000);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, fuzz_queries);
 #endif
 #if SZ_USE_NEON
@@ -1184,8 +1184,8 @@ void test_equivalence() {
 };
 
 /**
- *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
- *          provided by `sz::string` and `sz::string_view`.
+ *  @brief Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
+ *         provided by `sz::string` and `sz::string_view`.
  */
 template <typename string_type>
 void test_ascii_utilities() {
@@ -1249,7 +1249,7 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
 }
 
 /**
- *  @brief  Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
+ *  @brief Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
  *
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
  *  regions are tested. Covers various chunk sizes, overlapping regions, and both forward and backward traversals.
@@ -1337,9 +1337,9 @@ void test_memory_utilities(std::size_t max_l2_size = 1024ull * 1024ull) {
 }
 
 /**
- *  @brief  Tests memory utilities on large buffers (>1MB) that trigger special code paths
- *          in AVX2/AVX512 implementations. This specifically tests the bidirectional
- *          traversal optimization used for huge buffers.
+ *  @brief Tests memory utilities on large buffers (>1MB) that trigger special code paths
+ *         in AVX2/AVX512 implementations. This specifically tests the bidirectional
+ *         traversal optimization used for huge buffers.
  */
 void test_large_memory_utilities() {
     // Test sizes that trigger the "huge buffer" path (> 1MB)
@@ -1440,8 +1440,8 @@ void test_large_memory_utilities() {
     } while (0)
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover all STL APIs.
- *          This test guarantees API @b compatibility with STL `std::basic_string` template.
+ *  @brief Invokes different C++ member methods of immutable strings to cover all STL APIs.
+ *         This test guarantees API @b compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
 void test_stl_compatibility_for_reads() {
@@ -1724,8 +1724,8 @@ void test_stl_compatibility_for_reads() {
 }
 
 /**
- *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
- *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
+ *  @brief Invokes different C++ member methods of the memory-owning string class to make sure they all pass
+ *         compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
 void test_stl_compatibility_for_updates() {
@@ -1879,7 +1879,7 @@ void test_stl_compatibility_for_updates() {
 }
 
 /**
- *  @brief  Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
+ *  @brief Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
  */
 void test_stl_conversions() {
     // From a mutable STL string to StringZilla and vice-versa.
@@ -1928,8 +1928,8 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
 }
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover
- *          extensions beyond the STL API.
+ *  @brief Invokes different C++ member methods of immutable strings to cover
+ *         extensions beyond the STL API.
  */
 template <typename string_type>
 void test_non_stl_extensions_for_reads() {
@@ -2067,7 +2067,7 @@ void test_non_stl_extensions_for_updates() {
 }
 
 /**
- *  @brief  Tests copy constructor and copy-assignment constructor of `sz::string`.
+ *  @brief Tests copy constructor and copy-assignment constructor of `sz::string`.
  */
 void test_constructors() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
@@ -2092,7 +2092,7 @@ void test_constructors() {
 }
 
 /**
- *  @brief  Helper structure that counts the number of allocations and deallocations.
+ *  @brief Helper structure that counts the number of allocations and deallocations.
  */
 struct accounting_allocator : public std::allocator<char> {
     inline static bool &verbose_ref() {
@@ -2141,9 +2141,9 @@ void assert_balanced_memory(callback_type callback) {
 }
 
 /**
- *  @brief  Checks for memory leaks in the string class using the `accounting_allocator`.
+ *  @brief Checks for memory leaks in the string class using the `accounting_allocator`.
  *
- *  @note   The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
+ *  @note The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
 void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t iterations = scale_iterations(100)) {
 
@@ -2214,7 +2214,7 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
 }
 
 /**
- *  @brief  Tests the correctness of the string class update methods, such as `push_back` and `erase`.
+ *  @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`.
  */
 void test_updates(std::size_t repetitions = 1024) {
     // Compare STL and StringZilla strings append functionality.
@@ -2241,7 +2241,7 @@ void test_updates(std::size_t repetitions = 1024) {
 }
 
 /**
- *  @brief  Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
+ *  @brief Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
  */
 void test_comparisons() {
     // Comparing relative order of the strings
@@ -2257,8 +2257,8 @@ void test_comparisons() {
 }
 
 /**
- *  @brief  Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
- *          This covers haystacks and needles of different lengths, as well as character-sets.
+ *  @brief Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *         This covers haystacks and needles of different lengths, as well as character-sets.
  */
 void test_search() {
 
@@ -2826,7 +2826,7 @@ void test_utf8() {
 void test_utf8_ligature_semantics() {
     using str = sz::string_view;
 
-    // --- Ligature in haystack, ASCII needle ---
+    // Ligature in haystack, ASCII needle
 
     // "fi" in "ﬃ": fold("ﬃ")="ffi", "fi" is suffix of "ffi" → MATCH
     let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("fi"), m.offset == 0);
@@ -2849,7 +2849,7 @@ void test_utf8_ligature_semantics() {
     // "xfi" in "xﬃ": fold("xﬃ")="xffi", "xfi" is NOT a substring → NO MATCH
     let_assert(auto m = str("x\xEF\xAC\x83").utf8_case_insensitive_find("xfi"), m.offset == str::npos);
 
-    // --- Ligature in needle, ASCII haystack ---
+    // Ligature in needle, ASCII haystack
 
     // "ﬂ" in "ffll": fold("ﬂ")="fl", "fl" at position 1 → MATCH
     let_assert(auto m = str("ffll").utf8_case_insensitive_find("\xEF\xAC\x82"), m.offset == 1);
@@ -2860,7 +2860,7 @@ void test_utf8_ligature_semantics() {
     // "ﬁ" in "ﬀi": fold("ﬁ")="fi", fold("ﬀi")="ffi", "fi" at folded position 1 → MATCH
     let_assert(auto m = str("\xEF\xAC\x80i").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset != str::npos);
 
-    // --- Eszett (ß) cases ---
+    // Eszett (ß) cases
 
     // "ss" in "ß": fold("ß")="ss" → exact MATCH
     let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("ss"), m.offset == 0);
@@ -3395,9 +3395,7 @@ void test_utf8_case() {
 
     let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
 
-    // ==========================================================================
     // Cross-Script Mixed Needles (Regression tests for kernel selection issues)
-    // ==========================================================================
 
     // Capital Eszett (U+1E9E, E1 BA 9E) - folds to "ss"
     // Single Capital Eszett
@@ -3457,9 +3455,7 @@ void test_utf8_case() {
     let_assert(auto m = str("10 \xE2\x84\xAB unit").utf8_case_insensitive_find("10 \xC3\xA5"),
                m.offset == 0 && m.length == 6); // Å (3) vs å (2)
 
-    // ==========================================================================
     // 64-byte Boundary Stress Tests
-    // ==========================================================================
 
     // Capital Eszett at position 63 (just at SIMD boundary)
     {
@@ -3519,11 +3515,9 @@ void test_utf8_case() {
     let_assert(auto m = str("Hello").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
     let_assert(auto m = str("Hello").utf8_case_insensitive_find(""), m.offset == 0 && m.length == 0);
 
-    // ==========================================================================
     // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
     // These patterns were discovered by test_utf8_ci_find_fuzz() and expose
     // disagreements between serial and SIMD implementations.
-    // ==========================================================================
 
     // Pattern 0: Ligature tail-match in mixed-case context (historical verify crash).
     // Haystack: C3 96 45 47 76 C3 91 2C 50 EF AC 84 ... EF AC 82 70
@@ -3538,52 +3532,6 @@ void test_utf8_case() {
                                 .utf8_case_insensitive_find("pf"),
                    m.offset == 8 && m.length == 4);
     }
-#if 0
-    // Pattern 0b: Fuzz mismatch (seed=3418818602) where the needle is extracted from the folded haystack,
-    // but `sz_utf8_case_insensitive_find_ice` disagrees with `sz_utf8_case_insensitive_find_serial`.
-    // Fuzzer parameters: haystack=0 start=21 len=41 (in folded runes), kernel=2.
-    {
-        static char const haystack[] =
-            "\xCA\xBE\x6F\x4F\xE1\xBA\xA0\x4E\x77\x66\x6F\x78\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\x50\xD5\xA2\xD5\xA1"
-            "\xD6\x80\xD5\xA5\xD5\xBE\x4C\xC7\xB0\x46\xCE\xB2\x69\xE2\x84\xAA\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x90"
-            "\xCE\x91\xE1\xBA\x98\xD0\xB0\x48\x51\xD0\xB1\x4C\x64\xE2\x84\xAA\xC3\xA5\x50\xC3\xB1\x74\x68\x65\x3F"
-            "\x4C\xC3\x9C\xC3\x9F\xE2\x84\xAB\xE1\xBA\x9E\x48\x78\xCE\xB1\x6E\xE1\xBA\xA1\x56\x49\xE1\xBB\x86\xCE"
-            "\x91";
-
-        static char const needle[] =
-            "\xCC\x8C\x66\xCE\xB2\x69\x6B\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x91\xCE\xB1\x77\xCC\x8A\xD0\xB0\x68\x71"
-            "\xD0\xB1\x6C\x64\x6B\xC3\xA5\x70\xC3\xB1\x74\x68\x65\x3F\x6C\xC3\xBC\x73\x73\xC3\xA5\x73\x73\x68\x78"
-            "\xCE\xB1\x6E\xE1\xBA\xA1\x76\x69";
-
-        sz_size_t haystack_length = (sz_size_t)sizeof(haystack) - 1;
-        sz_size_t needle_length = (sz_size_t)sizeof(needle) - 1;
-
-        sz_size_t serial_matched = 0, ice_matched = 0;
-        sz_utf8_case_insensitive_needle_metadata_t serial_meta = {}, ice_meta = {};
-        sz_cptr_t serial_result = sz_utf8_case_insensitive_find_serial( //
-            haystack, haystack_length,                                  //
-            needle, needle_length,                                      //
-            &serial_meta, &serial_matched);
-        sz_cptr_t ice_result = sz_utf8_case_insensitive_find_ice( //
-            haystack, haystack_length,                            //
-            needle, needle_length,                                //
-            &ice_meta, &ice_matched);
-
-        if (serial_result != ice_result || serial_matched != ice_matched) {
-            sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack) : (sz_size_t)-1;
-            sz_size_t ice_off = ice_result ? (sz_size_t)(ice_result - haystack) : (sz_size_t)-1;
-            std::fprintf(stderr,
-                         "FUZZ REGRESSION seed=3418818602: serial_off=%zu serial_len=%zu ice_off=%zu ice_len=%zu "
-                         "kernel=%u offset_in_unfolded=%zu length_in_unfolded=%zu\n",
-                         (std::size_t)serial_off, (std::size_t)serial_matched, (std::size_t)ice_off,
-                         (std::size_t)ice_matched, (unsigned)ice_meta.kernel_id,
-                         (std::size_t)ice_meta.offset_in_unfolded, (std::size_t)ice_meta.length_in_unfolded);
-        }
-
-        assert(serial_result == ice_result);
-        assert(serial_matched == ice_matched);
-    }
-#endif
 
     // Pattern 1: "st" + Latin-1 char (st ligature expansion issue?)
     // Needle: 73 74 C2 BA = "st" + º (masculine ordinal indicator)
@@ -3765,11 +3713,9 @@ void test_utf8_case() {
         // This creates 116-byte prefix of ä characters
     }
 
-    // ==========================================================================
     // Minimal Divergence Cases (Ice Lake vs Serial)
     // These were discovered by multi-seed fuzzing and represent minimal inputs
     // that previously caused Serial/SIMD disagreement.
-    // ==========================================================================
 
     // Pattern 7: "sss" prefix matching "Sß" (seed 5678, Kernel 2)
     // Haystack: "brown Sßà jumps" - bytes at [6]: 53 C3 9F C3 A0 ("Sßà") = 5 bytes
@@ -4171,8 +4117,8 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 }
 
 /**
- *  @brief  Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
- *          Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
+ *  @brief Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *         Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
  */
 void test_search_with_misaligned_repetitions() {
     // When haystack is only formed of needles:
@@ -4257,7 +4203,7 @@ void test_replacements(std::size_t lookup_tables_to_try = 32, std::size_t slices
 }
 
 /**
- *  @brief  Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
+ *  @brief Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
  *
  *  Tries to sort incrementally complex inputs, such as strings of varying lengths, with many equal inputs.
  *  1. Basic tests with predetermined orders.
@@ -4357,7 +4303,7 @@ void test_sorting_algorithms() {
 }
 
 /**
- *  @brief  Tests array intersection functionality.
+ *  @brief Tests array intersection functionality.
  */
 void test_intersecting_algorithms() {
     using strs_t = std::vector<std::string>;
@@ -4435,7 +4381,7 @@ void test_intersecting_algorithms() {
 }
 
 /**
- *  @brief  Tests constructing STL containers with StringZilla strings.
+ *  @brief Tests constructing STL containers with StringZilla strings.
  */
 void test_stl_containers() {
     std::map<sz::string, int> sorted_words_sz;
@@ -4455,16 +4401,22 @@ int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
+    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
+    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
+    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
+    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
+    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
 

@@ -245,13 +245,13 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE2AES", "1" if is_64bit_arm() else "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -301,10 +301,10 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         ("SZ_USE_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
-        ("SZ_USE_ICE", "0"),
+        ("SZ_USE_ICELAKE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -333,10 +333,10 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -375,7 +375,7 @@ if sz_target == "stringzilla":
     ext_modules = [
         Extension(
             "stringzilla",
-            ["python/stringzilla.c", "c/stringzilla.c"],
+            ["python/stringzilla.c", "c/stringzilla/runtime.c"],
             include_dirs=["include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,

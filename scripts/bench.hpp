@@ -1,6 +1,6 @@
 /**
- *  @file   bench.hpp
- *  @brief  Helper structures and functions for C++ benchmarks.
+ *  @file scripts/bench.hpp
+ *  @brief Helper structures and functions for C++ benchmarks.
  *
  *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google Benchmark.
  *  There are several reasons for that:
@@ -102,8 +102,8 @@ struct callable_no_op_t {
 using profiled_function_t = std::function<call_result_t(std::size_t)>;
 
 /**
- *  @brief  Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
- *          Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
+ *  @brief Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
+ *         Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
  */
 inline std::uint64_t cpu_cycle_counter() {
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
@@ -149,8 +149,8 @@ double seconds_per_call(function_type_ &&function) {
 }
 
 /**
- *  @brief  Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
- *          Use as `for (auto running_seconds : repeat_up_to(5.0)) { ... }`.
+ *  @brief Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
+ *         Use as `for (auto running_seconds : repeat_up_to(5.0)) { ... }`.
  */
 struct repeat_up_to {
     double max_seconds = 0;
@@ -182,8 +182,8 @@ struct repeat_up_to {
 };
 
 /**
- *  @brief  Stops compilers from optimizing out the expression.
- *          Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
+ *  @brief Stops compilers from optimizing out the expression.
+ *         Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
  */
 template <typename argument_type>
 static void do_not_optimize(argument_type &&value) noexcept {
@@ -268,7 +268,7 @@ std::vector<result_string_type_, allocator_type_> filter_by_length(
 }
 
 /**
- *  @brief  Environment for the benchmarking scripts pulled from the CLI arguments.
+ *  @brief Environment for the benchmarking scripts pulled from the CLI arguments.
  *
  *  The original CLI arguments include the @p path to the dataset file and the number of @p seconds per benchmark,
  *  the Regex @p filter to select only the backends that match the given pattern, as well as the @p tokenization
@@ -323,9 +323,9 @@ struct environment_t {
 };
 
 /**
- *  @brief  Prepares the environment for benchmarking based on environment variables and default settings.
- *          It's expected that different workloads may use different default datasets and tokenization modes,
- *          but time limits and seeds are usually consistent across all benchmarks.
+ *  @brief Prepares the environment for benchmarking based on environment variables and default settings.
+ *         It's expected that different workloads may use different default datasets and tokenization modes,
+ *         but time limits and seeds are usually consistent across all benchmarks.
  *
  *  @param[in] argc Number of command-line string arguments. Not used in reality.
  *  @param[in] argv Array of command-line string arguments. Not used in reality.
@@ -485,8 +485,8 @@ inline environment_t build_environment(                                        /
 }
 
 /**
- *  @brief  Uses C-style file IO to save information about the most recent stress test failure.
- *          Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
+ *  @brief Uses C-style file IO to save information about the most recent stress test failure.
+ *         Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
  */
 inline void log_failure(                                              //
     environment_t const &env, std::string const &name,                //
@@ -514,8 +514,8 @@ inline void log_failure(                                              //
 }
 
 /**
- *  @brief  Light-weight structure to construct a histogram of function call durations for a very
- *          wide range of floating point values using logarithmic binning. TODO:
+ *  @brief Light-weight structure to construct a histogram of function call durations for a very
+ *         wide range of floating point values using logarithmic binning. TODO:
  */
 template <std::size_t slots_ = 128>
 struct duration_histogram {
@@ -553,8 +553,8 @@ struct bench_result_t {
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
 
     /**
-     *  @brief  Logs the benchmark results to the console, including the throughput and latency,
-     *          comparing against one or more baselines.
+     *  @brief Logs the benchmark results to the console, including the throughput and latency,
+     *         comparing against one or more baselines.
      *
      *  Example output:
      *

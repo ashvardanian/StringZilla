@@ -1,6 +1,6 @@
 /**
- *  @file   bench_fingerprints.cuh
- *  @brief  Shared code for CPU and GPU batched parallel exact substring search.
+ *  @file scripts/bench_fingerprints.cuh
+ *  @brief Shared code for CPU and GPU batched parallel exact substring search.
  */
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`

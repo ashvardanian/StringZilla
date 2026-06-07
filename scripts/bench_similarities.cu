@@ -1,8 +1,8 @@
 /**
- *  @file   bench_similarities.cpp
- *  @brief  Benchmarks string similarity computations.
- *          It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
- *          alignment scores, and fingerprinting techniques combined with the Hamming distance.
+ *  @file scripts/bench_similarities.cu
+ *  @brief Benchmarks string similarity computations.
+ *         It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
+ *         alignment scores, and fingerprinting techniques combined with the Hamming distance.
  *
  *  Benchmarks include:
  *  - Linear-complexity basic & bounded Hamming distance computations.

@@ -131,7 +131,7 @@ On Linux, after that, if you want to compile the mninmal set of tests:
 
 ```bash
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringzilla_test_cpp20
+cmake --build build_release --config Release --target stringzilla_test_cpp20 --parallel
 build_release/stringzilla_test_cpp20
 ```
 
@@ -144,7 +144,7 @@ cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 \
     -D CMAKE_C_COMPILER="$(brew --prefix llvm)/bin/clang" \
     -D CMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++" \
     -B build_release
-cmake --build build_release --config Release
+cmake --build build_release --config Release --parallel
 ```
 
 On Windows you can build with either MSVC (Visual Studio) or MinGW (GCC).
@@ -153,7 +153,7 @@ For MSVC (Developer Prompt):
 
 ```bat
 cmake -B build_release -G "Visual Studio 17 2022" -A x64 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
-cmake --build build_release --config Release
+cmake --build build_release --config Release --parallel
 build_release\\Release\\stringzilla_test_cpp20.exe
 ```
 
@@ -162,7 +162,7 @@ For MinGW (MSYS2):
 ```bash
 pacman -S --needed --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make
 cmake -G "MinGW Makefiles" -B build_release -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
-cmake --build build_release --config Release
+cmake --build build_release --config Release --parallel
 ./build_release/stringzilla_test_cpp20.exe
 ```
 
@@ -172,7 +172,7 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug -j   # Which will produce the following targets:
+cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
 build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
 build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
 build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
@@ -240,7 +240,7 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release    # Produces the following targets:
+cmake --build build_release --config Release --parallel    # Produces the following targets:
 build_release/stringzilla_bench_memory_cpp20    # - for string copies and fills
 build_release/stringzilla_bench_find_cpp20      # - for substring search
 build_release/stringzilla_bench_token_cpp20     # - for hashing, equality comparisons, etc.
@@ -262,8 +262,8 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_bench_fingerprints_cpp20 # CPU
-cmake --build build_release --config Release --target stringzillas_bench_similarities_cu20  # GPU
+cmake --build build_release --config Release --target stringzillas_bench_fingerprints_cpp20 --parallel # CPU
+cmake --build build_release --config Release --target stringzillas_bench_similarities_cu20 --parallel  # GPU
 STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cpp20
 STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
 
@@ -289,13 +289,13 @@ On x86_64, you can use the following commands to compile for Sandy Bridge, Haswe
 ```bash
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
     -D STRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
-    cmake --build build_release/ivybridge --config Release
+    cmake --build build_release/ivybridge --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
     -D STRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
-    cmake --build build_release/haswell --config Release
+    cmake --build build_release/haswell --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 \
     -D STRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
-    cmake --build build_release/sapphirerapids --config Release
+    cmake --build build_release/sapphirerapids --config Release --parallel
 ```
 
 ### Benchmarking Compiler-Specific Optimizations
@@ -306,10 +306,10 @@ On x86_64, you may want to compare GCC, Clang, and ICX.
 ```bash
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_CXX_COMPILER=g++-12 -D CMAKE_C_COMPILER=gcc-12 \
-    -B build_release/gcc && cmake --build build_release/gcc --config Release
+    -B build_release/gcc && cmake --build build_release/gcc --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_CXX_COMPILER=clang++-14 -D CMAKE_C_COMPILER=clang-14 \
-    -B build_release/clang && cmake --build build_release/clang --config Release
+    -B build_release/clang && cmake --build build_release/clang --config Release --parallel
 ```
 
 ### Profiling
@@ -323,7 +323,7 @@ cmake -D STRINGZILLA_BUILD_BENCHMARK=1 \
     -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
-cmake --build build_profile --config Release --target stringzilla_bench_token_cpp20
+cmake --build build_profile --config Release --target stringzilla_bench_token_cpp20 --parallel
 
 # Check that the debugging symbols are there with your favorite tool
 readelf --sections build_profile/stringzilla_bench_token_cpp20 | grep debug
@@ -349,7 +349,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla alpine:latest /bin/a
 cd /workspace/StringZilla
 apk add --update make cmake g++ gcc
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug
+cmake --build build_debug --config Debug --parallel
 build_debug/stringzilla_test_cpp20
 ```
 
@@ -365,7 +365,7 @@ cd /workspace/StringZilla
 swupd update
 swupd bundle-add c-basic dev-utils
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug
+cmake --build build_debug --config Debug --parallel
 build_debug/stringzilla_test_cpp20
 ```
 
@@ -373,7 +373,7 @@ For benchmarks:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release
+cmake --build build_release --config Release --parallel
 ```
 
 #### Amazon Linux
@@ -453,21 +453,21 @@ cmake -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_SYSTEM_NAME=Linux \
     -D CMAKE_SYSTEM_PROCESSOR=${BUILD_ARCH} \
     -B build_artifacts
-cmake --build build_artifacts --config Release
+cmake --build build_artifacts --config Release --parallel
 ```
 
 ## Parallel C++ and CUDA
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build build_debug --config Debug --target stringzillas_test_cpp20
-cmake --build build_debug --config Debug --target stringzillas_test_cu20
+cmake --build build_debug --config Debug --target stringzillas_test_cpp20 --parallel
+cmake --build build_debug --config Debug --target stringzillas_test_cu20 --parallel
 ```
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_test_cpp20
-cmake --build build_release --config Release --target stringzillas_test_cu20
+cmake --build build_release --config Release --target stringzillas_test_cpp20 --parallel
+cmake --build build_release --config Release --target stringzillas_test_cu20 --parallel
 ```
 
 ```sh
@@ -675,7 +675,7 @@ First, precompile the C library:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_SHARED=1 -D STRINGZILLA_BUILD_TEST=0 -D STRINGZILLA_BUILD_BENCHMARK=0 -B build_golang
-cmake --build build_golang
+cmake --build build_golang --parallel
 ```
 
 Then, navigate to the GoLang module root directory and run the tests from there:

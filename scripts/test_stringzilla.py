@@ -124,7 +124,7 @@ def log_test_environment():
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
     if is_qemu:
-        sve_like = {"sve", "sve2", "sve2+aes"}
+        sve_like = {"sve", "sve2", "sve2aes"}
         current = list(getattr(sz, "__capabilities__", ()))
         desired = tuple(c for c in current if c.lower() not in sve_like)
         if len(desired) != len(current):
@@ -1231,7 +1231,9 @@ def test_strs_to_pyarrow_conversion():
 
     # Calculate expected tape size (sum of all string lengths)
     expected_tape_nbytes = sum(len(s) for s in native_list)
-    assert strs.tape_nbytes == expected_tape_nbytes, f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+    assert (
+        strs.tape_nbytes == expected_tape_nbytes
+    ), f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
 
     # For 5 strings, we should have 6 offsets (N+1 format)
     # Offsets should be either 4 bytes (u32) or 8 bytes (u64) each
@@ -1240,8 +1242,9 @@ def test_strs_to_pyarrow_conversion():
         expected_offsets_nbytes = expected_offsets_count * 8
     else:
         expected_offsets_nbytes = expected_offsets_count * 4
-    assert strs.offsets_nbytes == expected_offsets_nbytes, \
-        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+    assert (
+        strs.offsets_nbytes == expected_offsets_nbytes
+    ), f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
 
     # Create PyArrow buffers from the properties
     tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
@@ -1253,17 +1256,9 @@ def test_strs_to_pyarrow_conversion():
 
     # Create an Arrow array from the buffers
     if strs.offsets_are_large:
-        arrow_array = pa.Array.from_buffers(
-            pa.large_string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
-        arrow_array = pa.Array.from_buffers(
-            pa.string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
 
     # Verify the Arrow array matches the original data
     assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
@@ -1313,17 +1308,9 @@ def test_strs_pyarrow_large_strings():
     offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
 
     if strs.offsets_are_large:
-        arrow_array = pa.Array.from_buffers(
-            pa.large_string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
-        arrow_array = pa.Array.from_buffers(
-            pa.string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
 
     assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
 
@@ -1360,11 +1347,7 @@ def test_strs_pyarrow_fragmented_conversion():
     tape_buffer = pa.foreign_buffer(fragmented_strs.tape_address, fragmented_strs.tape_nbytes, fragmented_strs)
     offsets_buffer = pa.foreign_buffer(fragmented_strs.offsets_address, fragmented_strs.offsets_nbytes, fragmented_strs)
 
-    arrow_array = pa.Array.from_buffers(
-        pa.string(),
-        len(fragmented_strs),
-        [None, offsets_buffer, tape_buffer]
-    )
+    arrow_array = pa.Array.from_buffers(pa.string(), len(fragmented_strs), [None, offsets_buffer, tape_buffer])
 
     # The data should match (order is shuffled)
     arrow_list = arrow_array.to_pylist()
@@ -2174,7 +2157,6 @@ def test_utf8_split_iter_matches_python(text):
     assert sz_result == py_result
 
 
-
 def test_utf8_word_iter_basic():
     """Test basic word iteration."""
     # Simple two words
@@ -2269,14 +2251,7 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
 
     # Generate random test strings
     test_chars = (
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789"
-        " \t\n"
-        ".,;:!?'"
-        "äöüß"
-        "αβγδ"
-        "абвг"
+        "abcdefghijklmnopqrstuvwxyz" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "0123456789" " \t\n" ".,;:!?'" "äöüß" "αβγδ" "абвг"
     )
 
     for _ in range(50):

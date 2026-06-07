@@ -1,6 +1,6 @@
 /**
- *  @file   bench_similarities.cuh
- *  @brief  Shared code for CPU and GPU batched string similarity kernels.
+ *  @file scripts/bench_similarities.cuh
+ *  @brief Shared code for CPU and GPU batched string similarity kernels.
  */
 #include <tuple> // `std::tuple`
 
@@ -21,20 +21,20 @@ namespace scripts {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::affine_gap_costs_t;
-using ashvardanian::stringzillas::affine_levenshtein_ice_t;
+using ashvardanian::stringzillas::affine_levenshtein_icelake_t;
 using ashvardanian::stringzillas::affine_levenshtein_serial_t;
 using ashvardanian::stringzillas::affine_needleman_wunsch_serial_t;
 using ashvardanian::stringzillas::affine_smith_waterman_serial_t;
 using ashvardanian::stringzillas::error_costs_256x256_t;
 using ashvardanian::stringzillas::error_costs_26x26ascii_t;
-using ashvardanian::stringzillas::levenshtein_ice_t;
+using ashvardanian::stringzillas::levenshtein_icelake_t;
 using ashvardanian::stringzillas::levenshtein_serial_t;
-using ashvardanian::stringzillas::levenshtein_utf8_ice_t;
+using ashvardanian::stringzillas::levenshtein_utf8_icelake_t;
 using ashvardanian::stringzillas::levenshtein_utf8_serial_t;
 using ashvardanian::stringzillas::linear_gap_costs_t;
-using ashvardanian::stringzillas::needleman_wunsch_ice_t;
+using ashvardanian::stringzillas::needleman_wunsch_icelake_t;
 using ashvardanian::stringzillas::needleman_wunsch_serial_t;
-using ashvardanian::stringzillas::smith_waterman_ice_t;
+using ashvardanian::stringzillas::smith_waterman_icelake_t;
 using ashvardanian::stringzillas::smith_waterman_serial_t;
 using ashvardanian::stringzillas::uniform_substitution_costs_t;
 
@@ -178,26 +178,27 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, name_affine_baseline, call_affine_baseline).log(linear_baseline);
         sz_unused_(affine_baseline);
 
-#if SZ_USE_ICE
-        bench_unary(env, "levenshtein_ice:batch"s + std::to_string(batch_size), call_linear_baseline,
-                    similarities_callable<levenshtein_ice_t, fu::basic_pool_t &>(
-                        env, results_linear_accelerated, levenshtein_ice_t {weird_uniform, weird_linear}, pool),
+#if SZ_USE_ICELAKE
+        bench_unary(env, "levenshtein_icelake:batch"s + std::to_string(batch_size), call_linear_baseline,
+                    similarities_callable<levenshtein_icelake_t, fu::basic_pool_t &>(
+                        env, results_linear_accelerated, levenshtein_icelake_t {weird_uniform, weird_linear}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(env, "affine_levenshtein_ice:batch"s + std::to_string(batch_size), call_affine_baseline,
-                    similarities_callable<affine_levenshtein_ice_t, fu::basic_pool_t &>(
-                        env, results_affine_accelerated, affine_levenshtein_ice_t {weird_uniform, weird_affine}, pool),
-                    callable_no_op_t {},        // preprocessing
-                    similarities_equality_t {}) // equality check
+        bench_unary(
+            env, "affine_levenshtein_icelake:batch"s + std::to_string(batch_size), call_affine_baseline,
+            similarities_callable<affine_levenshtein_icelake_t, fu::basic_pool_t &>(
+                env, results_affine_accelerated, affine_levenshtein_icelake_t {weird_uniform, weird_affine}, pool),
+            callable_no_op_t {},        // preprocessing
+            similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 
-        bench_unary(env, "levenshtein_utf8_ice:batch"s + std::to_string(batch_size), call_utf8_baseline,
-                    similarities_callable<levenshtein_utf8_ice_t>(env, results_utf8_accelerated,
-                                                                  levenshtein_utf8_ice_t {weird_uniform, weird_linear}),
+        bench_unary(env, "levenshtein_utf8_icelake:batch"s + std::to_string(batch_size), call_utf8_baseline,
+                    similarities_callable<levenshtein_utf8_icelake_t>(
+                        env, results_utf8_accelerated, levenshtein_utf8_icelake_t {weird_uniform, weird_linear}),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(utf8_baseline);
@@ -328,17 +329,17 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_result_t affine_local_baseline =
             bench_unary(env, name_affine_local_baseline, call_affine_local_baseline).log();
 
-#if SZ_USE_ICE
-        bench_unary(env, "needleman_wunsch_ice:batch"s + std::to_string(batch_size), call_linear_global_baseline,
-                    similarities_callable<needleman_wunsch_ice_t, fu::basic_pool_t &>(
+#if SZ_USE_ICELAKE
+        bench_unary(env, "needleman_wunsch_icelake:batch"s + std::to_string(batch_size), call_linear_global_baseline,
+                    similarities_callable<needleman_wunsch_icelake_t, fu::basic_pool_t &>(
                         env, results_linear_global_accelerated, {blosum62_matrix, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
         scramble_accelerated_results(results_linear_global_accelerated);
 
-        bench_unary(env, "smith_waterman_ice:batch"s + std::to_string(batch_size), call_linear_local_baseline,
-                    similarities_callable<smith_waterman_ice_t, fu::basic_pool_t &>(
+        bench_unary(env, "smith_waterman_icelake:batch"s + std::to_string(batch_size), call_linear_local_baseline,
+                    similarities_callable<smith_waterman_icelake_t, fu::basic_pool_t &>(
                         env, results_linear_local_accelerated, {blosum62_matrix, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
@@ -347,17 +348,18 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         // TODO: Ice Lake optimizations don't yield massive improvements, but can be added later.
         //
-        // bench_unary(env, "affine_needleman_wunsch_ice:batch"s + std::to_string(batch_size),
+        // bench_unary(env, "affine_needleman_wunsch_icelake:batch"s + std::to_string(batch_size),
         // call_affine_global_baseline,
-        //             similarities_callable<affine_needleman_wunsch_ice_t, fu::basic_pool_t &>(
+        //             similarities_callable<affine_needleman_wunsch_icelake_t, fu::basic_pool_t &>(
         //                 env, results_affine_global_accelerated, {blosum62_matrix, blosum62_affine_cost}, pool),
         //             callable_no_op_t {},        // preprocessing
         //             similarities_equality_t {}) // equality check
         //     .log(affine_global_baseline);
         // scramble_accelerated_results(results_affine_global_accelerated);
         //
-        // bench_unary(env, "affine_smith_waterman_ice:batch"s + std::to_string(batch_size), call_affine_local_baseline,
-        //             similarities_callable<affine_smith_waterman_ice_t, fu::basic_pool_t &>(
+        // bench_unary(env, "affine_smith_waterman_icelake:batch"s + std::to_string(batch_size),
+        // call_affine_local_baseline,
+        //             similarities_callable<affine_smith_waterman_icelake_t, fu::basic_pool_t &>(
         //                 env, results_affine_local_accelerated, {blosum62_matrix, blosum62_affine_cost}, pool),
         //             callable_no_op_t {},        // preprocessing
         //             similarities_equality_t {}) // equality check

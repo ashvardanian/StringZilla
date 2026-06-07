@@ -1,7 +1,7 @@
 /**
- *  @file   bench_container.cpp
- *  @brief  Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
+ *  @file scripts/bench_container.cpp
+ *  @brief Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
  *
  *  This file is the sibling of `bench_sequence.cpp`, `bench_find.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, constructs associative containers with string keys,
@@ -149,7 +149,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_umap);
     }
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);

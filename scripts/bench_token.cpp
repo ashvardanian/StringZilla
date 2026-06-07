@@ -1,8 +1,8 @@
 /**
- *  @file   bench_token.cpp
- *  @brief  Benchmarks token-level operations like hashing, equality, ordering, and copies.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_token.cpp
+ *  @brief Benchmarks token-level operations like hashing, equality, ordering, and copies.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - Checksum calculation and hashing for each token - @b bytesum and @b hash.
@@ -207,8 +207,8 @@ void bench_checksums(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_bytesum_skylake", validator, bytesum_from_sz<sz_bytesum_skylake> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_bytesum_ice", validator, bytesum_from_sz<sz_bytesum_ice> {env}).log(base, base_stl);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_bytesum_icelake", validator, bytesum_from_sz<sz_bytesum_icelake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_bytesum_neon", validator, bytesum_from_sz<sz_bytesum_neon> {env}).log(base, base_stl);
@@ -229,8 +229,8 @@ void bench_utf8_count(environment_t const &env) {
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_utf8_count_haswell", validator, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_utf8_count_ice", validator, utf8_count_from_sz<sz_utf8_count_ice> {env}).log(base);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_count_icelake", validator, utf8_count_from_sz<sz_utf8_count_icelake> {env}).log(base);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_utf8_count_neon", validator, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
@@ -245,8 +245,9 @@ void bench_utf8_unpack(environment_t const &env) {
     auto validator = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env, {}};
     bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", validator).log();
 
-#if SZ_USE_ICE
-    bench_unary(env, "sz_utf8_unpack_chunk_ice", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_ice> {env, {}})
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_unpack_chunk_icelake", validator,
+                utf8_unpack_from_sz<sz_utf8_unpack_chunk_icelake> {env, {}})
         .log(base);
 #endif
 #if SZ_USE_NEON
@@ -266,13 +267,13 @@ void bench_hashing(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_hash_skylake", validator, hash_from_sz<sz_hash_skylake> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_hash_ice", validator, hash_from_sz<sz_hash_ice> {env}).log(base, base_stl);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_hash_icelake", validator, hash_from_sz<sz_hash_icelake> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_SVE2_AES
+#if SZ_USE_SVE2AES
     bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
 #endif
 }
@@ -298,12 +299,14 @@ void bench_stream_hashing(environment_t const &env) {
             env})
         .log(base, base_stl);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_hash_stream_ice", validator,
-                hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_update_ice, sz_hash_state_digest_ice> {env})
+#if SZ_USE_ICELAKE
+    bench_unary(
+        env, "sz_hash_stream_icelake", validator,
+        hash_stream_from_sz<sz_hash_state_init_icelake, sz_hash_state_update_icelake, sz_hash_state_digest_icelake> {
+            env})
         .log(base, base_stl);
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     bench_unary(
         env, "sz_hash_stream_neon", validator,
         hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_update_neon, sz_hash_state_digest_neon> {env})
@@ -340,10 +343,10 @@ void bench_sha256(environment_t const &env) {
                                            sz_sha256_state_digest_serial> {env};
     bench_result_t base = bench_unary(env, "sz_sha256_serial", validator).log();
 
-#if SZ_USE_ICE
-    bench_unary(
-        env, "sz_sha256_ice", validator,
-        sha256_stream_from_sz<sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice> {env})
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_sha256_icelake", validator,
+                sha256_stream_from_sz<sz_sha256_state_init_icelake, sz_sha256_state_update_icelake,
+                                      sz_sha256_state_digest_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_GOLDMONT
@@ -352,7 +355,7 @@ void bench_sha256(environment_t const &env) {
                                       sz_sha256_state_digest_goldmont> {env})
         .log(base);
 #endif
-#if SZ_USE_NEON_SHA
+#if SZ_USE_NEONSHA
     bench_unary(
         env, "sz_sha256_neon", validator,
         sha256_stream_from_sz<sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon> {
@@ -366,10 +369,10 @@ void bench_sha256(environment_t const &env) {
 #pragma region Binary Functions
 
 /**
- *  @brief  Wraps a hardware-specific equality-checking backend into something similar to @b `std::equal_to`.
- *          Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
- *          more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
- *          and equivalent strings.
+ *  @brief Wraps a hardware-specific equality-checking backend into something similar to @b `std::equal_to`.
+ *         Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
+ *         more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
+ *         and equivalent strings.
  */
 template <sz_equal_t func_>
 struct equality_from_sz {
@@ -418,10 +421,10 @@ struct equality_from_memcmp_t {
 };
 
 /**
- *  @brief  Wraps a hardware-specific order-checking backend into something similar to @b `std::equal_to`.
- *          Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
- *          more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
- *          and equivalent strings.
+ *  @brief Wraps a hardware-specific order-checking backend into something similar to @b `std::equal_to`.
+ *         Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
+ *         more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
+ *         and equivalent strings.
  */
 template <sz_order_t func_>
 struct ordering_from_sz {
