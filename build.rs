@@ -21,8 +21,20 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let mut flags = HashMap::<String, bool>::new();
     let mut build = cc::Build::new();
     build
-        .file("c/stringzilla.c")
+        .files([
+            "c/stringzilla/runtime.c",
+            "c/stringzilla/compare.c",
+            "c/stringzilla/memory.c",
+            "c/stringzilla/hash.c",
+            "c/stringzilla/find.c",
+            "c/stringzilla/sort.c",
+            "c/stringzilla/intersect.c",
+            "c/stringzilla/utf8_iterate.c",
+            "c/stringzilla/utf8_case_fold.c",
+            "c/stringzilla/utf8_case_insensitive.c",
+        ])
         .include("include")
+        .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
@@ -70,21 +82,24 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let flags_to_try = match target_arch.as_str() {
         "arm" | "aarch64" => vec![
             //
-            "SZ_USE_SVE2_AES",
+            "SZ_USE_SVE2AES",
             "SZ_USE_SVE2",
             "SZ_USE_SVE",
-            "SZ_USE_NEON_SHA",
-            "SZ_USE_NEON_AES",
+            "SZ_USE_NEONSHA",
+            "SZ_USE_NEONAES",
             "SZ_USE_NEON",
         ],
         "x86_64" => vec![
             //
-            "SZ_USE_ICE",
+            "SZ_USE_ICELAKE",
             "SZ_USE_SKYLAKE",
             "SZ_USE_HASWELL",
             "SZ_USE_GOLDMONT",
             "SZ_USE_WESTMERE",
         ],
+        "riscv64" => vec!["SZ_USE_RVV"],
+        "loongarch64" => vec!["SZ_USE_LASX"],
+        "powerpc64" => vec!["SZ_USE_POWERVSX"],
         _ => vec![],
     };
 
@@ -125,21 +140,9 @@ fn build_stringzilla() -> HashMap<String, bool> {
         }
     }
 
-    println!("cargo:rerun-if-changed=c/stringzilla.c");
+    println!("cargo:rerun-if-changed=c/stringzilla");
     println!("cargo:rerun-if-changed=rust/stringzilla.rs");
-    println!("cargo:rerun-if-changed=include/stringzilla/stringzilla.h");
-
-    // Constituent parts:
-    println!("cargo:rerun-if-changed=include/stringzilla/find.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/hash.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/utf8.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/utf8_unpack.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/types.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/memory.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/compare.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/similarities.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/small_string.h");
+    println!("cargo:rerun-if-changed=include/stringzilla");
 
     // Rerun if SIMD backend environment variables change
     for flag in flags_to_try.iter() {
@@ -167,7 +170,13 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     // Nvidia GPU backend
     if is_cuda {
         build.cuda(true);
-        build.file("c/stringzillas.cu");
+        build.files([
+            "c/stringzillas/runtime.cu",
+            "c/stringzillas/levenshtein.cu",
+            "c/stringzillas/needleman_wunsch.cu",
+            "c/stringzillas/smith_waterman.cu",
+            "c/stringzillas/fingerprints.cu",
+        ]);
         build.define("SZ_USE_CUDA", "1");
         build.define("SZ_USE_ROCM", "0");
         build.flag("-std=c++20");
@@ -177,7 +186,13 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     // AMD GPU backend
     else if is_rocm {
         build.cpp(true);
-        build.file("c/stringzillas.cu");
+        build.files([
+            "c/stringzillas/runtime.cu",
+            "c/stringzillas/levenshtein.cu",
+            "c/stringzillas/needleman_wunsch.cu",
+            "c/stringzillas/smith_waterman.cu",
+            "c/stringzillas/fingerprints.cu",
+        ]);
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "1");
         build.flag("-std=c++20");
@@ -186,7 +201,13 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     // Multi-core CPU backend
     else if is_cpus {
         build.cpp(true);
-        build.file("c/stringzillas.cpp");
+        build.files([
+            "c/stringzillas/runtime.cpp",
+            "c/stringzillas/levenshtein.cpp",
+            "c/stringzillas/needleman_wunsch.cpp",
+            "c/stringzillas/smith_waterman.cpp",
+            "c/stringzillas/fingerprints.cpp",
+        ]);
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "0");
         build.flag("-std=c++20");
@@ -219,12 +240,7 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     }
 
     // StringZillas-specific rerun triggers
-    println!("cargo:rerun-if-changed=c/stringzillas.cu");
-    println!("cargo:rerun-if-changed=c/stringzillas.cuh");
-    println!("cargo:rerun-if-changed=include/stringzillas/stringzillas.h");
-    println!("cargo:rerun-if-changed=include/stringzillas/fingerprints.hpp");
-    println!("cargo:rerun-if-changed=include/stringzillas/fingerprints.cuh");
-    println!("cargo:rerun-if-changed=include/stringzillas/similarities.hpp");
-    println!("cargo:rerun-if-changed=include/stringzillas/similarities.cuh");
+    println!("cargo:rerun-if-changed=c/stringzillas");
+    println!("cargo:rerun-if-changed=include/stringzillas");
     println!("cargo:rerun-if-changed=fork_union/include/fork_union.hpp");
 }
