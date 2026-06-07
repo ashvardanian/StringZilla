@@ -366,6 +366,24 @@ elif sys.platform == "win32":
 else:
     compile_args, link_args, macros_args = [], [], []
 
+# The compiled C shims are split into one translation unit per domain (single-CPU) and per
+# algorithm (parallel); each binding lists the full set. See c/stringzilla/ and c/stringzillas/.
+STRINGZILLA_CORE_SOURCES = [
+    "c/stringzilla/runtime.c",
+    "c/stringzilla/compare.c",
+    "c/stringzilla/memory.c",
+    "c/stringzilla/hash.c",
+    "c/stringzilla/find.c",
+    "c/stringzilla/sort.c",
+    "c/stringzilla/intersect.c",
+    "c/stringzilla/utf8_iterate.c",
+    "c/stringzilla/utf8_case_fold.c",
+    "c/stringzilla/utf8_case_insensitive.c",
+]
+STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
+STRINGZILLAS_CPU_SOURCES = [f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS]
+STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
+
 ext_modules = []
 entry_points = {}
 command_class = {}
@@ -375,8 +393,8 @@ if sz_target == "stringzilla":
     ext_modules = [
         Extension(
             "stringzilla",
-            ["python/stringzilla.c", "c/stringzilla/runtime.c"],
-            include_dirs=["include"],
+            ["python/stringzilla.c"] + STRINGZILLA_CORE_SOURCES,
+            include_dirs=["include", "c/stringzilla"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
@@ -393,8 +411,8 @@ elif sz_target == "stringzillas-cpus":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cpp"],
-            include_dirs=["include", "c", "fork_union/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CPU_SOURCES,
+            include_dirs=["include", "c/stringzillas", "fork_union/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
@@ -406,8 +424,8 @@ elif sz_target == "stringzillas-cuda":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cu"],
-            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
+            include_dirs=["include", "c/stringzillas", "fork_union/include", "/usr/local/cuda/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lstdc++"],
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,

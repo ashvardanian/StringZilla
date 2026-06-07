@@ -21,7 +21,18 @@ let package = Package(
         .target(
             name: "StringZillaC",
             path: "include/stringzilla",
-            sources: ["../../c/stringzilla/runtime.c"],
+            sources: [
+                "../../c/stringzilla/runtime.c",
+                "../../c/stringzilla/compare.c",
+                "../../c/stringzilla/memory.c",
+                "../../c/stringzilla/hash.c",
+                "../../c/stringzilla/find.c",
+                "../../c/stringzilla/sort.c",
+                "../../c/stringzilla/intersect.c",
+                "../../c/stringzilla/utf8_iterate.c",
+                "../../c/stringzilla/utf8_case_fold.c",
+                "../../c/stringzilla/utf8_case_insensitive.c",
+            ],
             publicHeadersPath: ".",
             cSettings: [
                 .define("SZ_DYNAMIC_DISPATCH", to: "1"),
