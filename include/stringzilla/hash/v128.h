@@ -1,0 +1,386 @@
+/**
+ *  @brief WebAssembly SIMD128 backend for hash.
+ *  @file include/stringzilla/hash/v128.h
+ *  @author Ash Vardanian
+ *  @sa include/stringzilla/hash.h
+ */
+#ifndef STRINGZILLA_HASH_V128_H_
+#define STRINGZILLA_HASH_V128_H_
+
+#include "stringzilla/types.h"
+#include "stringzilla/hash/serial.h"
+#include "stringzilla/compare.h" // `sz_equal`
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if SZ_USE_V128
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("simd128")
+#endif
+
+SZ_PUBLIC sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
+    // WASM SIMD128 has no `psadbw`. The hot path keeps an 8-lane u16 accumulator entirely in a
+    // vector register and folds raw bytes into it with a single `extadd_pairwise` per 16 bytes:
+    // there are NO widening/extend/64-bit-add reductions inside the loop. Each u16 lane sums two
+    // byte columns, so after `k` iterations a lane holds at most `2 * k * 255`; it stays below
+    // 65535 for `k <= 128`. We therefore flush the u16 accumulator into a wide u64 accumulator
+    // every 128 iterations (2 KiB), and do ONE horizontal reduction at the very end.
+    sz_u128_vec_t sum16_vec, sum64_vec;
+    sum16_vec.v128 = wasm_u64x2_splat(0); // 8x u16 partials
+    sum64_vec.v128 = wasm_u64x2_splat(0); // 2x u64 partials
+
+    while (length >= 16) {
+        // Process up to 128 blocks before the u16 lanes could overflow.
+        sz_size_t blocks = length / 16;
+        if (blocks > 128) blocks = 128;
+        length -= blocks * 16;
+        for (sz_size_t i = 0; i < blocks; ++i, text += 16) {
+            v128_t vec = wasm_v128_load(text);
+            // 16x u8 -> 8x u16 pairwise sums, accumulated in-lane (associative, no reduction).
+            sum16_vec.v128 = wasm_i16x8_add(sum16_vec.v128, wasm_u16x8_extadd_pairwise_u8x16(vec));
+        }
+        // Flush: widen the 8x u16 partials to 4x u32, then to 2x u64, and fold into `sum64`.
+        v128_t pair32 = wasm_u32x4_extadd_pairwise_u16x8(sum16_vec.v128);
+        sum64_vec.v128 = wasm_i64x2_add( //
+            sum64_vec.v128, wasm_i64x2_add(wasm_u64x2_extend_low_u32x4(pair32), wasm_u64x2_extend_high_u32x4(pair32)));
+        sum16_vec.v128 = wasm_u64x2_splat(0);
+    }
+
+    sz_u64_t sum = sum64_vec.u64s[0] + sum64_vec.u64s[1];
+    while (length--) sum += *(sz_u8_t const *)text++;
+    return sum;
+}
+
+/** @brief Evaluate a GF(2)-linear byte map `x -> lo[x&0xF] ^ hi[x>>4]` across all 16 lanes. */
+SZ_INTERNAL v128_t sz_aes_linear_v128_(v128_t lo_table, v128_t hi_table, v128_t x) {
+    v128_t lo_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
+    v128_t hi_nibbles = wasm_u8x16_shr(x, 4);
+    return wasm_v128_xor(wasm_i8x16_swizzle(lo_table, lo_nibbles), wasm_i8x16_swizzle(hi_table, hi_nibbles));
+}
+
+/** @brief GF(2^4) (modulus `x^4+x+1`) lane-wise multiply via log/antilog swizzles with zero masking. */
+SZ_INTERNAL v128_t sz_aes_gf4_mul_v128_(v128_t a, v128_t b) {
+    static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
+                                                        0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
+    static sz_align_(16) sz_u8_t const exp_lo_table[16] = {0x01, 0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b,
+                                                           0x05, 0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x01};
+    static sz_align_(16) sz_u8_t const exp_hi_table[16] = {0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b, 0x05,
+                                                           0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x00, 0x00};
+    v128_t log_vec = wasm_v128_load(log_table);
+    v128_t exp_lo_vec = wasm_v128_load(exp_lo_table);
+    v128_t exp_hi_vec = wasm_v128_load(exp_hi_table);
+    v128_t zero = wasm_i8x16_splat(0);
+
+    // `sum = log[a] + log[b]` ranges over 0..28; the low antilog swizzle covers 0..15 (others -> 0),
+    // and the high antilog swizzle is fed `sum - 16` so it covers 16..28 (others wrap >= 16 -> 0).
+    v128_t sum = wasm_i8x16_add(wasm_i8x16_swizzle(log_vec, a), wasm_i8x16_swizzle(log_vec, b));
+    v128_t product = wasm_v128_xor(wasm_i8x16_swizzle(exp_lo_vec, sum),
+                                   wasm_i8x16_swizzle(exp_hi_vec, wasm_i8x16_sub(sum, wasm_i8x16_splat(16))));
+    // Force a zero result wherever either operand was zero (`log[0]` is otherwise indistinguishable).
+    v128_t any_zero = wasm_v128_or(wasm_i8x16_eq(a, zero), wasm_i8x16_eq(b, zero));
+    return wasm_v128_andnot(product, any_zero);
+}
+
+/**
+ *  @brief Bit-exact `_mm_aesenc_si128` for one round, identical to `sz_emulate_aesenc_si128_serial_`.
+ *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, computed with the vpaes tower field.
+ */
+SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+    // GF(2^8) <-> GF(2^4)^2 change-of-basis (forward `M` and inverse `M^-1`), as linear nibble tables.
+    static sz_align_(16) sz_u8_t const fwd_lo[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
+                                                     0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
+    static sz_align_(16) sz_u8_t const fwd_hi[16] = {0x00, 0x3c, 0xd5, 0xe9, 0x34, 0x08, 0xe1, 0xdd,
+                                                     0xe5, 0xd9, 0x30, 0x0c, 0xd1, 0xed, 0x04, 0x38};
+    static sz_align_(16) sz_u8_t const inv_lo[16] = {0x00, 0x01, 0x5c, 0x5d, 0xe0, 0xe1, 0xbc, 0xbd,
+                                                     0x50, 0x51, 0x0c, 0x0d, 0xb0, 0xb1, 0xec, 0xed};
+    static sz_align_(16) sz_u8_t const inv_hi[16] = {0x00, 0xa2, 0x02, 0xa0, 0xb8, 0x1a, 0xba, 0x18,
+                                                     0xdb, 0x79, 0xd9, 0x7b, 0x63, 0xc1, 0x61, 0xc3};
+    // AES affine map (constant `0x63` folded into the low table) as linear nibble tables.
+    static sz_align_(16) sz_u8_t const aff_lo[16] = {0x63, 0x7c, 0x5d, 0x42, 0x1f, 0x00, 0x21, 0x3e,
+                                                     0x9b, 0x84, 0xa5, 0xba, 0xe7, 0xf8, 0xd9, 0xc6};
+    static sz_align_(16) sz_u8_t const aff_hi[16] = {0x00, 0xf1, 0xe3, 0x12, 0xc7, 0x36, 0x24, 0xd5,
+                                                     0x8f, 0x7e, 0x6c, 0x9d, 0x48, 0xb9, 0xab, 0x5a};
+    // GF(2^4) inverse, square, and `square * N` (N = 8) nibble tables.
+    static sz_align_(16) sz_u8_t const gf4_inv[16] = {0x00, 0x01, 0x09, 0x0e, 0x0d, 0x0b, 0x07, 0x06,
+                                                      0x0f, 0x02, 0x0c, 0x05, 0x0a, 0x04, 0x03, 0x08};
+    static sz_align_(16) sz_u8_t const gf4_sqr[16] = {0x00, 0x01, 0x04, 0x05, 0x03, 0x02, 0x07, 0x06,
+                                                      0x0c, 0x0d, 0x08, 0x09, 0x0f, 0x0e, 0x0b, 0x0a};
+    static sz_align_(16) sz_u8_t const gf4_sqr_n[16] = {0x00, 0x08, 0x06, 0x0e, 0x0b, 0x03, 0x0d, 0x05,
+                                                        0x0a, 0x02, 0x0c, 0x04, 0x01, 0x09, 0x07, 0x0f};
+    // ShiftRows (fused with the serial byte de-interleave) and within-row column rotate, as swizzles.
+    static sz_align_(16) sz_u8_t const shift_rows[16] = {0x00, 0x05, 0x0a, 0x0f, 0x04, 0x09, 0x0e, 0x03,
+                                                         0x08, 0x0d, 0x02, 0x07, 0x0c, 0x01, 0x06, 0x0b};
+    static sz_align_(16) sz_u8_t const next_col[16] = {0x01, 0x02, 0x03, 0x00, 0x05, 0x06, 0x07, 0x04,
+                                                       0x09, 0x0a, 0x0b, 0x08, 0x0d, 0x0e, 0x0f, 0x0c};
+
+    v128_t state = state_vec.v128;
+    v128_t low_nibble_mask = wasm_i8x16_splat((sz_i8_t)0x0F);
+
+    // SubBytes: inverse in GF(2^8) via the tower field, then the AES affine map.
+    v128_t mapped = sz_aes_linear_v128_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state);
+    v128_t hi = wasm_u8x16_shr(mapped, 4);              // high nibble = `a_hi`
+    v128_t lo = wasm_v128_and(mapped, low_nibble_mask); // low nibble  = `a_lo`
+
+    // d = a_hi^2 * N  ^  a_hi * a_lo  ^  a_lo^2   (all in GF(2^4))
+    v128_t hi_sqr_n = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), hi);
+    v128_t hi_lo = sz_aes_gf4_mul_v128_(hi, lo);
+    v128_t lo_sqr = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), lo);
+    v128_t d = wasm_v128_xor(wasm_v128_xor(hi_sqr_n, hi_lo), lo_sqr);
+    v128_t d_inv = wasm_i8x16_swizzle(wasm_v128_load(gf4_inv), d);
+
+    v128_t b_hi = sz_aes_gf4_mul_v128_(hi, d_inv);
+    v128_t b_lo = sz_aes_gf4_mul_v128_(wasm_v128_xor(hi, lo), d_inv);
+    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(b_hi, 4), b_lo); // recombine nibbles into the byte
+
+    v128_t back = sz_aes_linear_v128_(wasm_v128_load(inv_lo), wasm_v128_load(inv_hi), inverted);
+    v128_t subbed = sz_aes_linear_v128_(wasm_v128_load(aff_lo), wasm_v128_load(aff_hi), back);
+
+    // ShiftRows: one swizzle (also de-interleaves into the serial row-major layout).
+    v128_t shifted = wasm_i8x16_swizzle(subbed, wasm_v128_load(shift_rows));
+
+    // MixColumns: U (row XOR) plus xtime of adjacent column differences.
+    v128_t col_table = wasm_v128_load(next_col);
+    v128_t col1 = wasm_i8x16_swizzle(shifted, col_table);
+    v128_t col2 = wasm_i8x16_swizzle(col1, col_table);
+    v128_t col3 = wasm_i8x16_swizzle(col2, col_table);
+    v128_t row_xor = wasm_v128_xor(wasm_v128_xor(shifted, col1), wasm_v128_xor(col2, col3));
+
+    v128_t diff = wasm_v128_xor(shifted, col1);   // s[c] ^ s[c+1]
+    v128_t need_reduce = wasm_i8x16_shr(diff, 7); // 0xFF where the top bit is set, else 0x00
+    v128_t reduce = wasm_v128_and(need_reduce, wasm_i8x16_splat((sz_i8_t)0x1B));
+    v128_t xtime = wasm_v128_xor(wasm_i8x16_shl(diff, 1), reduce);
+
+    v128_t mixed = wasm_v128_xor(wasm_v128_xor(shifted, row_xor), xtime);
+
+    // AddRoundKey.
+    sz_u128_vec_t result;
+    result.v128 = wasm_v128_xor(mixed, round_key_vec.v128);
+    return result;
+}
+
+/** @brief Vectorized counterpart of `sz_emulate_shuffle_epi8_serial_` using one `wasm_i8x16_swizzle`. */
+SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_v128_(sz_u128_vec_t state_vec, v128_t order) {
+    sz_u128_vec_t result;
+    result.v128 = wasm_i8x16_swizzle(state_vec.v128, order);
+    return result;
+}
+
+#pragma region Hash with SIMD128 AES
+
+SZ_INTERNAL void sz_hash_minimal_init_v128_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
+    sz_hash_minimal_init_serial_(state, seed);
+}
+
+SZ_INTERNAL void sz_hash_minimal_update_v128_(sz_hash_minimal_t_ *state, sz_u128_vec_t block) {
+    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    state->aes = sz_emulate_aesenc_v128_(state->aes, block);
+    state->sum = sz_emulate_shuffle_epi8_v128_(state->sum, shuffle);
+    state->sum.v128 = wasm_i64x2_add(state->sum.v128, block.v128);
+}
+
+SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_v128_(sz_hash_minimal_t_ const *state, sz_size_t length) {
+    sz_u128_vec_t key_with_length = state->key;
+    key_with_length.u64s[0] += length;
+    sz_u128_vec_t mixed = sz_emulate_aesenc_v128_(state->sum, state->aes);
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128_(sz_emulate_aesenc_v128_(mixed, key_with_length), mixed);
+    return mixed_in_register.u64s[0];
+}
+
+SZ_INTERNAL void sz_hash_state_update_v128_(sz_hash_state_t *state) {
+    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    sz_u128_vec_t *aes_vecs = (sz_u128_vec_t *)state->aes;
+    sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)state->sum;
+    sz_u128_vec_t *ins_vecs = (sz_u128_vec_t *)state->ins;
+    for (sz_size_t i = 0; i < 4; ++i) {
+        aes_vecs[i] = sz_emulate_aesenc_v128_(aes_vecs[i], ins_vecs[i]);
+        sum_vecs[i] = sz_emulate_shuffle_epi8_v128_(sum_vecs[i], shuffle);
+        sum_vecs[i].v128 = wasm_i64x2_add(sum_vecs[i].v128, ins_vecs[i].v128);
+    }
+}
+
+SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_t const *state) {
+    sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
+    sz_u128_vec_t key_with_length;
+    key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
+    key_with_length.u64s[1] = key_u64s[1];
+
+    sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
+    sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+
+    sz_u128_vec_t mixed0 = sz_emulate_aesenc_v128_(sum_vecs[0], aes_vecs[0]);
+    sz_u128_vec_t mixed1 = sz_emulate_aesenc_v128_(sum_vecs[1], aes_vecs[1]);
+    sz_u128_vec_t mixed2 = sz_emulate_aesenc_v128_(sum_vecs[2], aes_vecs[2]);
+    sz_u128_vec_t mixed3 = sz_emulate_aesenc_v128_(sum_vecs[3], aes_vecs[3]);
+
+    sz_u128_vec_t mixed01 = sz_emulate_aesenc_v128_(mixed0, mixed1);
+    sz_u128_vec_t mixed23 = sz_emulate_aesenc_v128_(mixed2, mixed3);
+    sz_u128_vec_t mixed = sz_emulate_aesenc_v128_(mixed01, mixed23);
+
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128_(sz_emulate_aesenc_v128_(mixed, key_with_length), mixed);
+    return mixed_in_register.u64s[0];
+}
+
+SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+    if (length <= 16) {
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_v128_(&state, seed);
+        sz_u128_vec_t data_vec;
+        data_vec.u64s[0] = data_vec.u64s[1] = 0;
+        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        sz_hash_minimal_update_v128_(&state, data_vec);
+        return sz_hash_minimal_finalize_v128_(&state, length);
+    }
+    else if (length <= 32) {
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_v128_(&state, seed);
+        sz_u128_vec_t data0_vec, data1_vec;
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
+        sz_hash_minimal_update_v128_(&state, data0_vec);
+        sz_hash_minimal_update_v128_(&state, data1_vec);
+        return sz_hash_minimal_finalize_v128_(&state, length);
+    }
+    else if (length <= 48) {
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_v128_(&state, seed);
+        sz_u128_vec_t data0_vec, data1_vec, data2_vec;
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
+        sz_hash_minimal_update_v128_(&state, data0_vec);
+        sz_hash_minimal_update_v128_(&state, data1_vec);
+        sz_hash_minimal_update_v128_(&state, data2_vec);
+        return sz_hash_minimal_finalize_v128_(&state, length);
+    }
+    else if (length <= 64) {
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_v128_(&state, seed);
+        sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
+        sz_hash_minimal_update_v128_(&state, data0_vec);
+        sz_hash_minimal_update_v128_(&state, data1_vec);
+        sz_hash_minimal_update_v128_(&state, data2_vec);
+        sz_hash_minimal_update_v128_(&state, data3_vec);
+        return sz_hash_minimal_finalize_v128_(&state, length);
+    }
+    else {
+        sz_align_(64) sz_hash_state_t state;
+        sz_hash_state_init_serial(&state, seed);
+        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+            for (sz_size_t i = 0; i < 64; ++i) state.ins[i] = start[state.ins_length + i];
+            sz_hash_state_update_v128_(&state);
+        }
+        if (state.ins_length < length) {
+            for (sz_size_t i = 0; i != 64; ++i) state.ins[i] = 0;
+            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
+                state.ins[i] = start[state.ins_length];
+            sz_hash_state_update_v128_(&state);
+            state.ins_length = length;
+        }
+        return sz_hash_state_finalize_v128_(&state);
+    }
+}
+
+SZ_PUBLIC void sz_hash_state_init_v128(sz_hash_state_t *state, sz_u64_t seed) {
+    sz_hash_state_init_serial(state, seed);
+}
+
+SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    while (length) {
+        sz_size_t progress_in_block = state->ins_length % 64;
+        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
+        int const will_fill_block = progress_in_block + to_copy == 64;
+        state->ins_length += to_copy;
+        length -= to_copy;
+        while (to_copy--) state->ins[progress_in_block++] = *text++;
+        if (will_fill_block) {
+            sz_hash_state_update_v128_(state);
+            for (sz_size_t i = 0; i < 64; ++i) state->ins[i] = 0;
+        }
+    }
+}
+
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128(sz_hash_state_t const *state) {
+    sz_size_t length = state->ins_length;
+    if (length >= 64) return sz_hash_state_finalize_v128_(state);
+
+    sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
+    sz_hash_minimal_t_ minimal_state;
+    minimal_state.key.u64s[0] = key_u64s[0];
+    minimal_state.key.u64s[1] = key_u64s[1];
+    minimal_state.aes = *(sz_u128_vec_t const *)state->aes;
+    minimal_state.sum = *(sz_u128_vec_t const *)state->sum;
+
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
+    if (length <= 16) {
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
+        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+    }
+    else if (length <= 32) {
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
+        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+    }
+    else if (length <= 48) {
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[2]);
+        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+    }
+    else {
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[2]);
+        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[3]);
+        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+    }
+}
+
+SZ_PUBLIC void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+    sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
+    sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
+    for (sz_size_t lane_index = 0; length; ++lane_index) {
+        input_vec.u64s[0] = input_vec.u64s[1] = nonce + lane_index;
+        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
+        key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
+        generated_vec = sz_emulate_aesenc_v128_(input_vec, key_vec);
+        for (sz_size_t i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+    }
+}
+
+#pragma endregion // Hash with SIMD128 AES
+
+SZ_PUBLIC void sz_sha256_state_init_v128(sz_sha256_state_t *state) { sz_sha256_state_init_serial(state); }
+
+SZ_PUBLIC void sz_sha256_state_update_v128(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+    sz_sha256_state_update_serial(state, data, length);
+}
+
+SZ_PUBLIC void sz_sha256_state_digest_v128(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+    sz_sha256_state_digest_serial(state, digest);
+}
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif // SZ_USE_V128
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // STRINGZILLA_HASH_V128_H_

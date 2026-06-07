@@ -26,14 +26,13 @@
  *  Before optimizing its relevant to understand the typical usecases for the algorithm. Typically,
  *  we would use `uint32_t` for the state indicies, and 256 state transitions for byte-level FSM.
  *
- *  | Use Case                      | Number of States        | Memory Usage            |
- *  |-------------------------------|-------------------------|-------------------------|
- *  | UTF-32 Mapping                | 10,000 – 100,000        | 10.24 MB – 102.4 MB     |
- *  | Malware/Intrusion Detection   | 10,000 – 1,000,000      | 10.24 MB – 1.024 GB     |
- *  | DNA/RNA Motif Scanning        | 100 – 100,000           | 0.1 MB – 102.4 MB       |
- *  | Keyword Filtering/Moderation  | 100 – 10,000            | 0.1 MB – 10.24 MB       |
- *  | Plagiarism/Code Similarity    | 1,000 – 100,000         | 1.024 MB – 102.4 MB     |
- *  | Product Catalog Matching      | 100,000 – 1,000,000     | 102.4 MB – 1.024 GB     |
+ *  Use Case                      | Number of States        | Memory Usage
+ *  UTF-32 Mapping                | 10,000 – 100,000        | 10.24 MB – 102.4 MB
+ *  Malware/Intrusion Detection   | 10,000 – 1,000,000      | 10.24 MB – 1.024 GB
+ *  DNA/RNA Motif Scanning        | 100 – 100,000           | 0.1 MB – 102.4 MB
+ *  Keyword Filtering/Moderation  | 100 – 10,000            | 0.1 MB – 10.24 MB
+ *  Plagiarism/Code Similarity    | 1,000 – 100,000         | 1.024 MB – 102.4 MB
+ *  Product Catalog Matching      | 100,000 – 1,000,000     | 102.4 MB – 1.024 GB
  */
 #ifndef STRINGZILLAS_FIND_MANY_HPP_
 #define STRINGZILLAS_FIND_MANY_HPP_

@@ -1,14 +1,15 @@
 /**
- *  @brief  StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
- *          It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
- *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
- *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
+ *  @brief StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
+ *         It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
+ *         On modern CPUs it uses AVX2, AVX-512, NEON, SVE, SVE2, WebAssembly, RISC-V, LoongArch & Power @b SIMD,
+ *         with a SWAR fallback for older CPUs.
+ *         On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
  *
- *  @file   stringzilla.h
+ *  @file include/stringzilla/stringzilla.h
  *  @author Ash Vardanian
  *
- *  @see    StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
- *  @see    LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
+ *  @see StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
+ *  @see LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
  *
  *  @section Introduction
  *
@@ -52,12 +53,21 @@
  *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
  *
  *  - `SZ_USE_WESTMERE=?` - whether to use SSE4.2 & AES-NI instructions on x86_64.
+ *  - `SZ_USE_GOLDMONT=?` - whether to use SHA-NI instructions on x86_64.
  *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
+ *  - `SZ_USE_ICELAKE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
+ *  - `SZ_USE_NEONAES=?` - whether to use NEON AES instructions on ARM.
+ *  - `SZ_USE_NEONSHA=?` - whether to use NEON SHA-2 instructions on ARM.
  *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
  *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
+ *  - `SZ_USE_SVE2AES=?` - whether to use SVE2 AES instructions on ARM.
+ *  - `SZ_USE_V128=?` - whether to use WebAssembly SIMD128 instructions.
+ *  - `SZ_USE_V128RELAXED=?` - whether to use WebAssembly relaxed-SIMD instructions.
+ *  - `SZ_USE_RVV=?` - whether to use RISC-V Vector (RVV 1.0) instructions.
+ *  - `SZ_USE_LASX=?` - whether to use LoongArch LASX instructions.
+ *  - `SZ_USE_POWERVSX=?` - whether to use IBM Power VSX instructions.
  *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on Nvidia GPUs.
  *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on Nvidia GPUs.
  *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on Nvidia GPUs.
@@ -69,17 +79,17 @@
 #define STRINGZILLA_H_VERSION_MINOR 6
 #define STRINGZILLA_H_VERSION_PATCH 2
 
-#include "types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
-#include "compare.h"      // `sz_equal`, `sz_order`
-#include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
-#include "hash.h"         // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
-#include "find.h"         // `sz_find`, `sz_find_byteset`, `sz_rfind`
-#include "utf8.h"         // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
-#include "utf8_case.h"    // `sz_utf8_case_insensitive_find`, `sz_utf8_unpack_chunk`
-#include "utf8_word.h"    // `sz_rune_word_break_property`, `sz_rune_is_word_char`
-#include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
-#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`
-#include "intersect.h"    // `sz_sequence_intersect`
+#include "stringzilla/types.h"   // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
+#include "stringzilla/compare.h" // `sz_equal`, `sz_order`
+#include "stringzilla/memory.h"  // `sz_copy`, `sz_move`, `sz_fill`
+#include "stringzilla/hash.h"    // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
+#include "stringzilla/find.h"    // `sz_find`, `sz_find_byteset`, `sz_rfind`
+#include "stringzilla/utf8_iterate.h" // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
+#include "stringzilla/utf8_case_fold.h"        // `sz_utf8_case_fold`
+#include "stringzilla/utf8_case_insensitive.h" // `sz_utf8_case_insensitive_find`, `sz_utf8_case_insensitive_order`
+#include "stringzilla/small_string.h"          // `sz_string_t`, `sz_string_init`, `sz_string_free`
+#include "stringzilla/sort.h"                  // `sz_sequence_argsort`, `sz_pgrams_sort`
+#include "stringzilla/intersect.h"             // `sz_sequence_intersect`
 
 /* Inferring target OS: Windows, MacOS, or Linux */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
@@ -139,14 +149,20 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
         {sz_cap_goldmont_k, "goldmont"},
         {sz_cap_haswell_k, "haswell"},
         {sz_cap_skylake_k, "skylake"},
-        {sz_cap_ice_k, "ice"},
+        {sz_cap_icelake_k, "icelake"},
         //
         {sz_cap_neon_k, "neon"},
-        {sz_cap_neon_aes_k, "neon+aes"},
-        {sz_cap_neon_sha_k, "neon+sha"},
+        {sz_cap_neonaes_k, "neonaes"},
+        {sz_cap_neonsha_k, "neonsha"},
         {sz_cap_sve_k, "sve"},
         {sz_cap_sve2_k, "sve2"},
-        {sz_cap_sve2_aes_k, "sve2+aes"},
+        {sz_cap_sve2aes_k, "sve2aes"},
+        //
+        {sz_cap_v128_k, "v128"},
+        {sz_cap_v128relaxed_k, "v128relaxed"},
+        {sz_cap_rvv_k, "rvv"},
+        {sz_cap_lasx_k, "lasx"},
+        {sz_cap_powervsx_k, "powervsx"},
         //
         {sz_cap_cuda_k, "cuda"},
         {sz_cap_kepler_k, "kepler"},
@@ -171,7 +187,7 @@ SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const 
 
 /**
  *  @brief Internal helper to map a capability name to its flag.
- *  @param[in] name Capability name, e.g. "serial", "neon", "sve2_aes".
+ *  @param[in] name Capability name, e.g. "serial", "neon", "sve2aes".
  *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
  */
 SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const *name) {
@@ -184,20 +200,20 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
     if (sz_equal_null_terminated_serial(name, "goldmont") == sz_true_k) return sz_cap_goldmont_k;
     if (sz_equal_null_terminated_serial(name, "haswell") == sz_true_k) return sz_cap_haswell_k;
     if (sz_equal_null_terminated_serial(name, "skylake") == sz_true_k) return sz_cap_skylake_k;
-    if (sz_equal_null_terminated_serial(name, "ice") == sz_true_k) return sz_cap_ice_k;
+    if (sz_equal_null_terminated_serial(name, "icelake") == sz_true_k) return sz_cap_icelake_k;
+    // WebAssembly, RISC-V, LoongArch, Power
+    if (sz_equal_null_terminated_serial(name, "v128") == sz_true_k) return sz_cap_v128_k;
+    if (sz_equal_null_terminated_serial(name, "v128relaxed") == sz_true_k) return sz_cap_v128relaxed_k;
+    if (sz_equal_null_terminated_serial(name, "rvv") == sz_true_k) return sz_cap_rvv_k;
+    if (sz_equal_null_terminated_serial(name, "lasx") == sz_true_k) return sz_cap_lasx_k;
+    if (sz_equal_null_terminated_serial(name, "powervsx") == sz_true_k) return sz_cap_powervsx_k;
     // Arm
     if (sz_equal_null_terminated_serial(name, "neon") == sz_true_k) return sz_cap_neon_k;
     if (sz_equal_null_terminated_serial(name, "sve") == sz_true_k) return sz_cap_sve_k;
     if (sz_equal_null_terminated_serial(name, "sve2") == sz_true_k) return sz_cap_sve2_k;
-    if (sz_equal_null_terminated_serial(name, "neon_aes") == sz_true_k ||
-        sz_equal_null_terminated_serial(name, "neon+aes") == sz_true_k)
-        return sz_cap_neon_aes_k;
-    if (sz_equal_null_terminated_serial(name, "neon_sha") == sz_true_k ||
-        sz_equal_null_terminated_serial(name, "neon+sha") == sz_true_k)
-        return sz_cap_neon_sha_k;
-    if (sz_equal_null_terminated_serial(name, "sve2_aes") == sz_true_k ||
-        sz_equal_null_terminated_serial(name, "sve2+aes") == sz_true_k)
-        return sz_cap_sve2_aes_k;
+    if (sz_equal_null_terminated_serial(name, "neonaes") == sz_true_k) return sz_cap_neonaes_k;
+    if (sz_equal_null_terminated_serial(name, "neonsha") == sz_true_k) return sz_cap_neonsha_k;
+    if (sz_equal_null_terminated_serial(name, "sve2aes") == sz_true_k) return sz_cap_sve2aes_k;
     // GPU
     if (sz_equal_null_terminated_serial(name, "cuda") == sz_true_k) return sz_cap_cuda_k;
     if (sz_equal_null_terminated_serial(name, "kepler") == sz_true_k) return sz_cap_kepler_k;
@@ -209,7 +225,7 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
 
 /**
  *  @brief Internal helper function to convert SIMD capabilities to a string.
- *  @sa    sz_capabilities_to_string, sz_capabilities
+ *  @sa sz_capabilities_to_string, sz_capabilities
  */
 SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
 
@@ -240,21 +256,26 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
 }
 
 SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
-    return (sz_capability_t)(                   //
-        (sz_cap_neon_k * SZ_USE_NEON) |         //
-        (sz_cap_neon_aes_k * SZ_USE_NEON_AES) | //
-        (sz_cap_neon_sha_k * SZ_USE_NEON_SHA) | //
-        (sz_cap_sve_k * SZ_USE_SVE) |           //
-        (sz_cap_sve2_k * SZ_USE_SVE2) |         //
-        (sz_cap_sve2_aes_k * SZ_USE_SVE2_AES) | //
-        (sz_cap_westmere_k * SZ_USE_WESTMERE) | //
-        (sz_cap_goldmont_k * SZ_USE_GOLDMONT) | //
-        (sz_cap_haswell_k * SZ_USE_HASWELL) |   //
-        (sz_cap_skylake_k * SZ_USE_SKYLAKE) |   //
-        (sz_cap_ice_k * SZ_USE_ICE) |           //
-        (sz_cap_cuda_k * SZ_USE_CUDA) |         //
-        (sz_cap_kepler_k * SZ_USE_KEPLER) |     //
-        (sz_cap_hopper_k * SZ_USE_HOPPER) |     //
+    return (sz_capability_t)(                         //
+        (sz_cap_neon_k * SZ_USE_NEON) |               //
+        (sz_cap_neonaes_k * SZ_USE_NEONAES) |         //
+        (sz_cap_neonsha_k * SZ_USE_NEONSHA) |         //
+        (sz_cap_sve_k * SZ_USE_SVE) |                 //
+        (sz_cap_sve2_k * SZ_USE_SVE2) |               //
+        (sz_cap_sve2aes_k * SZ_USE_SVE2AES) |         //
+        (sz_cap_westmere_k * SZ_USE_WESTMERE) |       //
+        (sz_cap_goldmont_k * SZ_USE_GOLDMONT) |       //
+        (sz_cap_haswell_k * SZ_USE_HASWELL) |         //
+        (sz_cap_skylake_k * SZ_USE_SKYLAKE) |         //
+        (sz_cap_icelake_k * SZ_USE_ICELAKE) |         //
+        (sz_cap_cuda_k * SZ_USE_CUDA) |               //
+        (sz_cap_kepler_k * SZ_USE_KEPLER) |           //
+        (sz_cap_hopper_k * SZ_USE_HOPPER) |           //
+        (sz_cap_v128_k * SZ_USE_V128) |               //
+        (sz_cap_v128relaxed_k * SZ_USE_V128RELAXED) | //
+        (sz_cap_rvv_k * SZ_USE_RVV) |                 //
+        (sz_cap_lasx_k * SZ_USE_LASX) |               //
+        (sz_cap_powervsx_k * SZ_USE_POWERVSX) |       //
         (sz_cap_serial_k));
 }
 
@@ -281,7 +302,7 @@ static void sz_mrs_test_sigill_handler_(int sig) {
 #endif
 
 /**
- *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
+ *  @brief Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
 SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
@@ -291,17 +312,17 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
-    uint32_t supports_neon_aes = 0;
-    uint32_t supports_neon_sha = 0;
+    uint32_t supports_neonaes = 0;
+    uint32_t supports_neonsha = 0;
     size_t size = sizeof(supports_neon);
     if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
-    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neon_aes, &size, NULL, 0) != 0) supports_neon_aes = 0;
-    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neon_sha, &size, NULL, 0) != 0) supports_neon_sha = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neonaes, &size, NULL, 0) != 0) supports_neonaes = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neonsha, &size, NULL, 0) != 0) supports_neonsha = 0;
 
-    return (sz_capability_t)(                       //
-        (sz_cap_neon_k * (supports_neon)) |         //
-        (sz_cap_neon_aes_k * (supports_neon_aes)) | //
-        (sz_cap_neon_sha_k * (supports_neon_sha)) | //
+    return (sz_capability_t)(                     //
+        (sz_cap_neon_k * (supports_neon)) |       //
+        (sz_cap_neonaes_k * (supports_neonaes)) | //
+        (sz_cap_neonsha_k * (supports_neonsha)) | //
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_LINUX_)
@@ -338,14 +359,14 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
-    unsigned supports_neon = 0, supports_neon_aes = 0, supports_neon_sha = 0, supports_sve = 0, supports_sve2 = 0,
-             supports_sve2_aes = 0;
+    unsigned supports_neon = 0, supports_neonaes = 0, supports_neonsha = 0, supports_sve = 0, supports_sve2 = 0,
+             supports_sve2aes = 0;
     sz_unused_(id_aa64isar0_el1);
     sz_unused_(id_aa64isar1_el1);
     sz_unused_(id_aa64pfr0_el1);
     sz_unused_(id_aa64zfr0_el1);
 
-#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEON_AES || SZ_USE_NEON_SHA || SZ_USE_SVE2_AES
+#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEONAES || SZ_USE_NEONSHA || SZ_USE_SVE2AES
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
@@ -365,11 +386,11 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // check in case we are running on R-profile CPUs.
     supports_neon = ((id_aa64pfr0_el1 >> 20) & 0xF) != 0xF;
     // AES, bits [7:4] of ID_AA64ISAR0_EL1
-    supports_neon_aes = ((id_aa64isar0_el1 >> 4) & 0xF) >= 1;
+    supports_neonaes = ((id_aa64isar0_el1 >> 4) & 0xF) >= 1;
     // SHA2, bits [15:12] of ID_AA64ISAR0_EL1
-    supports_neon_sha = ((id_aa64isar0_el1 >> 12) & 0xF) >= 1;
+    supports_neonsha = ((id_aa64isar0_el1 >> 12) & 0xF) >= 1;
 
-#if SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2_AES
+#if SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2AES
     // SVE, bits [35:32] of ID_AA64PFR0_EL1
     supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
     // Now let's unpack the status flags from ID_AA64ZFR0_EL1
@@ -381,16 +402,16 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     //  - 0b0010: SVE2.1 is implemented
     // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
     supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
-    supports_sve2_aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
+    supports_sve2aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
 #endif // SZ_USE_SVE || SZ_USE_SVE2
 
-    return (sz_capability_t)(                       //
-        (sz_cap_neon_k * (supports_neon)) |         //
-        (sz_cap_neon_aes_k * (supports_neon_aes)) | //
-        (sz_cap_neon_sha_k * (supports_neon_sha)) | //
-        (sz_cap_sve_k * (supports_sve)) |           //
-        (sz_cap_sve2_k * (supports_sve2)) |         //
-        (sz_cap_sve2_aes_k * (supports_sve2_aes)) | //
+    return (sz_capability_t)(                     //
+        (sz_cap_neon_k * (supports_neon)) |       //
+        (sz_cap_neonaes_k * (supports_neonaes)) | //
+        (sz_cap_neonsha_k * (supports_neonsha)) | //
+        (sz_cap_sve_k * (supports_sve)) |         //
+        (sz_cap_sve2_k * (supports_sve2)) |       //
+        (sz_cap_sve2aes_k * (supports_sve2aes)) | //
         (sz_cap_serial_k));
 
 #elif defined(SZ_IS_WINDOWS_)
@@ -400,10 +421,10 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     unsigned supports_neon = IsProcessorFeaturePresent(PF_ARM_V8_INSTRUCTIONS_AVAILABLE);
     unsigned supports_crypto = IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE);
 
-    return (sz_capability_t)(                     //
-        (sz_cap_neon_k * (supports_neon)) |       //
-        (sz_cap_neon_aes_k * (supports_crypto)) | //
-        (sz_cap_neon_sha_k * (supports_crypto)) | //
+    return (sz_capability_t)(                    //
+        (sz_cap_neon_k * (supports_neon)) |      //
+        (sz_cap_neonaes_k * (supports_crypto)) | //
+        (sz_cap_neonsha_k * (supports_crypto)) | //
         (sz_cap_serial_k));
 
 #else // Unknown platform
@@ -426,7 +447,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
 SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 
-#if SZ_USE_WESTMERE || SZ_USE_GOLDMONT || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+#if SZ_USE_WESTMERE || SZ_USE_GOLDMONT || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
@@ -483,12 +504,12 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
     unsigned supports_aesni = ((info1.named.ecx & 0x02000000u) != 0);
     unsigned supports_shani = ((info7.named.ebx & 0x20000000u) != 0); // SHA-NI bit 29 in EBX from CPUID(7,0)
 
-    return (sz_capability_t)(                                                               //
-        (sz_cap_westmere_k * (supports_sse42 && supports_aesni)) |                          //
-        (sz_cap_goldmont_k * (supports_shani)) |                                            //
-        (sz_cap_haswell_k * (supports_avx2)) |                                              //
-        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) | //
-        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) |   //
+    return (sz_capability_t)(                                                                 //
+        (sz_cap_westmere_k * (supports_sse42 && supports_aesni)) |                            //
+        (sz_cap_goldmont_k * (supports_shani)) |                                              //
+        (sz_cap_haswell_k * (supports_avx2)) |                                                //
+        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) |   //
+        (sz_cap_icelake_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) | //
         (sz_cap_serial_k));
 #else
     return sz_cap_serial_k;
@@ -507,7 +528,9 @@ SZ_PUBLIC sz_capability_t sz_capabilities_runtime_implementation_(void) {
 #elif SZ_IS_64BIT_ARM_
     return sz_capabilities_implementation_arm_();
 #else
-    return sz_cap_serial_k;
+    // WebAssembly, RISC-V, LoongArch, and Power expose their SIMD support at compile time
+    // (there is no portable runtime probe here), so runtime capabilities mirror compile-time ones.
+    return sz_capabilities_comptime_implementation_();
 #endif
 }
 

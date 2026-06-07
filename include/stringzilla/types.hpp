@@ -1,6 +1,6 @@
 /**
- *  @brief  Shared definitions for the StringZilla C++ library.
- *  @file   types.hpp
+ *  @brief Shared definitions for the StringZilla C++ library.
+ *  @file include/stringzilla/types.hpp
  *  @author Ash Vardanian
  *
  *  The goal for this header is to provide absolutely-minimal set of types and forward-declarations for
@@ -20,11 +20,11 @@
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
 
-#include "types.h"
+#include "stringzilla/types.h"
 
 /**
- *  @brief  When set to 1, the library will include the C++ STL headers and implement
- *          automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
+ *  @brief When set to 1, the library will include the C++ STL headers and implement
+ *         automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
  */
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
@@ -65,8 +65,8 @@
 #endif
 
 /**
- *  @brief  Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
- *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
+ *  @brief Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
+ *         Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
  *
  *  The `constexpr` keyword has different applicability scope in different C++ versions.
  *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
@@ -340,8 +340,8 @@ struct dummy_alloc {
 using dummy_alloc_t = dummy_alloc<char>;
 
 /**
- *  @brief  Random access iterator for any immutable container with indexed element lookup support.
- *  @note   Designed for `arrow_strings_tape` and `arrow_strings_view` compatibility with STL algorithms and ranges.
+ *  @brief Random access iterator for any immutable container with indexed element lookup support.
+ *  @note Designed for `arrow_strings_tape` and `arrow_strings_view` compatibility with STL algorithms and ranges.
  */
 template <typename container_type_>
 struct indexed_container_iterator {
@@ -454,9 +454,9 @@ struct indexed_container_iterator {
 };
 
 /**
- *  @brief  Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *          Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
- *  @sa     arrow_strings_tape
+ *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
+ *         Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
+ *  @sa arrow_strings_tape
  */
 template <typename char_type_, typename offset_type_>
 struct arrow_strings_view {
@@ -488,9 +488,9 @@ struct arrow_strings_view {
 };
 
 /**
- *  @brief  Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *          Each string is appended to a contiguous memory block, delimited by the NULL character.
- *          Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
+ *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
+ *         Each string is appended to a contiguous memory block, delimited by the NULL character.
+ *         Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
  */
 template <typename char_type_, typename offset_type_, typename allocator_type_>
 struct arrow_strings_tape {
@@ -642,7 +642,7 @@ struct arrow_strings_tape {
 };
 
 /**
- *  @brief  Similar to `thrust::constant_iterator`, always returning the same value.
+ *  @brief Similar to `thrust::constant_iterator`, always returning the same value.
  */
 template <typename value_type_>
 struct constant_iterator {
@@ -872,7 +872,7 @@ struct gpu_specs_t {
 
 /**
  *  @brief Divides the @p x by @p divisor and rounds up to the nearest integer.
- *  @note  This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
+ *  @note This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
  */
 template <typename scalar_type_>
 sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
@@ -911,8 +911,8 @@ sz_constexpr_if_cpp14 void trivial_swap(value_type_ &x, value_type_ &y) noexcept
 }
 
 /**
- *  @brief  Helper structure for dividing a range of data into three parts: head, body, and tail,
- *          generally used to minimize misaligned (split) stores and operate on aligned pages.
+ *  @brief Helper structure for dividing a range of data into three parts: head, body, and tail,
+ *         generally used to minimize misaligned (split) stores and operate on aligned pages.
  */
 struct head_body_tail_t {
     size_t head = 0;
