@@ -1,8 +1,8 @@
 /**
- *  @file   bench_memory.cpp
- *  @brief  Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
- *          The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
- *          references to mimic real-world scenarios dealing with individual strings of different lengths.
+ *  @file scripts/bench_memory.cpp
+ *  @brief Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
+ *         The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
+ *         references to mimic real-world scenarios dealing with individual strings of different lengths.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -56,8 +56,8 @@ using namespace ashvardanian::stringzilla::scripts;
 constexpr std::size_t max_shift_length = 299;
 
 /**
- *  @brief  Wraps platform-specific @b aligned memory allocation and deallocation functions.
- *          Compatible with `std::unique_ptr` as the second template argument, to free the memory.
+ *  @brief Wraps platform-specific @b aligned memory allocation and deallocation functions.
+ *         Compatible with `std::unique_ptr` as the second template argument, to free the memory.
  */
 struct page_alloc_and_free_t {
 #ifdef _WIN32
@@ -266,8 +266,8 @@ void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
 }
 
 /**
- *  @brief  Benchmarks `memset`-like operations overwriting regions of output memory filling
- *          them with the first byte of the input regions or with random @b (reproducible) byte streams.
+ *  @brief Benchmarks `memset`-like operations overwriting regions of output memory filling
+ *         them with the first byte of the input regions or with random @b (reproducible) byte streams.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
  *  So the kernels can be compared against the baseline `memset` function.
@@ -301,14 +301,14 @@ void bench_fill(environment_t const &env) {
     bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_fill_random_ice", random_call, fill_random_from_sz<sz_fill_random_ice> {env, o})
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_fill_random_icelake", random_call, fill_random_from_sz<sz_fill_random_icelake> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon> {env, o})
         .log(zeros, random);
 #endif
@@ -347,7 +347,7 @@ void transform_like_sz(sz_ptr_t output, sz_size_t length, sz_cptr_t input, sz_cp
 }
 
 /**
- *  @brief  Benchmarks look-up transformations on the provided slices, updating them inplace.
+ *  @brief Benchmarks look-up transformations on the provided slices, updating them inplace.
  *
  *  Performs a simple cyclical rotation of the alphabet, to test the performance of the different
  *  "look-up table"-based transformations.
@@ -376,8 +376,8 @@ void bench_lookup(environment_t const &env) {
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_lookup_ice", lookup_from_sz<sz_lookup_ice> {env, o, lut}).log(zeros);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_lookup_icelake", lookup_from_sz<sz_lookup_icelake> {env, o, lut}).log(zeros);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);

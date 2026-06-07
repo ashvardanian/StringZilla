@@ -22,7 +22,7 @@
 # * stringzilla_test_cpp20_westmere: A test executable for SSE4.2.
 # * stringzilla_test_cpp20_goldmont: A test executable for SHA-NI.
 # * stringzilla_test_cpp20_haswell: A test executable for AVX2.
-# * stringzilla_test_cpp20_ice: A test executable for AVX-512.
+# * stringzilla_test_cpp20_icelake: A test executable for AVX-512.
 # * stringzilla_test_cpp20_neon: A test executable for ARM Neon.
 # * stringzilla_test_cpp20_sve: A test executable for ARM Scalable Vector Extension.
 #
@@ -114,6 +114,15 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64|amd64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
     set(SZ_IS_64BIT_ARM_ TRUE)
     message(STATUS "Platform: ARM64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|RISCV64")
+    set(SZ_IS_64BIT_RISCV_ TRUE)
+    message(STATUS "Platform: RISC-V 64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64")
+    set(SZ_IS_64BIT_LOONGARCH_ TRUE)
+    message(STATUS "Platform: LoongArch64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|powerpc64le|PPC64LE|POWERPC64LE")
+    set(SZ_IS_64BIT_POWER_ TRUE)
+    message(STATUS "Platform: PowerPC64 LE (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
@@ -323,14 +332,17 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "-fno-builtin-memset")
     endif ()
 
-    # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++.
-    # AppleClang automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
-    if (CMAKE_SYSTEM_NAME MATCHES "Darwin" AND compiler_id STREQUAL "Clang" AND NOT compiler_id STREQUAL "AppleClang")
+    # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++. AppleClang
+    # automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
+    if (CMAKE_SYSTEM_NAME MATCHES "Darwin"
+        AND compiler_id STREQUAL "Clang"
+        AND NOT compiler_id STREQUAL "AppleClang"
+    )
         if (NOT target_type STREQUAL "SHARED_LIBRARY")
             target_compile_options(${target} PRIVATE "-stdlib=libc++")
             target_link_options(${target} PRIVATE "-stdlib=libc++")
-            # Find and link the C++ standard library from the compiler's installation
-            # Homebrew LLVM stores libc++ in lib/c++ subdirectory
+            # Find and link the C++ standard library from the compiler's installation Homebrew LLVM stores libc++ in
+            # lib/c++ subdirectory
             get_filename_component(COMPILER_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
             get_filename_component(COMPILER_ROOT ${COMPILER_DIR} DIRECTORY)
             if (EXISTS "${COMPILER_ROOT}/lib/c++/libc++.dylib")
@@ -345,7 +357,9 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # Check for ${target_arch} and set it or use the current system if not defined
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
-        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES ${CMAKE_HOST_SYSTEM_PROCESSOR}))
+        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES
+                                                            ${CMAKE_HOST_SYSTEM_PROCESSOR})
+        )
             if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass native flag to host compiler
                 include(CheckCXXCompilerFlag)
@@ -485,25 +499,25 @@ if (STRINGZILLA_BUILD_TEST)
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
             define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "SSE4.2")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
-            define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "AVX512")
+            define_launcher(stringzilla_test_cpp20_icelake scripts/test_stringzilla.cpp 20 "AVX512")
             if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "AVX")
                 define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "SSE4.2")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "AVX2")
-                define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "AVX512")
+                define_gpu_launcher(stringzillas_test_cu20_icelake scripts/test_stringzillas.cu 20 "AVX512")
             endif ()
         else ()
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
             define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "westmere")
             define_launcher(stringzilla_test_cpp20_goldmont scripts/test_stringzilla.cpp 20 "goldmont")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
-            define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "sapphirerapids")
+            define_launcher(stringzilla_test_cpp20_icelake scripts/test_stringzilla.cpp 20 "sapphirerapids")
             if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "ivybridge")
                 define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "westmere")
                 define_gpu_launcher(stringzillas_test_cu20_goldmont scripts/test_stringzillas.cu 20 "goldmont")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "haswell")
-                define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "sapphirerapids")
+                define_gpu_launcher(stringzillas_test_cu20_icelake scripts/test_stringzillas.cu 20 "sapphirerapids")
             endif ()
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
@@ -548,13 +562,13 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_GOLDMONT=1"
                     "SZ_USE_HASWELL=1"
                     "SZ_USE_SKYLAKE=1"
-                    "SZ_USE_ICE=1"
+                    "SZ_USE_ICELAKE=1"
                     "SZ_USE_NEON=0"
-                    "SZ_USE_NEON_AES=0"
-                    "SZ_USE_NEON_SHA=0"
+                    "SZ_USE_NEONAES=0"
+                    "SZ_USE_NEONSHA=0"
                     "SZ_USE_SVE=0"
                     "SZ_USE_SVE2=0"
-                    "SZ_USE_SVE2_AES=0"
+                    "SZ_USE_SVE2AES=0"
         )
     elseif (SZ_IS_64BIT_ARM_)
         # SVE is not supported with MSVC
@@ -571,13 +585,28 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_GOLDMONT=0"
                     "SZ_USE_HASWELL=0"
                     "SZ_USE_SKYLAKE=0"
-                    "SZ_USE_ICE=0"
+                    "SZ_USE_ICELAKE=0"
                     "SZ_USE_NEON=1"
-                    "SZ_USE_NEON_AES=1"
-                    "SZ_USE_NEON_SHA=1"
+                    "SZ_USE_NEONAES=1"
+                    "SZ_USE_NEONSHA=1"
                     "SZ_USE_SVE=${supports_sve}"
                     "SZ_USE_SVE2=${supports_sve}"
-                    "SZ_USE_SVE2_AES=${supports_sve}"
+                    "SZ_USE_SVE2AES=${supports_sve}"
+        )
+    elseif (SZ_IS_64BIT_RISCV_)
+        # RISC-V with the RVV 1.0 Vector extension (the toolchain passes `-march=rv64gcv`).
+        target_compile_definitions(
+            ${target} PRIVATE "SZ_USE_RVV=1" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=0" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
+        )
+    elseif (SZ_IS_64BIT_LOONGARCH_)
+        # LoongArch64 with the LASX 256-bit SIMD extension (the toolchain passes `-mlasx`).
+        target_compile_definitions(
+            ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=1" "SZ_USE_POWERVSX=0" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
+        )
+    elseif (SZ_IS_64BIT_POWER_)
+        # IBM POWER (little-endian) with VSX (the toolchain passes `-mcpu=power9 -mvsx`).
+        target_compile_definitions(
+            ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=1" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
         )
     else ()
         # Fallback: disable all SIMD and use serial execution only
@@ -593,13 +622,13 @@ function (set_architecture_simd_definitions target)
                     "SZ_USE_GOLDMONT=0"
                     "SZ_USE_HASWELL=0"
                     "SZ_USE_SKYLAKE=0"
-                    "SZ_USE_ICE=0"
+                    "SZ_USE_ICELAKE=0"
                     "SZ_USE_NEON=0"
-                    "SZ_USE_NEON_AES=0"
-                    "SZ_USE_NEON_SHA=0"
+                    "SZ_USE_NEONAES=0"
+                    "SZ_USE_NEONSHA=0"
                     "SZ_USE_SVE=0"
                     "SZ_USE_SVE2=0"
-                    "SZ_USE_SVE2_AES=0"
+                    "SZ_USE_SVE2AES=0"
         )
     endif ()
 endfunction ()
@@ -611,9 +640,24 @@ target_include_directories(
     stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}> $<INSTALL_INTERFACE:include>
 )
 
+# The compiled core is split into one translation unit per domain, so editing one domain only recompiles that domain.
+# The thin `c/stringzilla/runtime.c` owns the shared dispatch table & glue.
+set(STRINGZILLA_SHIM_SOURCES
+    c/stringzilla/runtime.c
+    c/stringzilla/compare.c
+    c/stringzilla/memory.c
+    c/stringzilla/hash.c
+    c/stringzilla/find.c
+    c/stringzilla/sort.c
+    c/stringzilla/intersect.c
+    c/stringzilla/utf8_iterate.c
+    c/stringzilla/utf8_case_fold.c
+    c/stringzilla/utf8_case_insensitive.c
+)
+
 # Helper function used for `stringzilla_shared` and `stringzilla_bare` targets
 function (define_stringzilla_shared target)
-    add_library(${target} SHARED c/stringzilla.c)
+    add_library(${target} SHARED ${STRINGZILLA_SHIM_SOURCES})
     add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
     set_target_properties(
@@ -637,6 +681,8 @@ function (define_stringzilla_shared target)
             set_compiler_flags(${target} "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     else ()
+        # Cross-compiled targets (RISC-V, LoongArch, POWER, ...) get their `-march`/`-mcpu` from the CMake toolchain
+        # file's `CMAKE_<LANG>_FLAGS_INIT`, so pass an empty arch.
         set_compiler_flags(${target} "" "" "${CMAKE_CXX_COMPILER_ID}")
     endif ()
 
@@ -663,8 +709,8 @@ if (STRINGZILLA_BUILD_SHARED)
         target_compile_options(stringzilla_shared PRIVATE "-mllvm" "-inline-threshold=2000" "-finline-functions")
     endif ()
 
-    # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS machines !
-    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
+    # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS
+    # machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
     if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
         define_stringzilla_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
@@ -735,10 +781,22 @@ function (define_stringzillas_shared target source_file backend_flags)
 
 endfunction ()
 
+# The parallel shim is split into one translation unit per algorithm, so each engine (and its CUDA kernels) compiles
+# independently and in parallel. Each `.cpp`/`.cu` is a thin wrapper around the matching `c/szs_<algorithm>.cuh`, which
+# includes the shared `c/stringzillas/stringzillas.cuh` scaffolding.
+set(STRINGZILLAS_CPU_SOURCES
+    c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/needleman_wunsch.cpp
+    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
+)
+set(STRINGZILLAS_CUDA_SOURCES
+    c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/needleman_wunsch.cu
+    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu
+)
+
 if (STRINGZILLAS_BUILD_SHARED)
 
     # Define StringZillas CPU shared library
-    define_stringzillas_shared(stringzillas_cpus_shared c/stringzillas.cpp "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
+    define_stringzillas_shared(stringzillas_cpus_shared "${STRINGZILLAS_CPU_SOURCES}" "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
 
     # Set compiler flags for C++ target
     if (SZ_IS_64BIT_X86_)
@@ -748,11 +806,11 @@ if (STRINGZILLAS_BUILD_SHARED)
             set_compiler_flags(stringzillas_cpus_shared "" "ivybridge" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
-		if (MSVC)
+        if (MSVC)
             set_compiler_flags(stringzillas_cpus_shared "" "armv8.0" "${CMAKE_CXX_COMPILER_ID}")
-		else ()
+        else ()
             set_compiler_flags(stringzillas_cpus_shared "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
-		endif ()
+        endif ()
     else ()
         set_compiler_flags(stringzillas_cpus_shared "" "" "${CMAKE_CXX_COMPILER_ID}")
     endif ()
@@ -760,7 +818,7 @@ endif ()
 
 # Define StringZillas CUDA shared library (only if CUDA is available)
 if (STRINGZILLA_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
-    define_stringzillas_shared(stringzillas_cuda_shared c/stringzillas.cu "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
+    define_stringzillas_shared(stringzillas_cuda_shared "${STRINGZILLAS_CUDA_SOURCES}" "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
 
     # Link CUDA libraries
     target_link_libraries(stringzillas_cuda_shared PRIVATE CUDA::cudart)
@@ -769,14 +827,19 @@ if (STRINGZILLA_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
     set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
     set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "90a") # We dispatch manually
 
-    # Enable CUDA separable compilation for device code
-    set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    # Whole-program (non-separable) CUDA compilation: each per-algorithm translation unit is self-contained, so it
+    # carries its own internal (`static`) copy of header `__constant__` globals and its own kernels.
+    # Separable/relocatable device linking would otherwise either reject the duplicate `__constant__` symbols or sum
+    # their sizes past the 64 KB constant-memory limit.
+    set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
 
     # Add CUDA-specific compiler flags
     target_compile_options(stringzillas_cuda_shared PRIVATE "--expt-relaxed-constexpr")
 
-    # Set the source file as CUDA
-    set_source_files_properties(c/stringzillas.cu TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA)
+    # Set the source files as CUDA
+    set_source_files_properties(
+        ${STRINGZILLAS_CUDA_SOURCES} TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA
+    )
 
     # Set compiler flags for CUDA target (must be done AFTER file language is set to CUDA)
     if (SZ_IS_64BIT_X86_)
@@ -786,11 +849,11 @@ if (STRINGZILLA_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
             set_compiler_flags(stringzillas_cuda_shared "" "ivybridge" "${CMAKE_CUDA_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
-		if (MSVC)
+        if (MSVC)
             set_compiler_flags(stringzillas_cuda_shared "" "armv8.0" "${CMAKE_CUDA_COMPILER_ID}")
-		else ()
+        else ()
             set_compiler_flags(stringzillas_cuda_shared "" "armv8-a" "${CMAKE_CUDA_COMPILER_ID}")
-		endif ()
+        endif ()
     else ()
         set_compiler_flags(stringzillas_cuda_shared "" "" "${CMAKE_CUDA_COMPILER_ID}")
     endif ()

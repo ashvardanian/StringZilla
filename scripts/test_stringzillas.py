@@ -31,6 +31,7 @@ Example:
     SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation --verbose
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 """
+
 import os
 import sys
 import platform
@@ -70,7 +71,7 @@ def log_test_environment():
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
     if is_qemu:
-        sve_like = {"sve", "sve2", "sve2+aes"}
+        sve_like = {"sve", "sve2", "sve2aes"}
         for module in (sz, szs):
             current = list(getattr(module, "__capabilities__", ()))
             desired = tuple(c for c in current if c.lower() not in sve_like)

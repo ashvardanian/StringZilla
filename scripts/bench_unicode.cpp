@@ -1,8 +1,8 @@
 /**
- *  @file   bench_unicode.cpp
- *  @brief  Benchmarks Unicode text processing operations like case folding.
- *          The program accepts a file path to a dataset and benchmarks the case folding operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_unicode.cpp
+ *  @brief Benchmarks Unicode text processing operations like case folding.
+ *         The program accepts a file path to a dataset and benchmarks the case folding operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_case_fold.
@@ -76,8 +76,9 @@ void bench_utf8_case_fold(environment_t const &env) {
     auto validator = utf8_case_fold_from_sz<sz_utf8_case_fold_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_case_fold_serial", validator).log();
 
-#if SZ_USE_ICE
-    bench_unary(env, "sz_utf8_case_fold_ice", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_ice> {env}).log(base);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_case_fold_icelake", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_icelake> {env})
+        .log(base);
 #endif
 }
 
@@ -130,9 +131,9 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
     auto validator = utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_case_insensitive_find_serial", validator).log();
 
-#if SZ_USE_ICE
-    bench_unary(env, "sz_utf8_case_insensitive_find_ice", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_ice> {env})
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_case_insensitive_find_icelake", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON

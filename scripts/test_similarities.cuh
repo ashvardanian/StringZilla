@@ -1,9 +1,9 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_similarities.cuh
- *  @author  Ash Vardanian
+ *  @file scripts/test_similarities.cuh
+ *  @author Ash Vardanian
  */
 #include "stringzillas/similarities.hpp"
 
@@ -402,9 +402,9 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
 }
 
 /**
- *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as the similarity scoring functions for bioinformatics-like workloads
- *          on a @b fixed set of different representative ASCII and UTF-8 strings.
+ *  @brief Tests the correctness of the string class Levenshtein distance computation,
+ *         as well as the similarity scoring functions for bioinformatics-like workloads
+ *         on a @b fixed set of different representative ASCII and UTF-8 strings.
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
@@ -557,11 +557,11 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 }
 
 /**
- *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as the similarity scoring functions for bioinformatics-like workloads
- *          on a synthetic @b randomly-generated set of strings from a given @p alphabet.
+ *  @brief Tests the correctness of the string class Levenshtein distance computation,
+ *         as well as the similarity scoring functions for bioinformatics-like workloads
+ *         on a synthetic @b randomly-generated set of strings from a given @p alphabet.
  *
- *  @note   The default iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
+ *  @note The default iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
@@ -601,8 +601,8 @@ void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd
 }
 
 /**
- *  @brief  Tests the correctness of the string class Levenshtein distance, NW & SW score computation,
- *          comparing the results to some baseline implementation for predefined and random inputs.
+ *  @brief Tests the correctness of the string class Levenshtein distance, NW & SW score computation,
+ *         comparing the results to some baseline implementation for predefined and random inputs.
  */
 void test_similarity_scores_equivalence() {
 
@@ -718,43 +718,43 @@ void test_similarity_scores_equivalence() {
         smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                 //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
-        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_affine});
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine});
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                      //
         levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
 
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_si_k> {
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Ice Lake Smith-Waterman distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_si_k> {blosum62_matrix,
-                                                                                                 blosum62_linear_cost});
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+            blosum62_matrix, blosum62_linear_cost});
 
 #endif
 
@@ -856,8 +856,8 @@ void test_similarity_scores_equivalence() {
 }
 
 /**
- *  @brief  Many GPU algorithms depend on effective use of shared memory and scheduling its allocation for
- *          long inputs or very large batches isn't trivial.
+ *  @brief Many GPU algorithms depend on effective use of shared memory and scheduling its allocation for
+ *         long inputs or very large batches isn't trivial.
  */
 void test_similarity_scores_memory_usage() {
 
@@ -917,22 +917,22 @@ void test_similarity_scores_memory_usage() {
             levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
             experiment, 1);
 
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
         // Ice Lake Levenshtein distance against Multi-threaded on CPU
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {},
-            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {}, experiment, 1);
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}, experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
-            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear},
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear},
             experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
-            levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_affine},
+            levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine},
             experiment, 1);
 #endif
 

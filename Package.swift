@@ -21,7 +21,7 @@ let package = Package(
         .target(
             name: "StringZillaC",
             path: "include/stringzilla",
-            sources: ["../../c/stringzilla.c"],
+            sources: ["../../c/stringzilla/runtime.c"],
             publicHeadersPath: ".",
             cSettings: [
                 .define("SZ_DYNAMIC_DISPATCH", to: "1"),

@@ -1,8 +1,8 @@
 /**
- *  @file   bench_fingerprints.cu
- *  @brief  Benchmarks for exact multi-pattern substring search algorithms on the GPU.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_fingerprints.cu
+ *  @brief Benchmarks for exact multi-pattern substring search algorithms on the GPU.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.

@@ -1,9 +1,9 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test.cu
- *  @author  Ash Vardanian
+ *  @file scripts/test_stringzillas.cu
+ *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -18,7 +18,7 @@
 #define SZ_USE_WESTMERE 0
 #define SZ_USE_HASWELL 0
 #define SZ_USE_SKYLAKE 0
-#define SZ_USE_ICE 0
+#define SZ_USE_ICELAKE 0
 #define SZ_USE_CUDA 1
 #define SZ_USE_KEPLER 1
 #define SZ_USE_HOPPER 1

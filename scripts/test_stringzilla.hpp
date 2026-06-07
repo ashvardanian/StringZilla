@@ -1,6 +1,6 @@
 /**
- *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   test_stringzilla.hpp
+ *  @brief Helper structures and functions for C++ unit- and stress-tests.
+ *  @file scripts/test_stringzilla.hpp
  *  @author Ash Vardanian
  *
  *  @section Environment Variables
@@ -79,7 +79,7 @@ inline void write_file(std::string path, std::string content) noexcept(false) {
 }
 
 /**
- *  @brief  Returns the seed used for the global random number generator.
+ *  @brief Returns the seed used for the global random number generator.
  *
  *  If `SZ_TESTS_SEED` is set, returns its value. Otherwise, generates a random seed
  *  using `std::random_device`. The seed is cached after the first call.
@@ -102,7 +102,7 @@ inline bool global_random_seed_from_env() noexcept {
 }
 
 /**
- *  @brief  Returns a reference to the global random number generator.
+ *  @brief Returns a reference to the global random number generator.
  *
  *  The generator is seeded once using `global_random_seed()`, which respects the
  *  `SZ_TESTS_SEED` environment variable for reproducible testing.
@@ -113,7 +113,7 @@ inline std::mt19937 &global_random_generator() noexcept {
 }
 
 /**
- *  @brief  Returns the multiplier for stress-test iteration counts.
+ *  @brief Returns the multiplier for stress-test iteration counts.
  *
  *  Reads from the `SZ_TESTS_MULTIPLIER` environment variable. Defaults to 1.0.
  *  Use values < 1.0 for quick smoke tests, > 1.0 for thorough stress testing in CI.
@@ -131,7 +131,7 @@ inline double get_iterations_multiplier() noexcept {
 }
 
 /**
- *  @brief  Scales a baseline iteration count by the global multiplier.
+ *  @brief Scales a baseline iteration count by the global multiplier.
  *
  *  Use this to wrap hardcoded iteration counts in stress tests, e.g.:
  *  @code{.cpp}
@@ -152,8 +152,8 @@ inline string_type_ to_str(other_string_type_ const &other) noexcept {
 }
 
 /**
- *  @brief  A uniform distribution of characters, with a given alphabet size.
- *          The alphabet size is the number of distinct characters in the distribution.
+ *  @brief A uniform distribution of characters, with a given alphabet size.
+ *         The alphabet size is the number of distinct characters in the distribution.
  *
  *  We can't use `std::uniform_int_distribution<char>` because `char` overload is not supported by some platforms.
  *  MSVC, for example, requires one of `short`, `int`, `long`, `long long`, `unsigned short`, `unsigned int`,
@@ -261,15 +261,21 @@ inline char const *status_name(status_t s) noexcept {
 
 inline int log_environment() {
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
+    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
+    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
+    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
+    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
+    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
     std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
@@ -322,7 +328,7 @@ inline int log_environment() {
 }
 
 /**
- *  @brief  Prints test environment configuration (seed and multiplier).
+ *  @brief Prints test environment configuration (seed and multiplier).
  *
  *  Call this at the start of main() to display test configuration alongside
  *  other environment info. Format matches capability flags style.
