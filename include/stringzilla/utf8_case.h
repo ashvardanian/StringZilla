@@ -364,6 +364,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
 
 #pragma endregion
 
+#if !SZ_DYNAMIC_DISPATCH
+
 /*  Implementation Section
  *  Following the same pattern as find.h with implementations in the header file.
  */
@@ -8386,8 +8388,6 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
 
 #pragma region Dynamic Dispatch
 
-#if !SZ_DYNAMIC_DISPATCH
-
 SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
                                           sz_size_t *runes_unpacked) {
 #if SZ_USE_ICE
@@ -8431,9 +8431,9 @@ SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
 #endif
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
-
 #pragma endregion // Dynamic Dispatch
+
+#endif // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

@@ -132,6 +132,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_ice(sz_cptr_t text, sz_size_t le
 
 #pragma endregion
 
+#if !SZ_DYNAMIC_DISPATCH
+
 /*  Implementation Section
  *  Following the same pattern as find.h with implementations in the header file.
  */
@@ -1129,7 +1131,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t
  *  When dynamic dispatch is disabled, the SZ_DYNAMIC functions simply forward to serial implementations.
  *  When dynamic dispatch is enabled, these are provided by the shared library.
  */
-#if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
     return sz_utf8_word_find_boundary_serial(text, length, boundary_width);
@@ -1139,9 +1140,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t lengt
     return sz_utf8_word_rfind_boundary_serial(text, length, boundary_width);
 }
 
-#endif // !SZ_DYNAMIC_DISPATCH
-
 #pragma endregion // Dynamic Dispatch
+
+#endif // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

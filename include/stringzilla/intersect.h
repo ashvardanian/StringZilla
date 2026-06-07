@@ -229,6 +229,11 @@ typedef enum {
     sz_join_cross_k = 5,
 } sz_sequence_join_semantics_t;
 
+SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                                 //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+
 #if SZ_USE_ICE
 
 /** @copydoc sz_sequence_intersect */
@@ -250,6 +255,8 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(                               /
 #endif
 
 #pragma endregion
+
+#if !SZ_DYNAMIC_DISPATCH
 
 #pragma region Serial Implementation
 
@@ -768,7 +775,6 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
                                              sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
@@ -791,8 +797,9 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence
 #endif
 }
 
-#endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
+
+#endif            // !SZ_DYNAMIC_DISPATCH
 
 #ifdef __cplusplus
 }

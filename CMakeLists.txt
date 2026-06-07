@@ -613,7 +613,18 @@ target_include_directories(
 
 # Helper function used for `stringzilla_shared` and `stringzilla_bare` targets
 function (define_stringzilla_shared target)
-    add_library(${target} SHARED c/stringzilla.c)
+    add_library(${target} SHARED
+        c/compare.c
+        c/memory.c
+        c/find.c
+        c/hash.c
+        c/utf8.c
+        c/utf8_case.c
+        c/utf8_word.c
+        c/sort.c
+        c/intersect.c
+        c/stringzilla.c
+    )
     add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
     set_target_properties(
