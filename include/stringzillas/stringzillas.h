@@ -1,8 +1,8 @@
 /**
- *  @brief  StringZillas is a collection of advanced string algorithms, designed to be used in Big Data applications.
- *          It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
- *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
- *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
+ *  @brief StringZillas is a collection of advanced string algorithms, designed to be used in Big Data applications.
+ *         It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
+ *         On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
+ *         On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
  *
  *  Unlike traditional StringZilla interfaces, all of the functions:
  *  - operators are stateful, and should be reused between calls;
@@ -17,7 +17,7 @@
  *  Those templates also reuse the same pre-configured operators for different thread-pool & executor types,
  *  hardware capability levels.
  *
- *  @file   stringzillas.h
+ *  @file include/stringzillas/stringzillas.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLAS_H_

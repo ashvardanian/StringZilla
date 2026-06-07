@@ -1,6 +1,6 @@
 /**
- *  @brief  Shared definitions for the StringZilla CUDA library.
- *  @file   types.cuh
+ *  @brief Shared definitions for the StringZilla CUDA library.
+ *  @file include/stringzillas/types.cuh
  *  @author Ash Vardanian
  *
  *  The goal for this header is to provide absolutely-minimal set of types and forward-declarations for
@@ -26,7 +26,7 @@ namespace stringzillas {
 using namespace stringzilla;
 
 /**
- *  @brief  A custom allocator that uses CUDA Unified Memory for allocation.
+ *  @brief A custom allocator that uses CUDA Unified Memory for allocation.
  */
 template <typename value_type_>
 struct unified_alloc {
@@ -153,8 +153,8 @@ class cuda_executor_t {
 };
 
 /**
- *  @brief  Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
- *  @see    https://stackoverflow.com/a/40198552/2766161
+ *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
+ *  @see https://stackoverflow.com/a/40198552/2766161
  */
 __forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
     // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
@@ -181,9 +181,9 @@ enum warp_size_t : unsigned {
 };
 
 /**
- *  @brief  Defines the upper bound on the number of warps per multi processor we may theoretically
- *          be able to run as part of one or many blocks. Generally this number depends on the amount
- *          of shared memory available on the device, and the amount of reserved memory per block.
+ *  @brief Defines the upper bound on the number of warps per multi processor we may theoretically
+ *         be able to run as part of one or many blocks. Generally this number depends on the amount
+ *         of shared memory available on the device, and the amount of reserved memory per block.
  */
 enum warp_tasks_density_t : unsigned {
     warps_working_together_k = 0,
@@ -219,9 +219,9 @@ struct speculative_warp_tasks_density_t {
 };
 
 /**
- *  @brief  Multiple warps can run concurrently on the same multiprocessor, which helps hide the latency
- *          of memory operations. It only happens, if we have enough shared memory, so we may want to reduce
- *          the density of the tasks proportional to the current GPU's speculative factor.
+ *  @brief Multiple warps can run concurrently on the same multiprocessor, which helps hide the latency
+ *         of memory operations. It only happens, if we have enough shared memory, so we may want to reduce
+ *         the density of the tasks proportional to the current GPU's speculative factor.
  */
 inline speculative_warp_tasks_density_t speculation_friendly_density(warp_tasks_density_t maximum_density) noexcept {
     // if (maximum_density >= 16) return {static_cast<warp_tasks_density_t>(maximum_density / 16), 16};
