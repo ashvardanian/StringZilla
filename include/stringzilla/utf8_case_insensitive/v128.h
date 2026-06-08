@@ -19,9 +19,6 @@ extern "C" {
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("simd128")
 #endif
 
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_v128( //
@@ -43,8 +40,6 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_v128(sz_cptr_t a, sz_size
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128
 

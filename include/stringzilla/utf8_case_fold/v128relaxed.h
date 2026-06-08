@@ -16,9 +16,6 @@ extern "C" {
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("relaxed-simd")
 #endif
 
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128relaxed(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
@@ -27,8 +24,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128relaxed(sz_cptr_t source, sz_size_t so
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128RELAXED
 

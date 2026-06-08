@@ -219,6 +219,22 @@ void bench_checksums(environment_t const &env) {
 #if SZ_USE_SVE2
     bench_unary(env, "sz_bytesum_sve2", validator, bytesum_from_sz<sz_bytesum_sve2> {env}).log(base, base_stl);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_bytesum_v128", validator, bytesum_from_sz<sz_bytesum_v128> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_bytesum_v128relaxed", validator, bytesum_from_sz<sz_bytesum_v128relaxed> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_bytesum_rvv", validator, bytesum_from_sz<sz_bytesum_rvv> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_bytesum_lasx", validator, bytesum_from_sz<sz_bytesum_lasx> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_bytesum_powervsx", validator, bytesum_from_sz<sz_bytesum_powervsx> {env}).log(base, base_stl);
+#endif
 }
 
 void bench_utf8_count(environment_t const &env) {
@@ -238,6 +254,22 @@ void bench_utf8_count(environment_t const &env) {
 #if SZ_USE_SVE2
     bench_unary(env, "sz_utf8_count_sve2", validator, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_count_v128", validator, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_utf8_count_v128relaxed", validator, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_count_rvv", validator, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_count_lasx", validator, utf8_count_from_sz<sz_utf8_count_lasx> {env}).log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_count_powervsx", validator, utf8_count_from_sz<sz_utf8_count_powervsx> {env}).log(base);
+#endif
 }
 
 void bench_utf8_unpack(environment_t const &env) {
@@ -252,6 +284,23 @@ void bench_utf8_unpack(environment_t const &env) {
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_utf8_unpack_chunk_neon", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env, {}})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_unpack_chunk_v128", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_v128> {env, {}})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_unpack_chunk_rvv", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_rvv> {env, {}})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_unpack_chunk_lasx", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_lasx> {env, {}})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_unpack_chunk_powervsx", validator,
+                utf8_unpack_from_sz<sz_utf8_unpack_chunk_powervsx> {env, {}})
         .log(base);
 #endif
 }
@@ -275,6 +324,21 @@ void bench_hashing(environment_t const &env) {
 #endif
 #if SZ_USE_SVE2AES
     bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_hash_v128", validator, hash_from_sz<sz_hash_v128> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_hash_v128relaxed", validator, hash_from_sz<sz_hash_v128relaxed> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_hash_rvv", validator, hash_from_sz<sz_hash_rvv> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_hash_lasx", validator, hash_from_sz<sz_hash_lasx> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_hash_powervsx", validator, hash_from_sz<sz_hash_powervsx> {env}).log(base, base_stl);
 #endif
 }
 
@@ -310,6 +374,36 @@ void bench_stream_hashing(environment_t const &env) {
     bench_unary(
         env, "sz_hash_stream_neon", validator,
         hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_update_neon, sz_hash_state_digest_neon> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_V128
+    bench_unary(
+        env, "sz_hash_stream_v128", validator,
+        hash_stream_from_sz<sz_hash_state_init_v128, sz_hash_state_update_v128, sz_hash_state_digest_v128> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_hash_stream_v128relaxed", validator,
+                hash_stream_from_sz<sz_hash_state_init_v128relaxed, sz_hash_state_update_v128relaxed,
+                                    sz_hash_state_digest_v128relaxed> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_hash_stream_rvv", validator,
+                hash_stream_from_sz<sz_hash_state_init_rvv, sz_hash_state_update_rvv, sz_hash_state_digest_rvv> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_LASX
+    bench_unary(
+        env, "sz_hash_stream_lasx", validator,
+        hash_stream_from_sz<sz_hash_state_init_lasx, sz_hash_state_update_lasx, sz_hash_state_digest_lasx> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(
+        env, "sz_hash_stream_powervsx", validator,
+        hash_stream_from_sz<sz_hash_state_init_powervsx, sz_hash_state_update_powervsx, sz_hash_state_digest_powervsx> {
+            env})
         .log(base, base_stl);
 #endif
 }
@@ -360,6 +454,32 @@ void bench_sha256(environment_t const &env) {
         env, "sz_sha256_neon", validator,
         sha256_stream_from_sz<sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon> {
             env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(
+        env, "sz_sha256_v128", validator,
+        sha256_stream_from_sz<sz_sha256_state_init_v128, sz_sha256_state_update_v128, sz_sha256_state_digest_v128> {
+            env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(
+        env, "sz_sha256_rvv", validator,
+        sha256_stream_from_sz<sz_sha256_state_init_rvv, sz_sha256_state_update_rvv, sz_sha256_state_digest_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(
+        env, "sz_sha256_lasx", validator,
+        sha256_stream_from_sz<sz_sha256_state_init_lasx, sz_sha256_state_update_lasx, sz_sha256_state_digest_lasx> {
+            env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_sha256_powervsx", validator,
+                sha256_stream_from_sz<sz_sha256_state_init_powervsx, sz_sha256_state_update_powervsx,
+                                      sz_sha256_state_digest_powervsx> {env})
         .log(base);
 #endif
 }
@@ -497,6 +617,22 @@ void bench_comparing_equality(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_equal_sve", validator, equality_from_sz<sz_equal_sve> {env}).log(base, base_stl);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_equal_v128", validator, equality_from_sz<sz_equal_v128> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_equal_v128relaxed", validator, equality_from_sz<sz_equal_v128relaxed> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_equal_rvv", validator, equality_from_sz<sz_equal_rvv> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_equal_lasx", validator, equality_from_sz<sz_equal_lasx> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_equal_powervsx", validator, equality_from_sz<sz_equal_powervsx> {env}).log(base, base_stl);
+#endif
 }
 
 void bench_comparing_order(environment_t const &env) {
@@ -513,6 +649,22 @@ void bench_comparing_order(environment_t const &env) {
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_order_v128", validator, ordering_from_sz<sz_order_v128> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_order_v128relaxed", validator, ordering_from_sz<sz_order_v128relaxed> {env})
+        .log(base, base_stl);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_order_rvv", validator, ordering_from_sz<sz_order_rvv> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_order_lasx", validator, ordering_from_sz<sz_order_lasx> {env}).log(base, base_stl);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_order_powervsx", validator, ordering_from_sz<sz_order_powervsx> {env}).log(base, base_stl);
 #endif
 }
 

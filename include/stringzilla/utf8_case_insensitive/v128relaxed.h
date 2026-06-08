@@ -16,9 +16,6 @@ extern "C" {
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("relaxed-simd")
 #endif
 
 /*  This ISA has no dedicated case-insensitive UTF-8 kernels yet; it delegates to the serial
@@ -43,8 +40,6 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_v128relaxed(sz_cptr_t a, 
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128RELAXED
 

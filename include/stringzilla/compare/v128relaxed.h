@@ -18,9 +18,6 @@ extern "C" {
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("relaxed-simd")
 #endif
 
 /*  Equality is `wasm_i8x16_eq` + `all_true`, and ordering needs a byte-reversed compare of the first
@@ -36,8 +33,6 @@ SZ_PUBLIC sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t len
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128RELAXED
 

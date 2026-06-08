@@ -18,9 +18,6 @@ extern "C" {
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("relaxed-simd")
 #endif
 
 /*  `copy`, `move`, and `fill` are pure load/store streams with no shuffle or arithmetic, so
@@ -94,8 +91,6 @@ SZ_PUBLIC void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128RELAXED
 
