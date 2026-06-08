@@ -297,8 +297,11 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t
         sz_hash_minimal_init_neon_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data_vec;
-        data_vec.u8x16 = vdupq_n_u8(0);
-        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        if (length == 16) { data_vec.u8x16 = vld1q_u8((sz_u8_t const *)start); } // Full in-bounds block
+        else {
+            data_vec.u8x16 = vdupq_n_u8(0);
+            for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i]; // Variable partial tail
+        }
         sz_hash_minimal_update_neon_(&state, data_vec.u8x16);
         return sz_hash_minimal_finalize_neon_(&state, length);
     }
@@ -384,7 +387,9 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
         uint64x2_t generated = sz_emulate_aesenc_u64x2_neon_(input, key);
         // Now the tricky part is outputting this data to the user-supplied buffer
         // without masked writes, like in AVX-512.
-        for (sz_size_t i = 0; i < length; ++i) text[i] = ((sz_u8_t *)&generated)[i];
+        if (length >= 16) { vst1q_u8((sz_u8_t *)text, vreinterpretq_u8_u64(generated)); } // Full block
+        else
+            for (sz_size_t i = 0; i < length; ++i) text[i] = ((sz_u8_t *)&generated)[i]; // Variable partial tail
     }
     // Assuming the YMM register contains two 128-bit blocks, the input to the generator
     // will be more complex, containing the sum of the nonce and the block number.
@@ -400,7 +405,9 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
         generated[1] = sz_emulate_aesenc_u64x2_neon_(inputs[1], keys[1]);
         // The first store can easily be vectorized, but the second can be serial for now
         vst1q_u64((sz_u64_t *)(text), generated[0]);
-        for (sz_size_t i = 16; i < length; ++i) text[i] = ((sz_u8_t *)&generated[1])[i - 16];
+        if (length >= 32) { vst1q_u8((sz_u8_t *)(text + 16), vreinterpretq_u8_u64(generated[1])); } // Full block
+        else
+            for (sz_size_t i = 16; i < length; ++i) text[i] = ((sz_u8_t *)&generated[1])[i - 16]; // Partial tail
     }
     // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
     else if (length <= 48) {
@@ -420,7 +427,9 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
         // The first store can easily be vectorized, but the second can be serial for now
         vst1q_u64((sz_u64_t *)(text + 0), generated[0]);
         vst1q_u64((sz_u64_t *)(text + 16), generated[1]);
-        for (sz_size_t i = 32; i < length; ++i) text[i] = ((sz_u8_t *)generated)[i];
+        if (length >= 48) { vst1q_u8((sz_u8_t *)(text + 32), vreinterpretq_u8_u64(generated[2])); } // Full block
+        else
+            for (sz_size_t i = 32; i < length; ++i) text[i] = ((sz_u8_t *)generated)[i]; // Partial tail
     }
     // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
     else {
@@ -464,7 +473,11 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
             generated[1] = sz_emulate_aesenc_u64x2_neon_(inputs[1], keys[1]);
             generated[2] = sz_emulate_aesenc_u64x2_neon_(inputs[2], keys[2]);
             generated[3] = sz_emulate_aesenc_u64x2_neon_(inputs[3], keys[3]);
-            for (sz_size_t j = 0; i < length; ++i, ++j) text[i] = ((sz_u8_t *)generated)[j];
+            // Spill full 16-byte blocks with vector stores, leaving only the partial (<16) tail scalar
+            sz_size_t j = 0;
+            for (; i + 16 <= length; i += 16, j += 16)
+                vst1q_u8((sz_u8_t *)(text + i), vld1q_u8((sz_u8_t const *)generated + j)); // Full block
+            for (; i < length; ++i, ++j) text[i] = ((sz_u8_t *)generated)[j];              // Variable partial tail
         }
     }
 }

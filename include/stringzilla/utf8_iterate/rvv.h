@@ -109,20 +109,29 @@ SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     return count;
 }
 
-/*  Locate the start of the n-th codepoint. We population-count leading bytes per strip to skip
- *  whole strips cheaply; once the strip that contains the n-th leading byte is found, we scan it
- *  with the serial routine to get the exact byte. Byte-for-byte equivalent to the serial baseline. */
+/*  Locate the start of the n-th codepoint. We population-count leading bytes per strip to skip whole
+ *  strips cheaply; once the strip holding the n-th leading byte is found, we locate it WITHIN the strip
+ *  in-register with `viota` — RVV's stand-in for the PDEP "find the n-th set bit" that x86 has and the
+ *  serial fallback we used to call did scalar-side. `viota_m` gives, per lane, the count of set mask bits
+ *  strictly before it; the wanted lead is the lane that is itself a lead AND whose prefix count == target.
+ *
+ *  We run the scan at `e8m4` (not `e8m8`) on purpose: the lead mask is then `vbool2`, which pairs with a
+ *  `u16m8` iota whose lane count matches the strip — so the prefix counts (up to VL) never overflow the
+ *  8-bit lanes a `u8`-iota would have. Byte-for-byte equivalent to the serial baseline. */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(text_u8, vl);
-        vuint8m8_t masked = __riscv_vand_vx_u8m8(vec, 0xC0, vl);
-        vbool1_t lead_mask = __riscv_vmsne_vx_u8m8_b1(masked, 0x80, vl);
-        sz_size_t strip_leads = (sz_size_t)__riscv_vcpop_m_b1(lead_mask, vl);
-        // If the n-th leading byte (0-based) falls inside this strip, scan it serially.
-        if (seen + strip_leads > n) return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, vl, n - seen);
+        size_t vl = __riscv_vsetvl_e8m4(length);
+        vuint8m4_t vec = __riscv_vle8_v_u8m4(text_u8, vl);
+        vbool2_t lead_mask = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(vec, 0xC0, vl), 0x80, vl);
+        sz_size_t strip_leads = (sz_size_t)__riscv_vcpop_m_b2(lead_mask, vl);
+        if (seen + strip_leads > n) {
+            sz_u16_t target = (sz_u16_t)(n - seen); // 0-based index of the wanted lead byte within this strip
+            vuint16m8_t prefix = __riscv_viota_m_u16m8(lead_mask, vl);
+            vbool2_t hit = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u16m8_b2(prefix, target, vl), lead_mask, vl);
+            return (sz_cptr_t)(text_u8 + __riscv_vfirst_m_b2(hit, vl));
+        }
         seen += strip_leads;
         text_u8 += vl, length -= vl;
     }
