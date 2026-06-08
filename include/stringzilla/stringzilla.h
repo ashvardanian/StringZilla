@@ -128,10 +128,10 @@ extern "C" {
 
 /**
  *  @brief Internal helper function to convert SIMD capabilities to an array of string pointers.
- *  @param[in] caps The capabilities bitfield
- *  @param[out] strings Output array to store string pointers (should have more than `SZ_CAPABILITIES_COUNT` slots)
- *  @param[in] max_count Maximum number of strings to output
- *  @return Number of capability strings written to the array
+ *  @param caps The capabilities bitfield.
+ *  @param strings Output array to store string pointers (should have more than `SZ_CAPABILITIES_COUNT` slots).
+ *  @param max_count Maximum number of strings to output.
+ *  @return Number of capability strings written to the array.
  *  @sa sz_capabilities_to_string_implementation_, sz_capabilities
  */
 SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t caps, char const **strings,
@@ -171,11 +171,13 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
     int const capabilities_count = sizeof(capability_map) / sizeof(capability_map[0]);
 
     // Iterate over each capability flag.
-    sz_size_t count = 0;
-    for (int i = 0; i < capabilities_count && count < max_count; i++)
-        if (caps & capability_map[i].flag) strings[count++] = capability_map[i].name;
+    sz_size_t capability_count = 0;
+    for (int capability_index = 0; capability_index < capabilities_count && capability_count < max_count;
+         capability_index++)
+        if (caps & capability_map[capability_index].flag)
+            strings[capability_count++] = capability_map[capability_index].name;
 
-    return count;
+    return capability_count;
 }
 
 SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
@@ -187,7 +189,7 @@ SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const 
 
 /**
  *  @brief Internal helper to map a capability name to its flag.
- *  @param[in] name Capability name, e.g. "serial", "neon", "sve2aes".
+ *  @param name Capability name, e.g. "serial", "neon", "sve2aes".
  *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
  */
 SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const *name) {
@@ -229,30 +231,30 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
  */
 SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
 
-    static char buf[256];
-    char *p = buf;
-    char *const end = buf + sizeof(buf);
+    static char buffer[256];
+    char *p = buffer;
+    char *const end = buffer + sizeof(buffer);
 
     // Use the new function to get capability strings
     char const *cap_strings[SZ_CAPABILITIES_COUNT];
     sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
 
     // Build the comma-separated string
-    for (sz_size_t i = 0; i < cap_count; i++) {
-        if (i > 0) {
+    for (sz_size_t capability_index = 0; capability_index < cap_count; capability_index++) {
+        if (capability_index > 0) {
             // Add separator if this is not the first capability.
             char const sep[2] = {',', '\0'};
             char const *s = sep;
             while (*s && p < end - 1) *p++ = *s++;
         }
         // Append the capability name character by character.
-        char const *s = cap_strings[i];
+        char const *s = cap_strings[capability_index];
         while (*s && p < end - 1) *p++ = *s++;
     }
 
     // Null-terminate the string.
     *p = '\0';
-    return buf;
+    return buffer;
 }
 
 SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {

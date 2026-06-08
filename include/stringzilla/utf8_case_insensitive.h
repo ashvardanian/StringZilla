@@ -40,10 +40,10 @@ extern "C" {
  *  and expansion characters. Comparison is performed codepoint-by-codepoint after folding,
  *  not byte-by-byte, ensuring linguistically correct results.
  *
- *  @param[in] a First UTF-8 string to compare.
- *  @param[in] a_length Number of bytes in the first string.
- *  @param[in] b Second UTF-8 string to compare.
- *  @param[in] b_length Number of bytes in the second string.
+ *  @param a First UTF-8 string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b Second UTF-8 string to compare.
+ *  @param b_length Number of bytes in the second string.
  *  @return @c sz_less_k if a < b, @c sz_equal_k if a == b, @c sz_greater_k if a > b.
  *
  *  @warning Both inputs must contain valid UTF-8. Behavior is undefined for invalid input.
@@ -88,8 +88,8 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *  - Middle Eastern scripts (Arabic, Hebrew, Persian)
  *  - South/Southeast Asian scripts (Thai, Hindi, Vietnamese without Latin)
  *
- *  @param[in] str UTF-8 string to check.
- *  @param[in] length Number of bytes in the string.
+ *  @param str UTF-8 string to check.
+ *  @param length Number of bytes in the string.
  *  @return sz_true_k if all codepoints are case-agnostic, sz_false_k otherwise.
  *
  *  @example Optimization pattern:
@@ -213,11 +213,11 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
  *  @see https://github.com/uni-algo/uni-algo
  *       uni-algo - Unicode algorithms implementation with case-insensitive search
  *
- *  @param[in] haystack UTF-8 string to be searched.
- *  @param[in] haystack_length Number of bytes in the haystack buffer.
- *  @param[in] needle UTF-8 substring to search for.
- *  @param[inout] needle_metadata Optional pre-computed needle metadata for reuse across multiple searches.
- *  @param[out] matched_length Number of bytes in the matched region.
+ *  @param haystack UTF-8 string to be searched.
+ *  @param haystack_length Number of bytes in the haystack buffer.
+ *  @param needle UTF-8 substring to search for.
+ *  @param needle_metadata Optional pre-computed needle metadata for reuse across multiple searches.
+ *  @param matched_length Number of bytes in the matched region.
  *  @return Pointer to the first matching substring from @p haystack, or @c SZ_NULL_CHAR if not found.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //

@@ -33,13 +33,13 @@ SZ_PUBLIC sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     // minimum). Four 16-byte differences are OR-ed so a single `any_true` covers a 64-byte stride.
     sz_size_t offset = 0;
     while (offset + 64 <= length) {
-        v128_t diff_at_0_vec = wasm_v128_xor(wasm_v128_load(a + offset + 0), wasm_v128_load(b + offset + 0));
-        v128_t diff_at_16_vec = wasm_v128_xor(wasm_v128_load(a + offset + 16), wasm_v128_load(b + offset + 16));
-        v128_t diff_at_32_vec = wasm_v128_xor(wasm_v128_load(a + offset + 32), wasm_v128_load(b + offset + 32));
-        v128_t diff_at_48_vec = wasm_v128_xor(wasm_v128_load(a + offset + 48), wasm_v128_load(b + offset + 48));
-        v128_t any_diff_vec =
-            wasm_v128_or(wasm_v128_or(diff_at_0_vec, diff_at_16_vec), wasm_v128_or(diff_at_32_vec, diff_at_48_vec));
-        if (wasm_v128_any_true(any_diff_vec)) return sz_false_k;
+        v128_t diff_at_0_u8x16 = wasm_v128_xor(wasm_v128_load(a + offset + 0), wasm_v128_load(b + offset + 0));
+        v128_t diff_at_16_u8x16 = wasm_v128_xor(wasm_v128_load(a + offset + 16), wasm_v128_load(b + offset + 16));
+        v128_t diff_at_32_u8x16 = wasm_v128_xor(wasm_v128_load(a + offset + 32), wasm_v128_load(b + offset + 32));
+        v128_t diff_at_48_u8x16 = wasm_v128_xor(wasm_v128_load(a + offset + 48), wasm_v128_load(b + offset + 48));
+        v128_t any_diff_u8x16 = wasm_v128_or(wasm_v128_or(diff_at_0_u8x16, diff_at_16_u8x16),
+                                             wasm_v128_or(diff_at_32_u8x16, diff_at_48_u8x16));
+        if (wasm_v128_any_true(any_diff_u8x16)) return sz_false_k;
         offset += 64;
     }
     while (offset + 16 <= length) {

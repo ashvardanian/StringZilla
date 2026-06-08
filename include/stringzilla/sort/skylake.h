@@ -36,6 +36,15 @@ extern "C" {
 /**
  *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
  *  @note Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
+ *
+ *  @param initial_pgrams Source pgram array; updated in place after copy-back.
+ *  @param initial_order Corresponding order array; updated in place after copy-back.
+ *  @param partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
+ *  @param partitioned_order Temporary output buffer for the corresponding order entries.
+ *  @param start_in_sequence First index (inclusive) of the range to partition.
+ *  @param end_in_sequence One-past-the-last index of the range to partition.
+ *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
+ *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
  */
 SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                       //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
@@ -59,8 +68,9 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
     __mmask8 const tail_mask = sz_u8_mask_until_(tail_count);
 
     sz_u512_vec_t pgrams_vec, order_vec;
-    for (sz_size_t i = start_in_sequence; i + pgrams_per_register <= end_in_sequence; i += pgrams_per_register) {
-        pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + i);
+    for (sz_size_t block_index = start_in_sequence; block_index + pgrams_per_register <= end_in_sequence;
+         block_index += pgrams_per_register) {
+        pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + block_index);
         count_smaller += sz_u32_popcount(_mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
         count_greater += sz_u32_popcount(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
     }
@@ -80,10 +90,10 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
     sz_size_t greater_offset = start_in_sequence + count_smaller + count_equal;
 
     // The naive algorithm - unzip the elements into 3 separate buffers.
-    for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_register) {
-        __mmask8 const load_mask = i + pgrams_per_register <= end_in_sequence ? 0xFF : tail_mask;
-        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_pgrams + i);
-        order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_order + i);
+    for (sz_size_t block_index = start_in_sequence; block_index < end_in_sequence; block_index += pgrams_per_register) {
+        __mmask8 const load_mask = block_index + pgrams_per_register <= end_in_sequence ? 0xFF : tail_mask;
+        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_pgrams + block_index);
+        order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_order + block_index);
 
         __mmask8 const smaller_mask = _mm512_mask_cmplt_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
         __mmask8 const equal_mask = _mm512_mask_cmpeq_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
@@ -118,7 +128,14 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
 
 /**
  *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_skylake` and
- * `sz_pgrams_sort_skylake`, and using the `sz_sequence_argsort_skylake_3way_partition_` under the hood.
+ *      `sz_pgrams_sort_skylake`, and using the `sz_sequence_argsort_skylake_3way_partition_` under the hood.
+ *
+ *  @param initial_pgrams Pgram array to sort in place.
+ *  @param initial_order Corresponding order array, permuted in sync with `initial_pgrams`.
+ *  @param temporary_pgrams Scratch buffer of the same size as `initial_pgrams`, used during partitioning.
+ *  @param temporary_order Scratch buffer of the same size as `initial_order`, used during partitioning.
+ *  @param start_in_sequence First index (inclusive) of the range to sort.
+ *  @param end_in_sequence One-past-the-last index of the range to sort.
  */
 SZ_PUBLIC void sz_sequence_argsort_skylake_recursively_(            //
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
@@ -157,7 +174,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
                                              sz_sorted_idx_t *order) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
-    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+    for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -182,9 +199,17 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
 
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
+ *      It combines `sz_sequence_argsort_serial_export_next_pgrams_` and `sz_sequence_argsort_skylake_recursively_`,
+ *      recursively diving into groups of identical pgrams.
  *
- *  It combines `sz_sequence_argsort_serial_export_next_pgrams_` and `sz_sequence_argsort_serial_recursively_`,
- *  recursively diving into the identical pgrams.
+ *  @param sequence The collection of strings to sort.
+ *  @param global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param global_order Current permutation array, updated in place.
+ *  @param temporary_pgrams Scratch buffer of the same size as `global_pgrams`.
+ *  @param temporary_order Scratch buffer of the same size as `global_order`.
+ *  @param start_in_sequence First index (inclusive) of the range to process.
+ *  @param end_in_sequence One-past-the-last index of the range to process.
+ *  @param start_character Byte offset into each string for the current pgram window.
  */
 SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        //
     sz_sequence_t const *const sequence,                                        //
@@ -237,7 +262,8 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 
     // First, initialize the `order` with `std::iota`-like behavior.
     sz_size_t count = sequence->count;
-    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
 
     // On very small collections - just use the quadratic-complexity insertion sort
     // without any smart optimizations or memory allocations.

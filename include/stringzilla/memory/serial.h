@@ -13,16 +13,15 @@
 extern "C" {
 #endif
 
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, char const lut[sz_at_least_(256)]) {
-    sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
-    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
-    sz_u8_t *unsigned_result = (sz_u8_t *)result;
-    sz_u8_t const *end = unsigned_text + length;
-    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = unsigned_lut[*unsigned_text];
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                char const lut[sz_at_least_(256)]) {
+    sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
+    sz_u8_t const *source_u8 = (sz_u8_t const *)source;
+    sz_u8_t *target_u8 = (sz_u8_t *)target;
+    sz_u8_t const *source_end = source_u8 + length;
+    for (; source_u8 != source_end; ++source_u8, ++target_u8) *target_u8 = lut_u8[*source_u8];
 }
 
-// When overriding libc, disable optimizations for this function because MSVC will optimize the loops into a `memset`.
-// Which then causes a stack overflow due to infinite recursion (`memset` -> `sz_fill_serial` -> `memset`).
 #if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
 #pragma optimize("", off)
 #endif

@@ -20,9 +20,6 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-/*  Equality is `wasm_i8x16_eq` + `all_true`, and ordering needs a byte-reversed compare of the first
- *  differing word; neither gains anything from relaxed-simd. Both delegate to the baseline. */
-
 SZ_PUBLIC sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_order_v128(a, a_length, b, b_length);
 }

@@ -17,14 +17,14 @@ extern "C" {
 /**
  *  @brief Helper function performing case-folding under the constraint, that no output may be incomplete.
  *
- *  @param[in] source Pointer to the source UTF-8 data, must be valid UTF-8.
- *  @param[in] source_length Length of the source data in bytes.
- *  @param[out] destination Pointer to the destination buffer.
- *  @param[in] destination_length Length of the destination buffer in bytes.
- *  @param[out] codepoints_consumed Number of codepoints read from source.
- *  @param[out] codepoints_exported Number of codepoints written to destination.
- *  @param[out] bytes_consumed Number of bytes read from source.
- *  @param[out] bytes_exported Number of bytes written to destination.
+ *  @param source Pointer to the source UTF-8 data, must be valid UTF-8.
+ *  @param source_length Length of the source data in bytes.
+ *  @param destination Pointer to the destination buffer.
+ *  @param destination_length Length of the destination buffer in bytes.
+ *  @param codepoints_consumed Number of codepoints read from source.
+ *  @param codepoints_exported Number of codepoints written to destination.
+ *  @param bytes_consumed Number of bytes read from source.
+ *  @param bytes_exported Number of bytes written to destination.
  */
 SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
     sz_cptr_t source, sz_size_t source_length,                      //
@@ -67,11 +67,12 @@ SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
         // That's the story of 'ΐ' (U+0390, CE 90) becoming three codepoints (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81).
         sz_u8_t target_bytes[12]; // 3 runes max, each up to 4 bytes
         sz_size_t target_bytes_count = 0;
-        for (sz_size_t i = 0; i < target_runes_count; ++i)
-            target_bytes_count += sz_rune_export(target_runes[i], target_bytes + target_bytes_count);
+        for (sz_size_t rune_index = 0; rune_index < target_runes_count; ++rune_index)
+            target_bytes_count += sz_rune_export(target_runes[rune_index], target_bytes + target_bytes_count);
 
         if (destination_ptr + target_bytes_count > destination_limit) break;
-        for (sz_size_t i = 0; i < target_bytes_count; ++i) *destination_ptr++ = target_bytes[i];
+        for (sz_size_t byte_index = 0; byte_index < target_bytes_count; ++byte_index)
+            *destination_ptr++ = target_bytes[byte_index];
 
         source_ptr += source_rune_length;
         codepoints_read++;
@@ -105,8 +106,8 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
 
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
-        for (sz_size_t i = 0; i != folded_count; ++i)
-            destination_ptr += sz_rune_export(folded_runes[i], destination_ptr);
+        for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
+            destination_ptr += sz_rune_export(folded_runes[rune_index], destination_ptr);
     }
 
     return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);

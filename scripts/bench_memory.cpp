@@ -64,12 +64,12 @@ struct page_alloc_and_free_t {
     inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
         return reinterpret_cast<char *>(_aligned_malloc(size, alignment));
     }
-    inline void operator()(char *ptr) const noexcept { _aligned_free(ptr); }
+    inline void operator()(char *page_pointer) const noexcept { _aligned_free(page_pointer); }
 #else
     inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
         return reinterpret_cast<char *>(std::aligned_alloc(alignment, size));
     }
-    inline void operator()(char *ptr) const noexcept { std::free(ptr); }
+    inline void operator()(char *page_pointer) const noexcept { std::free(page_pointer); }
 #endif
 };
 

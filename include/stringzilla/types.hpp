@@ -812,7 +812,7 @@ struct gpu_specs_t {
 
     /**
      *  @brief Looks up hardware specs for a given compute capability (major, minor).
-     *  @param[in] sm The compute capability code obtained from `pack_sm_code(major, minor)`.
+     *  @param sm The compute capability code obtained from `pack_sm_code(major, minor)`.
      *  @sa Used to populate the `cuda_cores` property.
      */
     inline static size_t cores_per_multiprocessor(size_t sm) noexcept {

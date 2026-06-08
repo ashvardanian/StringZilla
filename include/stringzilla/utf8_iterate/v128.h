@@ -36,7 +36,7 @@ SZ_INTERNAL v128_t sz_utf8_rotate2_wasm_(v128_t v) {
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
     sz_u128_vec_t text_vec;
-    v128_t n_vec = wasm_i8x16_splat('\n');
+    v128_t newline_u8x16 = wasm_i8x16_splat('\n');
     v128_t f_vec = wasm_i8x16_splat('\f');
     v128_t r_vec = wasm_i8x16_splat('\r');
     v128_t x_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
@@ -55,20 +55,21 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
 
         // 1-byte matches: the contiguous control range '\n'..'\f' as one range compare (instead of
         // three separate equalities), plus '\r' which is masked at the last lane for the `\r\n` rule.
-        v128_t nvf_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, n_vec), wasm_u8x16_le(text_vec.v128, f_vec));
+        v128_t newline_range_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, newline_u8x16),
+                                                 wasm_u8x16_le(text_vec.v128, f_vec));
         v128_t r_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, r_vec), drop1_vec); // mask out \r at pos 15
-        v128_t one_byte_cmp = wasm_v128_or(nvf_cmp, r_cmp);
+        v128_t one_byte_cmp = wasm_v128_or(newline_range_cmp, r_cmp);
 
         // 2- & 3-byte matches with shifted views
         v128_t text1 = sz_utf8_rotate1_wasm_(text_vec.v128);
         v128_t text2 = sz_utf8_rotate2_wasm_(text_vec.v128);
-        v128_t rn_vec = wasm_v128_and(r_cmp, wasm_i8x16_eq(text1, n_vec));
+        v128_t rn_match_u8x16 = wasm_v128_and(r_cmp, wasm_i8x16_eq(text1, newline_u8x16));
         v128_t x_c285_vec = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_c2_vec), wasm_i8x16_eq(text1, x_85_vec));
-        v128_t two_byte_cmp = wasm_v128_and(wasm_v128_or(rn_vec, x_c285_vec), drop1_vec);
+        v128_t two_byte_cmp = wasm_v128_and(wasm_v128_or(rn_match_u8x16, x_c285_vec), drop1_vec);
 
         v128_t x_e280_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_e2_vec), wasm_i8x16_eq(text1, x_80_vec));
-        v128_t x_e280ax_cmp =
-            wasm_v128_and(x_e280_cmp, wasm_v128_or(wasm_i8x16_eq(text2, x_a8_vec), wasm_i8x16_eq(text2, x_a9_vec)));
+        v128_t x_e280ax_cmp = wasm_v128_and(
+            x_e280_cmp, wasm_v128_or(wasm_i8x16_eq(text2, x_a8_vec), wasm_i8x16_eq(text2, x_a9_vec)));
         v128_t three_byte_cmp = wasm_v128_and(x_e280ax_cmp, drop2_vec);
 
         v128_t combined_vec = wasm_v128_or(one_byte_cmp, wasm_v128_or(two_byte_cmp, three_byte_cmp));
@@ -160,20 +161,20 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
         v128_t x_80_ge_cmp = wasm_u8x16_ge(text2, x_80_vec);
         v128_t x_8d_le_cmp = wasm_u8x16_le(text2, x_8d_vec);
 
-        v128_t ogham_cmp =
-            wasm_v128_and(x_e1_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_9a_vec), wasm_i8x16_eq(text2, x_80_vec)));
+        v128_t ogham_cmp = wasm_v128_and(x_e1_cmp,
+                                         wasm_v128_and(wasm_i8x16_eq(text1, x_9a_vec), wasm_i8x16_eq(text2, x_80_vec)));
         v128_t range_e280_cmp = wasm_v128_and(
             x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_v128_and(x_80_ge_cmp, x_8d_le_cmp)));
-        v128_t line_cmp =
-            wasm_v128_and(x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a8_vec)));
-        v128_t paragraph_cmp =
-            wasm_v128_and(x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a9_vec)));
-        v128_t nnbsp_cmp =
-            wasm_v128_and(x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_af_vec)));
-        v128_t mmsp_cmp =
-            wasm_v128_and(x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_81_vec), wasm_i8x16_eq(text2, x_9f_vec)));
-        v128_t ideographic_vec =
-            wasm_v128_and(x_e3_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_80_vec)));
+        v128_t line_cmp = wasm_v128_and(x_e2_cmp,
+                                        wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a8_vec)));
+        v128_t paragraph_cmp = wasm_v128_and(
+            x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a9_vec)));
+        v128_t nnbsp_cmp = wasm_v128_and(x_e2_cmp,
+                                         wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_af_vec)));
+        v128_t mmsp_cmp = wasm_v128_and(x_e2_cmp,
+                                        wasm_v128_and(wasm_i8x16_eq(text1, x_81_vec), wasm_i8x16_eq(text2, x_9f_vec)));
+        v128_t ideographic_vec = wasm_v128_and(
+            x_e3_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_80_vec)));
         v128_t three_vec = wasm_v128_and(
             wasm_v128_or(wasm_v128_or(wasm_v128_or(ogham_cmp, range_e280_cmp), wasm_v128_or(line_cmp, paragraph_cmp)),
                          wasm_v128_or(wasm_v128_or(nnbsp_cmp, mmsp_cmp), ideographic_vec)),
@@ -258,31 +259,32 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
 
-    sz_u8_t const *src = (sz_u8_t const *)text;
-    sz_size_t written = 0;
+    sz_u8_t const *text_cursor = (sz_u8_t const *)text;
+    sz_size_t runes_written = 0;
 
     // Vectorized pure-ASCII prefix: 16 single-byte runes per window.
-    while (length - (sz_size_t)(src - (sz_u8_t const *)text) >= 16 && written + 16 <= runes_capacity) {
-        v128_t bytes = wasm_v128_load(src);
+    while (length - (sz_size_t)(text_cursor - (sz_u8_t const *)text) >= 16 && runes_written + 16 <= runes_capacity) {
+        v128_t bytes = wasm_v128_load(text_cursor);
         // Any byte >= 0x80 has its sign bit set; if present, defer the whole window to serial.
         if (wasm_i8x16_bitmask(bytes) != 0) break;
         // Widen 16x u8 -> 16x u32 and store as runes (zero-extension == the ASCII code point value).
-        v128_t lo16 = wasm_u16x8_extend_low_u8x16(bytes);
-        v128_t hi16 = wasm_u16x8_extend_high_u8x16(bytes);
-        wasm_v128_store(runes + written + 0, wasm_u32x4_extend_low_u16x8(lo16));
-        wasm_v128_store(runes + written + 4, wasm_u32x4_extend_high_u16x8(lo16));
-        wasm_v128_store(runes + written + 8, wasm_u32x4_extend_low_u16x8(hi16));
-        wasm_v128_store(runes + written + 12, wasm_u32x4_extend_high_u16x8(hi16));
-        written += 16;
-        src += 16;
+        v128_t low_u16x8 = wasm_u16x8_extend_low_u8x16(bytes);
+        v128_t high_u16x8 = wasm_u16x8_extend_high_u8x16(bytes);
+        wasm_v128_store(runes + runes_written + 0, wasm_u32x4_extend_low_u16x8(low_u16x8));
+        wasm_v128_store(runes + runes_written + 4, wasm_u32x4_extend_high_u16x8(low_u16x8));
+        wasm_v128_store(runes + runes_written + 8, wasm_u32x4_extend_low_u16x8(high_u16x8));
+        wasm_v128_store(runes + runes_written + 12, wasm_u32x4_extend_high_u16x8(high_u16x8));
+        runes_written += 16;
+        text_cursor += 16;
     }
 
     // Remainder (multi-byte sequences, ragged tail, or exhausted capacity) goes through serial.
-    sz_size_t consumed = (sz_size_t)(src - (sz_u8_t const *)text);
+    sz_size_t bytes_consumed = (sz_size_t)(text_cursor - (sz_u8_t const *)text);
     sz_size_t tail_unpacked = 0;
-    sz_cptr_t tail_end = sz_utf8_unpack_chunk_serial((sz_cptr_t)src, length - consumed, runes + written,
-                                                     runes_capacity - written, &tail_unpacked);
-    *runes_unpacked = written + tail_unpacked;
+    sz_cptr_t tail_end = sz_utf8_unpack_chunk_serial((sz_cptr_t)text_cursor, length - bytes_consumed,
+                                                     runes + runes_written, runes_capacity - runes_written,
+                                                     &tail_unpacked);
+    *runes_unpacked = runes_written + tail_unpacked;
     return tail_end;
 }
 
@@ -312,8 +314,8 @@ SZ_INTERNAL v128_t sz_wb_interior_mask_v128_(v128_t bytes) {
     v128_t lowered_vec = wasm_v128_or(bytes, wasm_i8x16_splat(0x20));
     v128_t is_alpha = wasm_v128_and(wasm_i8x16_ge(lowered_vec, wasm_i8x16_splat(0x61)),
                                     wasm_i8x16_le(lowered_vec, wasm_i8x16_splat(0x7A)));
-    v128_t is_digit =
-        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x30)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x39)));
+    v128_t is_digit = wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x30)),
+                                    wasm_i8x16_le(bytes, wasm_i8x16_splat(0x39)));
     v128_t is_underscore = wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x5F));
     v128_t interior = wasm_v128_or(wasm_v128_or(is_alpha, is_digit), is_underscore);
     return wasm_v128_and(is_ascii, interior);
@@ -327,40 +329,40 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_v128(sz_cptr_t text, sz_size_t le
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     // Skip the first codepoint (position 0 is always a boundary, WB1).
-    sz_size_t pos = sz_utf8_char_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_char_length_(text_u8[0]);
 
-    while (pos < length) {
+    while (position < length) {
         // Vectorized fast-skip over ASCII word/number interiors. A candidate at offset `i` is a
         // guaranteed non-boundary iff byte[i-1] and byte[i] are both ASCII word-interior. We load a
-        // 16-byte window anchored one byte BEFORE `pos`, so lane 0 = byte[pos-1] and lane 1 = byte[pos].
-        if (pos >= 1 && pos + 16 <= length) {
-            v128_t window = wasm_v128_load(text_u8 + pos - 1);
+        // 16-byte window anchored one byte BEFORE `position`, so lane 0 = byte[position-1] and lane 1 = byte[position].
+        if (position >= 1 && position + 16 <= length) {
+            v128_t window = wasm_v128_load(text_u8 + position - 1);
             v128_t interior = sz_wb_interior_mask_v128_(window);
             // Pair[i] interior iff lane i and lane i-1 both interior. Shift interior right by one lane
             // (lane i gets lane i-1's value); zero the wrapped lane 0 so it never claims a pair.
-            v128_t prev = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-                                             26, 27, 28, 29, 30);
-            v128_t pair = wasm_v128_and(interior, prev);
-            // Bit i (i>=1) set => offset (pos-1+i) is a guaranteed non-boundary. Candidates correspond
-            // to lanes 1..15 (offsets pos..pos+14). A clear bit among those is the first real candidate.
+            v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+                                                 25, 26, 27, 28, 29, 30);
+            v128_t pair = wasm_v128_and(interior, previous);
+            // Bit i (i>=1) set => offset (position-1+i) is a guaranteed non-boundary. Candidates correspond
+            // to lanes 1..15 (offsets position..position+14). A clear bit among those is the first real candidate.
             sz_u32_t pair_mask = (sz_u32_t)wasm_i8x16_bitmask(pair);
             // Consider only lanes 1..15; a non-boundary run is a prefix of set bits there.
             sz_u32_t candidate_bits = (~pair_mask) & 0xFFFEu; // clear lane 0, look at lanes 1..15
             if (candidate_bits == 0) {
-                // All of offsets pos..pos+14 are guaranteed non-boundaries; advance past them.
-                pos += 15;
+                // All of offsets position..position+14 are guaranteed non-boundaries; advance past them.
+                position += 15;
                 continue;
             }
             int first = sz_u32_ctz(candidate_bits); // lane index 1..15
-            pos += (sz_size_t)(first - 1);             // move to that codepoint-aligned candidate offset
-            // Fall through to the serial check at this `pos`.
+            position += (sz_size_t)(first - 1);     // move to that codepoint-aligned candidate offset
+            // Fall through to the serial check at this `position`.
         }
 
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = pos;
-            return text + pos;
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = position;
+            return text + position;
         }
-        pos += sz_utf8_char_length_(text_u8[pos]);
+        position += sz_utf8_char_length_(text_u8[position]);
     }
 
     if (boundary_width) *boundary_width = length;
@@ -375,40 +377,40 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t l
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     // Move back one codepoint from the end (position length is always a boundary, WB2).
-    sz_size_t pos = length - 1;
-    while (pos > 0 && (text_u8[pos] & 0xC0) == 0x80) pos--;
+    sz_size_t position = length - 1;
+    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
-    while (pos > 0) {
+    while (position > 0) {
         // Vectorized fast-skip backward over ASCII word/number interiors. Anchor a 16-byte window so
-        // lane 15 = byte[pos] and lane 14 = byte[pos-1]: load at (pos-15). Then pair[i] (i in 1..15)
+        // lane 15 = byte[position] and lane 14 = byte[position-1]: load at (position-15). Then pair[i] (i in 1..15)
         // = interior[i] && interior[i-1] marks offset (base+i) as a guaranteed non-boundary.
-        if (pos >= 15 && pos + 1 <= length) {
-            sz_size_t base = pos - 15;
+        if (position >= 15 && position + 1 <= length) {
+            sz_size_t base = position - 15;
             v128_t window = wasm_v128_load(text_u8 + base);
             v128_t interior = sz_wb_interior_mask_v128_(window);
-            v128_t prev = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-                                             26, 27, 28, 29, 30);
-            v128_t pair = wasm_v128_and(interior, prev);
+            v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+                                                 25, 26, 27, 28, 29, 30);
+            v128_t pair = wasm_v128_and(interior, previous);
             sz_u32_t pair_mask = (sz_u32_t)wasm_i8x16_bitmask(pair);
-            // Offsets base+1 .. base+15 map to lanes 1..15. We scan downward from lane 15 (offset pos).
+            // Offsets base+1 .. base+15 map to lanes 1..15. We scan downward from lane 15 (offset position).
             // A guaranteed non-boundary run is a suffix of set bits in lanes 1..15.
             sz_u32_t candidate_bits = (~pair_mask) & 0xFFFEu;
             if (candidate_bits == 0) {
-                // Offsets base+1..base+15 (== pos-14..pos) are all guaranteed non-boundaries; jump below.
-                pos = base; // base == pos-15 > 0 here; loop re-checks pos>0
+                // Offsets base+1..base+15 (== position-14..position) are all guaranteed non-boundaries; jump below.
+                position = base; // base == position-15 > 0 here; loop re-checks position>0
                 continue;
             }
             int last = 31 - sz_u32_clz(candidate_bits); // highest candidate lane 1..15
-            pos = base + (sz_size_t)last;                  // first real candidate at/below current pos
-            // Fall through to serial check at this `pos`.
+            position = base + (sz_size_t)last;          // first real candidate at/below current position
+            // Fall through to serial check at this `position`.
         }
 
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = length - pos;
-            return text + pos;
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = length - position;
+            return text + position;
         }
-        pos--;
-        while (pos > 0 && (text_u8[pos] & 0xC0) == 0x80) pos--;
+        position--;
+        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
 
     if (boundary_width) *boundary_width = length;

@@ -111,8 +111,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
             text_reversed_vec.zmm = _mm512_stream_load_si512((__m512i *)(text + body_length - 64));
-            sums_reversed_vec.zmm =
-                _mm512_add_epi64(sums_reversed_vec.zmm, _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512()));
+            sums_reversed_vec.zmm = _mm512_add_epi64(sums_reversed_vec.zmm,
+                                                     _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512()));
         }
         if (body_length >= 64) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));

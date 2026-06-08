@@ -33,9 +33,9 @@ extern "C" {
  *  Worst-case example: 'ΐ' (U+0390, CE 90) → "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81) (2 bytes → 6 bytes).
  *  A string of N such characters would expand from 2N to 6N bytes (3x expansion).
  *
- *  @param[in] source UTF-8 string to be case-folded.
- *  @param[in] source_length Number of bytes in the source buffer.
- *  @param[out] destination Buffer to write the case-folded UTF-8 string.
+ *  @param source UTF-8 string to be case-folded.
+ *  @param source_length Number of bytes in the source buffer.
+ *  @param destination Buffer to write the case-folded UTF-8 string.
  *  @return Number of bytes written to the destination buffer.
  *
  *  @warning The caller must ensure the destination buffer is large enough. No bounds checking

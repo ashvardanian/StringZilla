@@ -69,16 +69,16 @@ SZ_PUBLIC sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length)
                                _mm256_cmpeq_epi8(a_second_vec.ymm, b_second_vec.ymm))) == (int)0xFFFFFFFF);
     }
     else {
-        sz_size_t i = 0;
+        sz_size_t byte_index = 0;
         sz_u256_vec_t a_vec, b_vec;
         do {
-            a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + i));
-            b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + i));
+            a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + byte_index));
+            b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + byte_index));
             // One approach can be to use "movemasks", but we could also use a bitwise
             // matching like `_mm256_testnzc_si256`.
             if (_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm)) != (int)0xFFFFFFFF) return sz_false_k;
-            i += 32;
-        } while (i + 32 <= length);
+            byte_index += 32;
+        } while (byte_index + 32 <= length);
         a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + length - 32));
         b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + length - 32));
         return (sz_bool_t)(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm)) == (int)0xFFFFFFFF);

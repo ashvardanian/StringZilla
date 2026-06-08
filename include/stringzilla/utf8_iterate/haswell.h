@@ -35,29 +35,29 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t lengt
 
     // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
     // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    __m256i n_vec = _mm256_set1_epi8('\n');
-    __m256i v_vec = _mm256_set1_epi8('\v');
-    __m256i f_vec = _mm256_set1_epi8('\f');
-    __m256i r_vec = _mm256_set1_epi8('\r');
+    __m256i n_u8x32 = _mm256_set1_epi8('\n');
+    __m256i v_u8x32 = _mm256_set1_epi8('\v');
+    __m256i f_u8x32 = _mm256_set1_epi8('\f');
+    __m256i r_u8x32 = _mm256_set1_epi8('\r');
 
     // We also need to match the 2-byte newline character 0xC285 (NEL),
     // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
-    __m256i x_c2_vec = _mm256_set1_epi8('\xC2');
-    __m256i x_85_vec = _mm256_set1_epi8('\x85');
-    __m256i x_e2_vec = _mm256_set1_epi8('\xE2');
-    __m256i x_80_vec = _mm256_set1_epi8('\x80');
-    __m256i x_a8_vec = _mm256_set1_epi8('\xA8');
-    __m256i x_a9_vec = _mm256_set1_epi8('\xA9');
+    __m256i x_c2_u8x32 = _mm256_set1_epi8('\xC2');
+    __m256i x_85_u8x32 = _mm256_set1_epi8('\x85');
+    __m256i x_e2_u8x32 = _mm256_set1_epi8('\xE2');
+    __m256i x_80_u8x32 = _mm256_set1_epi8('\x80');
+    __m256i x_a8_u8x32 = _mm256_set1_epi8('\xA8');
+    __m256i x_a9_u8x32 = _mm256_set1_epi8('\xA9');
 
     // We check 32 bytes of data at once, but only step forward by 30 bytes for split-register matches.
     while (length >= 32) {
-        __m256i text_vec = _mm256_loadu_si256((__m256i const *)text);
+        __m256i text_u8x32 = _mm256_loadu_si256((__m256i const *)text);
 
         // 1-byte indicators & matches
-        __m256i n_cmp = _mm256_cmpeq_epi8(text_vec, n_vec);
-        __m256i v_cmp = _mm256_cmpeq_epi8(text_vec, v_vec);
-        __m256i f_cmp = _mm256_cmpeq_epi8(text_vec, f_vec);
-        __m256i r_cmp = _mm256_cmpeq_epi8(text_vec, r_vec);
+        __m256i n_cmp = _mm256_cmpeq_epi8(text_u8x32, n_u8x32);
+        __m256i v_cmp = _mm256_cmpeq_epi8(text_u8x32, v_u8x32);
+        __m256i f_cmp = _mm256_cmpeq_epi8(text_u8x32, f_u8x32);
+        __m256i r_cmp = _mm256_cmpeq_epi8(text_u8x32, r_u8x32);
 
         sz_u32_t n_mask = (sz_u32_t)_mm256_movemask_epi8(n_cmp);
         sz_u32_t v_mask = (sz_u32_t)_mm256_movemask_epi8(v_cmp);
@@ -66,12 +66,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t lengt
         sz_u32_t one_byte_mask = n_mask | v_mask | f_mask | r_mask;
 
         // 2-byte indicators
-        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_vec, x_c2_vec);
-        __m256i x_85_cmp = _mm256_cmpeq_epi8(text_vec, x_85_vec);
-        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_vec, x_e2_vec);
-        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_vec, x_80_vec);
-        __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_vec, x_a8_vec);
-        __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_vec, x_a9_vec);
+        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_c2_u8x32);
+        __m256i x_85_cmp = _mm256_cmpeq_epi8(text_u8x32, x_85_u8x32);
+        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e2_u8x32);
+        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_u8x32, x_80_u8x32);
+        __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a8_u8x32);
+        __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a9_u8x32);
 
         sz_u32_t x_c2_mask = (sz_u32_t)_mm256_movemask_epi8(x_c2_cmp);
         sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(x_85_cmp);
@@ -117,44 +117,44 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
 
     // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present.
     // There is also the canonical space ' ' (0x20).
-    __m256i x_20_vec = _mm256_set1_epi8(' ');
+    __m256i x_20_u8x32 = _mm256_set1_epi8(' ');
 
     // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP)
-    __m256i x_c2_vec = _mm256_set1_epi8('\xC2');
-    __m256i x_85_vec = _mm256_set1_epi8('\x85');
-    __m256i x_a0_vec = _mm256_set1_epi8('\xA0');
+    __m256i x_c2_u8x32 = _mm256_set1_epi8('\xC2');
+    __m256i x_85_u8x32 = _mm256_set1_epi8('\x85');
+    __m256i x_a0_u8x32 = _mm256_set1_epi8('\xA0');
 
     // 3-byte character prefixes and suffixes
-    __m256i x_e1_vec = _mm256_set1_epi8('\xE1');
-    __m256i x_e2_vec = _mm256_set1_epi8('\xE2');
-    __m256i x_e3_vec = _mm256_set1_epi8('\xE3');
-    __m256i x_9a_vec = _mm256_set1_epi8('\x9A');
-    __m256i x_80_vec = _mm256_set1_epi8('\x80');
-    __m256i x_81_vec = _mm256_set1_epi8('\x81');
-    __m256i x_a8_vec = _mm256_set1_epi8('\xA8');
-    __m256i x_a9_vec = _mm256_set1_epi8('\xA9');
-    __m256i x_af_vec = _mm256_set1_epi8('\xAF');
-    __m256i x_9f_vec = _mm256_set1_epi8('\x9F');
+    __m256i x_e1_u8x32 = _mm256_set1_epi8('\xE1');
+    __m256i x_e2_u8x32 = _mm256_set1_epi8('\xE2');
+    __m256i x_e3_u8x32 = _mm256_set1_epi8('\xE3');
+    __m256i x_9a_u8x32 = _mm256_set1_epi8('\x9A');
+    __m256i x_80_u8x32 = _mm256_set1_epi8('\x80');
+    __m256i x_81_u8x32 = _mm256_set1_epi8('\x81');
+    __m256i x_a8_u8x32 = _mm256_set1_epi8('\xA8');
+    __m256i x_a9_u8x32 = _mm256_set1_epi8('\xA9');
+    __m256i x_af_u8x32 = _mm256_set1_epi8('\xAF');
+    __m256i x_9f_u8x32 = _mm256_set1_epi8('\x9F');
 
     // We check 32 bytes of data at once, but only step forward by 30 bytes for split-register matches.
     while (length >= 32) {
-        __m256i text_vec = _mm256_loadu_si256((__m256i const *)text);
+        __m256i text_u8x32 = _mm256_loadu_si256((__m256i const *)text);
 
         // 1-byte indicators & matches
         // Range [9,13] covers \t, \n, \v, \f, \r
-        __m256i x_20_cmp = _mm256_cmpeq_epi8(text_vec, x_20_vec);
-        __m256i t_cmp = _mm256_cmpgt_epi8(text_vec, _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
-        __m256i r_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E), text_vec); // <= '\r' (0x0D)
+        __m256i x_20_cmp = _mm256_cmpeq_epi8(text_u8x32, x_20_u8x32);
+        __m256i t_cmp = _mm256_cmpgt_epi8(text_u8x32, _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
+        __m256i r_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E), text_u8x32); // <= '\r' (0x0D)
         __m256i tr_range = _mm256_and_si256(t_cmp, r_cmp);
         __m256i one_byte_cmp = _mm256_or_si256(x_20_cmp, tr_range);
 
         sz_u32_t one_byte_mask = (sz_u32_t)_mm256_movemask_epi8(one_byte_cmp);
 
         // 2-byte and 3-byte prefix indicators
-        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_vec, x_c2_vec);
-        __m256i x_e1_cmp = _mm256_cmpeq_epi8(text_vec, x_e1_vec);
-        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_vec, x_e2_vec);
-        __m256i x_e3_cmp = _mm256_cmpeq_epi8(text_vec, x_e3_vec);
+        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_c2_u8x32);
+        __m256i x_e1_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e1_u8x32);
+        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e2_u8x32);
+        __m256i x_e3_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e3_u8x32);
 
         sz_u32_t x_c2_mask = (sz_u32_t)_mm256_movemask_epi8(x_c2_cmp) & 0x7FFFFFFF;
         sz_u32_t x_e1_mask = (sz_u32_t)_mm256_movemask_epi8(x_e1_cmp) & 0x3FFFFFFF;
@@ -180,8 +180,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         }
 
         // 2-byte suffixes
-        __m256i x_85_cmp = _mm256_cmpeq_epi8(text_vec, x_85_vec);
-        __m256i x_a0_cmp = _mm256_cmpeq_epi8(text_vec, x_a0_vec);
+        __m256i x_85_cmp = _mm256_cmpeq_epi8(text_u8x32, x_85_u8x32);
+        __m256i x_a0_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a0_u8x32);
         sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(x_85_cmp);
         sz_u32_t x_a0_mask = (sz_u32_t)_mm256_movemask_epi8(x_a0_cmp);
 
@@ -190,16 +190,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         sz_u32_t two_byte_mask = x_c285_mask | x_c2a0_mask;
 
         // 3-byte suffixes
-        __m256i x_9a_cmp = _mm256_cmpeq_epi8(text_vec, x_9a_vec);
-        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_vec, x_80_vec);
-        __m256i x_81_cmp = _mm256_cmpeq_epi8(text_vec, x_81_vec);
-        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_(text_vec, x_80_vec);                     // >= 0x80
-        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_(_mm256_set1_epi8((char)0x8D), text_vec); // <= 0x8D
+        __m256i x_9a_cmp = _mm256_cmpeq_epi8(text_u8x32, x_9a_u8x32);
+        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_u8x32, x_80_u8x32);
+        __m256i x_81_cmp = _mm256_cmpeq_epi8(text_u8x32, x_81_u8x32);
+        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_(text_u8x32, x_80_u8x32);                   // >= 0x80
+        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_(_mm256_set1_epi8((char)0x8D), text_u8x32); // <= 0x8D
         __m256i x_8d_range = _mm256_and_si256(x_80_ge_cmp, x_8d_le_cmp);
-        __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_vec, x_a8_vec);
-        __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_vec, x_a9_vec);
-        __m256i x_af_cmp = _mm256_cmpeq_epi8(text_vec, x_af_vec);
-        __m256i x_9f_cmp = _mm256_cmpeq_epi8(text_vec, x_9f_vec);
+        __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a8_u8x32);
+        __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a9_u8x32);
+        __m256i x_af_cmp = _mm256_cmpeq_epi8(text_u8x32, x_af_u8x32);
+        __m256i x_9f_cmp = _mm256_cmpeq_epi8(text_u8x32, x_9f_u8x32);
 
         sz_u32_t x_9a_mask = (sz_u32_t)_mm256_movemask_epi8(x_9a_cmp);
         sz_u32_t x_80_mask = (sz_u32_t)_mm256_movemask_epi8(x_80_cmp);
@@ -218,8 +218,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         sz_u32_t nnbsp_mask = x_e2_mask & (x_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
         sz_u32_t mmsp_mask = x_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);             // E2 81 9F
         sz_u32_t ideographic_mask = x_e3_mask & (x_80_mask >> 1) & (x_80_mask >> 2);      // E3 80 80
-        sz_u32_t three_byte_mask =
-            ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask | ideographic_mask;
+        sz_u32_t three_byte_mask = ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask |
+                                   ideographic_mask;
 
         // Find the earliest match regardless of length
         sz_u32_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
@@ -260,8 +260,8 @@ SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
         headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
 
         // Compare with 0x80 (0b10000000) to find continuation bytes
-        sz_u32_t start_byte_mask =
-            ~(sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
+        sz_u32_t start_byte_mask = ~(sz_u32_t)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
 
         char_count += _mm_popcnt_u32(start_byte_mask);
         text_u8 += 32;
@@ -292,8 +292,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
         headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
 
         // Compare with 0x80 (0b10000000) to find continuation bytes
-        sz_u32_t start_byte_mask =
-            ~(sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
+        sz_u32_t start_byte_mask = ~(sz_u32_t)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
         sz_size_t start_byte_count = _mm_popcnt_u32(start_byte_mask);
 
         // Check if we've reached the terminal part of our search
@@ -421,7 +421,8 @@ static const sz_u8_t sz_wb_pair_decision_[256] = {
 
 /* Sentinel marking a byte whose property must be resolved by the scalar fallback
  * (continuation byte or non-ASCII lead byte). */
-#define SZ_WB_PROP_SENTINEL_ 0x80
+enum { sz_wb_prop_sentinel_k = 0x80 };
+#define SZ_WB_PROP_SENTINEL_ ((sz_u8_t)sz_wb_prop_sentinel_k)
 
 /* Classify a window of up to 32 bytes into per-byte Word_Break properties.
  * ASCII bytes get their exact property; every other byte gets SZ_WB_PROP_SENTINEL_. */
@@ -443,32 +444,32 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_haswell(sz_cptr_t text, sz_size_t
     }
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t pos = 0;
+    sz_size_t position = 0;
     // Skip first codepoint (position 0 is always a boundary), matching the serial reference.
-    pos += sz_utf8_char_length_(text_u8[0]);
+    position += sz_utf8_char_length_(text_u8[0]);
 
     // Window of classified properties covering [base, base+32).
     sz_u8_t props[32];
     sz_size_t base = (sz_size_t)-1; // No window loaded yet.
 
-    while (pos < length) {
-        // (Re)load the property window if the byte at `pos` and its immediate predecessor are covered.
-        // We need props[pos-base] (after) and props[pos-1-base] (prev byte) to be valid.
-        if (base == (sz_size_t)-1 || pos < base + 1 || pos >= base + 32) {
-            base = (pos > 0) ? (pos - 1) : 0;
+    while (position < length) {
+        // (Re)load the property window if the byte at `position` and its immediate predecessor are covered.
+        // We need props[position-base] (after) and props[position-1-base] (prev byte) to be valid.
+        if (base == (sz_size_t)-1 || position < base + 1 || position >= base + 32) {
+            base = (position > 0) ? (position - 1) : 0;
             if (base + 32 <= length) { sz_wb_classify_window_haswell_(text + base, 32, props); }
             else {
                 sz_size_t valid = length - base;
-                sz_u8_t tmp[32];
-                for (sz_size_t i = 0; i < valid; ++i) tmp[i] = text_u8[base + i];
-                for (sz_size_t i = valid; i < 32; ++i) tmp[i] = 0;
-                sz_wb_classify_window_haswell_((sz_cptr_t)tmp, valid, props);
+                sz_u8_t window_scratch[32];
+                for (sz_size_t i = 0; i < valid; ++i) window_scratch[i] = text_u8[base + i];
+                for (sz_size_t i = valid; i < 32; ++i) window_scratch[i] = 0;
+                sz_wb_classify_window_haswell_((sz_cptr_t)window_scratch, valid, props);
             }
         }
 
-        sz_u8_t after_prop = props[pos - base];
-        sz_u8_t prev_byte_prop = props[pos - 1 - base];
-        // The byte before `pos` must itself be a lead byte (not a continuation) for `prev_byte_prop`
+        sz_u8_t after_prop = props[position - base];
+        sz_u8_t prev_byte_prop = props[position - 1 - base];
+        // The byte before `position` must itself be a lead byte (not a continuation) for `prev_byte_prop`
         // to be the immediate previous codepoint's property. We approximate the serial `prev_prop`
         // (which skips ignorables) only when both sides are plain ASCII; otherwise defer.
         sz_u8_t decision = 2;
@@ -478,13 +479,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_haswell(sz_cptr_t text, sz_size_t
 
         sz_bool_t is_boundary;
         if (decision != 2) { is_boundary = (sz_bool_t)decision; }
-        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, pos); }
+        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
 
         if (is_boundary) {
-            if (boundary_width) *boundary_width = pos;
-            return text + pos;
+            if (boundary_width) *boundary_width = position;
+            return text + position;
         }
-        pos += sz_utf8_char_length_(text_u8[pos]);
+        position += sz_utf8_char_length_(text_u8[position]);
     }
 
     if (boundary_width) *boundary_width = length;
@@ -498,29 +499,29 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_haswell(sz_cptr_t text, sz_size_
     }
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t pos = length;
+    sz_size_t position = length;
     // Move back one codepoint (position length is always a boundary).
-    pos--;
-    while (pos > 0 && (text_u8[pos] & 0xC0) == 0x80) pos--;
+    position--;
+    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
     sz_u8_t props[32];
     sz_size_t base = (sz_size_t)-1;
 
-    while (pos > 0) {
-        if (base == (sz_size_t)-1 || pos < base + 1 || pos >= base + 32) {
-            base = pos - 1;
+    while (position > 0) {
+        if (base == (sz_size_t)-1 || position < base + 1 || position >= base + 32) {
+            base = position - 1;
             if (base + 32 <= length) { sz_wb_classify_window_haswell_(text + base, 32, props); }
             else {
                 sz_size_t valid = length - base;
-                sz_u8_t tmp[32];
-                for (sz_size_t i = 0; i < valid; ++i) tmp[i] = text_u8[base + i];
-                for (sz_size_t i = valid; i < 32; ++i) tmp[i] = 0;
-                sz_wb_classify_window_haswell_((sz_cptr_t)tmp, valid, props);
+                sz_u8_t window_scratch[32];
+                for (sz_size_t i = 0; i < valid; ++i) window_scratch[i] = text_u8[base + i];
+                for (sz_size_t i = valid; i < 32; ++i) window_scratch[i] = 0;
+                sz_wb_classify_window_haswell_((sz_cptr_t)window_scratch, valid, props);
             }
         }
 
-        sz_u8_t after_prop = props[pos - base];
-        sz_u8_t prev_byte_prop = props[pos - 1 - base];
+        sz_u8_t after_prop = props[position - base];
+        sz_u8_t prev_byte_prop = props[position - 1 - base];
         sz_u8_t decision = 2;
         if (after_prop != SZ_WB_PROP_SENTINEL_ && prev_byte_prop != SZ_WB_PROP_SENTINEL_) {
             decision = sz_wb_pair_decision_[((sz_size_t)prev_byte_prop << 4) | after_prop];
@@ -528,14 +529,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_haswell(sz_cptr_t text, sz_size_
 
         sz_bool_t is_boundary;
         if (decision != 2) { is_boundary = (sz_bool_t)decision; }
-        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, pos); }
+        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
 
         if (is_boundary) {
-            if (boundary_width) *boundary_width = length - pos;
-            return text + pos;
+            if (boundary_width) *boundary_width = length - position;
+            return text + position;
         }
-        pos--;
-        while (pos > 0 && (text_u8[pos] & 0xC0) == 0x80) pos--;
+        position--;
+        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
 
     if (boundary_width) *boundary_width = length;

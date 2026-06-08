@@ -36,16 +36,16 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     do {
         a_vec.u8x16 = vld1q_u8((sz_u8_t const *)(a + offset));
         b_vec.u8x16 = vld1q_u8((sz_u8_t const *)(b + offset));
-        uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
-        if (vminvq_u8(cmp) != 255) return sz_false_k; // Check if all bytes match
+        uint8x16_t matches_u8x16 = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
+        if (vminvq_u8(matches_u8x16) != 255) return sz_false_k; // Check if all bytes match
         offset += 16;
     } while (offset + 16 <= length);
 
     // For final check - load the last register-long piece of content from the end
     a_vec.u8x16 = vld1q_u8((sz_u8_t const *)(a + length - 16));
     b_vec.u8x16 = vld1q_u8((sz_u8_t const *)(b + length - 16));
-    uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
-    if (vminvq_u8(cmp) != 255) return sz_false_k;
+    uint8x16_t matches_u8x16 = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
+    if (vminvq_u8(matches_u8x16) != 255) return sz_false_k;
     return sz_true_k;
 }
 

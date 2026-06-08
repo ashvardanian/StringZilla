@@ -43,7 +43,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_lasx(sz_cptr_t text, sz_size_t length, 
 
     // We need to check if the ASCII chars in [10,13] ('\n', '\v', '\f', '\r') are present.
     // '\r' needs special handling to differentiate between "\r" and "\r\n".
-    __m256i n_vec = __lasx_xvreplgr2vr_b('\n');
+    __m256i newline_u8x32 = __lasx_xvreplgr2vr_b('\n');
     __m256i v_vec = __lasx_xvreplgr2vr_b('\v');
     __m256i f_vec = __lasx_xvreplgr2vr_b('\f');
     __m256i r_vec = __lasx_xvreplgr2vr_b('\r');
@@ -59,11 +59,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_lasx(sz_cptr_t text, sz_size_t length, 
     while (length >= 32) {
         __m256i text_vec = __lasx_xvld(text, 0);
 
-        sz_u32_t n_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, n_vec));
+        sz_u32_t newline_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, newline_u8x32));
         sz_u32_t v_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, v_vec));
         sz_u32_t f_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, f_vec));
         sz_u32_t r_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, r_vec)) & 0x7FFFFFFF; // Ignore last byte
-        sz_u32_t one_byte_mask = n_mask | v_mask | f_mask | r_mask;
+        sz_u32_t one_byte_mask = newline_mask | v_mask | f_mask | r_mask;
 
         sz_u32_t x_c2_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_c2_vec));
         sz_u32_t x_85_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_85_vec));
@@ -72,9 +72,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_lasx(sz_cptr_t text, sz_size_t length, 
         sz_u32_t x_a8_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_a8_vec));
         sz_u32_t x_a9_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_a9_vec));
 
-        sz_u32_t rn_mask = r_mask & (n_mask >> 1);
+        sz_u32_t rn_match_mask = r_mask & (newline_mask >> 1);
         sz_u32_t x_c285_mask = x_c2_mask & (x_85_mask >> 1);
-        sz_u32_t two_byte_mask = rn_mask | x_c285_mask;
+        sz_u32_t two_byte_mask = rn_match_mask | x_c285_mask;
 
         sz_u32_t x_e280_mask = x_e2_mask & (x_80_mask >> 1);
         sz_u32_t x_e280a8_mask = x_e280_mask & (x_a8_mask >> 2);
@@ -184,8 +184,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
         sz_u32_t nnbsp_mask = x_e2_mask & (x_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
         sz_u32_t mmsp_mask = x_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);             // E2 81 9F
         sz_u32_t ideographic_mask = x_e3_mask & (x_80_mask >> 1) & (x_80_mask >> 2);      // E3 80 80
-        sz_u32_t three_byte_mask =
-            ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask | ideographic_mask;
+        sz_u32_t three_byte_mask = ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask |
+                                   ideographic_mask;
 
         sz_u32_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
         if (combined_mask) {
@@ -259,9 +259,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_s
     while (length >= 32) {
         text_vec.lasx = __lasx_xvld(text_u8, 0);
         headers_vec.lasx = __lasx_xvand_v(text_vec.lasx, continuation_mask_vec);
-        sz_u32_t start_byte_mask =
-            ~sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(headers_vec.lasx, continuation_pattern_vec));
-        sz_size_t start_byte_count = (sz_size_t)__builtin_popcount(start_byte_mask);
+        sz_u32_t start_byte_mask = ~sz_xvmovemask_b_utf8_lasx_(
+            __lasx_xvseq_b(headers_vec.lasx, continuation_pattern_vec));
+        sz_size_t start_byte_count = (sz_size_t)sz_u32_popcount(start_byte_mask);
 
         if (n < start_byte_count) {
             // Drop the lowest `n` set bits, then the next set bit is our target.
@@ -332,28 +332,28 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_lasx(sz_cptr_t text, sz_size_t le
         if (boundary_width) *boundary_width = 0;
         return text;
     }
-    sz_size_t pos =
-        (sz_size_t)(1 + ((sz_u8_t)text[0] >= 0xC0) + ((sz_u8_t)text[0] >= 0xE0) + ((sz_u8_t)text[0] >= 0xF0));
-    while (pos < length) {
-        if (pos > 0 && pos + 32 <= length) {
-            sz_u32_t safe = sz_utf8_wb_safe_mask_lasx_(text, pos);
+    sz_size_t position = (sz_size_t)(1 + ((sz_u8_t)text[0] >= 0xC0) + ((sz_u8_t)text[0] >= 0xE0) +
+                                     ((sz_u8_t)text[0] >= 0xF0));
+    while (position < length) {
+        if (position > 0 && position + 32 <= length) {
+            sz_u32_t safe = sz_utf8_wb_safe_mask_lasx_(text, position);
             sz_u32_t not_safe = ~safe;
             if (not_safe == 0) {
-                pos += 32;
+                position += 32;
                 continue;
             }
-            sz_size_t skipped = pos + (sz_size_t)sz_u32_ctz(not_safe);
-            if (skipped > pos) {
-                pos = skipped;
-                if (pos >= length) break;
+            sz_size_t skipped = position + (sz_size_t)sz_u32_ctz(not_safe);
+            if (skipped > position) {
+                position = skipped;
+                if (position >= length) break;
             }
         }
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = pos;
-            return text + pos;
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = position;
+            return text + position;
         }
-        pos +=
-            (sz_size_t)(1 + ((sz_u8_t)text[pos] >= 0xC0) + ((sz_u8_t)text[pos] >= 0xE0) + ((sz_u8_t)text[pos] >= 0xF0));
+        position += (sz_size_t)(1 + ((sz_u8_t)text[position] >= 0xC0) + ((sz_u8_t)text[position] >= 0xE0) +
+                                ((sz_u8_t)text[position] >= 0xF0));
     }
     if (boundary_width) *boundary_width = length;
     return text + length;
@@ -364,27 +364,27 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_lasx(sz_cptr_t text, sz_size_t l
         if (boundary_width) *boundary_width = 0;
         return text;
     }
-    sz_size_t pos = length - 1;
-    while (pos > 0 && ((sz_u8_t)text[pos] & 0xC0) == 0x80) pos--;
-    while (pos > 0) {
-        if (pos >= 32) {
-            // Window [pos-31, pos+1): top lane is `pos` itself.
-            sz_size_t base = pos - 31;
+    sz_size_t position = length - 1;
+    while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
+    while (position > 0) {
+        if (position >= 32) {
+            // Window [position-31, position+1): top lane is `position` itself.
+            sz_size_t base = position - 31;
             sz_u32_t safe = sz_utf8_wb_safe_mask_lasx_(text, base);
             sz_u32_t not_safe = ~safe;
-            if (not_safe == 0) { pos = base; }
+            if (not_safe == 0) { position = base; }
             else {
-                int hi = 31 - sz_u32_clz(not_safe); // highest unsafe lane
-                pos = base + (sz_size_t)hi;
+                int high_index = 31 - sz_u32_clz(not_safe); // highest unsafe lane
+                position = base + (sz_size_t)high_index;
             }
-            if (pos == 0) break;
+            if (position == 0) break;
         }
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = length - pos;
-            return text + pos;
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = length - position;
+            return text + position;
         }
-        pos--;
-        while (pos > 0 && ((sz_u8_t)text[pos] & 0xC0) == 0x80) pos--;
+        position--;
+        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     }
     if (boundary_width) *boundary_width = length;
     return text;

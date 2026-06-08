@@ -24,19 +24,19 @@ extern "C" {
 #endif
 
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
-    uint64x2_t sum_vec = vdupq_n_u64(0);
+    uint64x2_t sum_u64x2 = vdupq_n_u64(0);
 
     // Process 16 bytes (128 bits) at a time
     for (; length >= 16; text += 16, length -= 16) {
-        uint8x16_t vec = vld1q_u8((sz_u8_t const *)text);      // Load 16 bytes
-        uint16x8_t pairwise_sum1 = vpaddlq_u8(vec);            // Pairwise add lower and upper 8 bits
-        uint32x4_t pairwise_sum2 = vpaddlq_u16(pairwise_sum1); // Pairwise add 16-bit results
-        uint64x2_t pairwise_sum3 = vpaddlq_u32(pairwise_sum2); // Pairwise add 32-bit results
-        sum_vec = vaddq_u64(sum_vec, pairwise_sum3);           // Accumulate the sum
+        uint8x16_t block_u8x16 = vld1q_u8((sz_u8_t const *)text);        // Load 16 bytes
+        uint16x8_t pairwise_sum_u16x8 = vpaddlq_u8(block_u8x16);         // Pairwise add lower and upper 8 bits
+        uint32x4_t pairwise_sum_u32x4 = vpaddlq_u16(pairwise_sum_u16x8); // Pairwise add 16-bit results
+        uint64x2_t pairwise_sum_u64x2 = vpaddlq_u32(pairwise_sum_u32x4); // Pairwise add 32-bit results
+        sum_u64x2 = vaddq_u64(sum_u64x2, pairwise_sum_u64x2);            // Accumulate the sum
     }
 
-    // Final reduction of `sum_vec` to a single scalar
-    sz_u64_t sum = vaddvq_u64(sum_vec);
+    // Final reduction of `sum_u64x2` to a single scalar
+    sz_u64_t sum = vaddvq_u64(sum_u64x2);
     while (length--) sum += *(sz_u8_t const *)text++; // Same as the scalar version
     return sum;
 }

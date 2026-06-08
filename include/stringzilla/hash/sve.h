@@ -29,9 +29,9 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
     sz_size_t const vector_length = svcntb();
     // SVE doesn't have widening accumulation, so we reduce across each loaded vector
     for (; progress < length; progress += vector_length) {
-        svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
-        svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
-        sum += svaddv_u8(progress_mask, text_vec);
+        svbool_t progress_b8x = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
+        svuint8_t text_u8x = svld1_u8(progress_b8x, (sz_u8_t const *)(text + progress));
+        sum += svaddv_u8(progress_b8x, text_u8x);
     }
     return sum;
 }

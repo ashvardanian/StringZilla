@@ -188,22 +188,22 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
     sz_size_t *runes_unpacked) {
 
-    sz_cptr_t src = text;
-    sz_cptr_t src_end = text + length;
+    sz_cptr_t text_cursor = text;
+    sz_cptr_t text_end = text + length;
     sz_size_t runes_written = 0;
 
     // Process up to runes_capacity codepoints or end of input.
-    while (src < src_end && runes_written < runes_capacity) {
+    while (text_cursor < text_end && runes_written < runes_capacity) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(src, &rune, &rune_length);
-        if (src + rune_length > src_end) break; // Incomplete sequence at buffer boundary
+        sz_rune_parse(text_cursor, &rune, &rune_length);
+        if (text_cursor + rune_length > text_end) break; // Incomplete sequence at buffer boundary
         runes[runes_written++] = rune;
-        src += rune_length;
+        text_cursor += rune_length;
     }
 
     *runes_unpacked = runes_written;
-    return src;
+    return text_cursor;
 }
 
 #pragma region UAX-29 Word Boundaries
@@ -768,15 +768,15 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
 
     // BMP two-stage lookup with nibble-packed stage2
     if (rune < 0x10000) {
-        sz_u8_t block_idx = sz_wb_prop_stage1_[rune >> 8];
+        sz_u8_t block_index = sz_wb_prop_stage1_[rune >> 8];
 
         // Special indices
-        if (block_idx == 0) return sz_tr29_word_break_other_k;   // All boundary
-        if (block_idx == 1) return sz_tr29_word_break_aletter_k; // All ALetter
-        if (block_idx == 255) return sz_tr29_word_break_other_k; // Fast path handled above
+        if (block_index == 0) return sz_tr29_word_break_other_k;   // All boundary
+        if (block_index == 1) return sz_tr29_word_break_aletter_k; // All ALetter
+        if (block_index == 255) return sz_tr29_word_break_other_k; // Fast path handled above
 
         // Nibble-packed lookup: each byte holds 2 properties
-        sz_size_t stage2_offset = ((sz_size_t)(block_idx - 0x80)) * 128;
+        sz_size_t stage2_offset = ((sz_size_t)(block_index - 0x80)) * 128;
         sz_u8_t low_byte = (sz_u8_t)(rune & 0xFF);
         sz_u8_t packed = sz_wb_prop_stage2_[stage2_offset + (low_byte >> 1)];
         return (low_byte & 1) ? (packed >> 4) : (packed & 0x0F);
@@ -785,16 +785,16 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     // SMP: Binary search over transition points
     // Each entry is packed as (codepoint << 4) | property
     // Property changes at each transition point
-    sz_size_t lo = 0, hi = SZ_TR29_WB_SMP_TRANSITION_COUNT_;
-    while (lo < hi) {
-        sz_size_t mid = (lo + hi) / 2;
+    sz_size_t search_low = 0, search_high = SZ_TR29_WB_SMP_TRANSITION_COUNT_;
+    while (search_low < search_high) {
+        sz_size_t mid = (search_low + search_high) / 2;
         sz_rune_t trans_cp = sz_wb_prop_smp_transitions_[mid] >> 4;
-        if (rune < trans_cp) { hi = mid; }
-        else { lo = mid + 1; }
+        if (rune < trans_cp) { search_high = mid; }
+        else { search_low = mid + 1; }
     }
-    // lo is now the index of first transition > rune, so lo-1 is our transition
-    if (lo == 0) return sz_tr29_word_break_other_k;
-    return (sz_u8_t)(sz_wb_prop_smp_transitions_[lo - 1] & 0x0F);
+    // search_low is now the index of first transition > rune, so search_low-1 is our transition
+    if (search_low == 0) return sz_tr29_word_break_other_k;
+    return (sz_u8_t)(sz_wb_prop_smp_transitions_[search_low - 1] & 0x0F);
 }
 
 /**
@@ -816,32 +816,33 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
 
 /**
  *  @brief Decode a UTF-8 codepoint starting at the given position.
- *  @return The decoded codepoint, or 0xFFFD on error. Updates pos to next codepoint.
+ *  @return The decoded codepoint, or 0xFFFD on error. Updates position to next codepoint.
  */
-SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_t *pos) {
-    if (*pos >= length) return 0;
-    sz_u8_t b0 = (sz_u8_t)text[*pos];
-    if (b0 < 0x80) {
-        (*pos)++;
-        return b0;
+SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_t *position) {
+    if (*position >= length) return 0;
+    sz_u8_t lead_byte = (sz_u8_t)text[*position];
+    if (lead_byte < 0x80) {
+        (*position)++;
+        return lead_byte;
     }
-    if ((b0 & 0xE0) == 0xC0 && *pos + 1 < length) {
-        sz_rune_t r = ((b0 & 0x1F) << 6) | (text[*pos + 1] & 0x3F);
-        *pos += 2;
-        return r;
+    if ((lead_byte & 0xE0) == 0xC0 && *position + 1 < length) {
+        sz_rune_t rune = ((lead_byte & 0x1F) << 6) | (text[*position + 1] & 0x3F);
+        *position += 2;
+        return rune;
     }
-    if ((b0 & 0xF0) == 0xE0 && *pos + 2 < length) {
-        sz_rune_t r = ((b0 & 0x0F) << 12) | ((text[*pos + 1] & 0x3F) << 6) | (text[*pos + 2] & 0x3F);
-        *pos += 3;
-        return r;
+    if ((lead_byte & 0xF0) == 0xE0 && *position + 2 < length) {
+        sz_rune_t rune = ((lead_byte & 0x0F) << 12) | ((text[*position + 1] & 0x3F) << 6) |
+                         (text[*position + 2] & 0x3F);
+        *position += 3;
+        return rune;
     }
-    if ((b0 & 0xF8) == 0xF0 && *pos + 3 < length) {
-        sz_rune_t r = ((b0 & 0x07) << 18) | ((text[*pos + 1] & 0x3F) << 12) | ((text[*pos + 2] & 0x3F) << 6) |
-                      (text[*pos + 3] & 0x3F);
-        *pos += 4;
-        return r;
+    if ((lead_byte & 0xF8) == 0xF0 && *position + 3 < length) {
+        sz_rune_t rune = ((lead_byte & 0x07) << 18) | ((text[*position + 1] & 0x3F) << 12) |
+                         ((text[*position + 2] & 0x3F) << 6) | (text[*position + 3] & 0x3F);
+        *position += 4;
+        return rune;
     }
-    (*pos)++;
+    (*position)++;
     return 0xFFFD;
 }
 
@@ -883,33 +884,34 @@ SZ_INTERNAL sz_bool_t sz_wb_is_midnumletq_(sz_u8_t prop) {
  *  @brief Skip forward past WB4-ignorable characters (Extend, Format, ZWJ).
  *  @return Position after ignorables, or original position if none.
  */
-SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t pos) {
-    while (pos < length) {
-        sz_size_t next_pos = pos;
-        sz_rune_t rune = sz_utf8_decode_(text, length, &next_pos);
+SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    while (position < length) {
+        sz_size_t next_position = position;
+        sz_rune_t rune = sz_utf8_decode_(text, length, &next_position);
         sz_u8_t prop = sz_rune_word_break_property(rune);
         if (!sz_wb_is_ignorable_(prop)) break;
-        pos = next_pos;
+        position = next_position;
     }
-    return pos;
+    return position;
 }
 
 /**
  *  @brief Get the effective property at position, skipping WB4 ignorables.
  *         Returns the property and updates next_pos to position after ignorables.
  */
-SZ_INTERNAL sz_u8_t sz_wb_get_effective_prop_(sz_cptr_t text, sz_size_t length, sz_size_t pos, sz_size_t *next_pos) {
-    sz_size_t cur = pos;
-    sz_rune_t rune = sz_utf8_decode_(text, length, &cur);
+SZ_INTERNAL sz_u8_t sz_wb_get_effective_prop_(sz_cptr_t text, sz_size_t length, sz_size_t position,
+                                              sz_size_t *next_position) {
+    sz_size_t current = position;
+    sz_rune_t rune = sz_utf8_decode_(text, length, &current);
     sz_u8_t prop = sz_rune_word_break_property(rune);
 
     // Skip ignorables to find effective next
-    while (cur < length && sz_wb_is_ignorable_(prop)) {
-        rune = sz_utf8_decode_(text, length, &cur);
+    while (current < length && sz_wb_is_ignorable_(prop)) {
+        rune = sz_utf8_decode_(text, length, &current);
         prop = sz_rune_word_break_property(rune);
     }
 
-    if (next_pos) *next_pos = cur;
+    if (next_position) *next_position = current;
     return prop;
 }
 
@@ -917,24 +919,24 @@ SZ_INTERNAL sz_u8_t sz_wb_get_effective_prop_(sz_cptr_t text, sz_size_t length, 
  *  @brief Look back to find the previous non-ignorable property.
  *  @return The property of the previous significant character, or sz_tr29_word_break_other_k if none.
  */
-SZ_INTERNAL sz_u8_t sz_wb_prev_prop_(sz_cptr_t text, sz_size_t pos) {
-    if (pos == 0) return sz_tr29_word_break_other_k;
+SZ_INTERNAL sz_u8_t sz_wb_prev_prop_(sz_cptr_t text, sz_size_t position) {
+    if (position == 0) return sz_tr29_word_break_other_k;
 
     // Scan backward to find start of previous codepoint
-    sz_size_t prev = pos - 1;
-    while (prev > 0 && ((sz_u8_t)text[prev] & 0xC0) == 0x80) prev--;
+    sz_size_t previous = position - 1;
+    while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
 
     // Decode and get property
-    sz_size_t decode_pos = prev;
-    sz_rune_t rune = sz_utf8_decode_(text, pos, &decode_pos);
+    sz_size_t decode_position = previous;
+    sz_rune_t rune = sz_utf8_decode_(text, position, &decode_position);
     sz_u8_t prop = sz_rune_word_break_property(rune);
 
     // Skip back over ignorables
-    while (sz_wb_is_ignorable_(prop) && prev > 0) {
-        prev--;
-        while (prev > 0 && ((sz_u8_t)text[prev] & 0xC0) == 0x80) prev--;
-        decode_pos = prev;
-        rune = sz_utf8_decode_(text, pos, &decode_pos);
+    while (sz_wb_is_ignorable_(prop) && previous > 0) {
+        previous--;
+        while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
+        decode_position = previous;
+        rune = sz_utf8_decode_(text, position, &decode_position);
         prop = sz_rune_word_break_property(rune);
     }
 
@@ -944,25 +946,25 @@ SZ_INTERNAL sz_u8_t sz_wb_prev_prop_(sz_cptr_t text, sz_size_t pos) {
 /**
  *  @brief Count Regional Indicators before position (for WB15/16).
  */
-SZ_INTERNAL sz_size_t sz_wb_count_ri_before_(sz_cptr_t text, sz_size_t pos) {
+SZ_INTERNAL sz_size_t sz_wb_count_ri_before_(sz_cptr_t text, sz_size_t position) {
     sz_size_t count = 0;
-    sz_size_t cur = pos;
+    sz_size_t current = position;
 
-    while (cur > 0) {
+    while (current > 0) {
         // Find previous codepoint
-        sz_size_t prev = cur - 1;
-        while (prev > 0 && ((sz_u8_t)text[prev] & 0xC0) == 0x80) prev--;
+        sz_size_t previous = current - 1;
+        while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
 
-        sz_size_t decode_pos = prev;
-        sz_rune_t rune = sz_utf8_decode_(text, cur, &decode_pos);
+        sz_size_t decode_position = previous;
+        sz_rune_t rune = sz_utf8_decode_(text, current, &decode_position);
         sz_u8_t prop = sz_rune_word_break_property(rune);
 
         if (prop == sz_tr29_word_break_regional_ind_k) {
             count++;
-            cur = prev;
+            current = previous;
         }
         else if (sz_wb_is_ignorable_(prop)) {
-            cur = prev; // Skip ignorables
+            current = previous; // Skip ignorables
         }
         else { break; }
     }
@@ -975,20 +977,20 @@ SZ_INTERNAL sz_size_t sz_wb_count_ri_before_(sz_cptr_t text, sz_size_t pos) {
  *  Implements the TR29 word boundary algorithm. Position 0 and position == length
  *  are always boundaries (WB1/WB2).
  */
-SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t pos) {
+SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     // WB1: Break at start of text
-    if (pos == 0) return sz_true_k;
+    if (position == 0) return sz_true_k;
     // WB2: Break at end of text
-    if (pos >= length) return sz_true_k;
+    if (position >= length) return sz_true_k;
 
     // Never break at UTF-8 continuation bytes (0x80-0xBF)
-    if (((sz_u8_t)text[pos] & 0xC0) == 0x80) return sz_false_k;
+    if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
 
     // Get properties of characters before and after the boundary
-    sz_u8_t prev_prop = sz_wb_prev_prop_(text, pos);
+    sz_u8_t prev_prop = sz_wb_prev_prop_(text, position);
 
-    sz_size_t after_pos = pos;
-    sz_rune_t after_rune = sz_utf8_decode_(text, length, &after_pos);
+    sz_size_t after_position = position;
+    sz_rune_t after_rune = sz_utf8_decode_(text, length, &after_position);
     sz_u8_t after_prop = sz_rune_word_break_property(after_rune);
 
     // WB3: Do not break between CR and LF
@@ -1011,8 +1013,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     // WB4: Ignore Format and Extend characters - get effective properties
     // Skip ignorables after position to get effective "after" property
     if (sz_wb_is_ignorable_(after_prop)) {
-        sz_size_t skip_pos = pos;
-        after_prop = sz_wb_get_effective_prop_(text, length, skip_pos, (sz_size_t *)0);
+        sz_size_t skip_position = position;
+        after_prop = sz_wb_get_effective_prop_(text, length, skip_position, (sz_size_t *)0);
     }
 
     // WB5: Do not break between AHLetter
@@ -1022,11 +1024,11 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if (sz_wb_is_ahletter_(prev_prop) &&
         (after_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(after_prop))) {
         // Look ahead to see if followed by AHLetter
-        sz_size_t lookahead = after_pos;
+        sz_size_t lookahead = after_position;
         lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
         if (lookahead < length) {
-            sz_size_t la_pos = lookahead;
-            sz_rune_t la_rune = sz_utf8_decode_(text, length, &la_pos);
+            sz_size_t la_position = lookahead;
+            sz_rune_t la_rune = sz_utf8_decode_(text, length, &la_position);
             sz_u8_t la_prop = sz_rune_word_break_property(la_rune);
             if (sz_wb_is_ahletter_(la_prop)) return sz_false_k;
         }
@@ -1036,14 +1038,14 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if ((prev_prop == sz_tr29_word_break_midletter_k || sz_wb_is_midnumletq_(prev_prop)) &&
         sz_wb_is_ahletter_(after_prop)) {
         // Look back to see if preceded by AHLetter
-        // This requires looking at the character before prev
-        sz_size_t prev_prev_end = pos - 1;
-        while (prev_prev_end > 0 && ((sz_u8_t)text[prev_prev_end] & 0xC0) == 0x80) prev_prev_end--;
-        if (prev_prev_end > 0) {
-            sz_size_t pp_start = prev_prev_end - 1;
-            while (pp_start > 0 && ((sz_u8_t)text[pp_start] & 0xC0) == 0x80) pp_start--;
-            sz_size_t pp_pos = pp_start;
-            sz_rune_t pp_rune = sz_utf8_decode_(text, prev_prev_end, &pp_pos);
+        // This requires looking at the character before the previous codepoint's position
+        sz_size_t previous_cp_start = position - 1;
+        while (previous_cp_start > 0 && ((sz_u8_t)text[previous_cp_start] & 0xC0) == 0x80) previous_cp_start--;
+        if (previous_cp_start > 0) {
+            sz_size_t pp_cp_start = previous_cp_start - 1;
+            while (pp_cp_start > 0 && ((sz_u8_t)text[pp_cp_start] & 0xC0) == 0x80) pp_cp_start--;
+            sz_size_t pp_position = pp_cp_start;
+            sz_rune_t pp_rune = sz_utf8_decode_(text, previous_cp_start, &pp_position);
             sz_u8_t pp_prop = sz_rune_word_break_property(pp_rune);
             if (sz_wb_is_ahletter_(pp_prop)) return sz_false_k;
         }
@@ -1065,11 +1067,11 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     // WB11: Do not break Numeric × (MidNum|MidNumLetQ) × Numeric
     if (prev_prop == sz_tr29_word_break_numeric_k &&
         (after_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(after_prop))) {
-        sz_size_t lookahead = after_pos;
+        sz_size_t lookahead = after_position;
         lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
         if (lookahead < length) {
-            sz_size_t la_pos = lookahead;
-            sz_rune_t la_rune = sz_utf8_decode_(text, length, &la_pos);
+            sz_size_t la_position = lookahead;
+            sz_rune_t la_rune = sz_utf8_decode_(text, length, &la_position);
             sz_u8_t la_prop = sz_rune_word_break_property(la_rune);
             if (la_prop == sz_tr29_word_break_numeric_k) return sz_false_k;
         }
@@ -1079,13 +1081,13 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     if ((prev_prop == sz_tr29_word_break_midnum_k || sz_wb_is_midnumletq_(prev_prop)) &&
         after_prop == sz_tr29_word_break_numeric_k) {
         // Check if preceded by Numeric
-        sz_size_t prev_prev_end = pos - 1;
-        while (prev_prev_end > 0 && ((sz_u8_t)text[prev_prev_end] & 0xC0) == 0x80) prev_prev_end--;
-        if (prev_prev_end > 0) {
-            sz_size_t pp_start = prev_prev_end - 1;
-            while (pp_start > 0 && ((sz_u8_t)text[pp_start] & 0xC0) == 0x80) pp_start--;
-            sz_size_t pp_pos = pp_start;
-            sz_rune_t pp_rune = sz_utf8_decode_(text, prev_prev_end, &pp_pos);
+        sz_size_t previous_cp_start = position - 1;
+        while (previous_cp_start > 0 && ((sz_u8_t)text[previous_cp_start] & 0xC0) == 0x80) previous_cp_start--;
+        if (previous_cp_start > 0) {
+            sz_size_t pp_cp_start = previous_cp_start - 1;
+            while (pp_cp_start > 0 && ((sz_u8_t)text[pp_cp_start] & 0xC0) == 0x80) pp_cp_start--;
+            sz_size_t pp_position = pp_cp_start;
+            sz_rune_t pp_rune = sz_utf8_decode_(text, previous_cp_start, &pp_position);
             sz_u8_t pp_prop = sz_rune_word_break_property(pp_rune);
             if (pp_prop == sz_tr29_word_break_numeric_k) return sz_false_k;
         }
@@ -1109,7 +1111,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     // WB15/16: Do not break between Regional Indicators (keep pairs together)
     if (prev_prop == sz_tr29_word_break_regional_ind_k && after_prop == sz_tr29_word_break_regional_ind_k) {
         // Count RI before - if odd, don't break (we're in the middle of a pair)
-        sz_size_t ri_count = sz_wb_count_ri_before_(text, pos);
+        sz_size_t ri_count = sz_wb_count_ri_before_(text, position);
         if (ri_count % 2 == 1) return sz_false_k;
     }
 
@@ -1117,34 +1119,23 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     return sz_true_k;
 }
 
-/**
- *  @brief Find the next word boundary in UTF-8 text.
- *
- *  Scans forward from the start of text to find the first word boundary position
- *  after position 0 (since position 0 is always a boundary).
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Outputs bytes consumed to reach boundary.
- *  @return Pointer to boundary position, or text+length if at end.
- */
 SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
     if (length == 0) {
         if (boundary_width) *boundary_width = 0;
         return text;
     }
 
-    sz_size_t pos = 0;
+    sz_size_t position = 0;
     // Skip first codepoint (position 0 is always a boundary)
-    if (pos < length) { pos += sz_utf8_char_length_((sz_u8_t)text[pos]); }
+    if (position < length) { position += sz_utf8_char_length_((sz_u8_t)text[position]); }
 
     // Scan for next boundary
-    while (pos < length) {
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = pos;
-            return text + pos;
+    while (position < length) {
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = position;
+            return text + position;
         }
-        pos += sz_utf8_char_length_((sz_u8_t)text[pos]);
+        position += sz_utf8_char_length_((sz_u8_t)text[position]);
     }
 
     // End of text is always a boundary
@@ -1152,38 +1143,27 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t 
     return text + length;
 }
 
-/**
- *  @brief Find the previous word boundary in UTF-8 text (reverse search).
- *
- *  Scans backward from the end of text to find the last word boundary position
- *  before position length (since position length is always a boundary).
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Outputs bytes from boundary to end.
- *  @return Pointer to boundary position, or text if at start.
- */
 SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
     if (length == 0) {
         if (boundary_width) *boundary_width = 0;
         return text;
     }
 
-    sz_size_t pos = length;
+    sz_size_t position = length;
     // Move back one codepoint (position length is always a boundary)
-    if (pos > 0) {
-        pos--;
-        while (pos > 0 && ((sz_u8_t)text[pos] & 0xC0) == 0x80) pos--;
+    if (position > 0) {
+        position--;
+        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     }
 
     // Scan backward for previous boundary
-    while (pos > 0) {
-        if (sz_utf8_is_word_boundary_serial(text, length, pos)) {
-            if (boundary_width) *boundary_width = length - pos;
-            return text + pos;
+    while (position > 0) {
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+            if (boundary_width) *boundary_width = length - position;
+            return text + position;
         }
-        pos--;
-        while (pos > 0 && ((sz_u8_t)text[pos] & 0xC0) == 0x80) pos--;
+        position--;
+        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     }
 
     // Start of text is always a boundary

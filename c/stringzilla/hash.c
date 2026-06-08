@@ -216,8 +216,8 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_dispatch_table.hash_state_digest(state);
 }
 
-SZ_DYNAMIC void sz_fill_random(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {
-    sz_dispatch_table.fill_random(result, result_length, nonce);
+SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+    sz_dispatch_table.fill_random(text, length, nonce);
 }
 
 SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) { sz_dispatch_table.sha256_state_init(state); }
@@ -233,9 +233,9 @@ SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t d
 // Provide overrides for the libc mem* functions
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
 #if !defined(_MSC_VER)
-SZ_DYNAMIC void memfrob(void *s, size_t n) {
+SZ_DYNAMIC void memfrob(void *target, size_t length) {
     static sz_u64_t nonce = 42;
-    sz_fill_random(s, n, nonce++);
+    sz_fill_random(target, length, nonce++);
 }
 #endif
 #endif // SZ_OVERRIDE_LIBC

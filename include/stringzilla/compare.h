@@ -30,9 +30,9 @@ extern "C" {
  *  @brief Checks if two strings are equal. Equivalent to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
  *  @see https://en.cppreference.com/w/c/string/byte/memcmp
  *
- *  @param[in] a First string to compare.
- *  @param[in] b Second string to compare.
- *  @param[in] length Number of bytes to compare in both strings.
+ *  @param a First string to compare.
+ *  @param b Second string to compare.
+ *  @param length Number of bytes to compare in both strings.
  *
  *  @retval `sz_true_k` if strings are equal.
  *  @retval `sz_false_k` if strings are different.
@@ -61,10 +61,10 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *  differ - will have differences among the very first characters and fetching more than one cache
  *  line may not be justified.
  *
- *  @param[in] a First string to compare.
- *  @param[in] a_length Number of bytes in the first string.
- *  @param[in] b Second string to compare.
- *  @param[in] b_length Number of bytes in the second string.
+ *  @param a First string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b Second string to compare.
+ *  @param b_length Number of bytes in the second string.
  *
  *  @retval `sz_less_k` if @p a is lexicographically smaller than @p b.
  *  @retval `sz_greater_k` if @p a is lexicographically greater than @p b.

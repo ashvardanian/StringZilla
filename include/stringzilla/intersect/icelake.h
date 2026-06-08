@@ -36,18 +36,25 @@ extern "C" {
                    "aes", "vaes", "sha")
 #endif
 
-SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i v) {
-    // Assume `v` stores values: [a, b, c, d].
-    __m256i cmp1 = _mm256_cmpeq_epi64(v, _mm256_permute4x64_epi64(v, 0xB1)); // 0xB1 produces [b, a, d, c]
-    __m256i cmp2 = _mm256_cmpeq_epi64(v, _mm256_permute4x64_epi64(v, 0x4E)); // 0x4E produces [c, d, a, b]
-    __m256i cmp3 = _mm256_cmpeq_epi64(v, _mm256_permute4x64_epi64(v, 0x1B)); // 0x1B produces [d, c, b, a]
+/**
+ *  @brief Checks whether any two of the four 64-bit integers in a 256-bit vector are equal (i.e., have collisions).
+ *      Used to detect slot collisions before attempting a vectorized scatter into the hash table.
+ *
+ *  @param values A 256-bit vector holding four 64-bit values [a, b, c, d].
+ *  @return Non-zero if at least two of the four values are identical, zero otherwise.
+ */
+SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i values) {
+    // Assume `values` stores: [a, b, c, d].
+    __m256i cmp1 = _mm256_cmpeq_epi64(values, _mm256_permute4x64_epi64(values, 0xB1)); // 0xB1 produces [b, a, d, c]
+    __m256i cmp2 = _mm256_cmpeq_epi64(values, _mm256_permute4x64_epi64(values, 0x4E)); // 0x4E produces [c, d, a, b]
+    __m256i cmp3 = _mm256_cmpeq_epi64(values, _mm256_permute4x64_epi64(values, 0x1B)); // 0x1B produces [d, c, b, a]
 
     // Combine the results from the three comparisons.
     __m256i cmp = _mm256_or_si256(_mm256_or_si256(cmp1, cmp2), cmp3);
 
     // Each 64-bit lane comparison yields all ones if equal, so the movemask will be nonzero if any pair matched.
-    int mask = _mm256_movemask_epi8(cmp);
-    return mask;
+    int matches_mask = _mm256_movemask_epi8(cmp);
+    return matches_mask;
 }
 
 SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                                //
@@ -124,16 +131,16 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
 
         // If we couldn't populate the whole batch, fall back to the serial solution
         if (batch_size != 4) {
-            for (sz_size_t i = 0; i < batch_size; ++i) {
-                sz_cptr_t const str = batch[i].start;
-                sz_size_t const length = batch[i].length;
+            for (sz_size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
+                sz_cptr_t const str = batch[batch_index].start;
+                sz_size_t const length = batch[batch_index].length;
                 sz_u64_t const hash = sz_hash(str, length, seed);
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to find the first free slot.
                 // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
                 while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
                 table_hashes[hash_slot] = hash;
-                table_positions[hash_slot] = batch_positions.u64s[i];
+                table_positions[hash_slot] = batch_positions.u64s[batch_index];
             }
         }
         // The batch is successfully populated, let's use the vectorized solution
@@ -165,8 +172,8 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
 
             // Before scattering the new positions - gather the pre-existing ones.
             // In case of `has_slot_collisions`, this will practically be a "prefetch" operation.
-            existing_hashes.ymm =
-                _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots.ymm, table_hashes, 8);
+            existing_hashes.ymm = _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots.ymm,
+                                                               table_hashes, 8);
 
             // Check that we don't have any collisions - in that case each value will be equal to `SZ_SIZE_MAX`
             int const all_empty = _mm256_testc_si256(existing_hashes.ymm, _mm256_set1_epi64x(-1));
@@ -177,13 +184,13 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             }
             else {
                 // We have a collision, let's resolve it with a serial solution
-                for (sz_size_t i = 0; i < 4; ++i) {
-                    sz_size_t hash_slot = batch_slots.u64s[i] & (hash_table_slots - 1);
+                for (sz_size_t batch_index = 0; batch_index < 4; ++batch_index) {
+                    sz_size_t hash_slot = batch_slots.u64s[batch_index] & (hash_table_slots - 1);
                     // Implement linear probing to find the first free slot.
                     // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
                     while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
-                    table_hashes[hash_slot] = batch_hashes.u64s[i];
-                    table_positions[hash_slot] = batch_positions.u64s[i];
+                    table_hashes[hash_slot] = batch_hashes.u64s[batch_index];
+                    table_positions[hash_slot] = batch_positions.u64s[batch_index];
                 }
             }
         }
@@ -210,9 +217,9 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
 
         // If we couldn't populate the whole batch, fall back to the serial solution
         if (batch_size != 4) {
-            for (sz_size_t i = 0; i < batch_size; ++i) {
-                sz_cptr_t const str = batch[i].start;
-                sz_size_t const length = batch[i].length;
+            for (sz_size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
+                sz_cptr_t const str = batch[batch_index].start;
+                sz_size_t const length = batch[batch_index].length;
                 sz_u64_t const hash = sz_hash(str, length, seed);
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to resolve collisions.
@@ -232,7 +239,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
 
                     // Finally, there is a match, store the positions.
                     small_positions[intersection_count] = small_position;
-                    large_positions[intersection_count] = batch_positions.u64s[i];
+                    large_positions[intersection_count] = batch_positions.u64s[batch_index];
                     ++intersection_count;
                     break;
                 }
@@ -266,13 +273,13 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             // This can help us detect values:
             // - that are definitely missing in the hash table, if the slot is just NULL-ed
             // - that may be present in the hash table, and need to be validated in the loop
-            existing_hashes.ymm =
-                _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots.ymm, table_hashes, 8);
+            existing_hashes.ymm = _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots.ymm,
+                                                               table_hashes, 8);
 
             // Check if we already have all of those slots populated with exactly the same values
             int const same_hashes = _mm256_movemask_epi8(_mm256_cmpeq_epi64(existing_hashes.ymm, batch_hashes.ymm));
-            int const nulled_hashes =
-                _mm256_movemask_epi8(_mm256_cmpeq_epi64(existing_hashes.ymm, _mm256_set1_epi64x(-1)));
+            int const nulled_hashes = _mm256_movemask_epi8(
+                _mm256_cmpeq_epi64(existing_hashes.ymm, _mm256_set1_epi64x(-1)));
 
             // Now for every one of the 4 hashed values we can have several outcomes:
             // - it's an "empty" value → no match
@@ -281,15 +288,15 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             // - it's the same hash for the same string, so we have a match → export
             //
             // That logic is too complex to be effectively handled by SIMD, so we switch back to serial code.
-            for (sz_size_t i = 0; i < 4; ++i) {
-                sz_cptr_t const str = batch[i].start;
-                sz_size_t const length = batch[i].length;
-                sz_u64_t const hash = batch_hashes.u64s[i];
-                int const same_hash = (same_hashes >> (8 * i)) & 0xFF;
-                int const nulled_hash = (nulled_hashes >> (8 * i)) & 0xFF;
+            for (sz_size_t batch_index = 0; batch_index < 4; ++batch_index) {
+                sz_cptr_t const str = batch[batch_index].start;
+                sz_size_t const length = batch[batch_index].length;
+                sz_u64_t const hash = batch_hashes.u64s[batch_index];
+                int const same_hash = (same_hashes >> (8 * batch_index)) & 0xFF;
+                int const nulled_hash = (nulled_hashes >> (8 * batch_index)) & 0xFF;
                 if (nulled_hash) continue;
 
-                sz_size_t hash_slot = batch_slots.u64s[i];
+                sz_size_t hash_slot = batch_slots.u64s[batch_index];
                 // This optimization may look like just one less  memory load,
                 // but it will help us produce a different set of branches and will affect
                 // the branch prediction quality on the CPU backend.
@@ -304,7 +311,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
                         if (same == sz_true_k) {
                             // Finally, there is a match, store the positions.
                             small_positions[intersection_count] = small_position;
-                            large_positions[intersection_count] = batch_positions.u64s[i];
+                            large_positions[intersection_count] = batch_positions.u64s[batch_index];
                             ++intersection_count;
                             // Now go to the next value in the batch.
                             continue;
@@ -331,7 +338,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
 
                     // Finally, there is a match, store the positions.
                     small_positions[intersection_count] = small_position;
-                    large_positions[intersection_count] = batch_positions.u64s[i];
+                    large_positions[intersection_count] = batch_positions.u64s[batch_index];
                     ++intersection_count;
                     break;
                 }

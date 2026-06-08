@@ -13,10 +13,6 @@
 extern "C" {
 #endif
 
-/**
- *  @brief Byte-level equality comparison between two strings.
- *         If unaligned loads are allowed, uses a switch-table to avoid loops on short strings.
- */
 SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_cptr_t const a_end = a + length;
 #if SZ_USE_MISALIGNED_LOADS

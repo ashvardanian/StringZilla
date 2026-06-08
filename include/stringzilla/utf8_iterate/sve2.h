@@ -69,10 +69,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
     // a few very convenient and cheap instructions. Most importantly, we have `svmatch` instruction
     // that can match against a set of bytes in one go, similar to many invocations of `vceqq` in NEON
     // with subsequent mask combination.
-    svuint8_t prefix_byte_set =
-        svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
-    svuint8_t one_byte_set =
-        svdupq_n_u8('\n', '\v', '\f', '\r', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n');
+    svuint8_t prefix_byte_set = svdupq_n_u8('\n', '\v', '\f', '\r', 0xC2, 0xE2, '\n', '\n', '\n', '\n', '\n', '\n',
+                                            '\n', '\n', '\n', '\n');
+    svuint8_t one_byte_set = svdupq_n_u8('\n', '\v', '\f', '\r', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n', '\n',
+                                         '\n', '\n', '\n');
     svuint8_t zeros = svdup_n_u8(0);
 
     // We load full `step` bytes but only match on first `step - 2` positions.
@@ -103,8 +103,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
 
         // 3-byte matches
         svbool_t x_e280_mask = svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE2), svcmpeq_n_u8(pg, text1, 0x80));
-        svbool_t three_byte_mask =
-            svand_b_z(pg, x_e280_mask, svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8), svcmpeq_n_u8(pg, text2, 0xA9)));
+        svbool_t three_byte_mask = svand_b_z(
+            pg, x_e280_mask, svorr_b_z(pg, svcmpeq_n_u8(pg, text2, 0xA8), svcmpeq_n_u8(pg, text2, 0xA9)));
 
         // Technically, we may want to exclude "\r" that is part of "\r\n" from one-byte matches,
         // but we don't really need it here - it won't affect the exstimates.
@@ -112,15 +112,15 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, 
         //      one_byte_mask = svbic_b_z(pg, one_byte_mask, rn_mask);
         svbool_t combined_mask = svorr_b_z(pg, one_byte_mask, svorr_b_z(pg, two_byte_mask, three_byte_mask));
         if (svptest_any(pg, combined_mask)) {
-            sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, combined_mask));
-            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)pos);
+            sz_size_t byte_offset = svcntp_b8(pg, svbrkb_b_z(pg, combined_mask));
+            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)byte_offset);
             sz_size_t has_two_byte = svptest_any(at_pos, two_byte_mask);
             sz_size_t has_three_byte = svptest_any(at_pos, three_byte_mask);
             sz_size_t length_value = 1;
             length_value += has_two_byte | has_three_byte;
             length_value += has_three_byte;
             *matched_length = length_value;
-            return (sz_cptr_t)(text_u8 + offset + pos);
+            return (sz_cptr_t)(text_u8 + offset + byte_offset);
         }
         offset += usable_step;
     }
@@ -137,13 +137,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
     if (length < step) return sz_utf8_find_whitespace_serial(text, length, matched_length);
 
     // Character sets for MATCH (DUPQ replicates 128-bit pattern, no stack/loads)
-    svuint8_t any_byte_set =
-        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, ' ', ' ', ' ', ' ', ' ', ' ');
-    svuint8_t one_byte_set =
-        svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
+    svuint8_t any_byte_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', 0xC2, 0xE1, 0xE2, 0xE3, ' ', ' ', ' ', ' ',
+                                         ' ', ' ');
+    svuint8_t one_byte_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+                                         ' ');
     // Valid third bytes for E2 80 XX: U+2000-U+200D (0x80-0x8D), U+2028 (0xA8), U+2029 (0xA9)
-    svuint8_t e280_third_bytes =
-        svdupq_n_u8(0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0xA8, 0xA9);
+    svuint8_t e280_third_bytes = svdupq_n_u8(0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B,
+                                             0x8C, 0x8D, 0xA8, 0xA9);
     svuint8_t zeros = svdup_n_u8(0);
 
     // We load full `step` bytes but only match on first `step - 2` positions.
@@ -184,28 +184,28 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
         // U+202F: E2 80 AF (NARROW NO-BREAK SPACE) - doesn't fit in the 16-byte set
         svbool_t nnbsp_mask = svand_b_z(pg, x_e280_mask, svcmpeq_n_u8(pg, text2, 0xAF));
         // U+205F: E2 81 9F (MEDIUM MATHEMATICAL SPACE)
-        svbool_t mmsp_mask =
-            svand_b_z(pg, svand_b_z(pg, x_e2_mask, svcmpeq_n_u8(pg, text1, 0x81)), svcmpeq_n_u8(pg, text2, 0x9F));
+        svbool_t mmsp_mask = svand_b_z(pg, svand_b_z(pg, x_e2_mask, svcmpeq_n_u8(pg, text1, 0x81)),
+                                       svcmpeq_n_u8(pg, text2, 0x9F));
 
         // 3-byte: E3 80 80 (IDEOGRAPHIC SPACE)
-        svbool_t ideographic_mask =
-            svand_b_z(pg, svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE3), svcmpeq_n_u8(pg, text1, 0x80)),
-                      svcmpeq_n_u8(pg, text2, 0x80));
+        svbool_t ideographic_mask = svand_b_z(
+            pg, svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE3), svcmpeq_n_u8(pg, text1, 0x80)),
+            svcmpeq_n_u8(pg, text2, 0x80));
 
         svbool_t three_byte_mask = svorr_b_z(pg, svorr_b_z(pg, ogham_mask, svorr_b_z(pg, x_e280xx_mask, nnbsp_mask)),
                                              svorr_b_z(pg, mmsp_mask, ideographic_mask));
         svbool_t combined_mask = svorr_b_z(pg, one_byte_mask, svorr_b_z(pg, two_byte_mask, three_byte_mask));
 
         if (svptest_any(pg, combined_mask)) {
-            sz_size_t pos = svcntp_b8(pg, svbrkb_b_z(pg, combined_mask));
-            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)pos);
+            sz_size_t byte_offset = svcntp_b8(pg, svbrkb_b_z(pg, combined_mask));
+            svbool_t at_pos = svcmpeq_n_u8(svptrue_b8(), svindex_u8(0, 1), (sz_u8_t)byte_offset);
             sz_size_t has_two_byte = svptest_any(at_pos, two_byte_mask);
             sz_size_t has_three_byte = svptest_any(at_pos, three_byte_mask);
             sz_size_t length_value = 1;
             length_value += has_two_byte | has_three_byte;
             length_value += has_three_byte;
             *matched_length = length_value;
-            return (sz_cptr_t)(text_u8 + offset + pos);
+            return (sz_cptr_t)(text_u8 + offset + byte_offset);
         }
         offset += usable_step;
     }

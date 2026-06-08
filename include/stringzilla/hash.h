@@ -89,8 +89,8 @@ extern "C" {
  *  @brief Computes the 64-bit check-sum of bytes in a string.
  *         Similar to `std::ranges::accumulate`.
  *
- *  @param[in] text String to aggregate.
- *  @param[in] length Number of bytes in the text.
+ *  @param text String to aggregate.
+ *  @param length Number of bytes in the text.
  *  @return 64-bit unsigned value.
  *
  *  Example usage:
@@ -115,9 +115,9 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *         It passes the SMHasher suite by Austin Appleby with no collisions, even with `--extra` flag.
  *  @see HASH.md for a detailed explanation of the algorithm.
  *
- *  @param[in] text String to hash.
- *  @param[in] length Number of bytes in the text.
- *  @param[in] seed 64-bit unsigned seed for the hash.
+ *  @param text String to hash.
+ *  @param length Number of bytes in the text.
+ *  @param seed 64-bit unsigned seed for the hash.
  *  @return 64-bit hash value.
  *
  *  Example usage:
@@ -151,9 +151,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *  In this case, it doesn't apply, as we only use one round of AES mixing. We also don't expose a separate "key",
  *  only a "nonce", to keep the API simple, but we mix it with 512 bits of Pi constants to increase randomness.
  *
- *  @param[out] text Output string buffer to be populated.
- *  @param[in] length Number of bytes in the string.
- *  @param[in] nonce "Number used ONCE" to ensure uniqueness of produced blocks.
+ *  @param text Output string buffer to be populated.
+ *  @param length Number of bytes in the string.
+ *  @param nonce "Number used ONCE" to ensure uniqueness of produced blocks.
  *
  *  Example usage:
  *
@@ -235,24 +235,24 @@ typedef struct sz_sha256_state_t {
 /**
  *  @brief Initializes the state for incremental construction of a hash.
  *
- *  @param[out] state The state to initialize.
- *  @param[in] seed The 64-bit unsigned seed for the hash.
+ *  @param state The state to initialize.
+ *  @param seed The 64-bit unsigned seed for the hash.
  */
 SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
 
 /**
  *  @brief Updates the state with new data.
  *
- *  @param[inout] state The state to stream.
- *  @param[in] text The new data to include in the hash.
- *  @param[in] length The number of bytes in the new data.
+ *  @param state The state to stream.
+ *  @param text The new data to include in the hash.
+ *  @param length The number of bytes in the new data.
  */
 SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Finalizes the immutable state and returns the hash.
  *
- *  @param[in] state The state to fold.
+ *  @param state The state to fold.
  *  @return The 64-bit hash value.
  */
 SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
@@ -260,24 +260,24 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 /**
  *  @brief Initializes the state for incremental SHA256 hashing.
  *
- *  @param[out] state The state to initialize.
+ *  @param state The state to initialize.
  */
 SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state);
 
 /**
  *  @brief Updates the SHA256 state with new data.
  *
- *  @param[inout] state The state to update.
- *  @param[in] data The new data to hash.
- *  @param[in] length The number of bytes in the new data.
+ *  @param state The state to update.
+ *  @param data The new data to hash.
+ *  @param length The number of bytes in the new data.
  */
 SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /**
  *  @brief Finalizes the SHA256 state and returns the hash.
  *
- *  @param[in] state The state to finalize.
- *  @param[out] digest Output buffer for the 32-byte (256-bit) hash.
+ *  @param state The state to finalize.
+ *  @param digest Output buffer for the 32-byte (256-bit) hash.
  */
 SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 

@@ -838,28 +838,28 @@ typedef struct sz_memory_allocator_t {
 /**
  *  @brief Initializes a memory allocator to use the system default `malloc` and `free`.
  *  @warning The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
- *  @param[in] alloc Memory allocator to initialize.
+ *  @param allocator Memory allocator to initialize.
  *
  *  @note Unlike the C standard library, the `malloc(0)` is guaranteed to return a non-null pointer.
  *  @see https://en.cppreference.com/w/c/memory/malloc
  */
-SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
+SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
 
 /**
  *  @brief Initializes a memory allocator to use only a static-capacity buffer @b w/out any dynamic allocations.
- *  @param[in] alloc Memory allocator to initialize.
- *  @param[in] buffer Buffer to use for allocations.
- *  @param[in] length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM page) is recommended.
+ *  @param allocator Memory allocator to initialize.
+ *  @param buffer Buffer to use for allocations.
+ *  @param length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM page) is recommended.
  *
  *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be
- * modified.
+ *  modified.
  */
-SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
+SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length);
 
 /**
  *  @brief Checks if two memory allocators are equivalent.
- *  @param[in] a First memory allocator.
- *  @param[in] b Second memory allocator.
+ *  @param a First memory allocator.
+ *  @param b Second memory allocator.
  *  @return True if the allocators are the same, false otherwise.
  */
 SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b);
@@ -1146,9 +1146,9 @@ typedef struct sz_sequence_t {
 
 /**
  *  @brief Initiates the sequence structure from a typical C-style strings array, like `char *[]`.
- *  @param[in] start Pointer to the array of strings.
- *  @param[in] count Number of strings in the array.
- *  @param[out] sequence Sequence structure to initialize.
+ *  @param start Pointer to the array of strings.
+ *  @param count Number of strings in the array.
+ *  @param sequence Sequence structure to initialize.
  */
 SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence);
 
@@ -1584,8 +1584,8 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 
 /**
  *  @brief Validates if a UTF-8 string contains only valid UTF-8 sequences.
- *  @param[in] text Pointer to the UTF-8 string to validate.
- *  @param[in] length Length of the string in bytes.
+ *  @param text Pointer to the UTF-8 string to validate.
+ *  @param length Length of the string in bytes.
  *  @return sz_true_k if the string contains only valid UTF-8, sz_false_k otherwise.
  */
 SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
@@ -1644,9 +1644,9 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
 
 /**
  *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer.
- *  @param[in] utf8 Pointer to the beginning of a valid UTF-8 encoded string.
- *  @param[out] runes Output parameter to store the extracted UTF-32 codepoint.
- *  @param[out] runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @param utf8 Pointer to the beginning of a valid UTF-8 encoded string.
+ *  @param runes Output parameter to store the extracted UTF-32 codepoint.
+ *  @param runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
  *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
  *  @note This function does not perform any bounds checking on the input string.
  */
@@ -1657,12 +1657,12 @@ SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_
     // Branchless UTF-8 length detection using arithmetic.
     // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
     // CLZ-based approach was also considered but has complications with ASCII handling.
-    sz_rune_length_t len = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
+    sz_rune_length_t length = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
 
     // Extract rune bits - switch compiles to efficient jump table.
     // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation needed.
     sz_rune_t rune;
-    switch (len) {
+    switch (length) {
     // Single-byte rune (0xxxxxxx)
     case 1: rune = lead; break;
     // Two-byte rune (110xxxxx 10xxxxxx)
@@ -1674,14 +1674,14 @@ SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_
     }
 
     *runes = rune;
-    *runes_lengths = len;
+    *runes_lengths = length;
 }
 
 /**
  *  @brief Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
- *  @param[in] utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
- *  @param[out] rune Output parameter to store the extracted UTF-32 codepoint.
- *  @param[out] rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @param utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
+ *  @param rune Output parameter to store the extracted UTF-32 codepoint.
+ *  @param rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
  *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
  *  @note This function does not perform any bounds checking on the input string.
  */
@@ -1689,18 +1689,18 @@ SZ_INTERNAL void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_len
     sz_u8_t const *u8s = (sz_u8_t const *)utf8_end;
 
     // Scan backwards to find the lead byte (not a continuation byte 10xxxxxx)
-    int len = 1;
-    for (--u8s; (*u8s & 0xC0) == 0x80 && len < 4; --u8s, ++len) {}
+    int length = 1;
+    for (--u8s; (*u8s & 0xC0) == 0x80 && length < 4; --u8s, ++length) {}
 
-    // Now u8s points to the lead byte, len is the sequence length
+    // Now u8s points to the lead byte, length is the sequence length
     sz_rune_parse((sz_cptr_t)u8s, rune, rune_length);
-    sz_assert_(*rune_length == (sz_rune_length_t)len && "Inconsistent rune length detected in sz_rune_rparse.");
+    sz_assert_(*rune_length == (sz_rune_length_t)length && "Inconsistent rune length detected in sz_rune_rparse.");
 }
 
 /**
  *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
- *  @param[in] rune The UTF-32 codepoint to encode.
- *  @param[out] utf8s Output buffer (must have space for at least 4 bytes).
+ *  @param rune The UTF-32 codepoint to encode.
+ *  @param utf8s Output buffer (must have space for at least 4 bytes).
  *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
  */
 SZ_INTERNAL sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
@@ -1785,27 +1785,27 @@ SZ_PUBLIC void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *h
 
 #endif
 
-SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
+SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
 #if !SZ_AVOID_LIBC
-    alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
-    alloc->free = (sz_memory_free_t)sz_memory_free_default_;
+    allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
+    allocator->free = (sz_memory_free_t)sz_memory_free_default_;
 #else
-    alloc->allocate = (sz_memory_allocate_t)SZ_NULL;
-    alloc->free = (sz_memory_free_t)SZ_NULL;
+    allocator->allocate = (sz_memory_allocate_t)SZ_NULL;
+    allocator->free = (sz_memory_free_t)SZ_NULL;
 #endif
-    alloc->handle = SZ_NULL;
+    allocator->handle = SZ_NULL;
 }
 
-SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
+SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length) {
     // The logic here is simple - put the buffer capacity in the first slots of the buffer.
     // The second slot is used to store the current consumed capacity.
     // The rest of the buffer is used for the actual data.
-    alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
-    alloc->free = (sz_memory_free_t)sz_memory_free_fixed_;
-    alloc->handle = buffer;
-    sz_size_t *ptr = (sz_size_t *)buffer;
-    ptr[0] = length;
-    ptr[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
+    allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
+    allocator->free = (sz_memory_free_t)sz_memory_free_fixed_;
+    allocator->handle = buffer;
+    sz_size_t *pointer = (sz_size_t *)buffer;
+    pointer[0] = length;
+    pointer[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
 SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {

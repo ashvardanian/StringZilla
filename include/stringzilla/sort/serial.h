@@ -15,6 +15,17 @@
 extern "C" {
 #endif
 
+/**
+ *  @brief Exports the next N-gram (pgram) slice for each string in the given range, storing the results
+ *      as byte-reversed integers so that simple integer comparisons yield lexicographic ordering.
+ *
+ *  @param sequence The sequence of strings to export pgrams from.
+ *  @param global_pgrams Output array of pgram integers, indexed by position in the sequence.
+ *  @param global_order Current permutation of sequence indices (identity on the first call).
+ *  @param start_in_sequence First index (inclusive) in the sequence range to process.
+ *  @param end_in_sequence One-past-the-last index in the sequence range to process.
+ *  @param start_character Byte offset into each string from which to begin exporting.
+ */
 SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
@@ -26,12 +37,12 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
 
     // Perform the same operation for every string.
-    for (sz_size_t i = start_in_sequence; i < end_in_sequence; ++i) {
+    for (sz_size_t sequence_index = start_in_sequence; sequence_index < end_in_sequence; ++sequence_index) {
 
         // On the first recursion level, the `global_order` is the identity permutation.
-        sz_sorted_idx_t const partial_order_index = global_order[i];
+        sz_sorted_idx_t const partial_order_index = global_order[sequence_index];
         if (SZ_DEBUG && start_character == 0)
-            sz_assert_(partial_order_index == i && "At start this must be an identity permutation.");
+            sz_assert_(partial_order_index == sequence_index && "At start this must be an identity permutation.");
 
         // Get the string slice in global memory.
         sz_cptr_t const source_str = sequence->get_start(sequence->handle, partial_order_index);
@@ -40,10 +51,11 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
         sz_size_t const exported_length = remaining_length > pgram_capacity ? pgram_capacity : remaining_length;
 
         // Fill with zeros, export a slice, and mark the exported length.
-        sz_pgram_t *target_pgram = &global_pgrams[i];
+        sz_pgram_t *target_pgram = &global_pgrams[sequence_index];
         sz_ptr_t target_str = (sz_ptr_t)target_pgram;
         *target_pgram = 0;
-        for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
+        for (sz_size_t character_index = 0; character_index < exported_length; ++character_index)
+            target_str[character_index] = source_str[character_index + start_character];
         target_str[pgram_capacity] = (char)exported_length;
 #if !SZ_IS_BIG_ENDIAN_
 #if SZ_IS_64BIT_
@@ -60,13 +72,13 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
     // As our goal is to sort the strings using the exported integer "pgrams",
     // this is a good place to validate the correctness of the exported data.
     if (SZ_DEBUG && start_character == 0)
-        for (sz_size_t i = start_in_sequence + 1; i < end_in_sequence; ++i) {
-            sz_pgram_t const previous_pgram = global_pgrams[i - 1];
-            sz_pgram_t const current_pgram = global_pgrams[i];
-            sz_cptr_t const previous_str = sequence->get_start(sequence->handle, i - 1);
-            sz_size_t const previous_length = sequence->get_length(sequence->handle, i - 1);
-            sz_cptr_t const current_str = sequence->get_start(sequence->handle, i);
-            sz_size_t const current_length = sequence->get_length(sequence->handle, i);
+        for (sz_size_t sequence_index = start_in_sequence + 1; sequence_index < end_in_sequence; ++sequence_index) {
+            sz_pgram_t const previous_pgram = global_pgrams[sequence_index - 1];
+            sz_pgram_t const current_pgram = global_pgrams[sequence_index];
+            sz_cptr_t const previous_str = sequence->get_start(sequence->handle, sequence_index - 1);
+            sz_size_t const previous_length = sequence->get_length(sequence->handle, sequence_index - 1);
+            sz_cptr_t const current_str = sequence->get_start(sequence->handle, sequence_index);
+            sz_size_t const current_length = sequence->get_length(sequence->handle, sequence_index);
             sz_ordering_t const ordering = sz_order(                                               //
                 previous_str, previous_length > pgram_capacity ? pgram_capacity : previous_length, //
                 current_str, current_length > pgram_capacity ? pgram_capacity : current_length);
@@ -78,7 +90,11 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
 
 /**
  *  @brief Picks the "pivot" value for the QuickSort algorithm's partitioning step using Robert Sedgewick's method,
- *         the median of three elements - the first, the middle, and the last element of the given range.
+ *      the median of three elements - the first, the middle, and the last element of the given range.
+ *
+ *  @param pgrams Pointer to the array of pgrams to choose a pivot from.
+ *  @param count Number of pgrams in the array.
+ *  @return Pointer to the chosen pivot pgram within the array.
  */
 SZ_INTERNAL sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
     sz_size_t const middle_offset = count / 2;
@@ -104,6 +120,12 @@ SZ_INTERNAL sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *
  *  into the left and right partitions. Instead we use the Dutch National Flag @b 3-way partitioning, outputting
  *  the range of values equal to the pivot.
  *
+ *  @param global_pgrams Pgram array to partition in place.
+ *  @param global_order Corresponding order array, permuted in sync with `global_pgrams`.
+ *  @param start_in_sequence First index (inclusive) of the range to partition.
+ *  @param end_in_sequence One-past-the-last index of the range to partition.
+ *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
+ *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
 SZ_INTERNAL void sz_sequence_argsort_serial_3way_partition_(              //
@@ -156,7 +178,12 @@ SZ_INTERNAL void sz_sequence_argsort_serial_3way_partition_(              //
 
 /**
  *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort` and `sz_pgrams_sort`,
- *         and using the `sz_sequence_argsort_serial_3way_partition_` under the hood.
+ *      and using the `sz_sequence_argsort_serial_3way_partition_` under the hood.
+ *
+ *  @param global_pgrams Pgram array to sort in place.
+ *  @param global_order Corresponding order array, permuted in sync with `global_pgrams`.
+ *  @param start_in_sequence First index (inclusive) of the range to sort.
+ *  @param end_in_sequence One-past-the-last index of the range to sort.
  */
 SZ_PUBLIC void sz_sequence_argsort_serial_recursively_(                   //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
@@ -180,8 +207,15 @@ SZ_PUBLIC void sz_sequence_argsort_serial_recursively_(                   //
 
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
- *         It combines `sz_sequence_argsort_serial_export_next_pgrams_` and `sz_sequence_argsort_serial_recursively_`,
- *         recursively diving into the identical pgrams.
+ *      It combines `sz_sequence_argsort_serial_export_next_pgrams_` and `sz_sequence_argsort_serial_recursively_`,
+ *      recursively diving into the identical pgrams.
+ *
+ *  @param sequence The collection of strings to sort.
+ *  @param global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param global_order Current permutation array, updated in place.
+ *  @param start_in_sequence First index (inclusive) of the range to process.
+ *  @param end_in_sequence One-past-the-last index of the range to process.
+ *  @param start_character Byte offset into each string for the current pgram window.
  */
 SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
     sz_sequence_t const *const sequence,                                  //
@@ -230,7 +264,8 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, 
                                                  sz_sorted_idx_t *order) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
-    for (sz_size_t i = 0; i != sequence->count; ++i) order[i] = i;
+    for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
+        order[sequence_index] = sequence_index;
 
     // On very small collections - just use the quadratic-complexity insertion sort
     // without any smart optimizations or memory allocations.
@@ -273,7 +308,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
                                             sz_sorted_idx_t *order) {
     sz_unused_(alloc);
     // First, initialize the `order` with `std::iota`-like behavior.
-    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+    for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
     // Reuse the string sorting algorithm for sorting the "pgrams".
     sz_sequence_argsort_serial_recursively_((sz_pgram_t *)pgrams, order, 0, count);
     return sz_success_k;
@@ -281,6 +316,17 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
 
 /**
  *  @brief Helper function similar to `std::set_union` over pairs of integers and their original indices.
+ *      Merges two sorted pgram arrays into a single sorted result, deduplicating equal keys by keeping the
+ *      entry from the first array (stable with respect to the first input).
+ *
+ *  @param first_pgrams Sorted pgram array from the first input.
+ *  @param first_indices Corresponding index array for the first input.
+ *  @param first_count Number of elements in the first input.
+ *  @param second_pgrams Sorted pgram array from the second input.
+ *  @param second_indices Corresponding index array for the second input.
+ *  @param second_count Number of elements in the second input.
+ *  @param result_pgrams Output array for merged pgrams; must hold at least `first_count + second_count` entries.
+ *  @param result_indices Output array for merged indices; must hold at least `first_count + second_count` entries.
  *  @see https://en.cppreference.com/w/cpp/algorithm/set_union
  */
 SZ_INTERNAL void sz_pgrams_union_serial_(                                                           //
@@ -326,8 +372,9 @@ SZ_INTERNAL void sz_pgrams_union_serial_(                                       
 
     // Validate the merged result.
     if (SZ_DEBUG)
-        for (sz_size_t i = 1; i < first_count + second_count; ++i)
-            sz_assert_(merged_begin[i - 1] <= merged_begin[i] && "The merged pgrams must be in ascending order.");
+        for (sz_size_t pgram_index = 1; pgram_index < first_count + second_count; ++pgram_index)
+            sz_assert_(merged_begin[pgram_index - 1] <= merged_begin[pgram_index] &&
+                       "The merged pgrams must be in ascending order.");
 }
 
 #ifdef __cplusplus

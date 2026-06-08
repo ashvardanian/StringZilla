@@ -118,16 +118,16 @@ inline std::uint64_t cpu_cycle_counter() {
     return _ReadStatusReg(ARM64_CNTVCT);
 #elif defined(__i386__) || defined(__x86_64__)
     // Use x86 inline assembly for `rdtsc` only if actually compiling for x86.
-    unsigned int lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    return (static_cast<std::uint64_t>(hi) << 32) | lo;
+    unsigned int low, high;
+    __asm__ volatile("rdtsc" : "=a"(low), "=d"(high));
+    return (static_cast<std::uint64_t>(high) << 32) | low;
 #elif defined(__aarch64__) || SZ_IS_64BIT_ARM_
     // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
     // (`SZ_IS_64BIT_ARM_` is a 0/1 value macro — testing `defined()` of it would be true everywhere,
     // wrongly selecting this branch on non-ARM targets such as wasm32.)
-    std::uint64_t cnt;
-    asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
-    return cnt;
+    std::uint64_t counter;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(counter));
+    return counter;
 #else
     return 0;
 #endif
@@ -329,20 +329,20 @@ struct environment_t {
  *         It's expected that different workloads may use different default datasets and tokenization modes,
  *         but time limits and seeds are usually consistent across all benchmarks.
  *
- *  @param[in] argc Number of command-line string arguments. Not used in reality.
- *  @param[in] argv Array of command-line string arguments. Not used in reality.
+ *  @param argc Number of command-line string arguments. Not used in reality.
+ *  @param argv Array of command-line string arguments. Not used in reality.
  *
- *  @param[in] default_dataset Path to the default dataset file, if the @b `STRINGWARS_DATASET` is not set.
- *  @param[in] default_tokens Tokenization mode, if the @b `STRINGWARS_TOKENS` is not set.
- *  @param[in] default_duration Time limit per benchmark, if the @b `STRINGWARS_DURATION` is not set.
+ *  @param default_dataset Path to the default dataset file, if the @b `STRINGWARS_DATASET` is not set.
+ *  @param default_tokens Tokenization mode, if the @b `STRINGWARS_TOKENS` is not set.
+ *  @param default_duration Time limit per benchmark, if the @b `STRINGWARS_DURATION` is not set.
  *
- *  @param[in] default_stress Whether to stress-test the backends, if the @b `STRINGWARS_STRESS` is not set.
- *  @param[in] default_stress_dir Directory for stress-testing logs, if the @b `STRINGWARS_STRESS_DIR` is not set.
- *  @param[in] default_stress_limit Max number of failures to tolerate, if the @b `STRINGWARS_STRESS_LIMIT` is not set.
- *  @param[in] default_stress_duration Time limit per stress-test, if the @b `STRINGWARS_STRESS_DURATION` is not set.
+ *  @param default_stress Whether to stress-test the backends, if the @b `STRINGWARS_STRESS` is not set.
+ *  @param default_stress_dir Directory for stress-testing logs, if the @b `STRINGWARS_STRESS_DIR` is not set.
+ *  @param default_stress_limit Max number of failures to tolerate, if the @b `STRINGWARS_STRESS_LIMIT` is not set.
+ *  @param default_stress_duration Time limit per stress-test, if the @b `STRINGWARS_STRESS_DURATION` is not set.
  *
- *  @param[in] default_filter Regular expression to filter the backends, if the @b `STRINGWARS_FILTER` is not set.
- *  @param[in] default_seed Seed for reproducibility, if the @b `STRINGWARS_SEED` is not set.
+ *  @param default_filter Regular expression to filter the backends, if the @b `STRINGWARS_FILTER` is not set.
+ *  @param default_seed Seed for reproducibility, if the @b `STRINGWARS_SEED` is not set.
  */
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
@@ -456,10 +456,11 @@ inline environment_t build_environment(                                        /
         seed_message = " (will shuffle tokens)";
     }
 
-    auto const mean_token_length =
-        std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
-                        [](std::size_t sum, token_view_t token) -> std::size_t { return sum + token.size(); }) *
-        1.0 / env.tokens.size();
+    auto const mean_token_length = std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
+                                                   [](std::size_t sum, token_view_t token) -> std::size_t {
+                                                       return sum + token.size();
+                                                   }) *
+                                   1.0 / env.tokens.size();
 
     // Group integer decimal separators by 3
     // https://www.ibm.com/docs/en/i/7.4?topic=categories-lc-numeric-category
@@ -656,11 +657,11 @@ struct bench_result_t {
 
 /**
  *  @brief Repeatedly calls and profiles a given @b nullary function, comparing it against a baseline.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
- *  @param[in] check_validator Optional function to validate the results of the benchmark.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
+ *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @param check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -728,12 +729,12 @@ bench_result_t bench_nullary(  //
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
- *  @param[in] preprocessing Optional function to pre-process the data after the prediction.
- *  @param[in] check_validator Optional function to validate the results of the benchmark.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
+ *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @param preprocessing Optional function to pre-process the data after the prediction.
+ *  @param check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -835,9 +836,9 @@ bench_result_t bench_unary(    //
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
@@ -847,9 +848,9 @@ bench_result_t bench_nullary(environment_t const &env, std::string const &name, 
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>

@@ -116,9 +116,9 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
         auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(env);
         base_map = bench_unary(env, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()).log();
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(env);
-        base_umap =
-            bench_unary(env, "unordered_map::find", callable_no_op_t(), callable_umap, callable_umap.preprocessor())
-                .log();
+        base_umap = bench_unary(env, "unordered_map::find", callable_no_op_t(), callable_umap,
+                                callable_umap.preprocessor())
+                        .log();
     }
 
     // Conditionally include SIMD-accelerated backends
@@ -218,8 +218,8 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
 
     // Try using StringZilla's `sz::string_view` for keys
     {
-        auto callable_map =
-            callable_for_associative_lookups<std::map<sz::string_view, unsigned, less_through_std_t>>(env);
+        auto callable_map = callable_for_associative_lookups<std::map<sz::string_view, unsigned, less_through_std_t>>(
+            env);
         bench_unary(env, "map<sz::string_view>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
         auto callable_umap = callable_for_associative_lookups<

@@ -25,6 +25,12 @@ extern "C" {
  *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
  *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
  *  bytes will carry absolutely no value and will be equal to 0x04.
+ *
+ *  @param start Pointer to the needle bytes.
+ *  @param length Length of the needle in bytes.
+ *  @param first Output offset of the first anomalous byte.
+ *  @param second Output offset of the second anomalous byte.
+ *  @param third Output offset of the third anomalous byte.
  */
 SZ_INTERNAL void sz_locate_needle_anomalies_( //
     sz_cptr_t start, sz_size_t length,        //
@@ -113,36 +119,36 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memchr(haystack, needle[0], haystack_length)`.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h_chars, sz_size_t h_length, sz_cptr_t n_chars) {
+SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
-    if (!h_length) return SZ_NULL_CHAR;
+    if (!haystack_length) return SZ_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
     // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
-    sz_u8_t const *h = (sz_u8_t const *)h_chars;
-    sz_u8_t const *const n = (sz_u8_t const *)n_chars;
-    sz_u8_t const *const h_end = h + h_length;
+    sz_u8_t const *haystack_cursor = (sz_u8_t const *)haystack;
+    sz_u8_t const *const needle_u8 = (sz_u8_t const *)needle;
+    sz_u8_t const *const haystack_end = haystack_cursor + haystack_length;
 
 #if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
-        if (*h == *n) return (sz_cptr_t)h;
+    for (; ((sz_size_t)haystack_cursor & 7ull) && haystack_cursor < haystack_end; ++haystack_cursor)
+        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
 #endif
 
-    // Broadcast the n into every byte of a 64-bit integer to use SWAR
+    // Broadcast the needle into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_vec_t h_vec, n_vec, match_vec;
+    sz_u64_vec_t haystack_vec, needle_vec, match_vec;
     match_vec.u64 = 0;
-    n_vec.u64 = (sz_u64_t)*n * 0x0101010101010101ull;
-    for (; h + 8 <= h_end; h += 8) {
-        h_vec.u64 = *(sz_u64_t const *)h;
-        match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
-        if (match_vec.u64) return (sz_cptr_t)(h + sz_u64_ctz(match_vec.u64) / 8);
+    needle_vec.u64 = (sz_u64_t)*needle_u8 * 0x0101010101010101ull;
+    for (; haystack_cursor + 8 <= haystack_end; haystack_cursor += 8) {
+        haystack_vec.u64 = *(sz_u64_t const *)haystack_cursor;
+        match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
+        if (match_vec.u64) return (sz_cptr_t)(haystack_cursor + sz_u64_ctz(match_vec.u64) / 8);
     }
 #endif
 
     // Handle the misaligned tail.
-    for (; h < h_end; ++h)
-        if (*h == *n) return (sz_cptr_t)h;
+    for (; haystack_cursor < haystack_end; ++haystack_cursor)
+        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
     return SZ_NULL_CHAR;
 }
 
@@ -150,119 +156,122 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h_chars, sz_size_t h_length, s
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h_chars, sz_size_t h_length, sz_cptr_t n_chars) {
+sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
-    if (!h_length) return SZ_NULL_CHAR;
+    if (!haystack_length) return SZ_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
     // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
-    sz_u8_t const *const h_start = (sz_u8_t const *)h_chars;
-    sz_u8_t const *const n = (sz_u8_t const *)n_chars;
+    sz_u8_t const *const haystack_start = (sz_u8_t const *)haystack;
+    sz_u8_t const *const needle_u8 = (sz_u8_t const *)needle;
 
-    // Reposition the `h` pointer to the end, as we will be walking backwards.
-    sz_u8_t const *h = h_start + h_length - 1;
+    // Reposition the cursor to the end, as we will be walking backwards.
+    sz_u8_t const *haystack_cursor = haystack_start + haystack_length - 1;
 
 #if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
-        if (*h == *n) return (sz_cptr_t)h;
+    for (; ((sz_size_t)(haystack_cursor + 1) & 7ull) && haystack_cursor >= haystack_start; --haystack_cursor)
+        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
 #endif
 
-    // Broadcast the n into every byte of a 64-bit integer to use SWAR
+    // Broadcast the needle into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_vec_t h_vec, n_vec, match_vec;
-    n_vec.u64 = (sz_u64_t)*n * 0x0101010101010101ull;
-    for (; h >= h_start + 7; h -= 8) {
-        h_vec.u64 = *(sz_u64_t const *)(h - 7);
-        match_vec = sz_u64_each_byte_equal_(h_vec, n_vec);
-        if (match_vec.u64) return (sz_cptr_t)(h - sz_u64_clz(match_vec.u64) / 8);
+    sz_u64_vec_t haystack_vec, needle_vec, match_vec;
+    needle_vec.u64 = (sz_u64_t)*needle_u8 * 0x0101010101010101ull;
+    for (; haystack_cursor >= haystack_start + 7; haystack_cursor -= 8) {
+        haystack_vec.u64 = *(sz_u64_t const *)(haystack_cursor - 7);
+        match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
+        if (match_vec.u64) return (sz_cptr_t)(haystack_cursor - sz_u64_clz(match_vec.u64) / 8);
     }
 #endif
 
-    for (; h >= h_start; --h)
-        if (*h == *n) return (sz_cptr_t)h;
+    for (; haystack_cursor >= haystack_start; --haystack_cursor)
+        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
     return SZ_NULL_CHAR;
 }
 
 /**
- *  @brief 2Byte-level equality comparison between two 64-bit integers.
- *  @return 64-bit integer, where every top bit in each 2byte signifies a match.
+ *  @brief 2-byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 2-byte group signifies a match.
  */
 SZ_INTERNAL sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
-    // The match is valid, if every bit within each 2byte is set.
-    // For that take the bottom 15 bits of each 2byte, add one to them,
+    // The match is valid, if every bit within each 2-byte group is set.
+    // For that take the bottom 15 bits of each 2-byte group, add one to them,
     // and if this sets the top bit to one, then all the 15 bits are ones as well.
     vec.u64 = ((vec.u64 & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) & ((vec.u64 & 0x8000800080008000ull));
     return vec;
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_1byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
-    return sz_find_byte_serial(h, h_length, n);
+SZ_INTERNAL sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
+    sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
+    return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_INTERNAL sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_unused_(n_length); //? We keep this argument only for `sz_rfind_t` signature compatibility.
-    return sz_rfind_byte_serial(h, h_length, n);
+SZ_INTERNAL sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_size_t needle_length) {
+    sz_unused_(needle_length); //? We keep this argument only for `sz_rfind_t` signature compatibility.
+    return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
 /**
  *  @brief Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
-    sz_assert_(h_length >= 2 && "The haystack is too short.");
-    sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
-    sz_cptr_t const h_end = h + h_length;
+    sz_assert_(haystack_length >= 2 && "The haystack is too short.");
+    sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
+    sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
 #if SZ_IS_BIG_ENDIAN_
-    for (; h + 2 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+    for (; haystack + 2 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
     return SZ_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
 #if !SZ_USE_MISALIGNED_LOADS
-    for (; ((sz_size_t)h & 7ull) && h + 2 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+    for (; ((sz_size_t)haystack & 7ull) && haystack + 2 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
 #endif
 
-    sz_u64_vec_t h_even_vec, h_odd_vec, n_vec, matches_even_vec, matches_odd_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1];
-    n_vec.u64 *= 0x0001000100010001ull; // broadcast
+    sz_u64_vec_t haystack_even_vec, haystack_odd_vec, needle_vec, matches_even_vec, matches_odd_vec;
+    needle_vec.u64 = 0;
+    needle_vec.u8s[0] = needle[0], needle_vec.u8s[1] = needle[1];
+    needle_vec.u64 *= 0x0001000100010001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
-    for (; h + 9 <= h_end; h += 8) {
-        h_even_vec.u64 = *(sz_u64_t *)h;
-        h_odd_vec.u64 = (h_even_vec.u64 >> 8) | ((sz_u64_t)h[8] << 56);
-        matches_even_vec = sz_u64_each_2byte_equal_(h_even_vec, n_vec);
-        matches_odd_vec = sz_u64_each_2byte_equal_(h_odd_vec, n_vec);
+    for (; haystack + 9 <= haystack_end; haystack += 8) {
+        haystack_even_vec.u64 = *(sz_u64_t *)haystack;
+        haystack_odd_vec.u64 = (haystack_even_vec.u64 >> 8) | ((sz_u64_t)haystack[8] << 56);
+        matches_even_vec = sz_u64_each_2byte_equal_(haystack_even_vec, needle_vec);
+        matches_odd_vec = sz_u64_each_2byte_equal_(haystack_odd_vec, needle_vec);
         matches_even_vec.u64 >>= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
-            return h + sz_u64_ctz(match_indicators) / 8;
+            return haystack + sz_u64_ctz(match_indicators) / 8;
         }
     }
 
-    for (; h + 2 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+    for (; haystack + 2 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) == 2) return haystack;
     return SZ_NULL_CHAR;
 }
 
 /**
- *  @brief 4Byte-level equality comparison between two 64-bit integers.
- *  @return 64-bit integer, where every top bit in each 4byte signifies a match.
+ *  @brief 4-byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 4-byte group signifies a match.
  */
 SZ_INTERNAL sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
-    // The match is valid, if every bit within each 4byte is set.
-    // For that take the bottom 31 bits of each 4byte, add one to them,
+    // The match is valid, if every bit within each 4-byte group is set.
+    // For that take the bottom 31 bits of each 4-byte group, add one to them,
     // and if this sets the top bit to one, then all the 31 bits are ones as well.
     vec.u64 = ((vec.u64 & 0x7FFFFFFF7FFFFFFFull) + 0x0000000100000001ull) & ((vec.u64 & 0x8000000080000000ull));
     return vec;
@@ -272,69 +281,81 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
-    sz_assert_(h_length >= 4 && "The haystack is too short.");
-    sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
-    sz_cptr_t const h_end = h + h_length;
+    sz_assert_(haystack_length >= 4 && "The haystack is too short.");
+    sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
+    sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
 #if SZ_IS_BIG_ENDIAN_
-    for (; h + 4 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+    for (; haystack + 4 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) +
+                (haystack[3] == needle[3]) ==
+            4)
+            return haystack;
     return SZ_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
 #if !SZ_USE_MISALIGNED_LOADS
-    for (; ((sz_size_t)h & 7ull) && h + 4 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+    for (; ((sz_size_t)haystack & 7ull) && haystack + 4 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) +
+                (haystack[3] == needle[3]) ==
+            4)
+            return haystack;
 #endif
 
-    sz_u64_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec, matches0_vec, matches1_vec, matches2_vec, matches3_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2], n_vec.u8s[3] = n[3];
-    n_vec.u64 *= 0x0000000100000001ull; // broadcast
+    sz_u64_vec_t haystack0_vec, haystack1_vec, haystack2_vec, haystack3_vec, needle_vec;
+    sz_u64_vec_t matches0_vec, matches1_vec, matches2_vec, matches3_vec;
+    needle_vec.u64 = 0;
+    needle_vec.u8s[0] = needle[0], needle_vec.u8s[1] = needle[1], needle_vec.u8s[2] = needle[2],
+    needle_vec.u8s[3] = needle[3];
+    needle_vec.u64 *= 0x0000000100000001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using four 64-bit words.
     // We load the subsequent four-byte word as well, taking its first bytes. Think of it as a glorified prefetch :)
-    sz_u64_t h_page_current, h_page_next;
-    for (; h + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= h_end; h += sizeof(sz_u64_t)) {
-        h_page_current = *(sz_u64_t *)h;
-        h_page_next = *(sz_u32_t *)(h + 8);
-        h0_vec.u64 = (h_page_current);
-        h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
-        h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
-        h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
-        matches0_vec = sz_u64_each_4byte_equal_(h0_vec, n_vec);
-        matches1_vec = sz_u64_each_4byte_equal_(h1_vec, n_vec);
-        matches2_vec = sz_u64_each_4byte_equal_(h2_vec, n_vec);
-        matches3_vec = sz_u64_each_4byte_equal_(h3_vec, n_vec);
+    sz_u64_t haystack_page_current, haystack_page_next;
+    for (; haystack + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= haystack_end; haystack += sizeof(sz_u64_t)) {
+        haystack_page_current = *(sz_u64_t *)haystack;
+        haystack_page_next = *(sz_u32_t *)(haystack + 8);
+        haystack0_vec.u64 = (haystack_page_current);
+        haystack1_vec.u64 = (haystack_page_current >> 8) | (haystack_page_next << 56);
+        haystack2_vec.u64 = (haystack_page_current >> 16) | (haystack_page_next << 48);
+        haystack3_vec.u64 = (haystack_page_current >> 24) | (haystack_page_next << 40);
+        matches0_vec = sz_u64_each_4byte_equal_(haystack0_vec, needle_vec);
+        matches1_vec = sz_u64_each_4byte_equal_(haystack1_vec, needle_vec);
+        matches2_vec = sz_u64_each_4byte_equal_(haystack2_vec, needle_vec);
+        matches3_vec = sz_u64_each_4byte_equal_(haystack3_vec, needle_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64) {
             matches0_vec.u64 >>= 24;
             matches1_vec.u64 >>= 16;
             matches2_vec.u64 >>= 8;
             sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
-            return h + sz_u64_ctz(match_indicators) / 8;
+            return haystack + sz_u64_ctz(match_indicators) / 8;
         }
     }
 
-    for (; h + 4 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+    for (; haystack + 4 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) +
+                (haystack[3] == needle[3]) ==
+            4)
+            return haystack;
     return SZ_NULL_CHAR;
 }
 
 /**
- *  @brief 3Byte-level equality comparison between two 64-bit integers.
- *  @return 64-bit integer, where every top bit in each 3byte signifies a match.
+ *  @brief 3-byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 3-byte group signifies a match.
  */
 SZ_INTERNAL sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
-    // The match is valid, if every bit within each 4byte is set.
-    // For that take the bottom 31 bits of each 4byte, add one to them,
+    // The match is valid, if every bit within each 4-byte group is set.
+    // For that take the bottom 31 bits of each 4-byte group, add one to them,
     // and if this sets the top bit to one, then all the 31 bits are ones as well.
     vec.u64 = ((vec.u64 & 0xFFFF7FFFFF7FFFFFull) + 0x0000000001000001ull) & ((vec.u64 & 0x0000800000800000ull));
     return vec;
@@ -344,75 +365,82 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief Find the first occurrence of a @b three-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
-    sz_assert_(h_length >= 3 && "The haystack is too short.");
-    sz_unused_(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
-    sz_cptr_t const h_end = h + h_length;
+    sz_assert_(haystack_length >= 3 && "The haystack is too short.");
+    sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
+    sz_cptr_t const haystack_end = haystack + haystack_length;
 
     // On big-endian systems, skip SWAR and use simple serial search
 #if SZ_IS_BIG_ENDIAN_
-    for (; h + 3 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
+    for (; haystack + 3 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
     return SZ_NULL_CHAR;
 #endif
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
 #if !SZ_USE_MISALIGNED_LOADS
-    for (; ((sz_size_t)h & 7ull) && h + 3 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
+    for (; ((sz_size_t)haystack & 7ull) && haystack + 3 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
 #endif
 
     // We fetch 12
-    sz_u64_vec_t h0_vec, h1_vec, h2_vec, h3_vec, h4_vec;
+    sz_u64_vec_t haystack0_vec, haystack1_vec, haystack2_vec, haystack3_vec, haystack4_vec;
     sz_u64_vec_t matches0_vec, matches1_vec, matches2_vec, matches3_vec, matches4_vec;
-    sz_u64_vec_t n_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2];
-    n_vec.u64 *= 0x0000000001000001ull; // broadcast
+    sz_u64_vec_t needle_vec;
+    needle_vec.u64 = 0;
+    needle_vec.u8s[0] = needle[0], needle_vec.u8s[1] = needle[1], needle_vec.u8s[2] = needle[2];
+    needle_vec.u64 *= 0x0000000001000001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using three 64-bit words.
     // We load the subsequent two-byte word as well.
-    sz_u64_t h_page_current, h_page_next;
-    for (; h + sizeof(sz_u64_t) + sizeof(sz_u16_t) <= h_end; h += sizeof(sz_u64_t)) {
-        h_page_current = *(sz_u64_t *)h;
-        h_page_next = *(sz_u16_t *)(h + 8);
-        h0_vec.u64 = (h_page_current);
-        h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
-        h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
-        h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
-        h4_vec.u64 = (h_page_current >> 32) | (h_page_next << 32);
-        matches0_vec = sz_u64_each_3byte_equal_(h0_vec, n_vec);
-        matches1_vec = sz_u64_each_3byte_equal_(h1_vec, n_vec);
-        matches2_vec = sz_u64_each_3byte_equal_(h2_vec, n_vec);
-        matches3_vec = sz_u64_each_3byte_equal_(h3_vec, n_vec);
-        matches4_vec = sz_u64_each_3byte_equal_(h4_vec, n_vec);
+    sz_u64_t haystack_page_current, haystack_page_next;
+    for (; haystack + sizeof(sz_u64_t) + sizeof(sz_u16_t) <= haystack_end; haystack += sizeof(sz_u64_t)) {
+        haystack_page_current = *(sz_u64_t *)haystack;
+        haystack_page_next = *(sz_u16_t *)(haystack + 8);
+        haystack0_vec.u64 = (haystack_page_current);
+        haystack1_vec.u64 = (haystack_page_current >> 8) | (haystack_page_next << 56);
+        haystack2_vec.u64 = (haystack_page_current >> 16) | (haystack_page_next << 48);
+        haystack3_vec.u64 = (haystack_page_current >> 24) | (haystack_page_next << 40);
+        haystack4_vec.u64 = (haystack_page_current >> 32) | (haystack_page_next << 32);
+        matches0_vec = sz_u64_each_3byte_equal_(haystack0_vec, needle_vec);
+        matches1_vec = sz_u64_each_3byte_equal_(haystack1_vec, needle_vec);
+        matches2_vec = sz_u64_each_3byte_equal_(haystack2_vec, needle_vec);
+        matches3_vec = sz_u64_each_3byte_equal_(haystack3_vec, needle_vec);
+        matches4_vec = sz_u64_each_3byte_equal_(haystack4_vec, needle_vec);
 
         if (matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64) {
             matches0_vec.u64 >>= 16;
             matches1_vec.u64 >>= 8;
             matches3_vec.u64 <<= 8;
             matches4_vec.u64 <<= 16;
-            sz_u64_t match_indicators =
-                matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
-            return h + sz_u64_ctz(match_indicators) / 8;
+            sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 |
+                                        matches4_vec.u64;
+            return haystack + sz_u64_ctz(match_indicators) / 8;
         }
     }
 
-    for (; h + 3 <= h_end; ++h)
-        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
+    for (; haystack + 3 <= haystack_end; ++haystack)
+        if ((haystack[0] == needle[0]) + (haystack[1] == needle[1]) + (haystack[2] == needle[2]) == 3) return haystack;
     return SZ_NULL_CHAR;
 }
 
 /**
  *  @brief Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes long.
  *         Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ *
+ *  @param haystack The haystack bytes.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle The needle bytes.
+ *  @param needle_length Length of the needle in bytes (must be <= 256).
+ *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
 SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
-    sz_cptr_t h_chars, sz_size_t h_length,                    //
-    sz_cptr_t n_chars, sz_size_t n_length) {
-    sz_assert_(n_length <= 256 && "The pattern is too long.");
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
+    sz_cptr_t needle, sz_size_t needle_length) {
+    sz_assert_(needle_length <= 256 && "The pattern is too long.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
     // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
@@ -423,37 +451,41 @@ SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
-    sz_u8_t const *h = (sz_u8_t const *)h_chars;
-    sz_u8_t const *n = (sz_u8_t const *)n_chars;
+    sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
+    sz_u8_t const *needle_u8 = (sz_u8_t const *)needle;
     {
-        sz_u64_vec_t n_length_vec;
-        n_length_vec.u64 = ((sz_u8_t)(n_length - 1)) * 0x0101010101010101ull; // broadcast
-        for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
-        for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n[i]] = (sz_u8_t)(n_length - i - 1);
+        sz_u64_vec_t needle_length_vec;
+        needle_length_vec.u64 = ((sz_u8_t)(needle_length - 1)) * 0x0101010101010101ull; // broadcast
+        for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
+            bad_shift_table.vecs[byte_index].u64 = needle_length_vec.u64;
+        for (sz_size_t byte_index = 0; byte_index + 1 < needle_length; ++byte_index)
+            bad_shift_table.jumps[needle_u8[byte_index]] = (sz_u8_t)(needle_length - byte_index - 1);
     }
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
-    sz_u32_vec_t h_vec, n_vec;
+    sz_u32_vec_t haystack_vec, needle_vec;
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(n_chars, n_length, &offset_first, &offset_mid, &offset_last);
+    sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast those characters into an unsigned integer.
-    n_vec.u8s[0] = n[offset_first];
-    n_vec.u8s[1] = n[offset_first + 1];
-    n_vec.u8s[2] = n[offset_mid];
-    n_vec.u8s[3] = n[offset_last];
+    needle_vec.u8s[0] = needle_u8[offset_first];
+    needle_vec.u8s[1] = needle_u8[offset_first + 1];
+    needle_vec.u8s[2] = needle_u8[offset_mid];
+    needle_vec.u8s[3] = needle_u8[offset_last];
 
-    // Scan through the whole haystack, skipping the last `n_length - 1` bytes.
-    for (sz_size_t i = 0; i <= h_length - n_length;) {
-        h_vec.u8s[0] = h[i + offset_first];
-        h_vec.u8s[1] = h[i + offset_first + 1];
-        h_vec.u8s[2] = h[i + offset_mid];
-        h_vec.u8s[3] = h[i + offset_last];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
-        i += bad_shift_table.jumps[h[i + n_length - 1]];
+    // Scan through the whole haystack, skipping the last `needle_length - 1` bytes.
+    for (sz_size_t byte_index = 0; byte_index <= haystack_length - needle_length;) {
+        haystack_vec.u8s[0] = haystack_u8[byte_index + offset_first];
+        haystack_vec.u8s[1] = haystack_u8[byte_index + offset_first + 1];
+        haystack_vec.u8s[2] = haystack_u8[byte_index + offset_mid];
+        haystack_vec.u8s[3] = haystack_u8[byte_index + offset_last];
+        if (haystack_vec.u32 == needle_vec.u32 &&
+            sz_equal_serial((sz_cptr_t)haystack_u8 + byte_index, needle, needle_length))
+            return (sz_cptr_t)haystack_u8 + byte_index;
+        byte_index += bad_shift_table.jumps[haystack_u8[byte_index + needle_length - 1]];
     }
     return SZ_NULL_CHAR;
 }
@@ -461,50 +493,60 @@ SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
 /**
  *  @brief Boyer-Moore-Horspool algorithm for @b reverse-order exact matching of patterns up to @b 256-bytes long.
  *         Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ *
+ *  @param haystack The haystack bytes.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle The needle bytes.
+ *  @param needle_length Length of the needle in bytes (must be <= 256).
+ *  @return Pointer to last match, or SZ_NULL_CHAR if none.
  */
 SZ_INTERNAL sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
-    sz_cptr_t h_chars, sz_size_t h_length,                     //
-    sz_cptr_t n_chars, sz_size_t n_length) {
-    sz_assert_(n_length <= 256 && "The pattern is too long.");
+    sz_cptr_t haystack, sz_size_t haystack_length,             //
+    sz_cptr_t needle, sz_size_t needle_length) {
+    sz_assert_(needle_length <= 256 && "The pattern is too long.");
     union {
         sz_u8_t jumps[256];
         sz_u64_vec_t vecs[64];
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
-    sz_u8_t const *h = (sz_u8_t const *)h_chars;
-    sz_u8_t const *n = (sz_u8_t const *)n_chars;
+    sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
+    sz_u8_t const *needle_u8 = (sz_u8_t const *)needle;
     {
-        sz_u64_vec_t n_length_vec;
-        n_length_vec.u64 = ((sz_u8_t)(n_length - 1)) * 0x0101010101010101ull; // broadcast
-        for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
-        for (sz_size_t i = 0; i + 1 < n_length; ++i)
-            bad_shift_table.jumps[n[n_length - i - 1]] = (sz_u8_t)(n_length - i - 1);
+        sz_u64_vec_t needle_length_vec;
+        needle_length_vec.u64 = ((sz_u8_t)(needle_length - 1)) * 0x0101010101010101ull; // broadcast
+        for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
+            bad_shift_table.vecs[byte_index].u64 = needle_length_vec.u64;
+        for (sz_size_t byte_index = 0; byte_index + 1 < needle_length; ++byte_index)
+            bad_shift_table.jumps[needle_u8[needle_length - byte_index - 1]] = (sz_u8_t)(needle_length - byte_index -
+                                                                                         1);
     }
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
-    sz_u32_vec_t h_vec, n_vec;
+    sz_u32_vec_t haystack_vec, needle_vec;
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(n_chars, n_length, &offset_first, &offset_mid, &offset_last);
+    sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast those characters into an unsigned integer.
-    n_vec.u8s[0] = n[offset_first];
-    n_vec.u8s[1] = n[offset_first + 1];
-    n_vec.u8s[2] = n[offset_mid];
-    n_vec.u8s[3] = n[offset_last];
+    needle_vec.u8s[0] = needle_u8[offset_first];
+    needle_vec.u8s[1] = needle_u8[offset_first + 1];
+    needle_vec.u8s[2] = needle_u8[offset_mid];
+    needle_vec.u8s[3] = needle_u8[offset_last];
 
-    // Scan through the whole haystack, skipping the first `n_length - 1` bytes.
-    for (sz_size_t j = 0; j <= h_length - n_length;) {
-        sz_size_t i = h_length - n_length - j;
-        h_vec.u8s[0] = h[i + offset_first];
-        h_vec.u8s[1] = h[i + offset_first + 1];
-        h_vec.u8s[2] = h[i + offset_mid];
-        h_vec.u8s[3] = h[i + offset_last];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
-        j += bad_shift_table.jumps[h[i]];
+    // Scan through the whole haystack, skipping the first `needle_length - 1` bytes.
+    for (sz_size_t skip_index = 0; skip_index <= haystack_length - needle_length;) {
+        sz_size_t byte_index = haystack_length - needle_length - skip_index;
+        haystack_vec.u8s[0] = haystack_u8[byte_index + offset_first];
+        haystack_vec.u8s[1] = haystack_u8[byte_index + offset_first + 1];
+        haystack_vec.u8s[2] = haystack_u8[byte_index + offset_mid];
+        haystack_vec.u8s[3] = haystack_u8[byte_index + offset_last];
+        if (haystack_vec.u32 == needle_vec.u32 &&
+            sz_equal_serial((sz_cptr_t)haystack_u8 + byte_index, needle, needle_length))
+            return (sz_cptr_t)haystack_u8 + byte_index;
+        skip_index += bad_shift_table.jumps[haystack_u8[byte_index]];
     }
     return SZ_NULL_CHAR;
 }
@@ -512,23 +554,32 @@ SZ_INTERNAL sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
 /**
  *  @brief Exact substring search helper function, that finds the first occurrence of a prefix of the needle
  *         using a given search function, and then verifies the remaining part of the needle.
+ *
+ *  @param haystack Pointer to the haystack.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the needle.
+ *  @param needle_length Length of the needle in bytes.
+ *  @param find_prefix Function used to search for the prefix.
+ *  @param prefix_length Length of the prefix to search for.
+ *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
 SZ_INTERNAL sz_cptr_t sz_find_with_prefix_( //
-    sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length, sz_find_t find_prefix, sz_size_t prefix_length) {
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, sz_find_t find_prefix,
+    sz_size_t prefix_length) {
 
-    sz_size_t suffix_length = n_length - prefix_length;
+    sz_size_t suffix_length = needle_length - prefix_length;
     while (1) {
-        sz_cptr_t found = find_prefix(h, h_length, n, prefix_length);
+        sz_cptr_t found = find_prefix(haystack, haystack_length, needle, prefix_length);
         if (!found) return SZ_NULL_CHAR;
 
         // Verify the remaining part of the needle
-        sz_size_t remaining = h_length - (found - h);
-        if (remaining < n_length) return SZ_NULL_CHAR;
-        if (sz_equal_serial(found + prefix_length, n + prefix_length, suffix_length)) return found;
+        sz_size_t remaining = haystack_length - (found - haystack);
+        if (remaining < needle_length) return SZ_NULL_CHAR;
+        if (sz_equal_serial(found + prefix_length, needle + prefix_length, suffix_length)) return found;
 
         // Adjust the position.
-        h = found + 1;
-        h_length = remaining - 1;
+        haystack = found + 1;
+        haystack_length = remaining - 1;
     }
 
     // Unreachable, but helps silence compiler warnings:
@@ -538,45 +589,57 @@ SZ_INTERNAL sz_cptr_t sz_find_with_prefix_( //
 /**
  *  @brief Exact reverse-order substring search helper function, that finds the last occurrence of a suffix of the
  *         needle using a given search function, and then verifies the remaining part of the needle.
+ *
+ *  @param haystack Pointer to the haystack.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the needle.
+ *  @param needle_length Length of the needle in bytes.
+ *  @param find_suffix Function used to search for the suffix.
+ *  @param suffix_length Length of the suffix to search for.
+ *  @return Pointer to last match start, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length,
-                                            sz_find_t find_suffix, sz_size_t suffix_length) {
+SZ_INTERNAL sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length, sz_find_t find_suffix, sz_size_t suffix_length) {
 
-    sz_size_t prefix_length = n_length - suffix_length;
+    sz_size_t prefix_length = needle_length - suffix_length;
     while (1) {
-        sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
+        sz_cptr_t found = find_suffix(haystack, haystack_length, needle + prefix_length, suffix_length);
         if (!found) return SZ_NULL_CHAR;
 
         // Verify the remaining part of the needle
-        sz_size_t remaining = found - h;
+        sz_size_t remaining = found - haystack;
         if (remaining < prefix_length) return SZ_NULL_CHAR;
-        if (sz_equal_serial(found - prefix_length, n, prefix_length)) return found - prefix_length;
+        if (sz_equal_serial(found - prefix_length, needle, prefix_length)) return found - prefix_length;
 
         // Adjust the position.
-        h_length = remaining - 1;
+        haystack_length = remaining - 1;
     }
 
     // Unreachable, but helps silence compiler warnings:
     return SZ_NULL_CHAR;
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    return sz_find_with_prefix_(h, h_length, n, n_length, (sz_find_t)sz_find_4byte_serial_, 4);
+SZ_INTERNAL sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                  sz_size_t needle_length) {
+    return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length, (sz_find_t)sz_find_4byte_serial_, 4);
 }
 
 SZ_INTERNAL sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
-    sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    return sz_find_with_prefix_(h, h_length, n, n_length, sz_find_horspool_upto_256bytes_serial_, 256);
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
+    return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length,
+                                sz_find_horspool_upto_256bytes_serial_, 256);
 }
 
 SZ_INTERNAL sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
-    sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    return sz_rfind_with_suffix_(h, h_length, n, n_length, sz_rfind_horspool_upto_256bytes_serial_, 256);
+    sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
+    return sz_rfind_with_suffix_(haystack, haystack_length, needle, needle_length,
+                                 sz_rfind_horspool_upto_256bytes_serial_, 256);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                   sz_size_t needle_length) {
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense - now optimized for both endianness!
@@ -593,17 +656,18 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 
     return backends[
         // For very short strings brute-force SWAR makes sense.
-        (n_length > 1) + (n_length > 2) + (n_length > 3) +
+        (needle_length > 1) + (needle_length > 2) + (needle_length > 3) +
         // To avoid constructing the skip-table, let's use the prefixed approach.
-        (n_length > 4) +
+        (needle_length > 4) +
         // For longer needles - use skip tables.
-        (n_length > 8) + (n_length > 256)](h, h_length, n, n_length);
+        (needle_length > 8) + (needle_length > 256)](haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                    sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
+    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
@@ -623,9 +687,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         // For very short strings brute-force SWAR makes sense.
         0 +
         // To avoid constructing the skip-table, let's use the prefixed approach.
-        (n_length > 1) +
+        (needle_length > 1) +
         // For longer needles - use skip tables.
-        (n_length > 256)](h, h_length, n, n_length);
+        (needle_length > 256)](haystack, haystack_length, needle, needle_length);
 }
 
 #ifdef __cplusplus

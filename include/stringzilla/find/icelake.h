@@ -126,10 +126,10 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz
         //
         //      for (sz_size_t i = 0; i != load_length; ++i) {
         //          sz_u8_t input = *(sz_u8_t const *)(text + i);
-        //          sz_u8_t const *bitset_ptr = &filter->_u8s[0];
+        //          sz_u8_t const *bitset_pointer = &filter->_u8s[0];
         //          sz_u8_t hi_nibble = input >> 4;
-        //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
-        //          sz_u8_t bitset_odd = bitset_ptr[hi_nibble * 2 + 1];
+        //          sz_u8_t bitset_even = bitset_pointer[hi_nibble * 2];
+        //          sz_u8_t bitset_odd = bitset_pointer[hi_nibble * 2 + 1];
         //          sz_assert_(bitset_even_vec.u8s[i] == bitset_even);
         //          sz_assert_(bitset_odd_vec.u8s[i] == bitset_odd);
         //      }
