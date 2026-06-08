@@ -53,11 +53,11 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         target += length;
         source += length;
 
-        sz_u128_vec_t src_vec;
+        sz_u128_vec_t source_vec;
         while (length >= 16) {
             target -= 16, source -= 16, length -= 16;
-            src_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
-            vst1q_u8((sz_u8_t *)target, src_vec.u8x16);
+            source_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
+            vst1q_u8((sz_u8_t *)target, source_vec.u8x16);
         }
         while (length) {
             target -= 1, source -= 1, length -= 1;
@@ -67,10 +67,10 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 }
 
 SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    uint8x16_t fill_vec = vdupq_n_u8(value); // Broadcast the value across the register
+    uint8x16_t fill_u8x16 = vdupq_n_u8(value); // Broadcast the value across the register
 
     while (length >= 16) {
-        vst1q_u8((sz_u8_t *)target, fill_vec);
+        vst1q_u8((sz_u8_t *)target, fill_u8x16);
         target += 16;
         length -= 16;
     }

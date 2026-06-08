@@ -177,12 +177,13 @@ struct utf8_word_reverse_from_sz {
         sz_size_t remaining = token.size();
         std::size_t boundaries = 0;
         while (remaining) {
-            sz_size_t width = 0; // `boundary_width` is `remaining - pos`; the boundary sits at `base + pos`.
+            sz_size_t width =
+                0; // `boundary_width` is `remaining - byte_position`; the boundary sits at `base + byte_position`.
             sz_cptr_t boundary = func_(base, remaining, &width);
-            std::size_t pos = static_cast<std::size_t>(boundary - base);
-            if (pos == 0 || pos >= remaining) break; // Reached the leading boundary at the start.
+            std::size_t byte_position = static_cast<std::size_t>(boundary - base);
+            if (byte_position == 0 || byte_position >= remaining) break; // Reached the leading boundary at the start.
             ++boundaries;
-            remaining = pos; // Continue the reverse scan over the prefix [base, pos).
+            remaining = byte_position; // Continue the reverse scan over the prefix [base, byte_position).
         }
         do_not_optimize(boundaries);
         return {token.size(), static_cast<check_value_t>(boundaries)};

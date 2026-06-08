@@ -140,8 +140,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
             text_reversed_vec.zmm = _mm512_stream_load_si512((__m512i *)(text + body_length - 64));
-            sums_reversed_vec.zmm =
-                _mm512_add_epi64(sums_reversed_vec.zmm, _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512()));
+            sums_reversed_vec.zmm = _mm512_add_epi64(sums_reversed_vec.zmm,
+                                                     _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512()));
         }
         if (body_length >= 64) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
@@ -237,8 +237,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
             state.sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state.sum.zmm, order), state.ins.zmm);
         }
         if (state.ins_length < length) {
-            state.ins.zmm =
-                _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
+            state.ins.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length),
+                                                    start + state.ins_length);
             state.aes.zmm = _mm512_aesenc_epi128(state.aes.zmm, state.ins.zmm);
             state.sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state.sum.zmm, order), state.ins.zmm);
             state.ins_length = length;
@@ -358,17 +358,17 @@ SZ_PUBLIC void sz_fill_random_icelake(sz_ptr_t output, sz_size_t length, sz_u64_
         __m512i const key = _mm512_xor_si512(_mm512_set1_epi64(nonce), pi);
 
         // Produce the output, fixing the key and enumerating input chunks.
-        sz_size_t i = 0;
-        for (; i + 64 <= length; i += 64) {
+        sz_size_t byte_index = 0;
+        for (; byte_index + 64 <= length; byte_index += 64) {
             __m512i generated = _mm512_aesenc_epi128(input, key);
-            _mm512_storeu_epi8((void *)(output + i), generated);
+            _mm512_storeu_epi8((void *)(output + byte_index), generated);
             input = _mm512_add_epi64(input, increment);
         }
 
         // Handle the tail of the buffer.
         __m512i generated = _mm512_aesenc_epi128(input, key);
-        __mmask64 store_mask = sz_u64_mask_until_(length - i);
-        _mm512_mask_storeu_epi8((void *)(output + i), store_mask, generated);
+        __mmask64 store_mask = sz_u64_mask_until_(length - byte_index);
+        _mm512_mask_storeu_epi8((void *)(output + byte_index), store_mask, generated);
     }
 }
 
@@ -383,6 +383,11 @@ typedef struct sz_hash_minimal_x4_t_ {
     sz_u512_vec_t key;
 } sz_hash_minimal_x4_t_;
 
+/**
+ *  @brief Initializes the 4-wide parallel minimal hash state using VAES and AVX-512 intrinsics.
+ *  @param state Pointer to the 4-wide minimal hash state to initialize.
+ *  @param seed 64-bit seed XOR-ed with Pi constants replicated across all four 128-bit lanes.
+ */
 SZ_INTERNAL void sz_hash_minimal_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
@@ -406,6 +411,15 @@ SZ_INTERNAL void sz_hash_minimal_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, 
     state->sum.zmm = sum_state_key;
 }
 
+/**
+ *  @brief Finalizes the 4-wide parallel minimal hash state, returning four 64-bit digests packed in a 256-bit vector.
+ *  @param state Pointer to the (const) 4-wide minimal hash state.
+ *  @param length0 Total byte count for the first 128-bit lane.
+ *  @param length1 Total byte count for the second 128-bit lane.
+ *  @param length2 Total byte count for the third 128-bit lane.
+ *  @param length3 Total byte count for the fourth 128-bit lane.
+ *  @return 256-bit vector containing four 64-bit hash values (one per lane).
+ */
 SZ_INTERNAL __m256i sz_hash_minimal_x4_finalize_icelake_(sz_hash_minimal_x4_t_ const *state, //
                                                          sz_size_t length0, sz_size_t length1, sz_size_t length2,
                                                          sz_size_t length3) {
@@ -423,6 +437,11 @@ SZ_INTERNAL __m256i sz_hash_minimal_x4_finalize_icelake_(sz_hash_minimal_x4_t_ c
         _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_in_register));
 }
 
+/**
+ *  @brief Absorbs four 128-bit blocks (one per hash lane) into the 4-wide minimal hash state.
+ *  @param state Pointer to the 4-wide minimal hash state.
+ *  @param blocks 512-bit register containing four 128-bit data blocks, one per lane.
+ */
 SZ_INTERNAL void sz_hash_minimal_x4_update_icelake_(sz_hash_minimal_x4_t_ *state, __m512i blocks) {
     __m512i const order = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, blocks);
@@ -430,9 +449,9 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_icelake_(sz_hash_minimal_x4_t_ *state
 }
 
 /**
- *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
- *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
- *  @param[in] block Pointer to 64-byte message block.
+ *  @brief Process a single 512-bit (64-byte) block of data using SHA256 with SHA-NI and AVX-512.
+ *  @param hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param block Pointer to 64-byte message block.
  */
 SZ_INTERNAL void sz_sha256_process_block_icelake_(sz_u32_t hash[sz_at_least_(8)],
                                                   sz_u8_t const block[sz_at_least_(64)]) {
@@ -479,165 +498,161 @@ SZ_INTERNAL void sz_sha256_process_block_icelake_(sz_u32_t hash[sz_at_least_(8)]
     // Pack state into SHA-NI format (ABEF/CDGH)
     __m128i state0 = _mm_lddqu_si128((__m128i const *)&hash[0]); // A B C D
     __m128i state1 = _mm_lddqu_si128((__m128i const *)&hash[4]); // E F G H
-    __m128i tmp = _mm_shuffle_epi32(state0, 0xB1);               // CDAB
+    __m128i perm_u32x4 = _mm_shuffle_epi32(state0, 0xB1);        // CDAB
     state1 = _mm_shuffle_epi32(state1, 0x1B);                    // HGFE
-    state0 = _mm_alignr_epi8(tmp, state1, 8);                    // ABEF
-    state1 = _mm_blend_epi16(state1, tmp, 0xF0);                 // CDGH
+    state0 = _mm_alignr_epi8(perm_u32x4, state1, 8);             // ABEF
+    state1 = _mm_blend_epi16(state1, perm_u32x4, 0xF0);          // CDGH
 
-    __m128i state0_save = state0;
-    __m128i state1_save = state1;
+    __m128i state0_saved = state0;
+    __m128i state1_saved = state1;
 
     // Rounds 0-3
-    __m128i msg_tmp = _mm_add_epi32(msg0, k0_3.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    __m128i round_input = _mm_add_epi32(msg0, k0_3.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
 
     // Rounds 4-7
-    msg_tmp = _mm_add_epi32(msg1, k4_7.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg1, k4_7.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 8-11
-    msg_tmp = _mm_add_epi32(msg2, k8_11.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg2, k8_11.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 12-15
-    msg_tmp = _mm_add_epi32(msg3, k12_15.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg3, k12_15.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
     msg0 = _mm_sha256msg2_epu32(msg0, msg3);
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 16-19
-    msg_tmp = _mm_add_epi32(msg0, k16_19.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg0, k16_19.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
     msg1 = _mm_sha256msg2_epu32(msg1, msg0);
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 20-23
-    msg_tmp = _mm_add_epi32(msg1, k20_23.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg1, k20_23.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
     msg2 = _mm_sha256msg2_epu32(msg2, msg1);
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 24-27
-    msg_tmp = _mm_add_epi32(msg2, k24_27.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg2, k24_27.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
     msg3 = _mm_sha256msg2_epu32(msg3, msg2);
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 28-31
-    msg_tmp = _mm_add_epi32(msg3, k28_31.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg3, k28_31.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
     msg0 = _mm_sha256msg2_epu32(msg0, msg3);
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 32-35
-    msg_tmp = _mm_add_epi32(msg0, k32_35.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg0, k32_35.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
     msg1 = _mm_sha256msg2_epu32(msg1, msg0);
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 36-39
-    msg_tmp = _mm_add_epi32(msg1, k36_39.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg1, k36_39.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
     msg2 = _mm_sha256msg2_epu32(msg2, msg1);
     msg0 = _mm_sha256msg1_epu32(msg0, msg1);
 
     // Rounds 40-43
-    msg_tmp = _mm_add_epi32(msg2, k40_43.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg2, k40_43.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
     msg3 = _mm_sha256msg2_epu32(msg3, msg2);
     msg1 = _mm_sha256msg1_epu32(msg1, msg2);
 
     // Rounds 44-47
-    msg_tmp = _mm_add_epi32(msg3, k44_47.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg3, k44_47.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
     msg0 = _mm_sha256msg2_epu32(msg0, msg3);
     msg2 = _mm_sha256msg1_epu32(msg2, msg3);
 
     // Rounds 48-51
-    msg_tmp = _mm_add_epi32(msg0, k48_51.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg0, k48_51.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
     msg1 = _mm_sha256msg2_epu32(msg1, msg0);
     msg3 = _mm_sha256msg1_epu32(msg3, msg0);
 
     // Rounds 52-55
-    msg_tmp = _mm_add_epi32(msg1, k52_55.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg1, k52_55.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
     msg2 = _mm_sha256msg2_epu32(msg2, msg1);
 
     // Rounds 56-59
-    msg_tmp = _mm_add_epi32(msg2, k56_59.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg2, k56_59.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
     msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
     msg3 = _mm_sha256msg2_epu32(msg3, msg2);
 
     // Rounds 60-63
-    msg_tmp = _mm_add_epi32(msg3, k60_63.xmm);
-    state1 = _mm_sha256rnds2_epu32(state1, state0, msg_tmp);
-    msg_tmp = _mm_shuffle_epi32(msg_tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, msg_tmp);
+    round_input = _mm_add_epi32(msg3, k60_63.xmm);
+    state1 = _mm_sha256rnds2_epu32(state1, state0, round_input);
+    round_input = _mm_shuffle_epi32(round_input, 0x0E);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, round_input);
 
     // Add compressed chunk to hash
-    state0 = _mm_add_epi32(state0, state0_save);
-    state1 = _mm_add_epi32(state1, state1_save);
+    state0 = _mm_add_epi32(state0, state0_saved);
+    state1 = _mm_add_epi32(state1, state1_saved);
 
     // Unpack from SHA-NI format back to ABCD/EFGH
-    tmp = _mm_shuffle_epi32(state0, 0x1B);       // FEBA
-    state1 = _mm_shuffle_epi32(state1, 0xB1);    // GHCD
-    state0 = _mm_blend_epi16(tmp, state1, 0xF0); // ABCD
-    state1 = _mm_alignr_epi8(state1, tmp, 8);    // EFGH
+    perm_u32x4 = _mm_shuffle_epi32(state0, 0x1B);       // FEBA
+    state1 = _mm_shuffle_epi32(state1, 0xB1);           // GHCD
+    state0 = _mm_blend_epi16(perm_u32x4, state1, 0xF0); // ABCD
+    state1 = _mm_alignr_epi8(state1, perm_u32x4, 8);    // EFGH
 
     // Store results
     _mm_storeu_si128((__m128i *)&hash[0], state0);
     _mm_storeu_si128((__m128i *)&hash[4], state1);
 }
 
-/**
- *  @brief Initialize SHA256 state with IV constants.
- *  @param state   Pointer to SHA256 state structure to initialize.
- */
 SZ_PUBLIC void sz_sha256_state_init_icelake(sz_sha256_state_t *state_ptr) {
     // Vectorize the load/store of 8x u32s using 1x 256-bit AVX load
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
@@ -645,13 +660,6 @@ SZ_PUBLIC void sz_sha256_state_init_icelake(sz_sha256_state_t *state_ptr) {
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-/**
- *  @brief Update SHA256 state with additional data.
- *         Uses AVX-512 for efficient data copying.
- *  @param state   Pointer to SHA256 state structure.
- *  @param data    Input data to process.
- *  @param length  Number of bytes in input data.
- */
 SZ_PUBLIC void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / 64;
@@ -678,8 +686,9 @@ SZ_PUBLIC void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr, sz_c
 
     // Process head to complete the current block
     if (head_length) {
-        __mmask64 mask = sz_u64_clamp_mask_until_(head_length);
-        _mm512_mask_storeu_epi8(&state_ptr->block[state_ptr->block_length], mask, _mm512_maskz_loadu_epi8(mask, input));
+        __mmask64 head_mask = sz_u64_clamp_mask_until_(head_length);
+        _mm512_mask_storeu_epi8(&state_ptr->block[state_ptr->block_length], head_mask,
+                                _mm512_maskz_loadu_epi8(head_mask, input));
         state_ptr->block_length += head_length;
         sz_sha256_process_block_icelake_(hash, state_ptr->block);
         state_ptr->block_length = 0;
@@ -692,8 +701,8 @@ SZ_PUBLIC void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr, sz_c
 
     // Process tail (remaining bytes into block buffer)
     if (tail_length) {
-        __mmask64 mask = sz_u64_clamp_mask_until_(tail_length);
-        _mm512_mask_storeu_epi8(state_ptr->block, mask, _mm512_maskz_loadu_epi8(mask, input));
+        __mmask64 tail_mask = sz_u64_clamp_mask_until_(tail_length);
+        _mm512_mask_storeu_epi8(state_ptr->block, tail_mask, _mm512_maskz_loadu_epi8(tail_mask, input));
         state_ptr->block_length = tail_length;
     }
 
@@ -712,16 +721,16 @@ SZ_PUBLIC void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state_ptr
     if (state.block_length > 56) {
         // Zero remaining bytes using AVX-512 masked store
         sz_size_t remaining = 64 - state.block_length;
-        __mmask64 mask = sz_u64_clamp_mask_until_(remaining);
-        _mm512_mask_storeu_epi8(&state.block[state.block_length], mask, _mm512_setzero_si512());
+        __mmask64 remaining_mask = sz_u64_clamp_mask_until_(remaining);
+        _mm512_mask_storeu_epi8(&state.block[state.block_length], remaining_mask, _mm512_setzero_si512());
         sz_sha256_process_block_icelake_(state.hash, state.block);
         state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes using AVX-512 masked store
     sz_size_t remaining = 56 - state.block_length;
-    __mmask64 mask = sz_u64_clamp_mask_until_(remaining);
-    _mm512_mask_storeu_epi8(&state.block[state.block_length], mask, _mm512_setzero_si512());
+    __mmask64 remaining_mask = sz_u64_clamp_mask_until_(remaining);
+    _mm512_mask_storeu_epi8(&state.block[state.block_length], remaining_mask, _mm512_setzero_si512());
 
     // Append the 64-bit length in bits (big-endian)
     sz_u64_t bit_length = state.total_length * 8;
@@ -738,11 +747,11 @@ SZ_PUBLIC void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state_ptr
     sz_sha256_process_block_icelake_(state.hash, state.block);
 
     // Produce the final hash digest in big-endian format
-    for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(state.hash[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(state.hash[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(state.hash[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(state.hash[i] >> 0);
+    for (sz_size_t lane_index = 0; lane_index < 8; ++lane_index) {
+        digest[lane_index * 4 + 0] = (sz_u8_t)(state.hash[lane_index] >> 24);
+        digest[lane_index * 4 + 1] = (sz_u8_t)(state.hash[lane_index] >> 16);
+        digest[lane_index * 4 + 2] = (sz_u8_t)(state.hash[lane_index] >> 8);
+        digest[lane_index * 4 + 3] = (sz_u8_t)(state.hash[lane_index] >> 0);
     }
 }
 

@@ -40,14 +40,14 @@ extern "C" {
  *         Outputs the @p first_positions from the @p first_sequence and @p second_positions from
  *         the @p second_sequence, that contain matched strings. Missing matches are represented as `SZ_SIZE_MAX`.
  *
- *  @param[in] first_sequence First immutable sequence of strings to intersection.
- *  @param[in] second_sequence Second immutable sequence of strings to intersection.
- *  @param[in] semantics JOIN semantics for the intersection, including handling of duplicates.
- *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[in] seed Optional seed for the hash table to avoid attacks.
- *  @param[out] intersection_size Number of matching strings in both sequences.
- *  @param[out] first_positions Offset positions of the matching strings from the @p first_sequence.
- *  @param[out] second_positions Offset positions of the matching strings from the @p second_sequence.
+ *  @param first_sequence First immutable sequence of strings to intersection.
+ *  @param second_sequence Second immutable sequence of strings to intersection.
+ *  @param semantics JOIN semantics for the intersection, including handling of duplicates.
+ *  @param alloc Optional memory allocator for temporary storage.
+ *  @param seed Optional seed for the hash table to avoid attacks.
+ *  @param intersection_size Number of matching strings in both sequences.
+ *  @param first_positions Offset positions of the matching strings from the @p first_sequence.
+ *  @param second_positions Offset positions of the matching strings from the @p second_sequence.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.

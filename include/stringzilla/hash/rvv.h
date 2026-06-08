@@ -167,8 +167,8 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u12
     vuint8m1_t low_high_vec = sz_rvv_gf16_mul_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vl);
     vuint8m1_t low_high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, low_high_vec, vl);
     vuint8m1_t high_squared_b_vec = __riscv_vrgather_vv_u8m1(mul_b_vec, high_squared_vec, vl);
-    vuint8m1_t norm_vec =
-        __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vl), high_squared_b_vec, vl);
+    vuint8m1_t norm_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vl),
+                                               high_squared_b_vec, vl);
     vuint8m1_t norm_inverse_vec = __riscv_vrgather_vv_u8m1(inverse4_vec, norm_vec, vl);
 
     // Inverse in the tower: new_high = hi*norm_inverse, new_low = (lo + hi*A) * norm_inverse.
@@ -284,11 +284,11 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_t const *state) {
     return mixed_in_register.u64s[0];
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `src` into `dst->u8s`,
- *          replacing a scalar byte loop. `src` must have a full block of readable bytes. */
-SZ_INTERNAL void sz_hash_load_block_rvv_(sz_u128_vec_t *dst, sz_cptr_t src) {
-    size_t vl = __riscv_vsetvl_e8m1(sizeof(dst->u8s));
-    __riscv_vse8_v_u8m1(dst->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)src, vl), vl);
+/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target->u8s`,
+ *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
+SZ_INTERNAL void sz_hash_load_block_rvv_(sz_u128_vec_t *target, sz_cptr_t source) {
+    size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
+    __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vl), vl);
 }
 
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -377,8 +377,8 @@ SZ_PUBLIC void sz_hash_state_update_rvv(sz_hash_state_t *state, sz_cptr_t text, 
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_rvv_(state);
-            size_t vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
-            __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, vl), vl);
+            size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
+            __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, clear_vl), clear_vl);
         }
     }
 }
@@ -420,11 +420,11 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_rvv(sz_hash_state_t const *state) {
 }
 
 SZ_PUBLIC void sz_fill_random_rvv(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
+    sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
         input_vec.u64s[0] = input_vec.u64s[1] = nonce + lane_index;
-        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        pi_vec = ((sz_u128_vec_t const *)pi_constants)[lane_index % 4];
         key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
         generated_vec = sz_emulate_aesenc_rvv_(input_vec, key_vec);

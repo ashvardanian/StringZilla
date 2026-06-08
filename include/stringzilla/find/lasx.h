@@ -17,20 +17,33 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-/*  See `compare/lasx.h` for the rationale: `__lasx_xvmskltz_b` packs the sign bit of each byte into a
+/**
+ *  @brief Produce an AVX2-style 32-bit movemask from a LASX 256-bit comparison result.
+ *      Bit `i` reflects byte `i` of the comparison (0xFF → set, 0x00 → clear).
+ *
+ *  See `compare/lasx.h` for the rationale: `__lasx_xvmskltz_b` packs the sign bit of each byte into a
  *  per-128-bit-lane 16-bit mask (word 0 = low lane, word 4 = high lane). Recombining matches AVX2's
- *  `_mm256_movemask_epi8` byte ordering, so `ctz`/`clz` index bytes identically to the Haswell backend. */
+ *  `_mm256_movemask_epi8` byte ordering, so `ctz`/`clz` index bytes identically to the Haswell backend.
+ *
+ *  @param sign_extended A 256-bit comparison result vector (0xFF where matched, 0x00 otherwise).
+ *  @return 32-bit movemask where bit `i` is set when byte `i` matched.
+ */
 SZ_INTERNAL sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended) {
     __m256i collected = __lasx_xvmskltz_b(sign_extended);
-    sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 0);
-    sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 4);
+    unsigned int low = __lasx_xvpickve2gr_wu(collected, 0);
+    unsigned int high = __lasx_xvpickve2gr_wu(collected, 4);
     return (low & 0xFFFFu) | ((high & 0xFFFFu) << 16);
 }
 
-/*  The 128-bit LSX movemask (see `compare/lasx.h`): a single GPR extract yields the SSE-style 16-bit mask.
- *  Used to cover the sub-32-byte head/tail that a 256-bit-only loop would otherwise hand to the serial path. */
+/**
+ *  @brief Produce an SSE-style 16-bit movemask from an LSX 128-bit comparison result.
+ *      Used to cover the sub-32-byte head/tail that a 256-bit-only loop would otherwise hand to the serial path.
+ *
+ *  @param sign_extended A 128-bit comparison result vector (0xFF where matched, 0x00 otherwise).
+ *  @return Low 16 bits of the movemask.
+ */
 SZ_INTERNAL sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended) {
-    return (sz_u32_t)__lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
+    return __lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
@@ -49,9 +62,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_len
         // lane's in byte 16 (each 0..15, or 16 when that lane has no match).
         if (__lasx_xbnz_v(matches_vec.lasx)) {
             __m256i first_match_indices = __lasx_xvfrstpi_b(matches_vec.lasx, matches_vec.lasx, 0);
-            sz_size_t low_lane_index = (sz_size_t)(__lasx_xvpickve2gr_wu(first_match_indices, 0) & 0xFF);
+            unsigned int low_lane_index = __lasx_xvpickve2gr_wu(first_match_indices, 0) & 0xFF;
             if (low_lane_index < 16) return haystack + low_lane_index;
-            return haystack + 16 + (sz_size_t)(__lasx_xvpickve2gr_wu(first_match_indices, 4) & 0xFF);
+            return haystack + 16 + (__lasx_xvpickve2gr_wu(first_match_indices, 4) & 0xFF);
         }
         haystack += 32, haystack_length -= 32;
     }
@@ -64,7 +77,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_len
         // One lane: `vfrstp` writes the first-match index to byte 0 (`bnz_v` already proved a match exists).
         if (__lsx_bnz_v(matches128_vec.lsx)) {
             __m128i first_match_indices = __lsx_vfrstpi_b(matches128_vec.lsx, matches128_vec.lsx, 0);
-            return haystack + (sz_size_t)(__lsx_vpickve2gr_wu(first_match_indices, 0) & 0xFF);
+            return haystack + (__lsx_vpickve2gr_wu(first_match_indices, 0) & 0xFF);
         }
         haystack += 16, haystack_length -= 16;
     }
@@ -301,9 +314,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_by
         if (__lasx_xbnz_v(matches_vec.lasx)) {
             __m256i in_set_vec = __lasx_xvslt_bu(zero_vec, matches_vec.lasx);
             __m256i first_match_indices = __lasx_xvfrstpi_b(in_set_vec, in_set_vec, 0);
-            sz_size_t low_lane_index = (sz_size_t)(__lasx_xvpickve2gr_wu(first_match_indices, 0) & 0xFF);
+            unsigned int low_lane_index = __lasx_xvpickve2gr_wu(first_match_indices, 0) & 0xFF;
             if (low_lane_index < 16) return text + low_lane_index;
-            return text + 16 + (sz_size_t)(__lasx_xvpickve2gr_wu(first_match_indices, 4) & 0xFF);
+            return text + 16 + (__lasx_xvpickve2gr_wu(first_match_indices, 4) & 0xFF);
         }
         text += 32, length -= 32;
     }
@@ -334,7 +347,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_by
             // One lane: sign-extend the in-set bytes, then `vfrstp` gives the first index (`bnz_v` proved >=1).
             __m128i in_set_vec = __lsx_vslt_bu(zero128_vec, matches128_vec.lsx);
             __m128i first_match_indices = __lsx_vfrstpi_b(in_set_vec, in_set_vec, 0);
-            return text + (sz_size_t)(__lsx_vpickve2gr_wu(first_match_indices, 0) & 0xFF);
+            return text + (__lsx_vpickve2gr_wu(first_match_indices, 0) & 0xFF);
         }
         text += 16, length -= 16;
     }

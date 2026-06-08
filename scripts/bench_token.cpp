@@ -80,9 +80,9 @@ struct bytesum_from_std_t {
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
-        std::size_t bytesum =
-            std::accumulate(buffer.begin(), buffer.end(), (std::size_t)0,
-                            [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
+        std::size_t bytesum = std::accumulate(
+            buffer.begin(), buffer.end(), (std::size_t)0,
+            [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
         do_not_optimize(bytesum);
         return {buffer.size(), static_cast<check_value_t>(bytesum)};
     }

@@ -69,8 +69,8 @@ typedef enum sz_tr29_word_break_t {
  *  and then subtract that from the total byte length to get the number of "start bytes" -
  *  coinciding with the number of UTF-8 characters.
  *
- *  @param[in] text String to be scanned.
- *  @param[in] length Number of bytes in the string.
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
  *  @return Number of UTF-8 characters in the string.
  *
  *  @example Count characters:
@@ -84,9 +84,9 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
 /**
  *  @brief Skip forward to the Nth UTF-8 character.
  *
- *  @param[in] text String to be scanned.
- *  @param[in] length Number of bytes in the string.
- *  @param[in] n Number of UTF-8 characters to skip (0-indexed, so n=0 returns text).
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @param n Number of UTF-8 characters to skip (0-indexed, so n=0 returns text).
  *  @return Pointer to the Nth character, or NULL if the string has fewer than n characters.
  *
  *  @example Skip to character 1000 (e.g., pagination):
@@ -126,9 +126,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_
  *        These are data structure delimiters used in formats like USV (Unicode Separated Values),
  *        not line breaks. Use @c sz_find_byte() if you need to find these separators.
  *
- *  @param[in] text String to be scanned.
- *  @param[in] length Number of bytes in the string.
- *  @param[out] matched_length Number of bytes in the matched newline delimiter.
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @param matched_length Number of bytes in the matched newline delimiter.
  *  @return Pointer to the first matching newline character from @p text, or @c SZ_NULL_CHAR if not found.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
@@ -180,9 +180,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
  *      These are Format characters, not whitespace. They have no width and affect rendering,
  *      not spacing.
  *
- *  @param[in] text String to be scanned.
- *  @param[in] length Number of bytes in the string.
- *  @param[out] matched_length Number of bytes in the matched whitespace character.
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @param matched_length Number of bytes in the matched whitespace character.
  *  @return Pointer to the first matching whitespace character from @p text, or @c SZ_NULL_CHAR if not found.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
@@ -206,11 +206,11 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
  *
  *  It's a different story for emoji-heavy texts, which can mix 4-byte characters more frequently.
  *
- *  @param[in] text UTF-8 string to unpack.
- *  @param[in] length Number of bytes in the string (up to 64).
- *  @param[out] runes Output buffer for UTF-32 codepoints (recommended to be at least @b 64 entries wide).
- *  @param[in] runes_capacity Capacity of the @p runes buffer (number of sz_rune_t entries).
- *  @param[out] runes_unpacked Number of runes unpacked.
+ *  @param text UTF-8 string to unpack.
+ *  @param length Number of bytes in the string (up to 64).
+ *  @param runes Output buffer for UTF-32 codepoints (recommended to be at least @b 64 entries wide).
+ *  @param runes_capacity Capacity of the @p runes buffer (number of sz_rune_t entries).
+ *  @param runes_unpacked Number of runes unpacked.
  *  @return Pointer to the byte after the last unpacked byte in @p text.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
@@ -224,7 +224,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
  *  Returns one of the 16 Word_Break property values (sz_tr29_word_break_other_k through
  *  sz_tr29_word_break_mid_quotes_k). This is the foundation for TR29-compliant word boundary detection.
  *
- *  @param[in] rune The Unicode codepoint to classify.
+ *  @param rune The Unicode codepoint to classify.
  *  @return The Word_Break property value (0-15).
  *
  *  @see https://www.unicode.org/reports/tr29/ - Unicode Text Segmentation
@@ -237,7 +237,7 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
  *  Returns true if the codepoint has a Word_Break property that typically forms words:
  *  ALetter, Hebrew_Letter, Numeric, Katakana, ExtendNumLet, or mid-word punctuation.
  *
- *  @param[in] rune The Unicode codepoint to check.
+ *  @param rune The Unicode codepoint to check.
  *  @return sz_true_k if the codepoint is a word character, sz_false_k otherwise.
  */
 SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
@@ -248,9 +248,9 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
  *  Scans forward from the start of text to find the first word boundary position.
  *  Returns a pointer to the boundary position and optionally outputs the boundary width.
  *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Optional output: bytes spanning the boundary.
+ *  @param text UTF-8 encoded text.
+ *  @param length Byte length of text.
+ *  @param boundary_width Optional output: bytes spanning the boundary.
  *  @return Pointer to boundary position, or text+length at end.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
@@ -258,9 +258,9 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length
 /**
  *  @brief Find the previous word boundary in UTF-8 text (dispatch function).
  *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[out] boundary_width Optional output: bytes spanning the boundary.
+ *  @param text UTF-8 encoded text.
+ *  @param length Byte length of text.
+ *  @param boundary_width Optional output: bytes spanning the boundary.
  *  @return Pointer to boundary position, or text at start.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
@@ -274,15 +274,15 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t lengt
  *  - WB5-WB13: Letter, number, and punctuation rules
  *  - WB15-WB16: Regional Indicator pair rules
  *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of text.
- *  @param[in] pos Byte offset to check (must be start of a UTF-8 codepoint).
- *  @return sz_true_k if pos is a word boundary, sz_false_k otherwise.
+ *  @param text UTF-8 encoded text.
+ *  @param length Byte length of text.
+ *  @param position Byte offset to check (must be start of a UTF-8 codepoint).
+ *  @return sz_true_k if position is a word boundary, sz_false_k otherwise.
  *
  *  @note Position 0 and position == length are always boundaries (SOT/EOT).
  *  @note This is an internal helper used by the iterators; not part of stable ABI.
  */
-SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t pos);
+SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
 
 #pragma endregion
 

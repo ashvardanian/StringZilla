@@ -22,44 +22,40 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-/*  Length-agnostic `memcpy`. The `vsetvl` loop handles any tail without scalar fallback. */
 SZ_PUBLIC void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_u8_t *t = (sz_u8_t *)target;
-    sz_u8_t const *s = (sz_u8_t const *)source;
+    sz_u8_t *target_cursor = (sz_u8_t *)target;
+    sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(s, vl);
-        __riscv_vse8_v_u8m8(t, vec, vl);
-        t += vl, s += vl, length -= vl;
+        size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+        __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vector_length);
+        target_cursor += vector_length, source_cursor += vector_length, length -= vector_length;
     }
 }
 
-/*  Length-agnostic `memmove`. Forward pass when the ranges can be copied left-to-right safely,
- *  otherwise a backward pass that mirrors the serial reference's overlap handling. */
 SZ_PUBLIC void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) { sz_copy_rvv(target, source, length); }
     else {
         // Overlapping with `target > source`: walk from the end backwards.
-        sz_u8_t *t = (sz_u8_t *)target + length;
-        sz_u8_t const *s = (sz_u8_t const *)source + length;
+        sz_u8_t *target_cursor = (sz_u8_t *)target + length;
+        sz_u8_t const *source_cursor = (sz_u8_t const *)source + length;
         while (length) {
-            size_t vl = __riscv_vsetvl_e8m8(length);
-            t -= vl, s -= vl;
-            vuint8m8_t vec = __riscv_vle8_v_u8m8(s, vl);
-            __riscv_vse8_v_u8m8(t, vec, vl);
-            length -= vl;
+            size_t vector_length = __riscv_vsetvl_e8m8(length);
+            target_cursor -= vector_length, source_cursor -= vector_length;
+            vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+            __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vector_length);
+            length -= vector_length;
         }
     }
 }
 
-/*  Length-agnostic `memset`. */
 SZ_PUBLIC void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_u8_t *t = (sz_u8_t *)target;
+    sz_u8_t *target_cursor = (sz_u8_t *)target;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t vec = __riscv_vmv_v_x_u8m8(value, vl);
-        __riscv_vse8_v_u8m8(t, vec, vl);
-        t += vl, length -= vl;
+        size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t fill_u8m8 = __riscv_vmv_v_x_u8m8(value, vector_length);
+        __riscv_vse8_v_u8m8(target_cursor, fill_u8m8, vector_length);
+        target_cursor += vector_length, length -= vector_length;
     }
 }
 
@@ -81,35 +77,38 @@ SZ_PUBLIC void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source
         return;
     }
 
-    sz_u8_t *t = (sz_u8_t *)target;
-    sz_u8_t const *s = (sz_u8_t const *)source;
+    sz_u8_t *target_cursor = (sz_u8_t *)target;
+    sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
 
-    size_t lut_vl = __riscv_vsetvl_e8m8(256);
-    if (lut_vl >= 256) {
-        vuint8m8_t lut_vec = __riscv_vle8_v_u8m8(lut_u8, 256);
+    size_t lut_vector_length = __riscv_vsetvl_e8m8(256);
+    if (lut_vector_length >= 256) {
+        vuint8m8_t lut_u8m8 = __riscv_vle8_v_u8m8(lut_u8, 256);
         while (length) {
-            size_t vl = __riscv_vsetvl_e8m8(length);
-            vuint8m8_t idx_vec = __riscv_vle8_v_u8m8(s, vl);
-            vuint8m8_t out_vec = __riscv_vrgather_vv_u8m8(lut_vec, idx_vec, vl);
-            __riscv_vse8_v_u8m8(t, out_vec, vl);
-            t += vl, s += vl, length -= vl;
+            size_t vector_length = __riscv_vsetvl_e8m8(length);
+            vuint8m8_t index_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+            vuint8m8_t result_u8m8 = __riscv_vrgather_vv_u8m8(lut_u8m8, index_u8m8, vector_length);
+            __riscv_vse8_v_u8m8(target_cursor, result_u8m8, vector_length);
+            target_cursor += vector_length, source_cursor += vector_length, length -= vector_length;
         }
     }
     else if (__riscv_vsetvl_e8m8(128) >= 128) {
         // Two-half gather for `VLEN == 128` (and any case where a group holds >= 128 but < 256 bytes).
-        vuint8m8_t lut_lo = __riscv_vle8_v_u8m8(lut_u8, 128);
-        vuint8m8_t lut_hi = __riscv_vle8_v_u8m8(lut_u8 + 128, 128);
+        vuint8m8_t lut_low_u8m8 = __riscv_vle8_v_u8m8(lut_u8, 128);
+        vuint8m8_t lut_high_u8m8 = __riscv_vle8_v_u8m8(lut_u8 + 128, 128);
         while (length) {
-            size_t vl = __riscv_vsetvl_e8m8(length);
-            vuint8m8_t idx_vec = __riscv_vle8_v_u8m8(s, vl);
-            vuint8m8_t idx_lo = __riscv_vand_vx_u8m8(idx_vec, 0x7F, vl); // low 7 bits index either half
-            vuint8m8_t out_lo = __riscv_vrgather_vv_u8m8(lut_lo, idx_lo, vl);
-            vuint8m8_t out_hi = __riscv_vrgather_vv_u8m8(lut_hi, idx_lo, vl);
-            vbool1_t hi_mask = __riscv_vmsgeu_vx_u8m8_b1(idx_vec, 128, vl); // top bit set -> upper half
-            vuint8m8_t out_vec = __riscv_vmerge_vvm_u8m8(out_lo, out_hi, hi_mask, vl);
-            __riscv_vse8_v_u8m8(t, out_vec, vl);
-            t += vl, s += vl, length -= vl;
+            size_t vector_length = __riscv_vsetvl_e8m8(length);
+            vuint8m8_t index_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+            vuint8m8_t index_low7_u8m8 = __riscv_vand_vx_u8m8(index_u8m8, 0x7F,
+                                                              vector_length); // low 7 bits index either half
+            vuint8m8_t result_low_u8m8 = __riscv_vrgather_vv_u8m8(lut_low_u8m8, index_low7_u8m8, vector_length);
+            vuint8m8_t result_high_u8m8 = __riscv_vrgather_vv_u8m8(lut_high_u8m8, index_low7_u8m8, vector_length);
+            vbool1_t high_half_mask = __riscv_vmsgeu_vx_u8m8_b1(index_u8m8, 128,
+                                                                vector_length); // top bit set -> upper half
+            vuint8m8_t result_u8m8 = __riscv_vmerge_vvm_u8m8(result_low_u8m8, result_high_u8m8, high_half_mask,
+                                                             vector_length);
+            __riscv_vse8_v_u8m8(target_cursor, result_u8m8, vector_length);
+            target_cursor += vector_length, source_cursor += vector_length, length -= vector_length;
         }
     }
     else { sz_lookup_serial(target, length, source, lut); }

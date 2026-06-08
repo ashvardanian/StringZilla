@@ -41,9 +41,9 @@ extern "C" {
  *  @brief Faster @b arg-sort for an arbitrary @b string sequence, using QuickSort.
  *         Outputs the @p order of elements in the immutable @p sequence, that would sort it.
  *
- *  @param[in] sequence Immutable sequence of strings to sort.
- *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements.
+ *  @param sequence Immutable sequence of strings to sort.
+ *  @param alloc Optional memory allocator for temporary storage.
+ *  @param order Output permutation that sorts the elements.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
@@ -80,10 +80,10 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *  @brief Faster @b inplace `std::sort` for a continuous @b unsigned-integer sequence, using QuickSort.
  *         Overwrites the input @p pgrams with the sorted sequence and exports the @p order permutation.
  *
- *  @param[inout] pgrams Continuous buffer of unsigned integers to sort in place.
- *  @param[in] count Number of elements in the sequence.
- *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements.
+ *  @param pgrams Continuous buffer of unsigned integers to sort in place.
+ *  @param count Number of elements in the sequence.
+ *  @param alloc Optional memory allocator for temporary storage.
+ *  @param order Output permutation that sorts the elements.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
@@ -153,12 +153,12 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz
  */
 SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
     // Assume `order` is already initialized with 0, 1, 2, ... N.
-    for (sz_size_t i = 1; i < sequence->count; ++i) {
-        sz_sorted_idx_t current_idx = order[i];
-        sz_size_t j = i;
-        while (j > 0) {
+    for (sz_size_t element_index = 1; element_index < sequence->count; ++element_index) {
+        sz_sorted_idx_t current_idx = order[element_index];
+        sz_size_t position_index = element_index;
+        while (position_index > 0) {
             // Get the two strings to compare.
-            sz_sorted_idx_t previous_idx = order[j - 1];
+            sz_sorted_idx_t previous_idx = order[position_index - 1];
             sz_cptr_t previous_start = sequence->get_start(sequence->handle, previous_idx);
             sz_cptr_t current_start = sequence->get_start(sequence->handle, current_idx);
             sz_size_t previous_length = sequence->get_length(sequence->handle, previous_idx);
@@ -171,10 +171,10 @@ SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
             if (ordering != sz_greater_k) break;
 
             // Otherwise, shift the previous element to the right.
-            order[j] = order[j - 1];
-            --j;
+            order[position_index] = order[position_index - 1];
+            --position_index;
         }
-        order[j] = current_idx;
+        order[position_index] = current_idx;
     }
 }
 
@@ -186,28 +186,29 @@ SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
 SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
 
     // Assume `order` is already initialized with 0, 1, 2, ... N.
-    for (sz_size_t i = 1; i < count; ++i) {
+    for (sz_size_t element_index = 1; element_index < count; ++element_index) {
         // Save the current key and corresponding index.
-        sz_pgram_t current_key = pgrams[i];
-        sz_sorted_idx_t current_idx = order[i];
-        sz_size_t j = i;
+        sz_pgram_t current_key = pgrams[element_index];
+        sz_sorted_idx_t current_idx = order[element_index];
+        sz_size_t position_index = element_index;
 
         // Shift elements of the sorted region that are greater than the current key
         // to the right. This loop stops as soon as the correct insertion point is found.
-        while (j > 0 && pgrams[j - 1] > current_key) {
-            pgrams[j] = pgrams[j - 1];
-            order[j] = order[j - 1];
-            --j;
+        while (position_index > 0 && pgrams[position_index - 1] > current_key) {
+            pgrams[position_index] = pgrams[position_index - 1];
+            order[position_index] = order[position_index - 1];
+            --position_index;
         }
 
         // Insert the current key and index into their proper location.
-        pgrams[j] = current_key;
-        order[j] = current_idx;
+        pgrams[position_index] = current_key;
+        order[position_index] = current_idx;
     }
 
 #if SZ_DEBUG
-    for (sz_size_t i = 1; i < count; ++i)
-        sz_assert_(pgrams[i - 1] <= pgrams[i] && "The pgrams should be sorted in ascending order.");
+    for (sz_size_t element_index = 1; element_index < count; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] &&
+                   "The pgrams should be sorted in ascending order.");
 #endif
 }
 
@@ -250,8 +251,8 @@ SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_i
     sz_sequence_sorting_network_conditional_swap_(1, 2);
 
 #if SZ_DEBUG
-    for (sz_size_t i = 1; i < 3; ++i)
-        sz_assert_(pgrams[i - 1] <= pgrams[i] && "Sorting network for 3 elements failed.");
+    for (sz_size_t element_index = 1; element_index < 3; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] && "Sorting network for 3 elements failed.");
 #endif
 }
 
@@ -281,8 +282,8 @@ SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_i
     sz_sequence_sorting_network_conditional_swap_(1, 2);
 
 #if SZ_DEBUG
-    for (sz_size_t i = 1; i < 4; ++i)
-        sz_assert_(pgrams[i - 1] <= pgrams[i] && "Sorting network for 4 elements failed.");
+    for (sz_size_t element_index = 1; element_index < 4; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] && "Sorting network for 4 elements failed.");
 #endif
 }
 
@@ -335,8 +336,9 @@ SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_i
 
 #if SZ_DEBUG
     // Validate the sorting network.
-    for (sz_size_t i = 1; i < 8; ++i)
-        sz_assert_(pgrams[i - 1] <= pgrams[i] && "The sorting network must sort the pgrams in ascending order.");
+    for (sz_size_t element_index = 1; element_index < 8; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] &&
+                   "The sorting network must sort the pgrams in ascending order.");
 #endif
 }
 

@@ -23,6 +23,12 @@ extern "C" {
 #pragma GCC target("sse4.2", "aes")
 #endif
 
+/**
+ *  @brief Initializes the minimal single-lane AES hash state using SSE2/AES-NI intrinsics.
+ *         Requires the @p state to be 16-byte aligned.
+ *  @param state Pointer to the aligned minimal hash state to initialize.
+ *  @param seed 64-bit seed value XOR-ed with Pi constants to form the initial state.
+ */
 SZ_INTERNAL void sz_hash_minimal_init_westmere_aligned_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
@@ -41,11 +47,23 @@ SZ_INTERNAL void sz_hash_minimal_init_westmere_aligned_(sz_hash_minimal_t_ *stat
     state->sum.xmm = sum_state_key;
 }
 
+/**
+ *  @brief Absorbs one 128-bit block into the minimal hash state using AES-NI and SSSE3 intrinsics.
+ *  @param state_ptr Pointer to the aligned minimal hash state.
+ *  @param block 128-bit data block to absorb.
+ *  @param order Shuffle permutation for the additive accumulator lane (loaded from `sz_hash_u8x16x4_shuffle_`).
+ */
 SZ_INTERNAL void sz_hash_minimal_update_westmere_aligned_(sz_hash_minimal_t_ *state_ptr, __m128i block, __m128i order) {
     state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block);
     state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order), block);
 }
 
+/**
+ *  @brief Finalizes the minimal AES hash state using AES-NI and returns a 64-bit digest.
+ *  @param state Pointer to the (const) aligned minimal hash state.
+ *  @param length Total number of bytes hashed, mixed into the key for length sensitivity.
+ *  @return 64-bit hash value.
+ */
 SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_westmere_aligned_(sz_hash_minimal_t_ const *state, sz_size_t length) {
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
@@ -69,12 +87,12 @@ SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
-    for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128((__m128i *)&state->aes[i * 16],
-                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2))));
-    for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128((__m128i *)&state->sum[i * 16],
-                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2 + 8))));
+    for (int lane_index = 0; lane_index < 4; ++lane_index)
+        _mm_storeu_si128((__m128i *)&state->aes[lane_index * 16],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2))));
+    for (int lane_index = 0; lane_index < 4; ++lane_index)
+        _mm_storeu_si128((__m128i *)&state->sum[lane_index * 16],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
     _mm_storeu_si128((__m128i *)&state->ins[0], _mm_setzero_si128());
@@ -84,19 +102,24 @@ SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed
     state->ins_length = 0;
 }
 
+/**
+ *  @brief Finalizes the full 512-bit AES hash state using AES-NI and returns a 64-bit digest.
+ *  @param state Pointer to the (const) hash state.
+ *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
+ */
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_t const *state) {
     // Mix the length into the key
-    __m128i key_with_length =
-        _mm_add_epi64(_mm_lddqu_si128((__m128i const *)state->key), _mm_set_epi64x(0, state->ins_length));
+    __m128i key_with_length = _mm_add_epi64(_mm_lddqu_si128((__m128i const *)state->key),
+                                            _mm_set_epi64x(0, state->ins_length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed0 =
-        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[0]), _mm_lddqu_si128((__m128i *)&state->aes[0]));
-    __m128i mixed1 =
-        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[16]), _mm_lddqu_si128((__m128i *)&state->aes[16]));
-    __m128i mixed2 =
-        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[32]), _mm_lddqu_si128((__m128i *)&state->aes[32]));
-    __m128i mixed3 =
-        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[48]), _mm_lddqu_si128((__m128i *)&state->aes[48]));
+    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[0]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes[0]));
+    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[16]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes[16]));
+    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[32]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes[32]));
+    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[48]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes[48]));
     // Combine the mixed registers
     __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
     __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
@@ -118,7 +141,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
         // Load the data and update the state
         sz_u128_vec_t data_vec;
         data_vec.xmm = _mm_setzero_si128();
-        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
@@ -208,8 +231,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
             state.ins.xmms[1] = _mm_setzero_si128();
             state.ins.xmms[2] = _mm_setzero_si128();
             state.ins.xmms[3] = _mm_setzero_si128();
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins.u8s[i] = start[state.ins_length];
+            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+                state.ins.u8s[byte_index] = start[state.ins_length];
             state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
             state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
             state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
@@ -374,7 +397,8 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
         __m128i generated = _mm_aesenc_si128(input, key);
         // Now the tricky part is outputting this data to the user-supplied buffer
         // without masked writes, like in AVX-512.
-        for (sz_size_t i = 0; i < length; ++i) text[i] = ((sz_u8_t *)&generated)[i];
+        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
+            text[byte_index] = ((sz_u8_t *)&generated)[byte_index];
     }
     // Assuming the YMM register contains two 128-bit blocks, the input to the generator
     // will be more complex, containing the sum of the nonce and the block number.
@@ -390,7 +414,8 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
         generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
         // The first store can easily be vectorized, but the second can be serial for now
         _mm_storeu_si128((__m128i *)text, generated[0]);
-        for (sz_size_t i = 16; i < length; ++i) text[i] = ((sz_u8_t *)&generated[1])[i - 16];
+        for (sz_size_t byte_index = 16; byte_index < length; ++byte_index)
+            text[byte_index] = ((sz_u8_t *)&generated[1])[byte_index - 16];
     }
     // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
     else if (length <= 48) {
@@ -410,7 +435,8 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
         // The first store can easily be vectorized, but the second can be serial for now
         _mm_storeu_si128((__m128i *)(text + 0), generated[0]);
         _mm_storeu_si128((__m128i *)(text + 16), generated[1]);
-        for (sz_size_t i = 32; i < length; ++i) text[i] = ((sz_u8_t *)generated)[i];
+        for (sz_size_t byte_index = 32; byte_index < length; ++byte_index)
+            text[byte_index] = ((sz_u8_t *)generated)[byte_index];
     }
     // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
     else {
@@ -431,17 +457,17 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
         keys[3] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[3]);
 
         // Produce the output, fixing the key and enumerating input chunks.
-        sz_size_t i = 0;
+        sz_size_t byte_index = 0;
         __m128i const increment = _mm_set1_epi64x(4);
-        for (; i + 64 <= length; i += 64) {
+        for (; byte_index + 64 <= length; byte_index += 64) {
             generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
             generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
             generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
             generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
-            _mm_storeu_si128((__m128i *)(text + i + 0), generated[0]);
-            _mm_storeu_si128((__m128i *)(text + i + 16), generated[1]);
-            _mm_storeu_si128((__m128i *)(text + i + 32), generated[2]);
-            _mm_storeu_si128((__m128i *)(text + i + 48), generated[3]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 0), generated[0]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 16), generated[1]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 32), generated[2]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 48), generated[3]);
             inputs[0] = _mm_add_epi64(inputs[0], increment);
             inputs[1] = _mm_add_epi64(inputs[1], increment);
             inputs[2] = _mm_add_epi64(inputs[2], increment);
@@ -454,7 +480,8 @@ SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t
             generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
             generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
             generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
-            for (sz_size_t j = 0; i < length; ++i, ++j) text[i] = ((sz_u8_t *)generated)[j];
+            for (sz_size_t tail_index = 0; byte_index < length; ++byte_index, ++tail_index)
+                text[byte_index] = ((sz_u8_t *)generated)[tail_index];
         }
     }
 }

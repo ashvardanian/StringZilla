@@ -144,20 +144,21 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-    return sz_dispatch_table.find_byte(haystack, h_length, needle);
+SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+    return sz_dispatch_table.find_byte(haystack, haystack_length, needle);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-    return sz_dispatch_table.rfind_byte(haystack, h_length, needle);
+SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+    return sz_dispatch_table.rfind_byte(haystack, haystack_length, needle);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-    return sz_dispatch_table.find(haystack, h_length, needle, n_length);
+SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
+    return sz_dispatch_table.find(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-    return sz_dispatch_table.rfind(haystack, h_length, needle, n_length);
+SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                              sz_size_t needle_length) {
+    return sz_dispatch_table.rfind(haystack, haystack_length, needle, needle_length);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
@@ -183,22 +184,22 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_bytes
 #else
 #pragma comment(linker, "/export:_memchr")
 #endif
-void *__cdecl memchr(void const *s, int c_wide, size_t n) {
+void *__cdecl memchr(void const *haystack, int character_wide, size_t length) {
 #else
-SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
+SZ_DYNAMIC void *memchr(void const *haystack, int character_wide, size_t length) {
 #endif
-    sz_u8_t c = (sz_u8_t)c_wide;
-    return (void *)sz_find_byte(s, n, (sz_cptr_t)&c);
+    sz_u8_t character = (sz_u8_t)character_wide;
+    return (void *)sz_find_byte(haystack, length, (sz_cptr_t)&character);
 }
 
 #if !defined(_MSC_VER)
-SZ_DYNAMIC void *memmem(void const *h, size_t h_len, void const *n, size_t n_len) {
-    return (void *)sz_find(h, h_len, n, n_len);
+SZ_DYNAMIC void *memmem(void const *haystack, size_t haystack_length, void const *needle, size_t needle_length) {
+    return (void *)sz_find(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_DYNAMIC void *memrchr(void const *s, int c_wide, size_t n) {
-    sz_u8_t c = (sz_u8_t)c_wide;
-    return (void *)sz_rfind_byte(s, n, (sz_cptr_t)&c);
+SZ_DYNAMIC void *memrchr(void const *haystack, int character_wide, size_t length) {
+    sz_u8_t character = (sz_u8_t)character_wide;
+    return (void *)sz_rfind_byte(haystack, length, (sz_cptr_t)&character);
 }
 
 #endif

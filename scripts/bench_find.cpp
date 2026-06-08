@@ -74,10 +74,10 @@ struct matcher_from_sz_find {
     inline matcher_from_sz_find(std::string_view needle = {}) noexcept : needle_(needle) {}
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -94,10 +94,10 @@ struct matcher_strstr_t {
     inline matcher_strstr_t(std::string_view needle = {}) noexcept(false) { strstr_needle_copy_ = needle; }
     inline size_type needle_length() const noexcept { return strstr_needle_copy_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)strstr(haystack.data(), strstr_needle_copy_.c_str());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)strstr(haystack.data(), strstr_needle_copy_.c_str());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -114,10 +114,10 @@ struct matcher_memmem_t {
     inline matcher_memmem_t(std::string_view needle = {}) noexcept : needle_(needle) {}
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)memmem(haystack.data(), haystack.size(), needle_.data(), needle_.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)memmem(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -332,10 +332,10 @@ struct matcher_from_sz_find_byte {
     inline matcher_from_sz_find_byte(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &needle_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &needle_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -351,10 +351,10 @@ struct matcher_strchr_t {
     inline matcher_strchr_t(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)strchr(haystack.data(), needle_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)strchr(haystack.data(), needle_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -370,10 +370,10 @@ struct matcher_memchr_t {
     inline matcher_memchr_t(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)std::memchr(haystack.data(), needle_, haystack.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)std::memchr(haystack.data(), needle_, haystack.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -539,10 +539,10 @@ struct matcher_from_sz_find_byteset {
     constexpr matcher_from_sz_find_byteset(sz::byteset needles) noexcept : needles_(needles) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &needles_.raw());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &needles_.raw());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -623,9 +623,9 @@ void bench_byteset_search(environment_t const &env) {
 
     // First, benchmark the serial function
     // The "check value" for normal and reverse search is the same - simply the number of matches.
-    auto base_call =
-        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_serial>,
-                                    sz::byteset>(env);
+    auto base_call = callable_for_byteset_search<sz::range_matches,
+                                                 matcher_from_sz_find_byteset<sz_find_byteset_serial>, sz::byteset>(
+        env);
     bench_result_t base = bench_unary(env, "sz_find_byteset_serial", base_call).log();
     bench_result_t base_reverse =
         bench_unary(
@@ -760,10 +760,10 @@ struct matcher_from_sz_utf8_find_boundary {
 
     constexpr matcher_from_sz_utf8_find_boundary() noexcept {}
     inline size_type operator()(std::string_view haystack) noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &last_match_length_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &last_match_length_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     size_type needle_length() const noexcept { return last_match_length_; }
     size_type skip_length() const noexcept { return last_match_length_; }

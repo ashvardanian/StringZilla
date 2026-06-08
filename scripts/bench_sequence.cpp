@@ -119,8 +119,8 @@ static int _get_qsort_order(void const *a, void const *b, void *arg) {
     sz_size_t len_a = sequence->get_length(sequence->handle, idx_a);
     sz_size_t len_b = sequence->get_length(sequence->handle, idx_b);
 
-    int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
-    return res ? res : (int)(len_a - len_b);
+    int result = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
+    return result ? result : (int)(len_a - len_b);
 }
 
 #endif
@@ -417,8 +417,8 @@ void bench_intersections(environment_t const &env) {
     // First, benchmark the STL function
     auto base_call = intersect_strings_via_std_t {tokens_a, tokens_b, permute_a, permute_b};
     bench_result_t base = bench_nullary(env, "intersect<std::unordered_map>", base_call).log();
-    auto serial_call =
-        intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a, permute_b};
+    auto serial_call = intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a,
+                                                                               permute_b};
     bench_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends

@@ -35,8 +35,8 @@ extern "C" {
  *  This function implements the check via explicit range exclusions for all bicameral
  *  scripts and all Unicode blocks containing case fold expansion target characters.
  *
- *  @param[in] rune Unicode codepoint to check
- *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise
+ *  @param rune Unicode codepoint to check.
+ *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise.
  *
  *  @warning This is an internal function. Use sz_utf8_case_invariant_serial() for string checking.
  *  @see sz_utf8_case_invariant_serial
@@ -115,26 +115,26 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_invariant_(sz_rune_t rune) {
 }
 
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length) {
-    sz_u8_t const *ptr = (sz_u8_t const *)str;
-    sz_u8_t const *end = ptr + length;
+    sz_u8_t const *text_cursor = (sz_u8_t const *)str;
+    sz_u8_t const *text_end = text_cursor + length;
 
-    while (ptr < end) {
-        sz_u8_t lead = *ptr;
+    while (text_cursor < text_end) {
+        sz_u8_t lead = *text_cursor;
 
         // ASCII fast path: only digits, punctuation, and control chars are caseless
         // A-Z (0x41-0x5A) and a-z (0x61-0x7A) participate in case folding
         if (lead < 0x80) {
             if ((lead >= 'A' && lead <= 'Z') || (lead >= 'a' && lead <= 'z')) return sz_false_k;
-            ptr++;
+            text_cursor++;
             continue;
         }
 
         // Multi-byte: decode and check
         sz_rune_t rune;
-        sz_rune_length_t rune_len;
-        sz_rune_parse((sz_cptr_t)ptr, &rune, &rune_len);
+        sz_rune_length_t rune_length;
+        sz_rune_parse((sz_cptr_t)text_cursor, &rune, &rune_length);
         if (sz_rune_is_case_invariant_(rune) == sz_false_k) return sz_false_k;
-        ptr += rune_len;
+        text_cursor += rune_length;
     }
 
     return sz_true_k;
@@ -168,11 +168,11 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial(sz_cptr_t a, sz_si
  *  Walks backward from needle_end/haystack_end, comparing folded runes.
  *  Returns true if needle region exhausts (matched), with haystack bytes consumed.
  *
- *  @param[in] needle_start Start of needle head region
- *  @param[in] needle_end End of needle head region (where safe window begins)
- *  @param[in] haystack_start Start of haystack (lower bound for backward scan)
- *  @param[in] haystack_end End of haystack head region (where safe window was found)
- *  @param[out] match_length Haystack bytes consumed by this match
+ *  @param needle_start Start of needle head region.
+ *  @param needle_end End of needle head region (where safe window begins).
+ *  @param haystack_start Start of haystack (lower bound for backward scan).
+ *  @param haystack_end End of haystack head region (where safe window was found).
+ *  @param match_length Haystack bytes consumed by this match.
  */
 SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
                                                             sz_cptr_t haystack_start, sz_cptr_t haystack_end,
@@ -210,11 +210,11 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_head_(sz_cptr_t needle_sta
  *
  *  Walks forward, comparing folded runes. Returns true if needle exhausts.
  *
- *  @param[in] needle_start Start of needle tail region
- *  @param[in] needle_end End of needle tail region (= needle + needle_length)
- *  @param[in] haystack_start Start of haystack tail region
- *  @param[in] haystack_end End of haystack (upper bound for forward scan)
- *  @param[out] match_length Haystack bytes consumed by this match
+ *  @param needle_start Start of needle tail region.
+ *  @param needle_end End of needle tail region (= needle + needle_length).
+ *  @param haystack_start Start of haystack tail region.
+ *  @param haystack_end End of haystack (upper bound for forward scan).
+ *  @param match_length Haystack bytes consumed by this match.
  */
 SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
                                                             sz_cptr_t haystack_start, sz_cptr_t haystack_end,
@@ -256,58 +256,62 @@ SZ_INTERNAL sz_bool_t sz_utf8_case_insensitive_verify_tail_(sz_cptr_t needle_sta
  *  than the "folded slice" of the needle. We handle it as part of the "tail" and the `needle_tail_bytes`
  *  must be calculated accordingly.
  *
- *  @param[in] haystack_ptr Haystack start pointer, arbitrary case
- *  @param[in] haystack_length Haystack length in bytes
- *  @param[in] needle_ptr Needle start pointer, arbitrary case
- *  @param[in] needle_length Needle length in bytes
- *  @param[in] haystack_matched_offset Start offset of matched safe window in haystack in bytes
- *  @param[in] haystack_matched_length Length of matched safe window in haystack in bytes
- *  @param[in] needle_head_bytes Start of matched safe window in needle in bytes
- *  @param[in] needle_tail_bytes Number of bytes in the needle remaining after the matched part
- *  @param[out] match_length Total length of the verified match in haystack bytes
- *  @return Match start pointer, or SZ_NULL_CHAR if validation fails
+ *  @param haystack Haystack start pointer, arbitrary case.
+ *  @param haystack_length Haystack length in bytes.
+ *  @param needle Needle start pointer, arbitrary case.
+ *  @param needle_length Needle length in bytes.
+ *  @param haystack_matched_offset Start offset of matched safe window in haystack in bytes.
+ *  @param haystack_matched_length Length of matched safe window in haystack in bytes.
+ *  @param needle_head_bytes Start of matched safe window in needle in bytes.
+ *  @param needle_tail_bytes Number of bytes in the needle remaining after the matched part.
+ *  @param match_length Total length of the verified match in haystack bytes.
+ *  @return Match start pointer, or SZ_NULL_CHAR if validation fails.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_verify_match_(             //
-    sz_cptr_t haystack_ptr, sz_size_t haystack_length,                    //
-    sz_cptr_t needle_ptr, sz_size_t needle_length,                        //
+    sz_cptr_t haystack, sz_size_t haystack_length,                        //
+    sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_size_t haystack_matched_offset, sz_size_t haystack_matched_length, //
     sz_size_t needle_head_bytes, sz_size_t needle_tail_bytes,             //
     sz_size_t *match_length) {
 
-    sz_cptr_t needle_end = needle_ptr + needle_length;
-    sz_cptr_t haystack_end = haystack_ptr + haystack_length;
+    sz_cptr_t needle_end = needle + needle_length;
+    sz_cptr_t haystack_end = haystack + haystack_length;
 
     // Verify head using backward iterators
     sz_size_t head_match_length = 0;
     if (needle_head_bytes)
-        if (!sz_utf8_case_insensitive_verify_head_(                   //
-                needle_ptr, needle_ptr + needle_head_bytes,           // needle head region
-                haystack_ptr, haystack_ptr + haystack_matched_offset, // haystack head region
+        if (!sz_utf8_case_insensitive_verify_head_(           //
+                needle, needle + needle_head_bytes,           // needle head region
+                haystack, haystack + haystack_matched_offset, // haystack head region
                 &head_match_length))
             return SZ_NULL_CHAR;
 
     // Verify tail using forward iterators
     sz_size_t tail_match_length = 0;
-    sz_cptr_t haystack_tail_start = haystack_ptr + haystack_matched_offset + haystack_matched_length;
+    sz_cptr_t haystack_tail_start = haystack + haystack_matched_offset + haystack_matched_length;
     if (needle_tail_bytes)
-        if (!sz_utf8_case_insensitive_verify_tail_(                         //
-                needle_ptr + needle_length - needle_tail_bytes, needle_end, // needle tail region
-                haystack_tail_start, haystack_end,                          // haystack tail region
+        if (!sz_utf8_case_insensitive_verify_tail_(                     //
+                needle + needle_length - needle_tail_bytes, needle_end, // needle tail region
+                haystack_tail_start, haystack_end,                      // haystack tail region
                 &tail_match_length))
             return SZ_NULL_CHAR;
 
     *match_length = head_match_length + haystack_matched_length + tail_match_length;
-    return haystack_ptr + haystack_matched_offset - head_match_length;
+    return haystack + haystack_matched_offset - head_match_length;
 }
 
 /**
  *  @brief Hash-free case-insensitive search for needles that fold to exactly 1 rune.
- *         Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) = 2 runes).
+ *      Examples: 'a', 'A', 'б', 'Б' (but NOT 'ß' (U+00DF, C3 9F) → "ss" = 2 runes).
  *
  *  Single-pass algorithm: parses each source rune, folds it, checks if it produces
  *  exactly one rune matching the target. No iterator overhead, no verification needed.
  *
- *  @param[in] target_folded The single folded rune to search for.
+ *  @param haystack Pointer to the haystack string to search within.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle_folded The single folded rune to search for.
+ *  @param match_length Output: length of the matched rune in haystack bytes on success.
+ *  @return Pointer to the first matching rune, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_1folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -353,35 +357,35 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_1folded_serial_( //
  *  2. Searches for candidates matching that rune
  *  3. Validates each candidate using the full verification pipeline
  *
- *  @param[in] haystack_ptr Full haystack string, arbitrary case
- *  @param[in] haystack_length Full haystack length in bytes
- *  @param[in] needle_ptr Full needle string, arbitrary case
- *  @param[in] needle_length Full needle length
- *  @param[in] danger_ptr Start of the danger zone region to search
- *  @param[in] danger_length Length of the danger zone region in bytes
- *  @param[in] needle_first_safe_folded_rune The first rune of the safe window, folded
- *  @param[in] needle_head_bytes Offset of the safe window within the needle
- *  @param[out] match_length Haystack bytes consumed by the match
- *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region
+ *  @param haystack Full haystack string, arbitrary case.
+ *  @param haystack_length Full haystack length in bytes.
+ *  @param needle Full needle string, arbitrary case.
+ *  @param needle_length Full needle length.
+ *  @param danger_cursor Start of the danger zone region to search.
+ *  @param danger_length Length of the danger zone region in bytes.
+ *  @param needle_first_safe_folded_rune The first rune of the safe window, folded.
+ *  @param needle_first_safe_folded_rune_offset Offset of the safe window within the needle.
+ *  @param match_length Haystack bytes consumed by the match.
+ *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
-    sz_cptr_t haystack_ptr, sz_size_t haystack_length,               //
-    sz_cptr_t needle_ptr, sz_size_t needle_length,                   //
-    sz_cptr_t danger_ptr, sz_size_t danger_length,                   //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t needle, sz_size_t needle_length,                       //
+    sz_cptr_t danger_cursor, sz_size_t danger_length,                //
     sz_rune_t needle_first_safe_folded_rune,                         //
     sz_size_t needle_first_safe_folded_rune_offset,                  //
     sz_size_t *match_length) {
 
-    sz_cptr_t const haystack_end = haystack_ptr + haystack_length;
-    sz_cptr_t const danger_end = sz_min_of_two(danger_ptr + danger_length, haystack_end);
-    while (danger_ptr < danger_end) {
+    sz_cptr_t const haystack_end = haystack + haystack_length;
+    sz_cptr_t const danger_end = sz_min_of_two(danger_cursor + danger_length, haystack_end);
+    while (danger_cursor < danger_end) {
 
         // Skip continuation bytes - they are mid-sequence, not valid rune starts.
         // Without this check, a continuation byte like 0xBA could be misinterpreted as U+00BA (º),
         // causing false matches when the danger zone starts mid-character.
-        sz_u8_t lead_byte = *(sz_u8_t const *)danger_ptr;
+        sz_u8_t lead_byte = *(sz_u8_t const *)danger_cursor;
         if ((lead_byte & 0xC0) == 0x80) {
-            danger_ptr++;
+            danger_cursor++;
             continue;
         }
 
@@ -391,16 +395,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
         sz_rune_t haystack_rune;
         sz_rune_length_t haystack_rune_length;
         sz_rune_t haystack_folded_runes[3] = {~needle_first_safe_folded_rune};
-        sz_rune_parse(danger_ptr, &haystack_rune, &haystack_rune_length);
+        sz_rune_parse(danger_cursor, &haystack_rune, &haystack_rune_length);
         sz_size_t haystack_folded_runes_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes);
 
         // The simplest case is when the very first in `haystack_folded_runes` is our target:
         if (haystack_folded_runes[0] == needle_first_safe_folded_rune) {
             // Validate the full match using the unified validator
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_( //
-                haystack_ptr, haystack_length,                        //
-                needle_ptr, needle_length,                            //
-                danger_ptr - haystack_ptr, 0,                         // No pre-matched middle
+                haystack, haystack_length,                            //
+                needle, needle_length,                                //
+                danger_cursor - haystack, 0,                          // No pre-matched middle
                 needle_first_safe_folded_rune_offset,
                 needle_length - needle_first_safe_folded_rune_offset, // Verify everything after head serially
                 match_length);
@@ -418,9 +422,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
             // Check if the previous characters in the needle match the haystack before the danger zone began
             sz_rune_t needle_riter_rune = 0, haystack_riter_rune = 0;
             sz_utf8_folded_reverse_iter_t_ needle_riter, haystack_riter;
-            sz_utf8_folded_reverse_iter_init_(&needle_riter, needle_ptr,
-                                              needle_ptr + needle_first_safe_folded_rune_offset);
-            sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack_ptr, danger_ptr);
+            sz_utf8_folded_reverse_iter_init_(&needle_riter, needle, needle + needle_first_safe_folded_rune_offset);
+            sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack, danger_cursor);
 
             // Check if we even have needle bytes to check
             {
@@ -447,10 +450,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
             // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
             sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
-            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_first_safe_folded_rune_offset,
+            sz_utf8_folded_iter_init_(&needle_iter, needle + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
-            sz_utf8_folded_iter_init_(&haystack_iter, danger_ptr + haystack_rune_length,
-                                      haystack_end - (danger_ptr + haystack_rune_length));
+            sz_utf8_folded_iter_init_(&haystack_iter, danger_cursor + haystack_rune_length,
+                                      haystack_end - (danger_cursor + haystack_rune_length));
 
             // Pop the `needle_first_safe_folded_rune` from the forward iterator
             {
@@ -496,9 +499,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
             // Check if the previous characters in the needle match the haystack before the danger zone began
             sz_rune_t needle_riter_rune = 0, haystack_riter_rune = 0;
             sz_utf8_folded_reverse_iter_t_ needle_riter, haystack_riter;
-            sz_utf8_folded_reverse_iter_init_(&needle_riter, needle_ptr,
-                                              needle_ptr + needle_first_safe_folded_rune_offset);
-            sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack_ptr, danger_ptr);
+            sz_utf8_folded_reverse_iter_init_(&needle_riter, needle, needle + needle_first_safe_folded_rune_offset);
+            sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack, danger_cursor);
 
             // Check if we even have needle bytes to check
             {
@@ -528,10 +530,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
             // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
             sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
-            sz_utf8_folded_iter_init_(&needle_iter, needle_ptr + needle_first_safe_folded_rune_offset,
+            sz_utf8_folded_iter_init_(&needle_iter, needle + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
-            sz_utf8_folded_iter_init_(&haystack_iter, danger_ptr + haystack_rune_length,
-                                      haystack_end - (danger_ptr + haystack_rune_length));
+            sz_utf8_folded_iter_init_(&haystack_iter, danger_cursor + haystack_rune_length,
+                                      haystack_end - (danger_cursor + haystack_rune_length));
 
             // Pop the `needle_first_safe_folded_rune` from the forward iterator
             {
@@ -563,7 +565,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
 
     consider_following_haystack_runes:
         // Move to next candidate
-        danger_ptr += haystack_rune_length;
+        danger_cursor += haystack_rune_length;
     }
 
     return SZ_NULL_CHAR;
@@ -571,12 +573,17 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_in_danger_zone_( //
 
 /**
  *  @brief Hash-free case-insensitive search for needles that fold to exactly 2 runes.
- * Examples: 'ab', 'AB', 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73), 'ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066
- * U+0069, 66 69).
+ *      Examples: 'ab', 'AB', 'ß' (U+00DF) → "ss", 'ﬁ' (U+FB01) → "fi".
  *
- * Single-pass sliding window over the folded rune stream. Handles expansions ('ß' (U+00DF, C3 9F) → "ss" (U+0073
- * U+0073, 73 73))
+ *  Single-pass sliding window over the folded rune stream. Handles expansions
  *  by buffering folded runes from each source and tracking source boundaries.
+ *
+ *  @param haystack Pointer to the haystack string to search within.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param first_needle_folded First folded rune of the 2-rune needle.
+ *  @param second_needle_folded Second folded rune of the 2-rune needle.
+ *  @param match_length Output: length of the matched region in haystack bytes on success.
+ *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -637,12 +644,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_2folded_serial_( //
 
 /**
  *  @brief Hash-free case-insensitive search for needles that fold to exactly 3 runes.
- * Examples: 'abc', 'ABC', "aß" ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) → "ass" (U+0061 U+0073 U+0073, 61 73
- * 73),
- * "ﬁa" ('ﬁ' (U+FB01, EF AC 81) → "fi" (U+0066 U+0069, 66 69)) → "fia" (U+0066 U+0069 U+0061, 66 69 61).
+ *      Examples: 'abc', 'ABC', "aß" → "ass", "ﬁa" (U+FB01) → "fia".
  *
  *  Single-pass sliding window of 3 folded runes over the haystack's folded stream.
- *  Handles expansions ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) by buffering and tracking source boundaries.
+ *  Handles expansions by buffering folded runes and tracking source boundaries.
+ *
+ *  @param haystack Pointer to the haystack string to search within.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param first_needle_folded First folded rune of the 3-rune needle.
+ *  @param second_needle_folded Second folded rune of the 3-rune needle.
+ *  @param third_needle_folded Third folded rune of the 3-rune needle.
+ *  @param match_length Output: length of the matched region in haystack bytes on success.
+ *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_3folded_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
@@ -724,11 +737,6 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_3folded_serial_( //
     return SZ_NULL_CHAR;
 }
 
-/**
- *  @brief Rabin-Karp style case-insensitive UTF-8 substring search using a ring buffer.
- *         Uses a rolling hash over casefolded runes with O(1) updates per position.
- *         Ring buffer of 32 runes handles the prefix; longer needles verify tail separately.
- */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length,            //
@@ -802,7 +810,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     }
 
     sz_u64_t hash_multiplier = 1;
-    for (sz_size_t i = 1; i < needle_prefix_count; ++i) hash_multiplier *= 257;
+    for (sz_size_t lane_index = 1; lane_index < needle_prefix_count; ++lane_index) hash_multiplier *= 257;
 
     sz_rune_t window_runes[32];
     sz_cptr_t window_sources[32];     // Byte position of character that produced each window rune
@@ -818,13 +826,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     sz_size_t window_count = 0;
 
     while (window_count < needle_prefix_count) {
-        sz_cptr_t before_ptr = haystack_iter.ptr;
+        sz_cptr_t pre_advance_cursor = haystack_iter.ptr;
         sz_rune_t rune;
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &rune)) break;
         window_runes[window_count] = rune;
         // Update source and skip only when starting a new character (not mid-expansion)
         if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
-            current_source = before_ptr;
+            current_source = pre_advance_cursor;
             current_skip = 0;
         }
         window_sources[window_count] = current_source;
@@ -850,8 +858,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             //   - Second segment: window_runes[0..ring_head) maps to needle_runes[first_segment..needle_prefix_count)
             sz_size_t first_segment = needle_prefix_count - ring_head;
             sz_size_t mismatches = 0;
-            for (sz_size_t i = 0; i < first_segment; ++i) mismatches += window_runes[ring_head + i] != needle_runes[i];
-            for (sz_size_t i = 0; i < ring_head; ++i) mismatches += window_runes[i] != needle_runes[first_segment + i];
+            for (sz_size_t lane_index = 0; lane_index < first_segment; ++lane_index)
+                mismatches += window_runes[ring_head + lane_index] != needle_runes[lane_index];
+            for (sz_size_t lane_index = 0; lane_index < ring_head; ++lane_index)
+                mismatches += window_runes[lane_index] != needle_runes[first_segment + lane_index];
 
             if (!mismatches) {
                 sz_size_t skip_runes = window_skip_counts[ring_head];
@@ -867,7 +877,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
                                           (sz_size_t)(haystack + haystack_length - window_start));
                 // Skip runes within first character's expansion
                 sz_rune_t skip_rune;
-                for (sz_size_t i = 0; i < skip_runes; ++i) sz_utf8_folded_iter_next_(&verify_haystack_iter, &skip_rune);
+                for (sz_size_t skip_index = 0; skip_index < skip_runes; ++skip_index)
+                    sz_utf8_folded_iter_next_(&verify_haystack_iter, &skip_rune);
                 // Now verify full needle against remaining haystack
                 sz_utf8_folded_iter_t_ verify_needle_iter;
                 sz_utf8_folded_iter_init_(&verify_needle_iter, needle, needle_length);
@@ -887,7 +898,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
             }
         }
 
-        sz_cptr_t before_ptr = haystack_iter.ptr;
+        sz_cptr_t pre_advance_cursor = haystack_iter.ptr;
         sz_rune_t new_rune;
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &new_rune)) break;
 
@@ -901,7 +912,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
         window_runes[ring_head] = new_rune;
         // Update source and skip only when starting a new character (not mid-expansion)
         if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
-            current_source = before_ptr;
+            current_source = pre_advance_cursor;
             current_skip = 0;
         }
         window_sources[ring_head] = current_source;
@@ -934,14 +945,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
  *  This function encodes the contextual safety rules from the ASCII selector
  *  and applies them consistently to all paths that include ASCII.
  *
- *  @param[in] rune The decoded codepoint
- *  @param[in] rune_bytes UTF-8 byte length of this codepoint (1-4)
- *  @param[in] prev_rune Previous codepoint (0 if at start)
- *  @param[in] next_rune Next codepoint (0 if at end)
- *  @param[in] prev_prev_rune Codepoint before prev_rune (0 if prev is at start)
- *  @param[in] next_next_rune Codepoint after next_rune (0 if next is at end)
- *  @param[out] safety_profiles Safety flags for each script path
- *  @return The primary fast path preferred for this rune
+ *  @param rune The decoded codepoint.
+ *  @param rune_bytes UTF-8 byte length of this codepoint (1-4).
+ *  @param prev_rune Previous codepoint (0 if at start).
+ *  @param next_rune Next codepoint (0 if at end).
+ *  @param prev_prev_rune Codepoint before prev_rune (0 if prev is at start).
+ *  @param next_next_rune Codepoint after next_rune (0 if next is at end).
+ *  @param safety_profiles Safety flags for each script path.
+ *  @return The primary fast path preferred for this rune.
  *
  *  @note Using 0 for boundary markers is safe even though NUL (U+0000) is a valid
  *        codepoint in StringZilla's length-based strings. This works because:
@@ -997,10 +1008,10 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
         if (lower >= 'a' && lower <= 'z') {
             switch (lower) {
 
-            // Unconditionally safe for all profiles.
-            // No Unicode chars fold to sequences containing these,
-            // and they don't participate in dangerous ligatures.
-            // clang-format off
+                // Unconditionally safe for all profiles.
+                // No Unicode chars fold to sequences containing these,
+                // and they don't participate in dangerous ligatures.
+                // clang-format off
             case 'b': case 'c': case 'd': case 'e': case 'g':
             case 'm': case 'o': case 'p': case 'q': case 'r': case 'u':
             case 'v': case 'x': case 'z':
@@ -1366,16 +1377,16 @@ SZ_INTERNAL sz_utf8_case_rune_safety_profile_t_ sz_utf8_case_rune_safety_profile
  *  Higher scores indicate more diverse byte values, which lead to better
  *  filtering during SIMD search (fewer false positives).
  *
- *  @param[in] data Pointer to byte sequence.
- *  @param[in] length Length of byte sequence.
+ *  @param data Pointer to byte sequence.
+ *  @param length Length of byte sequence.
  *  @return Count of distinct byte values (0-256).
  */
 SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_size_t length) {
     if (length <= 1) return length;
     sz_u64_t seen[4] = {0, 0, 0, 0}; // 256-bit bitmap
     sz_size_t distinct = 0;
-    for (sz_size_t i = 0; i < length; ++i) {
-        sz_u8_t byte = data[i];
+    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) {
+        sz_u8_t byte = data[byte_index];
         sz_size_t word = byte >> 6;                // Which 64-bit word (0-3)
         sz_u64_t bit = (sz_u64_t)1 << (byte & 63); // Bit within the word
         if (!(seen[word] & bit)) {
@@ -1442,9 +1453,9 @@ SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_siz
  *  The function also sets `offset_in_unfolded` and `length_in_unfolded` to track where the
  *  selected folded slice came from in the original unfolded input.
  *
- *  @param[in] needle Pointer to needle string (original, not folded)
- *  @param[in] needle_length Length in bytes
- *  @param[out] refined Output metadata structure to populate
+ *  @param needle Pointer to needle string (original, not folded).
+ *  @param needle_length Length in bytes.
+ *  @param refined Output metadata structure to populate.
  */
 SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
                                                            sz_utf8_case_insensitive_needle_metadata_t *refined) {
@@ -1465,13 +1476,13 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
 
     // Best window found so far for each script
     script_window_t_ best[9];
-    for (sz_size_t i = 0; i < num_scripts; ++i) {
-        best[i].start_offset = 0;
-        best[i].input_length = 0;
-        best[i].folded_length = 0;
-        best[i].applicable = sz_false_k;
-        best[i].broken = sz_false_k;
-        best[i].diversity = 0;
+    for (sz_size_t script_index = 0; script_index < num_scripts; ++script_index) {
+        best[script_index].start_offset = 0;
+        best[script_index].input_length = 0;
+        best[script_index].folded_length = 0;
+        best[script_index].applicable = sz_false_k;
+        best[script_index].broken = sz_false_k;
+        best[script_index].diversity = 0;
     }
 
     // Handle empty needle
@@ -1485,51 +1496,51 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
         return;
     }
 
-    sz_u8_t const *needle_bytes = (sz_u8_t const *)needle;
-    sz_u8_t const *needle_end = needle_bytes + needle_length;
+    sz_u8_t const *needle_start = (sz_u8_t const *)needle;
+    sz_u8_t const *needle_end = needle_start + needle_length;
 
     // Iterate through each starting position in the needle (stepping by rune)
-    for (sz_u8_t const *start_ptr = needle_bytes; start_ptr < needle_end;) {
+    for (sz_u8_t const *needle_cursor = needle_start; needle_cursor < needle_end;) {
         // Current window being built for each script at this starting position
         script_window_t_ current[9];
-        for (sz_size_t i = 0; i < num_scripts; ++i) {
-            current[i].start_offset = (sz_size_t)(start_ptr - needle_bytes);
-            current[i].input_length = 0;
-            current[i].folded_length = 0;
-            current[i].applicable = sz_false_k;
-            current[i].broken = sz_false_k;
-            current[i].diversity = 0;
+        for (sz_size_t script_index = 0; script_index < num_scripts; ++script_index) {
+            current[script_index].start_offset = (sz_size_t)(needle_cursor - needle_start);
+            current[script_index].input_length = 0;
+            current[script_index].folded_length = 0;
+            current[script_index].applicable = sz_false_k;
+            current[script_index].broken = sz_false_k;
+            current[script_index].diversity = 0;
         }
 
         // Track context for safety profile evaluation
         sz_rune_t prev_prev_rune = 0;
         sz_rune_t prev_rune = 0;
 
-        // Fold forward from start_ptr until 16 bytes or needle end
-        sz_u8_t const *pos = start_ptr;
+        // Fold forward from needle_cursor until 16 bytes or needle end
+        sz_u8_t const *position = needle_cursor;
         sz_bool_t any_active = sz_true_k;
 
-        while (pos < needle_end && any_active) {
+        while (position < needle_end && any_active) {
             // Parse current rune
             sz_rune_t rune;
             sz_rune_length_t rune_bytes;
-            sz_rune_parse((sz_cptr_t)pos, &rune, &rune_bytes);
-            if (pos + rune_bytes > needle_end) break; // Incomplete rune
+            sz_rune_parse((sz_cptr_t)position, &rune, &rune_bytes);
+            if (position + rune_bytes > needle_end) break; // Incomplete rune
 
             // Parse next rune for context (if available)
             sz_rune_t next_rune = 0;
             sz_rune_length_t next_bytes = sz_utf8_invalid_k;
-            if (pos + rune_bytes < needle_end) {
-                sz_rune_parse((sz_cptr_t)(pos + rune_bytes), &next_rune, &next_bytes);
-                if (pos + rune_bytes + next_bytes > needle_end) next_rune = 0;
+            if (position + rune_bytes < needle_end) {
+                sz_rune_parse((sz_cptr_t)(position + rune_bytes), &next_rune, &next_bytes);
+                if (position + rune_bytes + next_bytes > needle_end) next_rune = 0;
             }
 
             // Parse next-next rune for context
             sz_rune_t next_next_rune = 0;
-            if (next_rune != 0 && pos + rune_bytes + next_bytes < needle_end) {
+            if (next_rune != 0 && position + rune_bytes + next_bytes < needle_end) {
                 sz_rune_length_t next_next_bytes;
-                sz_rune_parse((sz_cptr_t)(pos + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
-                if (pos + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
+                sz_rune_parse((sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
+                if (position + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
             }
 
             // Get safety mask and primary script for this rune
@@ -1543,65 +1554,66 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
 
             // Convert folded runes to UTF-8 bytes
             sz_u8_t folded_utf8[16];
-            sz_size_t folded_utf8_len = 0;
-            for (sz_size_t i = 0; i < folded_count; ++i) {
-                folded_utf8_len += sz_rune_export(folded_runes[i], folded_utf8 + folded_utf8_len);
+            sz_size_t folded_utf8_length = 0;
+            for (sz_size_t rune_index = 0; rune_index < folded_count; ++rune_index) {
+                folded_utf8_length += sz_rune_export(folded_runes[rune_index], folded_utf8 + folded_utf8_length);
             }
 
             // Update each script's window
             any_active = sz_false_k;
-            for (sz_size_t script = 1; script < num_scripts; ++script) {
-                if (current[script].broken) continue;
+            for (sz_size_t script_index = 1; script_index < num_scripts; ++script_index) {
+                if (current[script_index].broken) continue;
 
                 // Check if this rune is safe for this script
-                sz_bool_t is_safe = (safety_mask & (1u << script)) ? sz_true_k : sz_false_k;
+                sz_bool_t is_safe = (safety_mask & (1u << script_index)) ? sz_true_k : sz_false_k;
 
                 // Check if adding this rune would exceed 16 bytes
-                if (is_safe && current[script].folded_length + folded_utf8_len <= 16) {
+                if (is_safe && current[script_index].folded_length + folded_utf8_length <= 16) {
                     // Extend this script's window
-                    for (sz_size_t b = 0; b < folded_utf8_len; ++b) {
-                        current[script].folded_bytes[current[script].folded_length + b] = folded_utf8[b];
+                    for (sz_size_t byte_index = 0; byte_index < folded_utf8_length; ++byte_index) {
+                        current[script_index].folded_bytes[current[script_index].folded_length + byte_index] =
+                            folded_utf8[byte_index];
                     }
-                    current[script].folded_length += folded_utf8_len;
-                    current[script].input_length += rune_bytes;
+                    current[script_index].folded_length += folded_utf8_length;
+                    current[script_index].input_length += rune_bytes;
 
                     // Mark as applicable if primary script matches
-                    if (primary_script == script) { current[script].applicable = sz_true_k; }
+                    if (primary_script == script_index) { current[script_index].applicable = sz_true_k; }
                     any_active = sz_true_k;
                 }
                 else {
                     // Window broken for this script
-                    current[script].broken = sz_true_k;
+                    current[script_index].broken = sz_true_k;
                 }
             }
 
             // Update context for next iteration
             prev_prev_rune = prev_rune;
             prev_rune = rune;
-            pos += rune_bytes;
+            position += rune_bytes;
         }
 
         // Compare current to best for each script
-        for (sz_size_t script = 1; script < num_scripts; ++script) {
-            if (!current[script].applicable || current[script].folded_length == 0) continue;
+        for (sz_size_t script_index = 1; script_index < num_scripts; ++script_index) {
+            if (!current[script_index].applicable || current[script_index].folded_length == 0) continue;
 
             // Compute diversity score
-            current[script].diversity =
-                sz_utf8_probe_diversity_score_(current[script].folded_bytes, current[script].folded_length);
+            current[script_index].diversity = sz_utf8_probe_diversity_score_(current[script_index].folded_bytes,
+                                                                             current[script_index].folded_length);
 
             // Update best if this is better (prefer higher diversity, then longer length)
-            if (current[script].diversity > best[script].diversity ||
-                (current[script].diversity == best[script].diversity &&
-                 current[script].folded_length > best[script].folded_length)) {
-                best[script] = current[script];
+            if (current[script_index].diversity > best[script_index].diversity ||
+                (current[script_index].diversity == best[script_index].diversity &&
+                 current[script_index].folded_length > best[script_index].folded_length)) {
+                best[script_index] = current[script_index];
             }
         }
 
         // Advance to next rune for next starting position
         sz_rune_t skip_rune;
-        sz_rune_length_t skip_len;
-        sz_rune_parse((sz_cptr_t)start_ptr, &skip_rune, &skip_len);
-        start_ptr += skip_len;
+        sz_rune_length_t skip_length;
+        sz_rune_parse((sz_cptr_t)needle_cursor, &skip_rune, &skip_length);
+        needle_cursor += skip_length;
     }
 
     // Select final kernel based on best windows
@@ -1617,10 +1629,10 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     }
     else {
         // Find most diverse applicable script
-        for (sz_size_t script = 1; script < num_scripts; ++script) {
-            if (best[script].applicable && best[script].diversity > best_diversity) {
-                best_diversity = best[script].diversity;
-                chosen_script = script;
+        for (sz_size_t script_index = 1; script_index < num_scripts; ++script_index) {
+            if (best[script_index].applicable && best[script_index].diversity > best_diversity) {
+                best_diversity = best[script_index].diversity;
+                chosen_script = script_index;
             }
         }
     }
@@ -1643,13 +1655,13 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     refined->folded_slice_length = (sz_u8_t)best[chosen_script].folded_length;
 
     // Copy folded bytes
-    for (sz_size_t i = 0; i < best[chosen_script].folded_length; ++i) {
-        refined->folded_slice[i] = best[chosen_script].folded_bytes[i];
+    for (sz_size_t byte_index = 0; byte_index < best[chosen_script].folded_length; ++byte_index) {
+        refined->folded_slice[byte_index] = best[chosen_script].folded_bytes[byte_index];
     }
 
     // Compute probe positions - target last bytes of UTF-8 codepoints for maximum diversity
-    sz_size_t folded_len = best[chosen_script].folded_length;
-    if (folded_len == 0) {
+    sz_size_t folded_length = best[chosen_script].folded_length;
+    if (folded_length == 0) {
         refined->probe_second = 0;
         refined->probe_third = 0;
         return;
@@ -1659,10 +1671,11 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
     // A byte is a character's last byte if the next byte is a UTF-8 leader (not continuation)
     sz_size_t char_ends[16];
     sz_size_t char_count = 0;
-    for (sz_size_t i = 0; i < folded_len; ++i) {
-        sz_u8_t next = (i + 1 < folded_len) ? refined->folded_slice[i + 1] : 0xC0; // Fake leader at end
-        if ((next & 0xC0) != 0x80) {                                               // Next is not a continuation byte
-            if (char_count < 16) char_ends[char_count++] = i;
+    for (sz_size_t byte_index = 0; byte_index < folded_length; ++byte_index) {
+        sz_u8_t next = (byte_index + 1 < folded_length) ? refined->folded_slice[byte_index + 1]
+                                                        : 0xC0; // Fake leader at end
+        if ((next & 0xC0) != 0x80) {                            // Next is not a continuation byte
+            if (char_count < 16) char_ends[char_count++] = byte_index;
         }
     }
 
@@ -1672,40 +1685,40 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
         refined->probe_second = (sz_u8_t)char_ends[1];
         refined->probe_third = (sz_u8_t)char_ends[2];
     }
-    else if (folded_len <= 3) {
+    else if (folded_length <= 3) {
         // Very short: probes overlap
-        refined->probe_second = (folded_len > 1) ? 1 : 0;
-        refined->probe_third = (folded_len > 1) ? 1 : 0;
+        refined->probe_second = (folded_length > 1) ? 1 : 0;
+        refined->probe_third = (folded_length > 1) ? 1 : 0;
     }
     else {
         // 1-3 characters but 4+ bytes: use byte diversity search
         sz_u8_t byte_first = refined->folded_slice[0];
-        sz_u8_t byte_last = refined->folded_slice[folded_len - 1];
+        sz_u8_t byte_last = refined->folded_slice[folded_length - 1];
 
-        sz_size_t probe_second = folded_len / 3;
-        sz_size_t probe_third = (folded_len * 2) / 3;
+        sz_size_t probe_second = folded_length / 3;
+        sz_size_t probe_third = (folded_length * 2) / 3;
 
         // Try to find positions with bytes distinct from first/last
-        for (sz_size_t i = 1; i < folded_len - 1; ++i) {
-            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last) {
-                probe_second = i;
+        for (sz_size_t byte_index = 1; byte_index < folded_length - 1; ++byte_index) {
+            if (refined->folded_slice[byte_index] != byte_first && refined->folded_slice[byte_index] != byte_last) {
+                probe_second = byte_index;
                 break;
             }
         }
 
         sz_u8_t byte_second = refined->folded_slice[probe_second];
-        for (sz_size_t i = probe_second + 1; i < folded_len - 1; ++i) {
-            if (refined->folded_slice[i] != byte_first && refined->folded_slice[i] != byte_last &&
-                refined->folded_slice[i] != byte_second) {
-                probe_third = i;
+        for (sz_size_t byte_index = probe_second + 1; byte_index < folded_length - 1; ++byte_index) {
+            if (refined->folded_slice[byte_index] != byte_first && refined->folded_slice[byte_index] != byte_last &&
+                refined->folded_slice[byte_index] != byte_second) {
+                probe_third = byte_index;
                 break;
             }
         }
 
         // Clamp bounds
         if (probe_second == 0) probe_second = 1;
-        if (probe_third >= folded_len - 1) probe_third = folded_len - 2;
-        if (probe_third <= probe_second && probe_second + 1 < folded_len - 1) probe_third = probe_second + 1;
+        if (probe_third >= folded_length - 1) probe_third = folded_length - 2;
+        if (probe_third <= probe_second && probe_second + 1 < folded_length - 1) probe_third = probe_second + 1;
 
         refined->probe_second = (sz_u8_t)probe_second;
         refined->probe_third = (sz_u8_t)probe_third;

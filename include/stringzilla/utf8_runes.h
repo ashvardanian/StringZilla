@@ -57,7 +57,7 @@ typedef struct sz_utf8_case_insensitive_needle_metadata_t {
 #pragma region Unicode Core
 
 /**  Helper macro for readable assertions - use for SIMD implementation reference */
-#define sz_is_in_range_(x, lo, hi) ((x) >= (lo) && (x) <= (hi))
+#define sz_is_in_range_(x, low, high) ((x) >= (low) && (x) <= (high))
 
 /**
  *  @brief Fold a Unicode codepoint to its case-folded form (Unicode 17.0).
@@ -842,11 +842,11 @@ typedef struct {
 } sz_utf8_folded_iter_t_;
 
 /** @brief Initialize a folded rune iterator. */
-SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *it, sz_cptr_t str, sz_size_t len) {
-    it->ptr = str;
-    it->end = str + len;
-    it->pending_count = 0;
-    it->pending_idx = 0;
+SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *iterator, sz_cptr_t string, sz_size_t length) {
+    iterator->ptr = string;
+    iterator->end = string + length;
+    iterator->pending_count = 0;
+    iterator->pending_idx = 0;
 }
 
 /** @brief Get next folded rune. Returns `sz_false_k` when exhausted. Assumes valid UTF-8 input. */

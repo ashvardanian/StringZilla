@@ -51,7 +51,8 @@ SZ_PUBLIC void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_
 
     // Load the 256-byte table into 16 vectors of 16 bytes each.
     v128_t lut_vecs[16];
-    for (sz_size_t i = 0; i < 16; ++i) lut_vecs[i] = wasm_v128_load(lut + i * 16);
+    for (sz_size_t sub_table_index = 0; sub_table_index < 16; ++sub_table_index)
+        lut_vecs[sub_table_index] = wasm_v128_load(lut + sub_table_index * 16);
 
     v128_t const low_nibble_mask_vec = wasm_i8x16_splat(0x0F);
     v128_t const bit4_vec = wasm_i8x16_splat(0x10);
@@ -62,24 +63,29 @@ SZ_PUBLIC void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_
     while (length >= 16) {
         v128_t source_vec = wasm_v128_load(source);
         // The low nibble of each byte selects within a 16-byte sub-table (indices always in [0, 15]).
-        v128_t index_vec = wasm_v128_and(source_vec, low_nibble_mask_vec);
+        v128_t low_nibble_index_vec = wasm_v128_and(source_vec, low_nibble_mask_vec);
 
         // Index each of the 16 sub-tables by the low nibble with the cheaper relaxed swizzle.
-        v128_t sub_table_vec[16];
-        for (sz_size_t i = 0; i < 16; ++i) sub_table_vec[i] = wasm_i8x16_relaxed_swizzle(lut_vecs[i], index_vec);
+        v128_t sub_table_vecs[16];
+        for (sz_size_t sub_table_index = 0; sub_table_index < 16; ++sub_table_index)
+            sub_table_vecs[sub_table_index] = wasm_i8x16_relaxed_swizzle(lut_vecs[sub_table_index],
+                                                                         low_nibble_index_vec);
 
         // Tree reduction selecting the right sub-table by the four high bits of the source.
-        v128_t select4_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit4_vec), wasm_i8x16_splat(0));
-        for (sz_size_t i = 0; i < 16; i += 2)
-            sub_table_vec[i] = wasm_v128_bitselect(sub_table_vec[i], sub_table_vec[i + 1], select4_vec);
-        v128_t select5_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit5_vec), wasm_i8x16_splat(0));
-        for (sz_size_t i = 0; i < 16; i += 4)
-            sub_table_vec[i] = wasm_v128_bitselect(sub_table_vec[i], sub_table_vec[i + 2], select5_vec);
-        v128_t select6_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit6_vec), wasm_i8x16_splat(0));
-        for (sz_size_t i = 0; i < 16; i += 8)
-            sub_table_vec[i] = wasm_v128_bitselect(sub_table_vec[i], sub_table_vec[i + 4], select6_vec);
-        v128_t select7_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit7_vec), wasm_i8x16_splat(0));
-        v128_t result_vec = wasm_v128_bitselect(sub_table_vec[0], sub_table_vec[8], select7_vec);
+        v128_t select_bit4_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit4_vec), wasm_i8x16_splat(0));
+        for (sz_size_t sub_table_index = 0; sub_table_index < 16; sub_table_index += 2)
+            sub_table_vecs[sub_table_index] = wasm_v128_bitselect(sub_table_vecs[sub_table_index],
+                                                                  sub_table_vecs[sub_table_index + 1], select_bit4_vec);
+        v128_t select_bit5_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit5_vec), wasm_i8x16_splat(0));
+        for (sz_size_t sub_table_index = 0; sub_table_index < 16; sub_table_index += 4)
+            sub_table_vecs[sub_table_index] = wasm_v128_bitselect(sub_table_vecs[sub_table_index],
+                                                                  sub_table_vecs[sub_table_index + 2], select_bit5_vec);
+        v128_t select_bit6_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit6_vec), wasm_i8x16_splat(0));
+        for (sz_size_t sub_table_index = 0; sub_table_index < 16; sub_table_index += 8)
+            sub_table_vecs[sub_table_index] = wasm_v128_bitselect(sub_table_vecs[sub_table_index],
+                                                                  sub_table_vecs[sub_table_index + 4], select_bit6_vec);
+        v128_t select_bit7_vec = wasm_i8x16_eq(wasm_v128_and(source_vec, bit7_vec), wasm_i8x16_splat(0));
+        v128_t result_vec = wasm_v128_bitselect(sub_table_vecs[0], sub_table_vecs[8], select_bit7_vec);
 
         wasm_v128_store(target, result_vec);
         source += 16, target += 16, length -= 16;

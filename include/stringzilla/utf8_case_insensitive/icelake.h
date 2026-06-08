@@ -27,15 +27,16 @@ extern "C" {
 
 #if !SZ_AVOID_LIBC
 SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_hex_(FILE *stream, sz_cptr_t bytes, sz_size_t length) {
-    for (sz_size_t i = 0; i < length; ++i) fprintf(stream, "%02X ", (unsigned char)bytes[i]);
+    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
+        fprintf(stream, "%02X ", (unsigned char)bytes[byte_index]);
 }
 
 SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_c_array_(FILE *stream, char const *name, sz_cptr_t bytes,
                                                         sz_size_t length) {
     fprintf(stream, "static unsigned char %s[%zu] = {", name, (size_t)length);
-    for (sz_size_t i = 0; i < length; ++i) {
-        if ((i % 16) == 0) fprintf(stream, "\n    ");
-        fprintf(stream, "0x%02X,", (unsigned char)bytes[i]);
+    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) {
+        if ((byte_index % 16) == 0) fprintf(stream, "\n    ");
+        fprintf(stream, "0x%02X,", (unsigned char)bytes[byte_index]);
     }
     fprintf(stream, "\n};\n");
 }
@@ -63,12 +64,10 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
     fprintf(stderr, "Expected: %p, Found: %p\n", (void *)expected, (void *)result);
 
     if (expected) fprintf(stderr, "Expected Offset: %zu\n", (size_t)(expected - haystack));
-    else
-        fprintf(stderr, "Expected: NULL (Not Found)\n");
+    else fprintf(stderr, "Expected: NULL (Not Found)\n");
 
     if (result) fprintf(stderr, "Found Offset: %zu\n", (size_t)(result - haystack));
-    else
-        fprintf(stderr, "Found: NULL (Not Found)\n");
+    else fprintf(stderr, "Found: NULL (Not Found)\n");
 
     // Print SIMD metadata for debugging
     if (needle_metadata) {
@@ -77,8 +76,9 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
         fprintf(stderr, "SIMD Metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
                 needle_metadata->folded_slice_length, needle_metadata->probe_second, needle_metadata->probe_third);
         fprintf(stderr, "SIMD Metadata folded_slice: ");
-        for (sz_size_t i = 0; i < needle_metadata->folded_slice_length && i < 16; ++i)
-            fprintf(stderr, "%02X ", needle_metadata->folded_slice[i]);
+        for (sz_size_t byte_index = 0; byte_index < needle_metadata->folded_slice_length && byte_index < 16;
+             ++byte_index)
+            fprintf(stderr, "%02X ", needle_metadata->folded_slice[byte_index]);
         fprintf(stderr, "\n");
     }
 
@@ -97,17 +97,18 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
 
     // Print Haystack Context (if match found or missed)
     size_t context_padding = 16;
-    sz_cptr_t focus = expected ? expected : (result ? result : haystack);
-    sz_cptr_t start = (focus - haystack > (sz_ssize_t)context_padding) ? focus - context_padding : haystack;
-    sz_cptr_t end = (focus + needle_length + context_padding < haystack + haystack_length)
-                        ? focus + needle_length + context_padding
-                        : haystack + haystack_length;
+    sz_cptr_t context_focus = expected ? expected : (result ? result : haystack);
+    sz_cptr_t context_start = (context_focus - haystack > (sz_ssize_t)context_padding) ? context_focus - context_padding
+                                                                                       : haystack;
+    sz_cptr_t context_end = (context_focus + needle_length + context_padding < haystack + haystack_length)
+                                ? context_focus + needle_length + context_padding
+                                : haystack + haystack_length;
 
     fprintf(stderr, "Haystack Context (Hex): ");
-    for (sz_cptr_t p = start; p < end; ++p) {
-        if (p == expected) fprintf(stderr, "[EXP] ");
-        if (p == result) fprintf(stderr, "[ACT] ");
-        fprintf(stderr, "%02X ", (unsigned char)*p);
+    for (sz_cptr_t byte_cursor = context_start; byte_cursor < context_end; ++byte_cursor) {
+        if (byte_cursor == expected) fprintf(stderr, "[EXP] ");
+        if (byte_cursor == result) fprintf(stderr, "[ACT] ");
+        fprintf(stderr, "%02X ", (unsigned char)*byte_cursor);
     }
     fprintf(stderr, "\n");
     fprintf(stderr, "--------------------------------------------------------\n");
@@ -141,7 +142,7 @@ SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
  *  @brief Fold a ZMM register using ASCII case folding rules.
  *  @sa sz_utf8_case_rune_ascii_invariant_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(__m512i text_zmm) {
@@ -161,12 +162,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(__m512
  *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
  *  comparison to handle variable-width folding correctly.
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_(    //
@@ -223,8 +224,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_(    //
             haystack_candidate_vec.xmm = _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
                 _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             // Validate the full match using the unified validator
@@ -251,8 +252,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_(    //
         __mmask64 valid_mask = sz_u64_mask_until_(valid_starts);
         __mmask64 load_mask = sz_u64_mask_until_(remaining);
 
-        haystack_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_maskz_loadu_epi8(load_mask, haystack_ptr));
+        haystack_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_maskz_loadu_epi8(load_mask, haystack_ptr));
 
         sz_u64_t matches = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_first_vec.zmm);
         matches &= _mm512_cmpeq_epi8_mask(haystack_vec.zmm, probe_second_vec.zmm) >> offset_second;
@@ -268,8 +269,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_(    //
             haystack_candidate_vec.xmm = _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
                 _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             // Validate the full match using the unified validator
@@ -328,12 +329,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_3probe_( //
     // Main loop
     while (haystack_ptr + 64 + offset_last <= haystack_end) {
         // 3 parallel loads from different offsets - all hit L1 cache
-        haystack_first_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr));
-        haystack_second_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr + offset_second));
-        haystack_last_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr + offset_last));
+        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr));
+        haystack_second_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr + offset_second));
+        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr + offset_last));
 
         // XOR for difference detection - 0 where probe matches
         __m512i diff_first_zmm = _mm512_xor_si512(haystack_first_vec.zmm, probe_first_vec.zmm);
@@ -459,14 +460,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
     // Main loop
     while (haystack_ptr + 64 + offset_last <= haystack_end) {
         // 4 parallel loads from different offsets - all hit L1 cache
-        haystack_first_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr));
-        haystack_second_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr + offset_second));
-        haystack_third_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr + offset_third));
-        haystack_last_vec.zmm =
-            sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(_mm512_loadu_si512(haystack_ptr + offset_last));
+        haystack_first_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr));
+        haystack_second_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr + offset_second));
+        haystack_third_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr + offset_third));
+        haystack_last_vec.zmm = sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
+            _mm512_loadu_si512(haystack_ptr + offset_last));
 
         // XOR for difference detection - 0 where probe matches
         __m512i diff_first_zmm = _mm512_xor_si512(haystack_first_vec.zmm, probe_first_vec.zmm);
@@ -491,8 +492,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
             haystack_candidate_vec.xmm = _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
                 _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             // Window matched - validate head/tail
@@ -551,8 +552,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
             haystack_candidate_vec.xmm = _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_ascii_fold_zmm_(
                 _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
@@ -583,7 +584,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
  *  @brief Fold a ZMM register using Western European case-folding rules.
  *  @sa sz_utf8_case_rune_safe_western_europe_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_western_europe_fold_naively_zmm_(__m512i text_zmm) {
@@ -634,7 +635,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_western_europe_fold_na
  *  @brief Fold a ZMM register using Western European case-folding rules.
  *  @sa sz_utf8_case_rune_safe_western_europe_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_western_europe_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -705,7 +706,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_western_europe_fold_ef
  *
  *  Uses 12 CMPEQ operations (5 lead + 7 second byte checks).
  *
- *  @param[in] text_zmm The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm_naively_zmm_(__m512i text_zmm) {
@@ -760,7 +761,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm
  *
  *  Port summary: 8 p5 ops + 4 p0 ops (vs 12 p5 originally)
  *
- *  @param[in] text_zmm The text ZMM register to scan for danger bytes.
+ *  @param text_zmm The text ZMM register to scan for danger bytes.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm_efficiently_zmm_(__m512i text_zmm) {
@@ -812,12 +813,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm
     __mmask64 is_9f_mask = is_9f_or_bf_mask & ~has_bit5_mask;
 
     // Danger mask construction
-    __mmask64 danger_mask =
-        ((is_e1_mask << 1) & is_ba_mask) |                           // Capital Sharp S (E1 BA xx)
-        ((is_e2_mask << 1) & is_84_mask & (is_aa_or_ab_mask >> 1)) | // Kelvin/Angstrom (E2 84 AA/AB)
-        ((is_ef_mask << 1) & is_ac_mask) |                           // Ligatures (EF AC xx)
-        ((is_c5_mask << 1) & is_bf_mask) |                           // Long S (C5 BF)
-        ((is_c3_mask << 1) & is_9f_mask);                            // Sharp S (C3 9F)
+    __mmask64 danger_mask = ((is_e1_mask << 1) & is_ba_mask) | // Capital Sharp S (E1 BA xx)
+                            ((is_e2_mask << 1) & is_84_mask &
+                             (is_aa_or_ab_mask >> 1)) |        // Kelvin/Angstrom (E2 84 AA/AB)
+                            ((is_ef_mask << 1) & is_ac_mask) | // Ligatures (EF AC xx)
+                            ((is_c5_mask << 1) & is_bf_mask) | // Long S (C5 BF)
+                            ((is_c3_mask << 1) & is_9f_mask);  // Sharp S (C3 9F)
 
     sz_assert_(danger_mask == sz_utf8_case_insensitive_find_icelake_western_europe_alarm_naively_zmm_(text_zmm) &&
                "Efficient Western Europe alarm must match naive implementation");
@@ -832,12 +833,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm
  *  When found, verifies the head (backwards) and tail (forwards) using codepoint-by-codepoint
  *  comparison to handle variable-width folding correctly (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)).
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_western_europe_( //
@@ -873,8 +874,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_western_europe_( //
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -895,15 +896,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_western_europe_( //
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
         // Check for anomalies using the alarm function
-        __mmask64 danger_mask =
-            sz_utf8_case_insensitive_find_icelake_western_europe_alarm_efficiently_zmm_(haystack_vec.zmm);
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_icelake_western_europe_alarm_efficiently_zmm_(
+            haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
             // To find all matches that start at valid positions (0 to valid_starts-1), we need to
             // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -930,12 +931,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_western_europe_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_western_europe_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_western_europe_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -967,7 +968,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_western_europe_( //
  *  @brief Fold a ZMM register using Central European case-folding rules.
  *  @sa sz_utf8_case_rune_safe_central_europe_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_naively_zmm_(__m512i text_zmm) {
@@ -1056,7 +1057,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_na
  *  @brief Fold a ZMM register using Central European case-folding rules.
  *  @sa sz_utf8_case_rune_safe_central_europe_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -1093,8 +1094,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_ef
 
     // 1. Latin-1 Supplement: C3 80-9E -> +0x20 (excluding 97)
     // Range compression: (byte - 0x80) < 0x1F covers 80-9E
-    __mmask64 is_latin1_range =
-        _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(result_zmm, x_80_zmm), x_1f_zmm);
+    __mmask64 is_latin1_range = _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(result_zmm, x_80_zmm),
+                                                            x_1f_zmm);
     __mmask64 fold_latin1 = is_latin1_range & ~_mm512_cmpeq_epi8_mask(result_zmm, x_97_zmm);
 
     // 2. Latin Extended-A: C4xx / C5xx case folding with varying parity
@@ -1144,7 +1145,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_ef
  *
  *  Uses 10 CMPEQ operations (5 lead + 5 second byte checks).
  *
- *  @param[in] text_zmm The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_central_europe_alarm_naively_zmm_(__m512i text_zmm) {
@@ -1192,7 +1193,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_central_europe_alarm
  *
  *  Port summary: 8 p5 ops + 2 p0 ops (vs 10 p5 originally)
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_central_europe_alarm_efficiently_zmm_(__m512i text_zmm) {
@@ -1247,12 +1248,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_central_europe_alarm
  *  @brief Central European case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_central_europe_k
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Safe window metadata.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Safe window metadata.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_central_europe_( //
@@ -1288,8 +1289,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_central_europe_( //
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -1310,15 +1311,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_central_europe_( //
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
         // Check for anomalies using the alarm function
-        __mmask64 danger_mask =
-            sz_utf8_case_insensitive_find_icelake_central_europe_alarm_efficiently_zmm_(haystack_vec.zmm);
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_icelake_central_europe_alarm_efficiently_zmm_(
+            haystack_vec.zmm);
 
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
             // To find all matches that start at valid positions (0 to valid_starts-1), we need to
             // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -1346,12 +1347,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_central_europe_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_central_europe_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_central_europe_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -1385,7 +1386,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_central_europe_( //
  *
  *  Handles Basic Cyrillic (D0/D1) and Extended Cyrillic (D2/D3) ranges.
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_cyrillic_fold_naively_zmm_(__m512i text_zmm) {
@@ -1444,7 +1445,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_cyrillic_fold_naively_
  *  to distinct offsets (+0x10, +0x20, -0x20). A single VPSHUFB lookup replaces
  *  3 range comparisons + 3 masked moves.
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_cyrillic_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -1513,12 +1514,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_cyrillic_fold_efficien
  *  @brief Cyrillic case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_cyrillic_k
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Safe window metadata.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Safe window metadata.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_cyrillic_( //
@@ -1586,12 +1587,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_cyrillic_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_cyrillic_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_cyrillic_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -1623,7 +1624,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_cyrillic_( //
  *  @brief Fold a ZMM register using Armenian case-folding rules.
  *  @sa sz_utf8_case_rune_safe_armenian_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_naively_zmm_(__m512i text_zmm) {
@@ -1663,16 +1664,16 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_naively_
     // 2. D5 ranges (Uppercase D5 80-96 -> Lowercase D5 B0-BF / D6 80-86)
     // Group 2a: D5 80-8F ('Ղ'-'Տ') -> D5 B0-BF ('ղ'-'տ')
     // Offset +0x30
-    __mmask64 is_d5_upper_subset1 =
-        _mm512_mask_cmple_epu8_mask(is_after_d5_mask, result_zmm, _mm512_set1_epi8((char)0x8F));
+    __mmask64 is_d5_upper_subset1 = _mm512_mask_cmple_epu8_mask(is_after_d5_mask, result_zmm,
+                                                                _mm512_set1_epi8((char)0x8F));
     is_d5_upper_subset1 &= _mm512_mask_cmpge_epu8_mask(is_after_d5_mask, result_zmm, _mm512_set1_epi8((char)0x80));
 
     result_zmm = _mm512_mask_add_epi8(result_zmm, is_d5_upper_subset1, result_zmm, x_30_zmm); // +0x30
 
     // Group 2b: D5 90-96 ('Ր'-'Ֆ') -> D6 80-86 ('ր'-'ֆ')
     // Lead D5 -> D6, Second 90-96 -> 80-86 (-0x10)
-    __mmask64 is_d5_upper_subset2 =
-        _mm512_mask_cmpge_epu8_mask(is_after_d5_mask, result_zmm, _mm512_set1_epi8((char)0x90));
+    __mmask64 is_d5_upper_subset2 = _mm512_mask_cmpge_epu8_mask(is_after_d5_mask, result_zmm,
+                                                                _mm512_set1_epi8((char)0x90));
     is_d5_upper_subset2 &= _mm512_mask_cmple_epu8_mask(is_after_d5_mask, result_zmm, x_96_zmm);
 
     result_zmm = _mm512_mask_mov_epi8(result_zmm, is_d5_upper_subset2 >> 1, x_d6_zmm);        // Lead D5 -> D6
@@ -1690,7 +1691,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_naively_
  *  VPTERNLOG allows building 3 offset vectors in parallel (no dependencies),
  *  then combining them with a single OR operation (imm8=0xFE: A | B | C).
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -1724,14 +1725,14 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_efficien
 
     // Range compression: All 3 ranges computed in parallel
     // D4 B1-BF: (byte - B1) < 15
-    __mmask64 is_d4_upper =
-        _mm512_mask_cmplt_epu8_mask(is_after_d4_mask, _mm512_sub_epi8(result_zmm, x_b1_zmm), x_0f_zmm);
+    __mmask64 is_d4_upper = _mm512_mask_cmplt_epu8_mask(is_after_d4_mask, _mm512_sub_epi8(result_zmm, x_b1_zmm),
+                                                        x_0f_zmm);
     // D5 80-8F: (byte - 80) < 16
-    __mmask64 is_d5_subset1 =
-        _mm512_mask_cmplt_epu8_mask(is_after_d5_mask, _mm512_sub_epi8(result_zmm, x_80_zmm), x_10_zmm);
+    __mmask64 is_d5_subset1 = _mm512_mask_cmplt_epu8_mask(is_after_d5_mask, _mm512_sub_epi8(result_zmm, x_80_zmm),
+                                                          x_10_zmm);
     // D5 90-96: (byte - 90) < 7
-    __mmask64 is_d5_subset2 =
-        _mm512_mask_cmplt_epu8_mask(is_after_d5_mask, _mm512_sub_epi8(result_zmm, x_90_zmm), x_07_zmm);
+    __mmask64 is_d5_subset2 = _mm512_mask_cmplt_epu8_mask(is_after_d5_mask, _mm512_sub_epi8(result_zmm, x_90_zmm),
+                                                          x_07_zmm);
 
     // Lead byte changes (applied before offset to preserve original lead byte positions)
     // D4 B1-BF: lead D4 -> D5
@@ -1766,7 +1767,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_armenian_fold_efficien
  *
  *  Uses 4 CMPEQ operations (2 lead + 2 second byte checks).
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_armenian_alarm_naively_zmm_(__m512i text_zmm) {
@@ -1798,7 +1799,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_armenian_alarm_naive
  *  Currently delegates to the naive implementation.
  *  Armenian has only 4 CMPEQ ops, so optimization overhead may not be worthwhile.
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_armenian_alarm_efficiently_zmm_(__m512i text_zmm) {
@@ -1810,12 +1811,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_armenian_alarm_effic
  *  @brief Armenian case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_armenian_k
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_armenian_( //
@@ -1851,8 +1852,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_armenian_( //
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -1879,8 +1880,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_armenian_( //
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
             // To find all matches that start at valid positions (0 to valid_starts-1), we need to
             // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -1908,12 +1909,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_armenian_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_armenian_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_armenian_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -1945,7 +1946,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_armenian_( //
  *  @brief Fold a ZMM register using Greek case-folding rules.
  *  @sa sz_utf8_case_rune_safe_greek_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_greek_fold_naively_zmm_(__m512i text_zmm) {
@@ -2074,7 +2075,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_greek_fold_naively_zmm
  *  `mask_mov` operations on the same CPU port, creating a 6-deep dependency chain.
  *  VPTERNLOG allows grouping offsets into parallel vectors and combining with OR.
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_greek_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -2121,23 +2122,23 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_greek_fold_efficiently
 
     // Accented sub-masks
     __mmask64 is_86_mask = is_accented_mask & _mm512_cmpeq_epi8_mask(result_zmm, x_86_zmm);
-    __mmask64 is_88_8a_mask =
-        is_accented_mask & _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_88_zmm), x_03_zmm);
+    __mmask64 is_88_8a_mask = is_accented_mask &
+                              _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_88_zmm), x_03_zmm);
     __mmask64 is_8c_mask = is_accented_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0x8C));
     __mmask64 is_8e_8f_mask = is_accented_mask & _mm512_cmpge_epu8_mask(result_zmm, x_8e_zmm);
 
     // 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83)
-    __mmask64 is_final_sigma_mask =
-        _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm, _mm512_set1_epi8((char)0x82));
+    __mmask64 is_final_sigma_mask = _mm512_mask_cmpeq_epi8_mask(is_after_cf_mask, result_zmm,
+                                                                _mm512_set1_epi8((char)0x82));
 
     // 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
     __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c2_zmm);
-    __mmask64 is_micro_second_mask =
-        (is_c2_mask << 1) & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xB5));
+    __mmask64 is_micro_second_mask = (is_c2_mask << 1) &
+                                     _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xB5));
 
     // Lead byte changes: CE -> CF (applied before offset calculation)
-    __mmask64 change_ce_to_cf_mask =
-        ((is_basic2_mask | is_dialytika_mask | is_8c_mask | is_8e_8f_mask) >> 1) & is_ce_mask;
+    __mmask64 change_ce_to_cf_mask = ((is_basic2_mask | is_dialytika_mask | is_8c_mask | is_8e_8f_mask) >> 1) &
+                                     is_ce_mask;
     result_zmm = _mm512_mask_mov_epi8(result_zmm, change_ce_to_cf_mask, x_cf_zmm);
 
     // Micro sign lead change: C2 → CE
@@ -2190,7 +2191,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_greek_fold_efficiently
  *  - E1: Polytonic Greek / Extensions
  *  - CD: Combining Diacritical Marks
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_greek_alarm_naively_zmm_(__m512i text_zmm) {
@@ -2221,8 +2222,8 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_greek_alarm_naively_
     __mmask64 is_b0_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_b0_zmm);
     __mmask64 is_9x_mask = is_90_mask | _mm512_cmpeq_epi8_mask(text_zmm, x_91_zmm) | //
                            _mm512_cmpeq_epi8_mask(text_zmm, x_95_zmm) | _mm512_cmpeq_epi8_mask(text_zmm, x_96_zmm);
-    __mmask64 is_bx_mask =
-        is_b0_mask | _mm512_cmpeq_epi8_mask(text_zmm, x_b1_zmm) | _mm512_cmpeq_epi8_mask(text_zmm, x_b5_zmm);
+    __mmask64 is_bx_mask = is_b0_mask | _mm512_cmpeq_epi8_mask(text_zmm, x_b1_zmm) |
+                           _mm512_cmpeq_epi8_mask(text_zmm, x_b5_zmm);
     __mmask64 is_84_mask = _mm512_cmpeq_epi8_mask(text_zmm, x_84_zmm);
 
     // Danger mask construction
@@ -2245,7 +2246,7 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_greek_alarm_naively_
  *
  *  Port summary: 6 p5 ops + 5 p0 ops (vs 13 p5 originally)
  *
- *  @param[in] h The haystack ZMM register.
+ *  @param text_zmm The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_greek_alarm_efficiently_zmm_(__m512i text_zmm) {
@@ -2332,12 +2333,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_greek_alarm_efficien
  *  @brief Greek case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_greek_k
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_greek_(    //
@@ -2374,8 +2375,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_greek_(    //
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -2402,8 +2403,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_greek_(    //
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
             // To find all matches that start at valid positions (0 to valid_starts-1), we need to
             // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -2431,12 +2432,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_greek_(    //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_greek_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_greek_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -2468,7 +2469,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_greek_(    //
  *  @brief Fold a ZMM register using Vietnamese case-folding rules.
  *  @sa sz_utf8_case_rune_safe_vietnamese_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_naively_zmm_(__m512i text_zmm) {
@@ -2492,29 +2493,29 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_naivel
     __m512i const x_20_zmm = _mm512_set1_epi8((char)0x20);
 
     // Masks for lead bytes
-    __mmask64 is_c3 = _mm512_cmpeq_epi8_mask(result_zmm, x_c3_zmm);
-    __mmask64 is_c4 = _mm512_cmpeq_epi8_mask(result_zmm, x_c4_zmm);
-    __mmask64 is_c5 = _mm512_cmpeq_epi8_mask(result_zmm, x_c5_zmm);
-    __mmask64 is_c6 = _mm512_cmpeq_epi8_mask(result_zmm, x_c6_zmm);
-    __mmask64 is_e1 = _mm512_cmpeq_epi8_mask(result_zmm, x_e1_zmm);
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c3_zmm);
+    __mmask64 is_c4_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c4_zmm);
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c5_zmm);
+    __mmask64 is_c6_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_c6_zmm);
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(result_zmm, x_e1_zmm);
 
-    __mmask64 is_after_c3 = is_c3 << 1;
-    __mmask64 is_after_c4 = is_c4 << 1;
-    __mmask64 is_after_c5 = is_c5 << 1;
-    __mmask64 is_after_c6 = is_c6 << 1;
+    __mmask64 is_after_c3_mask = is_c3_mask << 1;
+    __mmask64 is_after_c4_mask = is_c4_mask << 1;
+    __mmask64 is_after_c5_mask = is_c5_mask << 1;
+    __mmask64 is_after_c6_mask = is_c6_mask << 1;
 
     // 1. Latin-1 Supplement (C3): Upper 80-96, 98-9E -> +0x20
     // Same as Western/Central
-    __mmask64 is_c3_target =
-        _mm512_mask_cmple_epu8_mask(is_after_c3, result_zmm, _mm512_set1_epi8((char)0x9E)); // <= 9E
+    __mmask64 is_c3_target_mask = _mm512_mask_cmple_epu8_mask(is_after_c3_mask, result_zmm,
+                                                              _mm512_set1_epi8((char)0x9E)); // <= 9E
     // Exclude multiplication sign 0xD7/0x97 if needed?
     // Western kernel excludes 0x97 (x) and 0xDF (ss).
     // Here we check <= 9E. 0x97 is usually Multiply, but standard folding keeps it?
     // Central kernel: excludes 97.
-    is_c3_target &= ~_mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0x97)); // Exclude ×
-    is_c3_target &= _mm512_mask_cmpge_epu8_mask(is_after_c3, result_zmm, _mm512_set1_epi8((char)0x80));
+    is_c3_target_mask &= ~_mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0x97)); // Exclude ×
+    is_c3_target_mask &= _mm512_mask_cmpge_epu8_mask(is_after_c3_mask, result_zmm, _mm512_set1_epi8((char)0x80));
 
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c3_target, result_zmm, x_20_zmm);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c3_target_mask, result_zmm, x_20_zmm);
 
     // 2. Latin Extended-A (C4/C5): Even -> Odd (+1) for MOST characters
     // Standard pattern (U+0100-U+0138, U+014A-U+017F): Even=uppercase, Odd=lowercase
@@ -2522,50 +2523,54 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_naivel
     //   - After C4: B9,BB,BD,BF are uppercase (odd), BA,BC,BE are lowercase (even)
     //   - After C5: 81,83,85,87 are uppercase (odd), 80,82,84,86,88 are lowercase (even)
     // Note: 'Ŀ' (U+013F, C4 BF) → 'ŀ' (U+0140, C5 80) crosses lead bytes, handled specially by safety profile
-    __mmask64 is_c4_c5_target = is_after_c4 | is_after_c5;
-    __mmask64 is_even = _mm512_cmpeq_epi8_mask(_mm512_and_si512(result_zmm, x_01_zmm), _mm512_setzero_si512());
-    __mmask64 is_odd = ~is_even;
+    __mmask64 is_c4_c5_target_mask = is_after_c4_mask | is_after_c5_mask;
+    __mmask64 is_even_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(result_zmm, x_01_zmm), _mm512_setzero_si512());
+    __mmask64 is_odd_mask = ~is_even_mask;
 
     // Identify the inverted range where Even=lowercase (should NOT be transformed +1)
     // After C4: B9-BE (U+0139-U+013E: Ĺ-ľ inverted pattern)
     // Note: BF (Ŀ U+013F) excluded - its lowercase ŀ (U+0140) is C5 80 (different lead byte)
-    __mmask64 is_c4_inverted_range = is_after_c4 & _mm512_cmpge_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xB9)) &
-                                     _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xBE));
+    __mmask64 is_c4_inverted_range_mask = is_after_c4_mask &
+                                          _mm512_cmpge_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xB9)) &
+                                          _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0xBE));
     // After C5: 80-88 (even bytes 80, 82, 84, 86, 88 are lowercase)
-    __mmask64 is_c5_inverted_range = is_after_c5 & _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0x88));
-    __mmask64 is_inverted_range = is_c4_inverted_range | is_c5_inverted_range;
+    __mmask64 is_c5_inverted_range_mask = is_after_c5_mask &
+                                          _mm512_cmple_epu8_mask(result_zmm, _mm512_set1_epi8((char)0x88));
+    __mmask64 is_inverted_range_mask = is_c4_inverted_range_mask | is_c5_inverted_range_mask;
 
     // Standard range: apply +1 to even bytes (uppercase -> lowercase)
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c4_c5_target & is_even & ~is_inverted_range, result_zmm, x_01_zmm);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c4_c5_target_mask & is_even_mask & ~is_inverted_range_mask,
+                                      result_zmm, x_01_zmm);
     // Inverted range: apply +1 to odd bytes (uppercase -> lowercase)
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_inverted_range & is_odd, result_zmm, x_01_zmm);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_inverted_range_mask & is_odd_mask, result_zmm, x_01_zmm);
 
     // 3. Latin Extended-B (C6): Specific Vietnamese chars
     // 'Ơ' (U+01A0, C6 A0) → 'ơ' (U+01A1, C6 A1) (even → odd)
     // 'Ư' (U+01AF, C6 AF) → 'ư' (U+01B0, C6 B0) (odd → even)
-    __mmask64 is_c6_A0 = is_after_c6 & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xA0));
-    __mmask64 is_c6_AF = is_after_c6 & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xAF));
+    __mmask64 is_c6_A0_mask = is_after_c6_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xA0));
+    __mmask64 is_c6_AF_mask = is_after_c6_mask & _mm512_cmpeq_epi8_mask(result_zmm, _mm512_set1_epi8((char)0xAF));
 
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c6_A0 | is_c6_AF, result_zmm, x_01_zmm);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_c6_A0_mask | is_c6_AF_mask, result_zmm, x_01_zmm);
 
     // 4. Latin Extended Additional (E1 B8-BB): Even -> Odd (+1) for Uppercase
     // E1 lead -> Second is B8..BB -> Third is Even
     // Exception: 1E 96-9F (Second=BA, Third=96-9F)
-    __mmask64 is_e1_second = is_e1 << 1;
-    __mmask64 is_valid_second = _mm512_mask_cmpge_epu8_mask(is_e1_second, result_zmm, x_b8_zmm);
-    is_valid_second &= _mm512_mask_cmple_epu8_mask(is_e1_second, result_zmm, x_bb_zmm);
+    __mmask64 is_e1_second_mask = is_e1_mask << 1;
+    __mmask64 is_valid_second_mask = _mm512_mask_cmpge_epu8_mask(is_e1_second_mask, result_zmm, x_b8_zmm);
+    is_valid_second_mask &= _mm512_mask_cmple_epu8_mask(is_e1_second_mask, result_zmm, x_bb_zmm);
 
-    __mmask64 is_e1_third = is_valid_second << 1;
+    __mmask64 is_e1_third_mask = is_valid_second_mask << 1;
 
     // Check exclusion: Second == BA && Third in 96-9F
-    __mmask64 is_ba_second = is_e1_second & _mm512_cmpeq_epi8_mask(result_zmm, x_ba_zmm);
-    __mmask64 is_excluded_third = (is_ba_second << 1) & _mm512_mask_cmpge_epu8_mask(is_e1_third, result_zmm, x_96_zmm) &
-                                  _mm512_mask_cmple_epu8_mask(is_e1_third, result_zmm, x_9f_zmm);
+    __mmask64 is_ba_second_mask = is_e1_second_mask & _mm512_cmpeq_epi8_mask(result_zmm, x_ba_zmm);
+    __mmask64 is_excluded_third_mask = (is_ba_second_mask << 1) &
+                                       _mm512_mask_cmpge_epu8_mask(is_e1_third_mask, result_zmm, x_96_zmm) &
+                                       _mm512_mask_cmple_epu8_mask(is_e1_third_mask, result_zmm, x_9f_zmm);
 
     // Apply +1 to Even bytes in valid third positions, excluding the danger range
-    __mmask64 is_e1_target = is_e1_third & is_even & ~is_excluded_third;
+    __mmask64 is_e1_target_mask = is_e1_third_mask & is_even_mask & ~is_excluded_third_mask;
 
-    result_zmm = _mm512_mask_add_epi8(result_zmm, is_e1_target, result_zmm, x_01_zmm);
+    result_zmm = _mm512_mask_add_epi8(result_zmm, is_e1_target_mask, result_zmm, x_01_zmm);
 
     return result_zmm;
 }
@@ -2574,7 +2579,7 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_naivel
  *  @brief Fold a ZMM register using Vietnamese case-folding rules.
  *  @sa sz_utf8_case_rune_safe_vietnamese_k
  *
- *  @param[in] text_zmm The text ZMM register.
+ *  @param text_zmm The text ZMM register.
  *  @return The folded ZMM register.
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_efficiently_zmm_(__m512i text_zmm) {
@@ -2620,8 +2625,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_effici
 
     // 1. Latin-1 Supplement (C3): Upper 80-9E -> +0x20 (excluding 97)
     // Range compression: (byte - 0x80) < 0x1F covers 80-9E
-    __mmask64 is_c3_range_mask =
-        _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(result_zmm, x_80_zmm), x_1f_zmm);
+    __mmask64 is_c3_range_mask = _mm512_mask_cmplt_epu8_mask(is_after_c3_mask, _mm512_sub_epi8(result_zmm, x_80_zmm),
+                                                             x_1f_zmm);
     __mmask64 is_c3_target_mask = is_c3_range_mask & ~_mm512_cmpeq_epi8_mask(result_zmm, x_97_zmm); // Exclude ×
 
     // 2. Latin Extended-A (C4/C5): Even -> Odd (+1) for MOST characters
@@ -2633,11 +2638,11 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_effici
 
     // RANGE COMPRESSION for inverted ranges
     // C4 B9-BE: (byte - B9) < 6
-    __mmask64 is_c4_inverted_range_mask =
-        is_after_c4_mask & _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_b9_zmm), x_06_zmm);
+    __mmask64 is_c4_inverted_range_mask = is_after_c4_mask &
+                                          _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_b9_zmm), x_06_zmm);
     // C5 80-88: (byte - 80) < 9
-    __mmask64 is_c5_inverted_range_mask =
-        is_after_c5_mask & _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_80_zmm), x_09_zmm);
+    __mmask64 is_c5_inverted_range_mask = is_after_c5_mask &
+                                          _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_80_zmm), x_09_zmm);
     __mmask64 is_inverted_range_mask = is_c4_inverted_range_mask | is_c5_inverted_range_mask;
 
     // Standard range: apply +1 to even bytes (uppercase -> lowercase)
@@ -2656,16 +2661,16 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_effici
     // Exception: 1E 96-9F (Second=BA, Third=96-9F)
     __mmask64 is_e1_second_mask = is_e1_mask << 1;
     // Range compression: (byte - B8) < 4 covers B8-BB
-    __mmask64 is_valid_second_mask =
-        _mm512_mask_cmplt_epu8_mask(is_e1_second_mask, _mm512_sub_epi8(result_zmm, x_b8_zmm), x_04_zmm);
+    __mmask64 is_valid_second_mask = _mm512_mask_cmplt_epu8_mask(is_e1_second_mask,
+                                                                 _mm512_sub_epi8(result_zmm, x_b8_zmm), x_04_zmm);
 
     __mmask64 is_e1_third_mask = is_valid_second_mask << 1;
 
     // Check exclusion: Second == BA && Third in 96-9F
     // Range compression: (byte - 96) < 10 covers 96-9F
     __mmask64 is_ba_second_mask = is_e1_second_mask & _mm512_cmpeq_epi8_mask(result_zmm, x_ba_zmm);
-    __mmask64 is_excluded_third_mask =
-        (is_ba_second_mask << 1) & _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_96_zmm), x_0a_zmm);
+    __mmask64 is_excluded_third_mask = (is_ba_second_mask << 1) &
+                                       _mm512_cmplt_epu8_mask(_mm512_sub_epi8(result_zmm, x_96_zmm), x_0a_zmm);
 
     // Apply +1 to Even bytes in valid third positions, excluding the danger range
     __mmask64 is_e1_target_mask = is_e1_third_mask & is_even_mask & ~is_excluded_third_mask;
@@ -2712,8 +2717,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_vietnamese_fold_effici
  *  Uses ~11 CMPEQ + 2 range operations.
  *  Note: Returns danger positions shifted to the START of multi-byte sequences.
  *
- *  @param[in] text_zmm The haystack ZMM register.
- *  @param[in] load_mask Mask of valid bytes in the ZMM register.
+ *  @param text_zmm The haystack ZMM register.
+ *  @param load_mask Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_naively_zmm_(__m512i text_zmm,
@@ -2772,8 +2777,8 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_nai
  *
  *  Port summary: 11 p5 ops + 1 p0 op (vs 12 p5 originally)
  *
- *  @param[in] h The haystack ZMM register.
- *  @param[in] load_mask Mask of valid bytes in the ZMM register.
+ *  @param text_zmm The haystack ZMM register.
+ *  @param load_mask Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_efficiently_zmm_(__m512i text_zmm,
@@ -2823,8 +2828,8 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_eff
     __mmask64 kelvin_mask = (is_e2_mask << 1) & _mm512_cmpeq_epi8_mask(text_zmm, x_84_zmm);
 
     // Shift back to sequence start positions
-    __mmask64 danger_mask =
-        (bad_third_mask >> 2) | (sharp_s_mask >> 1) | (long_s_mask >> 1) | (ligature_mask >> 1) | (kelvin_mask >> 1);
+    __mmask64 danger_mask = (bad_third_mask >> 2) | (sharp_s_mask >> 1) | (long_s_mask >> 1) | (ligature_mask >> 1) |
+                            (kelvin_mask >> 1);
 
     sz_assert_(danger_mask ==
                    sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_naively_zmm_(text_zmm, load_mask) &&
@@ -2836,12 +2841,12 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_eff
  *  @brief Vietnamese case-insensitive search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_case_rune_safe_vietnamese_k
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_vietnamese_( //
@@ -2877,8 +2882,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_vietnamese_( //
 
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -2899,14 +2904,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_vietnamese_( //
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, haystack_ptr);
 
         // Check for anomalies using alarm function
-        __mmask64 danger_mask =
-            sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_efficiently_zmm_(haystack_vec.zmm, load_mask);
+        __mmask64 danger_mask = sz_utf8_case_insensitive_find_icelake_vietnamese_alarm_efficiently_zmm_(
+            haystack_vec.zmm, load_mask);
         if (danger_mask) {
             // The danger zone handler scans for the needle's first safe rune (at offset_in_unfolded).
             // To find all matches that start at valid positions (0 to valid_starts-1), we need to
             // scan up to position valid_starts - 1 + offset_in_unfolded. Use chunk_size as upper bound.
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -2933,12 +2938,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_vietnamese_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_vietnamese_fold_efficiently_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_vietnamese_fold_efficiently_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                    //
@@ -2993,10 +2998,10 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_georgian_alarm_zmm_(
 
     // E1 82 [A0-E5] = Asomtavruli (folds to Nuskhuri)
     // Third byte range check: (byte - 0xA0) < 0x46 covers A0-E5
-    __mmask64 after_e1_82 = (is_e1_mask << 1) & is_82_mask;
-    __m512i off_a0 = _mm512_add_epi8(text_zmm, _mm512_set1_epi8(0x60)); // -0xA0 = +0x60
-    __mmask64 in_a0_e5 = _mm512_cmplt_epu8_mask(off_a0, _mm512_set1_epi8(0x46));
-    __mmask64 asomtavruli_mask = (after_e1_82 << 1) & in_a0_e5;
+    __mmask64 after_e1_82_mask = (is_e1_mask << 1) & is_82_mask;
+    __m512i offset_a0_zmm = _mm512_add_epi8(text_zmm, _mm512_set1_epi8(0x60)); // -0xA0 = +0x60
+    __mmask64 in_a0_e5_mask = _mm512_cmplt_epu8_mask(offset_a0_zmm, _mm512_set1_epi8(0x46));
+    __mmask64 asomtavruli_mask = (after_e1_82_mask << 1) & in_a0_e5_mask;
 
     // E2 B4 xx = Nuskhuri
     __mmask64 nuskhuri_mask = (is_e2_mask << 1) & is_b4_mask;
@@ -3014,9 +3019,9 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_georgian_alarm_zmm_(
  */
 SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_georgian_fold_zmm_(__m512i text_zmm) {
     // ASCII A-Z range check: (byte - 'A') <= 25
-    __m512i off_a = _mm512_sub_epi8(text_zmm, _mm512_set1_epi8('A'));
-    __mmask64 is_upper = _mm512_cmple_epu8_mask(off_a, _mm512_set1_epi8(25));
-    return _mm512_mask_add_epi8(text_zmm, is_upper, text_zmm, _mm512_set1_epi8(0x20));
+    __m512i offset_a_zmm = _mm512_sub_epi8(text_zmm, _mm512_set1_epi8('A'));
+    __mmask64 is_upper_mask = _mm512_cmple_epu8_mask(offset_a_zmm, _mm512_set1_epi8(25));
+    return _mm512_mask_add_epi8(text_zmm, is_upper_mask, text_zmm, _mm512_set1_epi8(0x20));
 }
 
 /**
@@ -3026,12 +3031,12 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_georgian_fold_zmm_(__m
  *  This is the fastest non-ASCII kernel because Mkhedruli is caseless - no Georgian
  *  folding needed in the hot path. Only ASCII A-Z folding for mixed text.
  *
- *  @param[in] haystack Pointer to the haystack string.
- *  @param[in] haystack_length Length of the haystack in bytes.
- *  @param[in] needle Pointer to the full needle string.
- *  @param[in] needle_length Length of the full needle in bytes.
- *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param haystack Pointer to the haystack string.
+ *  @param haystack_length Length of the haystack in bytes.
+ *  @param needle Pointer to the full needle string.
+ *  @param needle_length Length of the full needle in bytes.
+ *  @param needle_metadata Pre-folded window content with probe positions.
+ *  @param matched_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_georgian_( //
@@ -3069,8 +3074,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_georgian_( //
     // For danger zone handling
     sz_rune_t needle_first_safe_folded_rune;
     {
-        sz_rune_length_t dummy;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &dummy);
+        sz_rune_length_t rune_byte_length;
+        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_cptr_t haystack_ptr = haystack;
@@ -3088,8 +3093,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_georgian_( //
         // Check for anomalies using alarm function
         __mmask64 danger_mask = sz_utf8_case_insensitive_find_icelake_georgian_alarm_zmm_(haystack_vec.zmm);
         if (danger_mask) {
-            sz_size_t danger_scan_length =
-                sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded, chunk_size);
+            sz_size_t danger_scan_length = sz_min_of_two(valid_starts + needle_metadata->offset_in_unfolded,
+                                                         chunk_size);
             sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
                 haystack, haystack_length,                                   //
                 needle, needle_length,                                       //
@@ -3116,12 +3121,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_georgian_( //
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_mask, haystack_candidate_ptr);
-            haystack_candidate_vec.xmm =
-                _mm512_castsi512_si128(sz_utf8_case_insensitive_find_icelake_georgian_fold_zmm_(
+            haystack_candidate_vec.xmm = _mm512_castsi512_si128(
+                sz_utf8_case_insensitive_find_icelake_georgian_fold_zmm_(
                     _mm512_castsi128_si512(haystack_candidate_vec.xmm)));
 
-            __mmask16 window_mismatch_mask =
-                _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm, needle_window_vec.xmm);
+            __mmask16 window_mismatch_mask = _mm_mask_cmpneq_epi8_mask(folded_window_mask, haystack_candidate_vec.xmm,
+                                                                       needle_window_vec.xmm);
             if (window_mismatch_mask) continue;
 
             sz_cptr_t match = sz_utf8_case_insensitive_verify_match_(                                      //
@@ -3222,63 +3227,66 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_icelake( //
 }
 
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_icelake(sz_cptr_t str, sz_size_t length) {
-    sz_u8_t const *ptr = (sz_u8_t const *)str;
+    sz_u8_t const *text_cursor = (sz_u8_t const *)str;
 
     // Pre-computed constants
-    __m512i const a_upper_vec = _mm512_set1_epi8('A');
-    __m512i const a_lower_vec = _mm512_set1_epi8('a');
-    __m512i const z26_vec = _mm512_set1_epi8(26);
-    __m512i const x80_vec = _mm512_set1_epi8((char)0x80);
-    __m512i const xc0_vec = _mm512_set1_epi8((char)0xC0);
-    __m512i const xc3_vec = _mm512_set1_epi8((char)0xC3);
-    __m512i const xe0_vec = _mm512_set1_epi8((char)0xE0);
-    __m512i const xf0_vec = _mm512_set1_epi8((char)0xF0);
-    __m512i const xf8_vec = _mm512_set1_epi8((char)0xF8);
+    __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
+    __m512i const a_lower_u8x64 = _mm512_set1_epi8('a');
+    __m512i const range26_u8x64 = _mm512_set1_epi8(26);
+    __m512i const x80_u8x64 = _mm512_set1_epi8((char)0x80);
+    __m512i const xc0_u8x64 = _mm512_set1_epi8((char)0xC0);
+    __m512i const xc3_u8x64 = _mm512_set1_epi8((char)0xC3);
+    __m512i const xe0_u8x64 = _mm512_set1_epi8((char)0xE0);
+    __m512i const xf0_u8x64 = _mm512_set1_epi8((char)0xF0);
+    __m512i const xf8_u8x64 = _mm512_set1_epi8((char)0xF8);
 
-    // Single loop: advance by min(length, 61), check leads in first `step` positions
+    // Single loop: advance by min(length, 61), check leads in first `block_length` positions
     while (length) {
-        sz_size_t step = sz_min_of_two(length, 61);
-        __mmask64 lead_mask = sz_u64_mask_until_(step);
+        sz_size_t block_length = sz_min_of_two(length, 61);
+        __mmask64 lead_mask = sz_u64_mask_until_(block_length);
         __mmask64 load_mask = sz_u64_clamp_mask_until_(length); // min(length, 64) bits
-        __m512i data = _mm512_maskz_loadu_epi8(load_mask, ptr);
+        __m512i text_u8x64 = _mm512_maskz_loadu_epi8(load_mask, text_cursor);
 
         // 1. ASCII letter check (zeros beyond string are fine - not letters)
-        __mmask64 is_upper = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(data, a_upper_vec), z26_vec);
-        __mmask64 is_lower = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(data, a_lower_vec), z26_vec);
-        if (is_upper | is_lower) return sz_false_k;
+        __mmask64 is_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_upper_u8x64), range26_u8x64);
+        __mmask64 is_lower_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_lower_u8x64), range26_u8x64);
+        if (is_upper_mask | is_lower_mask) return sz_false_k;
 
         // 2. Check for non-ASCII in lead positions
-        __mmask64 is_non_ascii_mask = _mm512_movepi8_mask(data) & lead_mask;
+        __mmask64 is_non_ascii_mask = _mm512_movepi8_mask(text_u8x64) & lead_mask;
         if (is_non_ascii_mask) {
             // 3. Identify UTF-8 lead bytes
-            __mmask64 is_two = _mm512_cmpeq_epi8_mask(_mm512_and_si512(data, xe0_vec), xc0_vec) & lead_mask;
-            __mmask64 is_three = _mm512_cmpeq_epi8_mask(_mm512_and_si512(data, xf0_vec), xe0_vec) & lead_mask;
-            __mmask64 is_four = _mm512_cmpeq_epi8_mask(_mm512_and_si512(data, xf8_vec), xf0_vec) & lead_mask;
+            __mmask64 is_two_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(text_u8x64, xe0_u8x64), xc0_u8x64) &
+                                    lead_mask;
+            __mmask64 is_three_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(text_u8x64, xf0_u8x64), xe0_u8x64) &
+                                      lead_mask;
+            __mmask64 is_four_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(text_u8x64, xf8_u8x64), xf0_u8x64) &
+                                     lead_mask;
 
             // 4. Check 4-byte bicameral scripts (SMP): F0 with second byte 90/91/96/9D/9E
-            if (is_four) {
-                __mmask64 f0_sec = is_four << 1;
-                __mmask64 is_90 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0x90));
-                __mmask64 is_91 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0x91));
-                __mmask64 is_96 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0x96));
-                __mmask64 is_9d = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0x9D));
-                __mmask64 is_9e = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0x9E));
-                if (f0_sec & (is_90 | is_91 | is_96 | is_9d | is_9e)) return sz_false_k;
+            if (is_four_mask) {
+                __mmask64 after_f0_mask = is_four_mask << 1;
+                __mmask64 is_90_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x90));
+                __mmask64 is_91_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x91));
+                __mmask64 is_96_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x96));
+                __mmask64 is_9d_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9D));
+                __mmask64 is_9e_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9E));
+                if (after_f0_mask & (is_90_mask | is_91_mask | is_96_mask | is_9d_mask | is_9e_mask)) return sz_false_k;
             }
 
             // 5. Check 2-byte bicameral leads: C3-D6
             // C3-CF: Latin Extended (umlauts, accents, Eszett)
             // D0-D1: Cyrillic, D4-D6: Armenian (D6 needed for small letters U+0580+)
-            if (is_two) {
-                __mmask64 is_bicameral = _mm512_cmplt_epu8_mask( //
-                    _mm512_sub_epi8(data, xc3_vec), _mm512_set1_epi8(0x14));
+            if (is_two_mask) {
+                __mmask64 is_bicameral_mask = _mm512_cmplt_epu8_mask( //
+                    _mm512_sub_epi8(text_u8x64, xc3_u8x64), _mm512_set1_epi8(0x14));
 
                 // Special case: C2 B5 = U+00B5 MICRO SIGN folds to Greek mu (U+03BC)
-                __mmask64 is_c2 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xC2)) & is_two;
-                if (is_c2) {
-                    __mmask64 c2_sec = is_c2 << 1;
-                    __mmask64 is_b5 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xB5));
-                    if (c2_sec & is_b5) return sz_false_k;
+                __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xC2)) & is_two_mask;
+                if (is_c2_mask) {
+                    __mmask64 after_c2_mask = is_c2_mask << 1;
+                    __mmask64 is_b5_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB5));
+                    if (after_c2_mask & is_b5_mask) return sz_false_k;
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
@@ -3286,43 +3294,43 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_icelake(sz_cptr_t str, sz_size_t leng
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
                 // So we must NOT exclude this range from bicameral check.
 
-                if (is_bicameral & is_two) return sz_false_k;
+                if (is_bicameral_mask & is_two_mask) return sz_false_k;
             }
 
             // 6. Check 3-byte bicameral sequences
-            if (is_three) {
+            if (is_three_mask) {
                 // E1: Georgian, Greek Extended, Latin Extended Additional
-                __mmask64 is_e1 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xE1));
-                if (is_e1 & is_three) return sz_false_k;
+                __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
+                if (is_e1_mask & is_three_mask) return sz_false_k;
 
                 // EF: Fullwidth Latin
-                __mmask64 is_ef = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xEF));
-                if (is_ef & is_three) return sz_false_k;
+                __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xEF));
+                if (is_ef_mask & is_three_mask) return sz_false_k;
 
                 // E2: Safe only for second byte 80-83
-                __mmask64 is_e2 = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xE2)) & is_three;
-                if (is_e2) {
-                    __mmask64 e2_sec = is_e2 << 1;
-                    __mmask64 safe = _mm512_cmplt_epu8_mask( //
-                        _mm512_sub_epi8(data, x80_vec), _mm512_set1_epi8(0x04));
-                    if (e2_sec & ~safe) return sz_false_k;
+                __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE2)) & is_three_mask;
+                if (is_e2_mask) {
+                    __mmask64 after_e2_mask = is_e2_mask << 1;
+                    __mmask64 e2_second_safe_mask = _mm512_cmplt_epu8_mask( //
+                        _mm512_sub_epi8(text_u8x64, x80_u8x64), _mm512_set1_epi8(0x04));
+                    if (after_e2_mask & ~e2_second_safe_mask) return sz_false_k;
                 }
 
                 // EA: Bicameral second bytes 99-9F, AD-AE
-                __mmask64 is_ea = _mm512_cmpeq_epi8_mask(data, _mm512_set1_epi8((char)0xEA)) & is_three;
-                if (is_ea) {
-                    __mmask64 ea_sec = is_ea << 1;
-                    __mmask64 is_99 = _mm512_cmplt_epu8_mask( //
-                        _mm512_sub_epi8(data, _mm512_set1_epi8((char)0x99)), _mm512_set1_epi8(0x07));
-                    __mmask64 is_ad = _mm512_cmplt_epu8_mask( //
-                        _mm512_sub_epi8(data, _mm512_set1_epi8((char)0xAD)), _mm512_set1_epi8(0x02));
-                    if (ea_sec & (is_99 | is_ad)) return sz_false_k;
+                __mmask64 is_ea_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xEA)) & is_three_mask;
+                if (is_ea_mask) {
+                    __mmask64 after_ea_mask = is_ea_mask << 1;
+                    __mmask64 is_99_range_mask = _mm512_cmplt_epu8_mask( //
+                        _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8((char)0x99)), _mm512_set1_epi8(0x07));
+                    __mmask64 is_ad_range_mask = _mm512_cmplt_epu8_mask( //
+                        _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8((char)0xAD)), _mm512_set1_epi8(0x02));
+                    if (after_ea_mask & (is_99_range_mask | is_ad_range_mask)) return sz_false_k;
                 }
             }
         }
 
-        ptr += step;
-        length -= step;
+        text_cursor += block_length;
+        length -= block_length;
     }
 
     return sz_true_k;

@@ -41,9 +41,9 @@ extern "C" {
  *  @brief Similar to `memcpy`, copies contents of one string into another.
  *  @see https://en.cppreference.com/w/c/string/byte/memcpy
  *
- *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
- *  @param[in] length Number of bytes to copy. Can be a zero.
- *  @param[in] source String to copy from. Can be `NULL`, if the @p length is zero.
+ *  @param target String to copy into. Can be `NULL`, if the @p length is zero.
+ *  @param source String to copy from. Can be `NULL`, if the @p length is zero.
+ *  @param length Number of bytes to copy. Can be a zero.
  *
  *  Example usage:
  *
@@ -70,9 +70,9 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
  *         Unlike `sz_copy`, allows overlapping strings as arguments.
  *  @see https://en.cppreference.com/w/c/string/byte/memmove
  *
- *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
- *  @param[in] length Number of bytes to copy. Can be a zero.
- *  @param[in] source String to copy from. Can be `NULL`, if the @p length is zero.
+ *  @param target String to copy into. Can be `NULL`, if the @p length is zero.
+ *  @param source String to copy from. Can be `NULL`, if the @p length is zero.
+ *  @param length Number of bytes to copy. Can be a zero.
  *
  *  Example usage:
  *
@@ -95,9 +95,9 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
  *  @brief Similar to `memset`, fills a string with a given value.
  *  @see https://en.cppreference.com/w/c/string/byte/memset
  *
- *  @param[out] target String to fill. Can be `NULL`, if the @p length is zero.
- *  @param[in] length Number of bytes to fill. Can be a zero.
- *  @param[in] value Value to fill with.
+ *  @param target String to fill. Can be `NULL`, if the @p length is zero.
+ *  @param length Number of bytes to fill. Can be a zero.
+ *  @param value Value to fill with.
  *
  *  Example usage:
  *
@@ -124,10 +124,10 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
  *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
  *  broad implications in image processing, where image channel transformations are often done using LUTs.
  *
- *  @param[out] target Output string, can point to the same address as @p source.
- *  @param[in] length Number of bytes in the string.
- *  @param[in] source String to be mapped using the @p lut table into the @p target.
- *  @param[in] lut Look Up Table to apply. Must be exactly @b 256 bytes long.
+ *  @param target Output string, can point to the same address as @p source.
+ *  @param length Number of bytes in the string.
+ *  @param source String to be mapped using the @p lut table into the @p target.
+ *  @param lut Look Up Table to apply. Must be exactly @b 256 bytes long.
  *
  *  Example usage:
  *
@@ -205,7 +205,7 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 
 /**
  *  @brief Initializes a lookup table for converting ASCII characters to lowercase.
- *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
  *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
@@ -232,12 +232,12 @@ SZ_PUBLIC void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
         240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
     };
-    for (sz_size_t i = 0; i < 256; ++i) lut[i] = lowered[i];
+    for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = lowered[byte_index];
 }
 
 /**
  *  @brief Initializes a lookup table for converting ASCII characters to uppercase.
- *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
  *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
@@ -264,45 +264,45 @@ SZ_PUBLIC void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
         240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
     };
-    for (sz_size_t i = 0; i < 256; ++i) lut[i] = upped[i];
+    for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = upped[byte_index];
 }
 
 /**
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
- *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
 SZ_PUBLIC void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
-    for (sz_size_t i = 0; i < 256; ++i) lut[i] = (sz_u8_t)(i & 0x7F);
+    for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
 /**
  *  @brief Checks if all characters in a @p text are valid ASCII characters.
- *  @param[in] text String to be analyzed.
- *  @param[in] length Number of bytes in the string.
+ *  @param text String to be analyzed.
+ *  @param length Number of bytes in the string.
  *  @return Whether all characters are valid ASCII characters.
  */
 SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 
     if (!length) return sz_true_k;
-    sz_u8_t const *h = (sz_u8_t const *)text;
-    sz_u8_t const *const h_end = h + length;
+    sz_u8_t const *text_cursor = (sz_u8_t const *)text;
+    sz_u8_t const *const text_end = text_cursor + length;
 
 #if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
-        if (*h & 0x80ull) return sz_false_k;
+    for (; ((sz_size_t)text_cursor & 7ull) && text_cursor < text_end; ++text_cursor)
+        if (*text_cursor & 0x80ull) return sz_false_k;
 #endif
 
     // Validate eight bytes at once using SWAR.
     sz_u64_vec_t text_vec;
-    for (; h + 8 <= h_end; h += 8) {
-        text_vec.u64 = *(sz_u64_t const *)h;
+    for (; text_cursor + 8 <= text_end; text_cursor += 8) {
+        text_vec.u64 = *(sz_u64_t const *)text_cursor;
         if (text_vec.u64 & 0x8080808080808080ull) return sz_false_k;
     }
 
     // Handle the misaligned tail.
-    for (; h < h_end; ++h)
-        if (*h & 0x80ull) return sz_false_k;
+    for (; text_cursor < text_end; ++text_cursor)
+        if (*text_cursor & 0x80ull) return sz_false_k;
     return sz_true_k;
 }
 

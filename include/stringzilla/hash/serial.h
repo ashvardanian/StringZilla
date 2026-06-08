@@ -113,6 +113,13 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_ve
     return result;
 }
 
+/**
+ *  @brief Emulates the `_mm_shuffle_epi8` (pshufb) instruction for a single 128-bit vector.
+ *         Reorders bytes of @p state_vec according to the @p order permutation table.
+ *  @param state_vec Input 128-bit vector whose bytes are to be shuffled.
+ *  @param order Permutation table: order[i] gives the source byte index for output byte i.
+ *  @return Shuffled 128-bit vector.
+ */
 SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
                                                           sz_u8_t const order[sz_at_least_(16)]) {
     sz_u128_vec_t result;
@@ -232,6 +239,11 @@ SZ_INTERNAL sz_u32_t const *sz_sha256_round_constants_(void) {
     return &k[0];
 }
 
+/**
+ *  @brief Initializes the minimal single-lane AES hash state from a 64-bit seed.
+ *  @param state Pointer to the minimal hash state to initialize.
+ *  @param seed 64-bit seed value mixed with Pi constants to form the initial state.
+ */
 SZ_INTERNAL void sz_hash_minimal_init_serial_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
@@ -246,6 +258,11 @@ SZ_INTERNAL void sz_hash_minimal_init_serial_(sz_hash_minimal_t_ *state, sz_u64_
     state->sum.u64s[1] = seed ^ pi[9];
 }
 
+/**
+ *  @brief Absorbs one 128-bit block into the minimal hash state.
+ *  @param state Pointer to the minimal hash state.
+ *  @param block 128-bit data block to absorb.
+ */
 SZ_INTERNAL void sz_hash_minimal_update_serial_(sz_hash_minimal_t_ *state, sz_u128_vec_t block) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_si128_serial_(state->aes, block);
@@ -253,6 +270,12 @@ SZ_INTERNAL void sz_hash_minimal_update_serial_(sz_hash_minimal_t_ *state, sz_u1
     state->sum.u64s[0] += block.u64s[0], state->sum.u64s[1] += block.u64s[1];
 }
 
+/**
+ *  @brief Finalizes the minimal hash state, mixing in the total byte count, and returns a 64-bit digest.
+ *  @param state Pointer to the (const) minimal hash state.
+ *  @param length Total number of bytes hashed, mixed into the key for length sensitivity.
+ *  @return 64-bit hash value.
+ */
 SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_serial_(sz_hash_minimal_t_ const *state, sz_size_t length) {
     // Mix the length into the key
     sz_u128_vec_t key_with_length = state->key;
@@ -261,12 +284,18 @@ SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_serial_(sz_hash_minimal_t_ const *
     sz_u128_vec_t mixed = sz_emulate_aesenc_si128_serial_(state->sum, state->aes);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    sz_u128_vec_t mixed_in_register =
-        sz_emulate_aesenc_si128_serial_(sz_emulate_aesenc_si128_serial_(mixed, key_with_length), mixed);
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_si128_serial_(
+        sz_emulate_aesenc_si128_serial_(mixed, key_with_length), mixed);
     // Extract the low 64 bits
     return mixed_in_register.u64s[0];
 }
 
+/**
+ *  @brief Right-shifts the 128-bit vector by @p shift_bytes bytes in software.
+ *         Used to zero out trailing overlap bytes when the last block is shorter than 16 bytes.
+ *  @param vec Pointer to the 128-bit vector to shift in place.
+ *  @param shift_bytes Number of bytes to shift right (0–15); shifting by 0 is a no-op.
+ */
 SZ_INTERNAL void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
     // One of the ridiculous things about x86, the `bsrli` instruction requires its operand to be an immediate.
     // On GCC and Clang, we could use the provided `__int128` type, but MSVC doesn't support it.
@@ -292,14 +321,18 @@ SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) 
     sz_u64_t const *pi = sz_hash_pi_constants_();
     sz_u64_t *aes_u64s = (sz_u64_t *)state->aes;
     sz_u64_t *sum_u64s = (sz_u64_t *)state->sum;
-    for (int i = 0; i < 8; ++i) aes_u64s[i] = seed ^ pi[i];
-    for (int i = 0; i < 8; ++i) sum_u64s[i] = seed ^ pi[i + 8];
+    for (int lane_index = 0; lane_index < 8; ++lane_index) aes_u64s[lane_index] = seed ^ pi[lane_index];
+    for (int lane_index = 0; lane_index < 8; ++lane_index) sum_u64s[lane_index] = seed ^ pi[lane_index + 8];
 
     // The inputs are zeroed out at the beginning
-    for (int i = 0; i < 64; ++i) state->ins[i] = 0;
+    for (int byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
     state->ins_length = 0;
 }
 
+/**
+ *  @brief Absorbs the current 64-byte input buffer into the hash state (four 128-bit lanes).
+ *  @param state Pointer to the hash state whose `ins` buffer is consumed.
+ */
 SZ_INTERNAL void sz_hash_state_update_serial_(sz_hash_state_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
@@ -329,6 +362,11 @@ SZ_INTERNAL void sz_hash_state_update_serial_(sz_hash_state_t *state) {
     sum_vecs[3].u64s[0] += ins_vecs[3].u64s[0], sum_vecs[3].u64s[1] += ins_vecs[3].u64s[1];
 }
 
+/**
+ *  @brief Finalizes the full 512-bit hash state and returns a 64-bit digest.
+ *  @param state Pointer to the (const) hash state.
+ *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
+ */
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_t const *state) {
 
     // Mix the length into the key
@@ -354,14 +392,14 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_t const *state
 
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    sz_u128_vec_t mixed_in_register =
-        sz_emulate_aesenc_si128_serial_(sz_emulate_aesenc_si128_serial_(mixed, key_with_length), mixed);
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_si128_serial_(
+        sz_emulate_aesenc_si128_serial_(mixed, key_with_length), mixed);
 
     // Extract the low 64 bits
     return mixed_in_register.u64s[0];
 }
 
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
@@ -369,7 +407,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size
         // Load the data and update the state
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
-        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = text[byte_index];
         sz_hash_minimal_update_serial_(&state, data_vec);
         return sz_hash_minimal_finalize_serial_(&state, length);
     }
@@ -380,13 +418,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
 #if SZ_USE_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(start);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
+        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
+        data1_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
+        data1_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
 #else
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
+            data1_vec.u8s[byte_index] = text[length - 16 + byte_index];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
@@ -401,16 +440,17 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
 #if SZ_USE_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(start);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(start + 24);
-        data2_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
-        data2_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
+        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
+        data1_vec.u64s[0] = *(sz_u64_t const *)(text + 16);
+        data1_vec.u64s[1] = *(sz_u64_t const *)(text + 24);
+        data2_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
+        data2_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
 #else
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data1_vec.u8s[byte_index] = text[16 + byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
+            data2_vec.u8s[byte_index] = text[length - 16 + byte_index];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
@@ -426,19 +466,20 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
 #if SZ_USE_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(start);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(start + 24);
-        data2_vec.u64s[0] = *(sz_u64_t const *)(start + 32);
-        data2_vec.u64s[1] = *(sz_u64_t const *)(start + 40);
-        data3_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
-        data3_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
+        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
+        data1_vec.u64s[0] = *(sz_u64_t const *)(text + 16);
+        data1_vec.u64s[1] = *(sz_u64_t const *)(text + 24);
+        data2_vec.u64s[0] = *(sz_u64_t const *)(text + 32);
+        data2_vec.u64s[1] = *(sz_u64_t const *)(text + 40);
+        data3_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
+        data3_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
 #else
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data1_vec.u8s[byte_index] = text[16 + byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data2_vec.u8s[byte_index] = text[32 + byte_index];
+        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
+            data3_vec.u8s[byte_index] = text[length - 16 + byte_index];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
@@ -454,28 +495,29 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size
 
 #if SZ_USE_MISALIGNED_LOADS
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            sz_u64_t *ins_u64s = (sz_u64_t *)(sz_size_t)state.ins;
-            ins_u64s[0] = *(sz_u64_t const *)(start + state.ins_length);
-            ins_u64s[1] = *(sz_u64_t const *)(start + state.ins_length + 8);
-            ins_u64s[2] = *(sz_u64_t const *)(start + state.ins_length + 16);
-            ins_u64s[3] = *(sz_u64_t const *)(start + state.ins_length + 24);
-            ins_u64s[4] = *(sz_u64_t const *)(start + state.ins_length + 32);
-            ins_u64s[5] = *(sz_u64_t const *)(start + state.ins_length + 40);
-            ins_u64s[6] = *(sz_u64_t const *)(start + state.ins_length + 48);
-            ins_u64s[7] = *(sz_u64_t const *)(start + state.ins_length + 56);
+            sz_u64_t *ins_u64s = (sz_u64_t *)state.ins;
+            ins_u64s[0] = *(sz_u64_t const *)(text + state.ins_length);
+            ins_u64s[1] = *(sz_u64_t const *)(text + state.ins_length + 8);
+            ins_u64s[2] = *(sz_u64_t const *)(text + state.ins_length + 16);
+            ins_u64s[3] = *(sz_u64_t const *)(text + state.ins_length + 24);
+            ins_u64s[4] = *(sz_u64_t const *)(text + state.ins_length + 32);
+            ins_u64s[5] = *(sz_u64_t const *)(text + state.ins_length + 40);
+            ins_u64s[6] = *(sz_u64_t const *)(text + state.ins_length + 48);
+            ins_u64s[7] = *(sz_u64_t const *)(text + state.ins_length + 56);
             sz_hash_state_update_serial_(&state);
         }
 #else
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            for (sz_size_t i = 0; i < 64; ++i) state.ins[i] = start[state.ins_length + i];
+            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index)
+                state.ins[byte_index] = text[state.ins_length + byte_index];
             sz_hash_state_update_serial_(&state);
         }
 #endif
 
         if (state.ins_length < length) {
-            for (sz_size_t i = 0; i != 64; ++i) state.ins[i] = 0;
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins[i] = start[state.ins_length];
+            for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index) state.ins[byte_index] = 0;
+            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+                state.ins[byte_index] = text[state.ins_length];
             sz_hash_state_update_serial_(&state);
             state.ins_length = length;
         }
@@ -497,7 +539,7 @@ SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t tex
         if (will_fill_block) {
             sz_hash_state_update_serial_(state);
             // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
-            for (int i = 0; i < 64; ++i) state->ins[i] = 0;
+            for (int byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
         }
     }
 }
@@ -575,8 +617,8 @@ SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
- *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
- *  @param[in] block Pointer to 64-byte message block.
+ *  @param hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param block Pointer to 64-byte message block.
  */
 SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
                                                  sz_u8_t const block[sz_at_least_(64)]) {
@@ -589,11 +631,14 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
     e = hash[4], f = hash[5], g = hash[6], h = hash[7];
 
     // Main compression loop - rounds until 16th
-    for (sz_size_t i = 0; i < 16; ++i) {
+    for (sz_size_t round_index = 0; round_index < 16; ++round_index) {
         // Read big-endian 32-bit words from the block
-        message_schedule[i] = ((sz_u32_t)block[i * 4 + 0] << 24) | ((sz_u32_t)block[i * 4 + 1] << 16) |
-                              ((sz_u32_t)block[i * 4 + 2] << 8) | ((sz_u32_t)block[i * 4 + 3] << 0);
-        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i % 16];
+        message_schedule[round_index] = ((sz_u32_t)block[round_index * 4 + 0] << 24) |
+                                        ((sz_u32_t)block[round_index * 4 + 1] << 16) |
+                                        ((sz_u32_t)block[round_index * 4 + 2] << 8) |
+                                        ((sz_u32_t)block[round_index * 4 + 3] << 0);
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[round_index] +
+                message_schedule[round_index % 16];
         temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
         e = d + temp1;
@@ -602,11 +647,13 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
     }
 
     // Main compression loop - rounds from 16th to 64th
-    for (sz_size_t i = 16; i < 64; ++i) {
-        message_schedule[(i) % 16] =
-            sz_sha256_sigma1_lower_(message_schedule[(i - 2) % 16]) + message_schedule[(i - 7) % 16] +
-            sz_sha256_sigma0_lower_(message_schedule[(i - 15) % 16]) + message_schedule[(i - 16) % 16];
-        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i % 16];
+    for (sz_size_t round_index = 16; round_index < 64; ++round_index) {
+        message_schedule[(round_index) % 16] = sz_sha256_sigma1_lower_(message_schedule[(round_index - 2) % 16]) +
+                                               message_schedule[(round_index - 7) % 16] +
+                                               sz_sha256_sigma0_lower_(message_schedule[(round_index - 15) % 16]) +
+                                               message_schedule[(round_index - 16) % 16];
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[round_index] +
+                message_schedule[round_index % 16];
         temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
         e = d + temp1;
@@ -619,25 +666,15 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
     hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
 }
 
-/**
- *  @brief Initialize SHA256 state with standard initial hash values.
- *  @param state   Pointer to SHA256 state structure.
- */
 SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
     // Vectorize the load/store of 8x u32s as 4x u64s
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    sz_u64_t const *src = (sz_u64_t const *)initial_hash;
-    sz_u64_t *dst = (sz_u64_t *)state_ptr->hash;
-    dst[0] = src[0], dst[1] = src[1], dst[2] = src[2], dst[3] = src[3];
+    sz_u64_t const *source = (sz_u64_t const *)initial_hash;
+    sz_u64_t *target = (sz_u64_t *)state_ptr->hash;
+    target[0] = source[0], target[1] = source[1], target[2] = source[2], target[3] = source[3];
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-/**
- *  @brief Update SHA256 state with new data.
- *  @param state   Pointer to SHA256 state structure.
- *  @param data    Pointer to input data.
- *  @param length  Length of input data in bytes.
- */
 SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / 64;
@@ -666,7 +703,8 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
 
     // Process head to complete the current block
     if (head_length) {
-        for (sz_size_t i = 0; i < head_length; ++i) state_ptr->block[state_ptr->block_length++] = input[i];
+        for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
+            state_ptr->block[state_ptr->block_length++] = input[byte_index];
         sz_sha256_process_block_serial_(hash, state_ptr->block);
         state_ptr->block_length = 0;
         input += head_length;
@@ -677,7 +715,8 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
         sz_sha256_process_block_serial_(hash, input);
 
     // Process tail (remaining bytes into block buffer)
-    for (sz_size_t i = 0; i < tail_length; ++i) state_ptr->block[i] = input[i];
+    for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+        state_ptr->block[byte_index] = input[byte_index];
     state_ptr->block_length = tail_length;
 
     // Copy hash back
@@ -700,11 +739,14 @@ SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr,
 #if SZ_USE_MISALIGNED_LOADS
         // Use word-sized writes for better performance when misaligned stores are supported
         sz_size_t word_bytes = (remaining / 8) * 8;
-        for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&state.block[state.block_length + i] = 0;
-        for (sz_size_t i = word_bytes; i < remaining; ++i) state.block[state.block_length + i] = 0;
+        for (sz_size_t byte_index = 0; byte_index < word_bytes; byte_index += 8)
+            *(sz_u64_t *)&state.block[state.block_length + byte_index] = 0;
+        for (sz_size_t byte_index = word_bytes; byte_index < remaining; ++byte_index)
+            state.block[state.block_length + byte_index] = 0;
 #else
         // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-        for (sz_size_t i = 0; i < remaining; ++i) state.block[state.block_length + i] = 0;
+        for (sz_size_t byte_index = 0; byte_index < remaining; ++byte_index)
+            state.block[state.block_length + byte_index] = 0;
 #endif
         sz_sha256_process_block_serial_(state.hash, state.block);
         state.block_length = 0;
@@ -716,11 +758,14 @@ SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr,
 #if SZ_USE_MISALIGNED_LOADS
     // Use word-sized writes for better performance when misaligned stores are supported
     sz_size_t word_bytes = (remaining / 8) * 8;
-    for (sz_size_t i = 0; i < word_bytes; i += 8) *(sz_u64_t *)&state.block[state.block_length + i] = 0;
-    for (sz_size_t i = word_bytes; i < remaining; ++i) state.block[state.block_length + i] = 0;
+    for (sz_size_t byte_index = 0; byte_index < word_bytes; byte_index += 8)
+        *(sz_u64_t *)&state.block[state.block_length + byte_index] = 0;
+    for (sz_size_t byte_index = word_bytes; byte_index < remaining; ++byte_index)
+        state.block[state.block_length + byte_index] = 0;
 #else
     // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-    for (sz_size_t i = 0; i < remaining; ++i) state.block[state.block_length + i] = 0;
+    for (sz_size_t byte_index = 0; byte_index < remaining; ++byte_index)
+        state.block[state.block_length + byte_index] = 0;
 #endif
 
     state.block_length = 56;
@@ -740,11 +785,11 @@ SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr,
     sz_sha256_process_block_serial_(state.hash, state.block);
 
     // Produce the final hash digest in big-endian format
-    for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(state.hash[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(state.hash[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(state.hash[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(state.hash[i] >> 0);
+    for (sz_size_t lane_index = 0; lane_index < 8; ++lane_index) {
+        digest[lane_index * 4 + 0] = (sz_u8_t)(state.hash[lane_index] >> 24);
+        digest[lane_index * 4 + 1] = (sz_u8_t)(state.hash[lane_index] >> 16);
+        digest[lane_index * 4 + 2] = (sz_u8_t)(state.hash[lane_index] >> 8);
+        digest[lane_index * 4 + 3] = (sz_u8_t)(state.hash[lane_index] >> 0);
     }
 }
 
@@ -762,7 +807,8 @@ SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t n
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
         generated_vec = sz_emulate_aesenc_si128_serial_(input_vec, key_vec);
         // Export back to the user-supplied buffer
-        for (int i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+        for (int byte_index = 0; byte_index < 16 && length; ++byte_index, --length)
+            *text++ = generated_vec.u8s[byte_index];
     }
 }
 

@@ -52,7 +52,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
         if (blocks > 255) blocks = 255;
         length -= blocks * 16;
         high8_vec.v128 = wasm_u64x2_splat(0); // 16x u8 per-lane high-bit counters
-        for (sz_size_t i = 0; i < blocks; ++i, text += 16) {
+        for (sz_size_t block_index = 0; block_index < blocks; ++block_index, text += 16) {
             v128_t block_vec = wasm_v128_load(text);
             // Signed in-lane MAC: dot32 += sum of (i8)byte over each pair, folded into 4 i32 lanes.
             dot32_vec.v128 = wasm_i32x4_relaxed_dot_i8x16_i7x16_add(block_vec, ones_vec, dot32_vec.v128);
@@ -87,11 +87,11 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
  *  to `sz_emulate_aesenc_si128_serial_`), so these relaxed kernels match the serial reference exactly. */
 
 /** @brief `relaxed_swizzle` counterpart of `sz_aes_linear_v128_`. */
-SZ_INTERNAL v128_t sz_aes_linear_v128relaxed_(v128_t lo_table, v128_t hi_table, v128_t x) {
-    v128_t lo_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
-    v128_t hi_nibbles = wasm_u8x16_shr(x, 4);
-    return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(lo_table, lo_nibbles),
-                         wasm_i8x16_relaxed_swizzle(hi_table, hi_nibbles));
+SZ_INTERNAL v128_t sz_aes_linear_v128relaxed_(v128_t low_table, v128_t high_table, v128_t x) {
+    v128_t low_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
+    v128_t high_nibbles = wasm_u8x16_shr(x, 4);
+    return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(low_table, low_nibbles),
+                         wasm_i8x16_relaxed_swizzle(high_table, high_nibbles));
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_aes_gf4_mul_v128_`. */
@@ -146,18 +146,18 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec
     v128_t low_nibble_mask = wasm_i8x16_splat((sz_i8_t)0x0F);
 
     v128_t mapped = sz_aes_linear_v128relaxed_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state);
-    v128_t hi = wasm_u8x16_shr(mapped, 4);
-    v128_t lo = wasm_v128_and(mapped, low_nibble_mask);
+    v128_t high_nibble = wasm_u8x16_shr(mapped, 4);
+    v128_t low_nibble = wasm_v128_and(mapped, low_nibble_mask);
 
-    v128_t hi_sqr_n = wasm_i8x16_relaxed_swizzle(wasm_v128_load(gf4_sqr_n), hi);
-    v128_t hi_lo = sz_aes_gf4_mul_v128relaxed_(hi, lo);
-    v128_t lo_sqr = wasm_i8x16_relaxed_swizzle(wasm_v128_load(gf4_sqr), lo);
-    v128_t d = wasm_v128_xor(wasm_v128_xor(hi_sqr_n, hi_lo), lo_sqr);
+    v128_t high_sqr_n = wasm_i8x16_relaxed_swizzle(wasm_v128_load(gf4_sqr_n), high_nibble);
+    v128_t high_low_product = sz_aes_gf4_mul_v128relaxed_(high_nibble, low_nibble);
+    v128_t low_sqr = wasm_i8x16_relaxed_swizzle(wasm_v128_load(gf4_sqr), low_nibble);
+    v128_t d = wasm_v128_xor(wasm_v128_xor(high_sqr_n, high_low_product), low_sqr);
     v128_t d_inv = wasm_i8x16_relaxed_swizzle(wasm_v128_load(gf4_inv), d);
 
-    v128_t b_hi = sz_aes_gf4_mul_v128relaxed_(hi, d_inv);
-    v128_t b_lo = sz_aes_gf4_mul_v128relaxed_(wasm_v128_xor(hi, lo), d_inv);
-    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(b_hi, 4), b_lo);
+    v128_t high_inverse = sz_aes_gf4_mul_v128relaxed_(high_nibble, d_inv);
+    v128_t low_inverse = sz_aes_gf4_mul_v128relaxed_(wasm_v128_xor(high_nibble, low_nibble), d_inv);
+    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(high_inverse, 4), low_inverse);
 
     v128_t back = sz_aes_linear_v128relaxed_(wasm_v128_load(inv_lo), wasm_v128_load(inv_hi), inverted);
     v128_t subbed = sz_aes_linear_v128relaxed_(wasm_v128_load(aff_lo), wasm_v128_load(aff_hi), back);
@@ -200,8 +200,8 @@ SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_v128relaxed_(sz_hash_minimal_t_ co
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
     sz_u128_vec_t mixed = sz_emulate_aesenc_v128relaxed_(state->sum, state->aes);
-    sz_u128_vec_t mixed_in_register =
-        sz_emulate_aesenc_v128relaxed_(sz_emulate_aesenc_v128relaxed_(mixed, key_with_length), mixed);
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128relaxed_(
+        sz_emulate_aesenc_v128relaxed_(mixed, key_with_length), mixed);
     return mixed_in_register.u64s[0];
 }
 
@@ -210,10 +210,10 @@ SZ_INTERNAL void sz_hash_state_update_v128relaxed_(sz_hash_state_t *state) {
     sz_u128_vec_t *aes_vecs = (sz_u128_vec_t *)state->aes;
     sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)state->sum;
     sz_u128_vec_t *ins_vecs = (sz_u128_vec_t *)state->ins;
-    for (sz_size_t i = 0; i < 4; ++i) {
-        aes_vecs[i] = sz_emulate_aesenc_v128relaxed_(aes_vecs[i], ins_vecs[i]);
-        sum_vecs[i] = sz_emulate_shuffle_epi8_v128relaxed_(sum_vecs[i], shuffle);
-        sum_vecs[i].v128 = wasm_i64x2_add(sum_vecs[i].v128, ins_vecs[i].v128);
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        aes_vecs[lane_index] = sz_emulate_aesenc_v128relaxed_(aes_vecs[lane_index], ins_vecs[lane_index]);
+        sum_vecs[lane_index] = sz_emulate_shuffle_epi8_v128relaxed_(sum_vecs[lane_index], shuffle);
+        sum_vecs[lane_index].v128 = wasm_i64x2_add(sum_vecs[lane_index].v128, ins_vecs[lane_index].v128);
     }
 }
 
@@ -235,8 +235,8 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_t const *
     sz_u128_vec_t mixed23 = sz_emulate_aesenc_v128relaxed_(mixed2, mixed3);
     sz_u128_vec_t mixed = sz_emulate_aesenc_v128relaxed_(mixed01, mixed23);
 
-    sz_u128_vec_t mixed_in_register =
-        sz_emulate_aesenc_v128relaxed_(sz_emulate_aesenc_v128relaxed_(mixed, key_with_length), mixed);
+    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128relaxed_(
+        sz_emulate_aesenc_v128relaxed_(mixed, key_with_length), mixed);
     return mixed_in_register.u64s[0];
 }
 
@@ -292,15 +292,17 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128relaxed(sz_cptr_t start, sz
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            for (sz_size_t k = 0; k < 4; ++k)
-                wasm_v128_store(state.ins + k * 16, wasm_v128_load(start + state.ins_length + k * 16));
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
+                wasm_v128_store(state.ins + lane_index * 16,
+                                wasm_v128_load(start + state.ins_length + lane_index * 16));
             sz_hash_state_update_v128relaxed_(&state);
         }
         if (state.ins_length < length) {
             v128_t zero_vec = wasm_u64x2_splat(0);
-            for (sz_size_t k = 0; k < 4; ++k) wasm_v128_store(state.ins + k * 16, zero_vec);
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins[i] = start[state.ins_length];
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
+                wasm_v128_store(state.ins + lane_index * 16, zero_vec);
+            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+                state.ins[byte_index] = start[state.ins_length];
             sz_hash_state_update_v128relaxed_(&state);
             state.ins_length = length;
         }
@@ -322,7 +324,7 @@ SZ_PUBLIC void sz_hash_state_update_v128relaxed(sz_hash_state_t *state, sz_cptr_
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_v128relaxed_(state);
-            for (sz_size_t i = 0; i < 64; ++i) state->ins[i] = 0;
+            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
         }
     }
 }
@@ -364,11 +366,11 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *state
 }
 
 SZ_PUBLIC void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
+    sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
         input_vec.v128 = wasm_u64x2_splat(nonce + lane_index);
-        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        pi_vec = ((sz_u128_vec_t const *)pi_constants)[lane_index % 4];
         key_vec.v128 = wasm_v128_xor(pi_vec.v128, wasm_u64x2_splat(nonce));
         generated_vec = sz_emulate_aesenc_v128relaxed_(input_vec, key_vec);
         if (length >= 16) { wasm_v128_store(text, generated_vec.v128), text += 16, length -= 16; }

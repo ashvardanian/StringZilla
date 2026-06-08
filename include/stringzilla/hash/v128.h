@@ -9,7 +9,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/hash/serial.h"
-#include "stringzilla/compare.h"    // `sz_equal`
+#include "stringzilla/compare.h"     // `sz_equal`
 #include "stringzilla/memory/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
 
 #ifdef __cplusplus
@@ -37,7 +37,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
         sz_size_t blocks = length / 16;
         if (blocks > 128) blocks = 128;
         length -= blocks * 16;
-        for (sz_size_t i = 0; i < blocks; ++i, text += 16) {
+        for (sz_size_t block_index = 0; block_index < blocks; ++block_index, text += 16) {
             v128_t vec = wasm_v128_load(text);
             // 16x u8 -> 8x u16 pairwise sums, accumulated in-lane (associative, no reduction).
             sum16_vec.v128 = wasm_i16x8_add(sum16_vec.v128, wasm_u16x8_extadd_pairwise_u8x16(vec));
@@ -54,11 +54,11 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-/** @brief Evaluate a GF(2)-linear byte map `x -> lo[x&0xF] ^ hi[x>>4]` across all 16 lanes. */
-SZ_INTERNAL v128_t sz_aes_linear_v128_(v128_t lo_table, v128_t hi_table, v128_t x) {
-    v128_t lo_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
-    v128_t hi_nibbles = wasm_u8x16_shr(x, 4);
-    return wasm_v128_xor(wasm_i8x16_swizzle(lo_table, lo_nibbles), wasm_i8x16_swizzle(hi_table, hi_nibbles));
+/** @brief Evaluate a GF(2)-linear byte map `x -> low_table[x&0xF] ^ high_table[x>>4]` across all 16 lanes. */
+SZ_INTERNAL v128_t sz_aes_linear_v128_(v128_t low_table, v128_t high_table, v128_t x) {
+    v128_t low_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
+    v128_t high_nibbles = wasm_u8x16_shr(x, 4);
+    return wasm_v128_xor(wasm_i8x16_swizzle(low_table, low_nibbles), wasm_i8x16_swizzle(high_table, high_nibbles));
 }
 
 /** @brief GF(2^4) (modulus `x^4+x+1`) lane-wise multiply via log/antilog swizzles with zero masking. */
@@ -121,19 +121,19 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, sz_u1
 
     // SubBytes: inverse in GF(2^8) via the tower field, then the AES affine map.
     v128_t mapped = sz_aes_linear_v128_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state);
-    v128_t hi = wasm_u8x16_shr(mapped, 4);              // high nibble = `a_hi`
-    v128_t lo = wasm_v128_and(mapped, low_nibble_mask); // low nibble  = `a_lo`
+    v128_t high_nibble = wasm_u8x16_shr(mapped, 4);             // high nibble = `a_hi`
+    v128_t low_nibble = wasm_v128_and(mapped, low_nibble_mask); // low nibble  = `a_lo`
 
     // d = a_hi^2 * N  ^  a_hi * a_lo  ^  a_lo^2   (all in GF(2^4))
-    v128_t hi_sqr_n = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), hi);
-    v128_t hi_lo = sz_aes_gf4_mul_v128_(hi, lo);
-    v128_t lo_sqr = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), lo);
-    v128_t d = wasm_v128_xor(wasm_v128_xor(hi_sqr_n, hi_lo), lo_sqr);
+    v128_t high_sqr_n = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), high_nibble);
+    v128_t high_low_product = sz_aes_gf4_mul_v128_(high_nibble, low_nibble);
+    v128_t low_sqr = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), low_nibble);
+    v128_t d = wasm_v128_xor(wasm_v128_xor(high_sqr_n, high_low_product), low_sqr);
     v128_t d_inv = wasm_i8x16_swizzle(wasm_v128_load(gf4_inv), d);
 
-    v128_t b_hi = sz_aes_gf4_mul_v128_(hi, d_inv);
-    v128_t b_lo = sz_aes_gf4_mul_v128_(wasm_v128_xor(hi, lo), d_inv);
-    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(b_hi, 4), b_lo); // recombine nibbles into the byte
+    v128_t high_inverse = sz_aes_gf4_mul_v128_(high_nibble, d_inv);
+    v128_t low_inverse = sz_aes_gf4_mul_v128_(wasm_v128_xor(high_nibble, low_nibble), d_inv);
+    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(high_inverse, 4), low_inverse); // recombine nibbles into the byte
 
     v128_t back = sz_aes_linear_v128_(wasm_v128_load(inv_lo), wasm_v128_load(inv_hi), inverted);
     v128_t subbed = sz_aes_linear_v128_(wasm_v128_load(aff_lo), wasm_v128_load(aff_hi), back);
@@ -194,10 +194,10 @@ SZ_INTERNAL void sz_hash_state_update_v128_(sz_hash_state_t *state) {
     sz_u128_vec_t *aes_vecs = (sz_u128_vec_t *)state->aes;
     sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)state->sum;
     sz_u128_vec_t *ins_vecs = (sz_u128_vec_t *)state->ins;
-    for (sz_size_t i = 0; i < 4; ++i) {
-        aes_vecs[i] = sz_emulate_aesenc_v128_(aes_vecs[i], ins_vecs[i]);
-        sum_vecs[i] = sz_emulate_shuffle_epi8_v128_(sum_vecs[i], shuffle);
-        sum_vecs[i].v128 = wasm_i64x2_add(sum_vecs[i].v128, ins_vecs[i].v128);
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        aes_vecs[lane_index] = sz_emulate_aesenc_v128_(aes_vecs[lane_index], ins_vecs[lane_index]);
+        sum_vecs[lane_index] = sz_emulate_shuffle_epi8_v128_(sum_vecs[lane_index], shuffle);
+        sum_vecs[lane_index].v128 = wasm_i64x2_add(sum_vecs[lane_index].v128, ins_vecs[lane_index].v128);
     }
 }
 
@@ -275,15 +275,17 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_size_t
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            for (sz_size_t k = 0; k < 4; ++k)
-                wasm_v128_store(state.ins + k * 16, wasm_v128_load(start + state.ins_length + k * 16));
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
+                wasm_v128_store(state.ins + lane_index * 16,
+                                wasm_v128_load(start + state.ins_length + lane_index * 16));
             sz_hash_state_update_v128_(&state);
         }
         if (state.ins_length < length) {
             v128_t zero_vec = wasm_u64x2_splat(0);
-            for (sz_size_t k = 0; k < 4; ++k) wasm_v128_store(state.ins + k * 16, zero_vec);
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins[i] = start[state.ins_length];
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
+                wasm_v128_store(state.ins + lane_index * 16, zero_vec);
+            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+                state.ins[byte_index] = start[state.ins_length];
             sz_hash_state_update_v128_(&state);
             state.ins_length = length;
         }
@@ -305,7 +307,7 @@ SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text,
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_v128_(state);
-            for (sz_size_t i = 0; i < 64; ++i) state->ins[i] = 0;
+            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
         }
     }
 }
@@ -347,11 +349,11 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128(sz_hash_state_t const *state) {
 }
 
 SZ_PUBLIC void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
+    sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
-        input_vec.v128 = wasm_u64x2_splat(nonce + lane_index);        // both 64-bit lanes = nonce + block
-        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        input_vec.v128 = wasm_u64x2_splat(nonce + lane_index); // both 64-bit lanes = nonce + block
+        pi_vec = ((sz_u128_vec_t const *)pi_constants)[lane_index % 4];
         key_vec.v128 = wasm_v128_xor(pi_vec.v128, wasm_u64x2_splat(nonce)); // key = pi ^ broadcast(nonce)
         generated_vec = sz_emulate_aesenc_v128_(input_vec, key_vec);
         // Emit the whole 16-byte block with one vector store on the hot path; the ragged final block
@@ -392,18 +394,18 @@ SZ_INTERNAL void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8)], s
     // Load the first 16 words big-endian: reverse the 4 bytes of each 32-bit word. This is a
     // compile-time-CONSTANT permutation, so `wasm_i8x16_shuffle` (a fixed lane shuffle) is optimal —
     // there is no data-dependent table here, hence nothing for `relaxed_swizzle` to accelerate.
-    for (sz_size_t k = 0; k < 4; ++k) {
-        v128_t loaded = wasm_v128_load(block + k * 16);
-        wasm_v128_store(&w[k * 4],
+    for (sz_size_t group_index = 0; group_index < 4; ++group_index) {
+        v128_t loaded = wasm_v128_load(block + group_index * 16);
+        wasm_v128_store(&w[group_index * 4],
                         wasm_i8x16_shuffle(loaded, loaded, 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12));
     }
 
     // Extend to 64 words, four at a time.
-    for (sz_size_t i = 16; i < 64; i += 4) {
-        v128_t w_m16 = wasm_v128_load(&w[i - 16]);
-        v128_t w_m15 = wasm_v128_load(&w[i - 15]);
-        v128_t w_m7 = wasm_v128_load(&w[i - 7]);
-        v128_t w_m2 = wasm_v128_load(&w[i - 2]); // lanes 2,3 = W[i],W[i+1] are still zero (computed below)
+    for (sz_size_t word_index = 16; word_index < 64; word_index += 4) {
+        v128_t w_m16 = wasm_v128_load(&w[word_index - 16]);
+        v128_t w_m15 = wasm_v128_load(&w[word_index - 15]);
+        v128_t w_m7 = wasm_v128_load(&w[word_index - 7]);
+        v128_t w_m2 = wasm_v128_load(&w[word_index - 2]); // lanes 2,3 = W[i],W[i+1] are still zero (computed below)
         v128_t partial = wasm_i32x4_add(wasm_i32x4_add(w_m16, sz_sha256_sigma0_lower_v128_(w_m15)), w_m7);
         // Phase 1: sigma1 of lanes 0,1 (W[i-2],W[i-1]) gives correct W[i],W[i+1] in t0's low lanes.
         v128_t t0 = wasm_i32x4_add(partial, sz_sha256_sigma1_lower_v128_(w_m2));
@@ -411,13 +413,14 @@ SZ_INTERNAL void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8)], s
         v128_t w_hi = wasm_i32x4_shuffle(t0, t0, 0, 1, 0, 1); // lanes 2,3 = W[i],W[i+1]
         v128_t t1 = wasm_i32x4_add(partial, sz_sha256_sigma1_lower_v128_(w_hi));
         // Blend: low two lanes from phase 1, high two from phase 2.
-        wasm_v128_store(&w[i], wasm_i32x4_shuffle(t0, t1, 0, 1, 6, 7));
+        wasm_v128_store(&w[word_index], wasm_i32x4_shuffle(t0, t1, 0, 1, 6, 7));
     }
 
     sz_u32_t a = hash[0], b = hash[1], c = hash[2], d = hash[3];
     sz_u32_t e = hash[4], f = hash[5], g = hash[6], h = hash[7];
-    for (sz_size_t i = 0; i < 64; ++i) {
-        sz_u32_t temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + w[i];
+    for (sz_size_t round_index = 0; round_index < 64; ++round_index) {
+        sz_u32_t temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[round_index] +
+                         w[round_index];
         sz_u32_t temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
         e = d + temp1;
@@ -449,20 +452,22 @@ SZ_PUBLIC void sz_sha256_state_update_v128(sz_sha256_state_t *state_ptr, sz_cptr
     sz_size_t const body_length = length - head_length - tail_length;
 
     sz_align_(32) sz_u32_t hash[8];
-    for (sz_size_t i = 0; i < 8; ++i) hash[i] = state_ptr->hash[i];
+    for (sz_size_t word_index = 0; word_index < 8; ++word_index) hash[word_index] = state_ptr->hash[word_index];
 
     if (head_length) {
-        for (sz_size_t i = 0; i < head_length; ++i) state_ptr->block[state_ptr->block_length++] = input[i];
+        for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
+            state_ptr->block[state_ptr->block_length++] = input[byte_index];
         sz_sha256_process_block_v128_(hash, state_ptr->block);
         state_ptr->block_length = 0;
         input += head_length;
     }
     for (sz_size_t processed = 0; processed < body_length; processed += 64, input += 64)
         sz_sha256_process_block_v128_(hash, input);
-    for (sz_size_t i = 0; i < tail_length; ++i) state_ptr->block[i] = input[i];
+    for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+        state_ptr->block[byte_index] = input[byte_index];
     state_ptr->block_length = tail_length;
 
-    for (sz_size_t i = 0; i < 8; ++i) state_ptr->hash[i] = hash[i];
+    for (sz_size_t word_index = 0; word_index < 8; ++word_index) state_ptr->hash[word_index] = hash[word_index];
 }
 
 SZ_PUBLIC void sz_sha256_state_digest_v128(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {

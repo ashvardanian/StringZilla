@@ -57,16 +57,16 @@ SZ_PUBLIC sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length
                                _mm_cmpeq_epi8(a_second_vec.xmm, b_second_vec.xmm))) == 0xFFFF);
     }
     else {
-        sz_size_t i = 0;
+        sz_size_t byte_index = 0;
         sz_u128_vec_t a_vec, b_vec;
         do {
-            a_vec.xmm = _mm_lddqu_si128((__m128i const *)(a + i));
-            b_vec.xmm = _mm_lddqu_si128((__m128i const *)(b + i));
+            a_vec.xmm = _mm_lddqu_si128((__m128i const *)(a + byte_index));
+            b_vec.xmm = _mm_lddqu_si128((__m128i const *)(b + byte_index));
             // One approach can be to use "movemasks", but we could also use a bitwise
             // matching like `_mm_testnzc_si128`.
             if (_mm_movemask_epi8(_mm_cmpeq_epi8(a_vec.xmm, b_vec.xmm)) != 0xFFFF) return sz_false_k;
-            i += 16;
-        } while (i + 16 <= length);
+            byte_index += 16;
+        } while (byte_index + 16 <= length);
         a_vec.xmm = _mm_lddqu_si128((__m128i const *)(a + length - 16));
         b_vec.xmm = _mm_lddqu_si128((__m128i const *)(b + length - 16));
         return (sz_bool_t)(_mm_movemask_epi8(_mm_cmpeq_epi8(a_vec.xmm, b_vec.xmm)) == 0xFFFF);

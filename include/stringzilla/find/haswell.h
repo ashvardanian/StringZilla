@@ -26,109 +26,112 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    int mask;
-    sz_u256_vec_t h_vec, n_vec;
-    n_vec.ymm = _mm256_set1_epi8(n[0]);
+SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+    int matches_mask;
+    sz_u256_vec_t haystack_vec, needle_vec;
+    needle_vec.ymm = _mm256_set1_epi8(needle[0]);
 
-    while (h_length >= 32) {
-        h_vec.ymm = _mm256_lddqu_si256((__m256i const *)h);
-        mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_vec.ymm, n_vec.ymm));
-        if (mask) return h + sz_u32_ctz(mask);
-        h += 32, h_length -= 32;
+    while (haystack_length >= 32) {
+        haystack_vec.ymm = _mm256_lddqu_si256((__m256i const *)haystack);
+        matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
+        if (matches_mask) return haystack + sz_u32_ctz(matches_mask);
+        haystack += 32, haystack_length -= 32;
     }
 
-    return sz_find_byte_serial(h, h_length, n);
+    return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    int mask;
-    sz_u256_vec_t h_vec, n_vec;
-    n_vec.ymm = _mm256_set1_epi8(n[0]);
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+    int matches_mask;
+    sz_u256_vec_t haystack_vec, needle_vec;
+    needle_vec.ymm = _mm256_set1_epi8(needle[0]);
 
-    while (h_length >= 32) {
-        h_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - 32));
-        mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_vec.ymm, n_vec.ymm));
-        if (mask) return h + h_length - 1 - sz_u32_clz(mask);
-        h_length -= 32;
+    while (haystack_length >= 32) {
+        haystack_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack + haystack_length - 32));
+        matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
+        if (matches_mask) return haystack + haystack_length - 1 - sz_u32_clz(matches_mask);
+        haystack_length -= 32;
     }
 
-    return sz_rfind_byte_serial(h, h_length, n);
+    return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                    sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
-    if (n_length == 1) return sz_find_byte_haswell(h, h_length, n);
+    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    if (needle_length == 1) return sz_find_byte_haswell(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(n, n_length, &offset_first, &offset_mid, &offset_last);
+    sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast those characters into YMM registers.
     sz_u32_vec_t matches_vec;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.ymm = _mm256_set1_epi8(n[offset_first]);
-    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_mid]);
-    n_last_vec.ymm = _mm256_set1_epi8(n[offset_last]);
+    n_first_vec.ymm = _mm256_set1_epi8(needle[offset_first]);
+    n_mid_vec.ymm = _mm256_set1_epi8(needle[offset_mid]);
+    n_last_vec.ymm = _mm256_set1_epi8(needle[offset_last]);
 
     // Scan through the string.
-    for (; h_length >= n_length + 32; h += 32, h_length -= 32) {
-        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_first));
-        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_mid));
-        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_last));
+    for (; haystack_length >= needle_length + 32; haystack += 32, haystack_length -= 32) {
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack + offset_first));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack + offset_mid));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack + offset_last));
         matches_vec.i32 = //
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
             int potential_offset = sz_u32_ctz(matches_vec.u32);
-            if (sz_equal_haswell(h + potential_offset, n, n_length)) return h + potential_offset;
+            if (sz_equal_haswell(haystack + potential_offset, needle, needle_length))
+                return haystack + potential_offset;
             matches_vec.u32 &= matches_vec.u32 - 1;
         }
     }
 
-    return sz_find_serial(h, h_length, n, n_length);
+    return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                     sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
-    if (n_length == 1) return sz_rfind_byte_haswell(h, h_length, n);
+    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    if (needle_length == 1) return sz_rfind_byte_haswell(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
-    sz_locate_needle_anomalies_(n, n_length, &offset_first, &offset_mid, &offset_last);
+    sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
 
     // Broadcast those characters into YMM registers.
     sz_u32_vec_t matches_vec;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.ymm = _mm256_set1_epi8(n[offset_first]);
-    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_mid]);
-    n_last_vec.ymm = _mm256_set1_epi8(n[offset_last]);
+    n_first_vec.ymm = _mm256_set1_epi8(needle[offset_first]);
+    n_mid_vec.ymm = _mm256_set1_epi8(needle[offset_mid]);
+    n_last_vec.ymm = _mm256_set1_epi8(needle[offset_last]);
 
     // Scan through the string.
-    sz_cptr_t h_reversed;
-    for (; h_length >= n_length + 32; h_length -= 32) {
-        h_reversed = h + h_length - n_length - 32 + 1;
-        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_first));
-        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_mid));
-        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_last));
+    sz_cptr_t haystack_cursor;
+    for (; haystack_length >= needle_length + 32; haystack_length -= 32) {
+        haystack_cursor = haystack + haystack_length - needle_length - 32 + 1;
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack_cursor + offset_first));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack_cursor + offset_mid));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack_cursor + offset_last));
         matches_vec.i32 = //
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
             int potential_offset = sz_u32_clz(matches_vec.u32);
-            if (sz_equal_haswell(h + h_length - n_length - potential_offset, n, n_length))
-                return h + h_length - n_length - potential_offset;
+            if (sz_equal_haswell(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
+                return haystack + haystack_length - needle_length - potential_offset;
             matches_vec.u32 &= ~(1u << (31 - potential_offset));
         }
     }
 
-    return sz_rfind_serial(h, h_length, n, n_length);
+    return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {

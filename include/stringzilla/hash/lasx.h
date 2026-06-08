@@ -280,9 +280,9 @@ SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
     __m128i tower_low_xor_high = __lsx_vxor_v(tower_low, tower_high);
     __m128i tower_high_squared = sz_lsx_gf16_mul_(tower_high, tower_high, gf16_log, gf16_exp, zero_vec);
     __m128i tower_nu = __lsx_vreplgr2vr_b(0x08); // the irreducible-polynomial offset of the tower field
-    __m128i inverse_denominator =
-        __lsx_vxor_v(sz_lsx_gf16_mul_(tower_high_squared, tower_nu, gf16_log, gf16_exp, zero_vec),
-                     sz_lsx_gf16_mul_(tower_low, tower_low_xor_high, gf16_log, gf16_exp, zero_vec));
+    __m128i inverse_denominator = __lsx_vxor_v(
+        sz_lsx_gf16_mul_(tower_high_squared, tower_nu, gf16_log, gf16_exp, zero_vec),
+        sz_lsx_gf16_mul_(tower_low, tower_low_xor_high, gf16_log, gf16_exp, zero_vec));
     __m128i denominator_inverse = sz_lsx_pshufb_(gf16_inverse, inverse_denominator);
     __m128i inverted_high = sz_lsx_gf16_mul_(tower_high, denominator_inverse, gf16_log, gf16_exp, zero_vec);
     __m128i inverted_low = sz_lsx_gf16_mul_(tower_low_xor_high, denominator_inverse, gf16_log, gf16_exp, zero_vec);
@@ -314,9 +314,9 @@ SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
 }
 
 /** @brief  Load 16 bytes from an `sz_u128_vec_t`-style buffer into an LSX register. */
-SZ_INTERNAL __m128i sz_lsx_load128_(void const *ptr) { return __lsx_vld(ptr, 0); }
+SZ_INTERNAL __m128i sz_lsx_load128_(void const *pointer) { return __lsx_vld(pointer, 0); }
 /** @brief  Store an LSX register into a 16-byte buffer. */
-SZ_INTERNAL void sz_lsx_store128_(void *ptr, __m128i v) { __lsx_vst(v, ptr, 0); }
+SZ_INTERNAL void sz_lsx_store128_(void *pointer, __m128i value_u8x16) { __lsx_vst(value_u8x16, pointer, 0); }
 
 SZ_INTERNAL void sz_hash_minimal_init_lasx_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
     state->key.u64s[0] = seed, state->key.u64s[1] = seed;
@@ -337,8 +337,8 @@ SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_lasx_(sz_hash_minimal_t_ const *st
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
     __m128i mixed = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state->sum), sz_lsx_load128_(&state->aes));
-    __m128i mixed_in_register =
-        sz_emulate_aesenc_lasx_(sz_emulate_aesenc_lasx_(mixed, sz_lsx_load128_(&key_with_length)), mixed);
+    __m128i mixed_in_register = sz_emulate_aesenc_lasx_(
+        sz_emulate_aesenc_lasx_(mixed, sz_lsx_load128_(&key_with_length)), mixed);
     sz_u128_vec_t result;
     sz_lsx_store128_(&result, mixed_in_register);
     return result.u64s[0];
@@ -354,7 +354,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
         sz_hash_minimal_init_lasx_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
-        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
         sz_hash_minimal_update_lasx_(&state, data_vec);
         return sz_hash_minimal_finalize_lasx_(&state, length);
     }
@@ -409,8 +409,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
             __m256i zero_vec = __lasx_xvreplgr2vr_b(0);
             __lasx_xvst(zero_vec, state.ins, 0);
             __lasx_xvst(zero_vec, state.ins + 32, 0);
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins[i] = start[state.ins_length];
+            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+                state.ins[byte_index] = start[state.ins_length];
             sz_hash_state_update_lasx_(&state);
             state.ins_length = length;
         }
@@ -427,11 +427,13 @@ SZ_INTERNAL void sz_hash_state_update_lasx_(sz_hash_state_t *state) {
     sz_u128_vec_t *aes_vecs = (sz_u128_vec_t *)state->aes;
     sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)state->sum;
     sz_u128_vec_t *ins_vecs = (sz_u128_vec_t *)state->ins;
-    for (sz_size_t i = 0; i < 4; ++i) {
-        __m128i aes = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[i]), sz_lsx_load128_(&ins_vecs[i]));
-        sz_lsx_store128_(&aes_vecs[i], aes);
-        sum_vecs[i] = sz_emulate_shuffle_epi8_serial_(sum_vecs[i], shuffle);
-        sum_vecs[i].u64s[0] += ins_vecs[i].u64s[0], sum_vecs[i].u64s[1] += ins_vecs[i].u64s[1];
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        __m128i aes = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[lane_index]),
+                                              sz_lsx_load128_(&ins_vecs[lane_index]));
+        sz_lsx_store128_(&aes_vecs[lane_index], aes);
+        sum_vecs[lane_index] = sz_emulate_shuffle_epi8_serial_(sum_vecs[lane_index], shuffle);
+        sum_vecs[lane_index].u64s[0] += ins_vecs[lane_index].u64s[0],
+            sum_vecs[lane_index].u64s[1] += ins_vecs[lane_index].u64s[1];
     }
 }
 
@@ -451,8 +453,8 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_t const *state) 
     __m128i mixed01 = sz_emulate_aesenc_lasx_(mixed0, mixed1);
     __m128i mixed23 = sz_emulate_aesenc_lasx_(mixed2, mixed3);
     __m128i mixed = sz_emulate_aesenc_lasx_(mixed01, mixed23);
-    __m128i mixed_in_register =
-        sz_emulate_aesenc_lasx_(sz_emulate_aesenc_lasx_(mixed, sz_lsx_load128_(&key_with_length)), mixed);
+    __m128i mixed_in_register = sz_emulate_aesenc_lasx_(
+        sz_emulate_aesenc_lasx_(mixed, sz_lsx_load128_(&key_with_length)), mixed);
     sz_u128_vec_t result;
     sz_lsx_store128_(&result, mixed_in_register);
     return result.u64s[0];
@@ -512,16 +514,17 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_lasx(sz_hash_state_t const *state) {
 }
 
 SZ_PUBLIC void sz_fill_random_lasx(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
+    sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
         input_vec.u64s[0] = input_vec.u64s[1] = nonce + lane_index;
-        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        pi_vec = ((sz_u128_vec_t const *)pi_constants)[lane_index % 4];
         key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
         __m128i gen = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&input_vec), sz_lsx_load128_(&key_vec));
         sz_lsx_store128_(&generated_vec, gen);
-        for (sz_size_t i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+        for (sz_size_t byte_index = 0; byte_index < 16 && length; ++byte_index, --length)
+            *text++ = generated_vec.u8s[byte_index];
     }
 }
 
@@ -558,34 +561,35 @@ SZ_INTERNAL void sz_sha256_process_block_lasx_(sz_u32_t hash[sz_at_least_(8)], s
     static
         sz_align_(16) sz_u8_t const byte_reverse_indices[16] = {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12};
     __m128i byte_reverse_vec = __lsx_vld(byte_reverse_indices, 0);
-    for (sz_size_t group = 0; group < 4; ++group) {
-        __m128i raw_vec = __lsx_vld(block + group * 16, 0);
-        __lsx_vst(__lsx_vshuf_b(raw_vec, raw_vec, byte_reverse_vec), &message_schedule[group * 4], 0);
+    for (sz_size_t group_index = 0; group_index < 4; ++group_index) {
+        __m128i raw_vec = __lsx_vld(block + group_index * 16, 0);
+        __lsx_vst(__lsx_vshuf_b(raw_vec, raw_vec, byte_reverse_vec), &message_schedule[group_index * 4], 0);
     }
 
     // Expand W[16..63] four lanes at a time. `low_pair_mask` keeps lanes 0,1 and zeroes lanes 2,3 so that
     // `sigma1` of the not-yet-computed high pair contributes nothing in step one.
     __m128i const low_pair_mask = __lsx_vinsgr2vr_d(__lsx_vreplgr2vr_d(-1), 0, 1); // [~0, ~0, 0, 0]
-    for (sz_size_t t = 16; t < 64; t += 4) {
-        __m128i window_16_vec = __lsx_vld(&message_schedule[t - 16], 0); // W[t-16 .. t-13]
-        __m128i window_15_vec = __lsx_vld(&message_schedule[t - 15], 0); // W[t-15 .. t-12]
-        __m128i window_7_vec = __lsx_vld(&message_schedule[t - 7], 0);   // W[t-7  .. t-4]
-        __m128i base_vec =
-            __lsx_vadd_w(__lsx_vadd_w(window_16_vec, sz_sha256_sigma0_lower_lasx_(window_15_vec)), window_7_vec);
+    for (sz_size_t word_index = 16; word_index < 64; word_index += 4) {
+        __m128i window_16_vec = __lsx_vld(&message_schedule[word_index - 16], 0); // W[t-16 .. t-13]
+        __m128i window_15_vec = __lsx_vld(&message_schedule[word_index - 15], 0); // W[t-15 .. t-12]
+        __m128i window_7_vec = __lsx_vld(&message_schedule[word_index - 7], 0);   // W[t-7  .. t-4]
+        __m128i base_vec = __lsx_vadd_w(__lsx_vadd_w(window_16_vec, sz_sha256_sigma0_lower_lasx_(window_15_vec)),
+                                        window_7_vec);
         // Step 1: sigma1 of [W[t-2], W[t-1], 0, 0] finalizes lanes 0,1 (W[t], W[t+1]).
-        __m128i prev_pair_vec = __lsx_vand_v(__lsx_vld(&message_schedule[t - 2], 0), low_pair_mask);
+        __m128i prev_pair_vec = __lsx_vand_v(__lsx_vld(&message_schedule[word_index - 2], 0), low_pair_mask);
         __m128i schedule_vec = __lsx_vadd_w(base_vec, sz_sha256_sigma1_lower_lasx_(prev_pair_vec));
         // Step 2: shift the fresh low pair into lanes 2,3 and add its sigma1 to finalize W[t+2], W[t+3].
         __m128i new_pair_vec = __lsx_vbsll_v(schedule_vec, 8); // [0, 0, W[t], W[t+1]]
         schedule_vec = __lsx_vadd_w(schedule_vec, sz_sha256_sigma1_lower_lasx_(new_pair_vec));
-        __lsx_vst(schedule_vec, &message_schedule[t], 0);
+        __lsx_vst(schedule_vec, &message_schedule[word_index], 0);
     }
 
     // Scalar compression — sequential, identical to `sz_sha256_process_block_serial_`.
     sz_u32_t a = hash[0], b = hash[1], c = hash[2], d = hash[3];
     sz_u32_t e = hash[4], f = hash[5], g = hash[6], h = hash[7], temp1, temp2;
-    for (sz_size_t i = 0; i < 64; ++i) {
-        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i];
+    for (sz_size_t round_index = 0; round_index < 64; ++round_index) {
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[round_index] +
+                message_schedule[round_index];
         temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
         h = g, g = f, f = e;
         e = d + temp1;
@@ -624,14 +628,16 @@ SZ_PUBLIC void sz_sha256_state_update_lasx(sz_sha256_state_t *state_ptr, sz_cptr
 
     // Complete the partial block with the head, then run aligned bodies, then buffer the tail.
     if (head_length) {
-        for (sz_size_t i = 0; i < head_length; ++i) state_ptr->block[state_ptr->block_length++] = input[i];
+        for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
+            state_ptr->block[state_ptr->block_length++] = input[byte_index];
         sz_sha256_process_block_lasx_(hash, state_ptr->block);
         state_ptr->block_length = 0;
         input += head_length;
     }
     for (sz_size_t processed = 0; processed < body_length; processed += 64, input += 64)
         sz_sha256_process_block_lasx_(hash, input);
-    for (sz_size_t i = 0; i < tail_length; ++i) state_ptr->block[i] = input[i];
+    for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+        state_ptr->block[byte_index] = input[byte_index];
     state_ptr->block_length = tail_length;
 
     state_ptr->hash[0] = hash[0], state_ptr->hash[1] = hash[1], state_ptr->hash[2] = hash[2],
@@ -645,11 +651,11 @@ SZ_PUBLIC void sz_sha256_state_digest_lasx(sz_sha256_state_t const *state_ptr, s
     // Append the '1' bit (0x80), then pad with zeros, processing an extra block if the length doesn't fit.
     state.block[state.block_length++] = 0x80;
     if (state.block_length > 56) {
-        for (sz_size_t i = state.block_length; i < 64; ++i) state.block[i] = 0;
+        for (sz_size_t byte_index = state.block_length; byte_index < 64; ++byte_index) state.block[byte_index] = 0;
         sz_sha256_process_block_lasx_(state.hash, state.block);
         state.block_length = 0;
     }
-    for (sz_size_t i = state.block_length; i < 56; ++i) state.block[i] = 0;
+    for (sz_size_t byte_index = state.block_length; byte_index < 56; ++byte_index) state.block[byte_index] = 0;
     state.block_length = 56;
 
     // Append the message length in bits as a 64-bit big-endian integer, then process the final block.
@@ -665,11 +671,11 @@ SZ_PUBLIC void sz_sha256_state_digest_lasx(sz_sha256_state_t const *state_ptr, s
     sz_sha256_process_block_lasx_(state.hash, state.block);
 
     // Emit the digest big-endian.
-    for (sz_size_t i = 0; i < 8; ++i) {
-        digest[i * 4 + 0] = (sz_u8_t)(state.hash[i] >> 24);
-        digest[i * 4 + 1] = (sz_u8_t)(state.hash[i] >> 16);
-        digest[i * 4 + 2] = (sz_u8_t)(state.hash[i] >> 8);
-        digest[i * 4 + 3] = (sz_u8_t)(state.hash[i] >> 0);
+    for (sz_size_t word_index = 0; word_index < 8; ++word_index) {
+        digest[word_index * 4 + 0] = (sz_u8_t)(state.hash[word_index] >> 24);
+        digest[word_index * 4 + 1] = (sz_u8_t)(state.hash[word_index] >> 16);
+        digest[word_index * 4 + 2] = (sz_u8_t)(state.hash[word_index] >> 8);
+        digest[word_index * 4 + 3] = (sz_u8_t)(state.hash[word_index] >> 0);
     }
 }
 

@@ -32,17 +32,17 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     //
     // We can use that kind of logic to accelerate the inner loop, but we still need to reduce the 64-bit results.
     while (progress < length) {
-        svuint16_t sum_u16_top = svdup_n_u16(0);
-        svuint16_t sum_u16_bot = svdup_n_u16(0);
+        svuint16_t sum_top_u16x = svdup_n_u16(0);
+        svuint16_t sum_bottom_u16x = svdup_n_u16(0);
         // Assuming `u16` has a 256x wider range than `u8`, we can aggregate up to 256 lanes in each value.
         for (sz_size_t loop_index = 0; progress < length && loop_index < 256; progress += vector_length, ++loop_index) {
-            svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
-            svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
-            sum_u16_top = svaddwb_u16(sum_u16_top, text_vec);
-            sum_u16_bot = svaddwt_u16(sum_u16_bot, text_vec);
+            svbool_t progress_b8x = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
+            svuint8_t text_u8x = svld1_u8(progress_b8x, (sz_u8_t const *)(text + progress));
+            sum_top_u16x = svaddwb_u16(sum_top_u16x, text_u8x);
+            sum_bottom_u16x = svaddwt_u16(sum_bottom_u16x, text_u8x);
         }
-        sum += svaddv_u16(svptrue_b16(), sum_u16_top);
-        sum += svaddv_u16(svptrue_b16(), sum_u16_bot);
+        sum += svaddv_u16(svptrue_b16(), sum_top_u16x);
+        sum += svaddv_u16(svptrue_b16(), sum_bottom_u16x);
     }
 
     return sum;

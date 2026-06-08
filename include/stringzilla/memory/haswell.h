@@ -277,8 +277,8 @@ SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t so
     // Assuming each lookup is performed within 16 elements of 256, we need to reduce the scope by 16x = 2^4.
     sz_u256_vec_t not_first_bit_vec, not_second_bit_vec, not_third_bit_vec, not_fourth_bit_vec;
 
-    /// Top and bottom nibbles of the source are used separately.
-    sz_u256_vec_t source_vec, source_bot_vec;
+    // Top and bottom nibbles of the source are used separately.
+    sz_u256_vec_t source_vec, source_low_nibble_vec;
     sz_u256_vec_t blended_0_to_31_vec, blended_32_to_63_vec, blended_64_to_95_vec, blended_96_to_127_vec,
         blended_128_to_159_vec, blended_160_to_191_vec, blended_192_to_223_vec, blended_224_to_255_vec;
 
@@ -286,42 +286,42 @@ SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t so
     while (length >= 32) {
         // Load and separate the nibbles of each byte in the source.
         source_vec.ymm = _mm256_lddqu_si256((__m256i const *)source);
-        source_bot_vec.ymm = _mm256_and_si256(source_vec.ymm, _mm256_set1_epi8((char)0x0F));
+        source_low_nibble_vec.ymm = _mm256_and_si256(source_vec.ymm, _mm256_set1_epi8((char)0x0F));
 
         // In the first round, we select using the 4th bit.
         not_fourth_bit_vec.ymm = _mm256_cmpeq_epi8( //
             _mm256_and_si256(_mm256_set1_epi8((char)0x10), source_vec.ymm), _mm256_setzero_si256());
-        blended_0_to_31_vec.ymm = _mm256_blendv_epi8(                      //
-            _mm256_shuffle_epi8(lut_16_to_31_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_0_to_15_vec.ymm, source_bot_vec.ymm),  //
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8(                             //
+            _mm256_shuffle_epi8(lut_16_to_31_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_0_to_15_vec.ymm, source_low_nibble_vec.ymm),  //
             not_fourth_bit_vec.ymm);
-        blended_32_to_63_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_48_to_63_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_32_to_47_vec.ymm, source_bot_vec.ymm), //
+        blended_32_to_63_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_48_to_63_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_32_to_47_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_64_to_95_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_80_to_95_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_64_to_79_vec.ymm, source_bot_vec.ymm), //
+        blended_64_to_95_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_80_to_95_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_64_to_79_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_96_to_127_vec.ymm = _mm256_blendv_epi8(                      //
-            _mm256_shuffle_epi8(lut_112_to_127_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_96_to_111_vec.ymm, source_bot_vec.ymm),  //
+        blended_96_to_127_vec.ymm = _mm256_blendv_epi8(                             //
+            _mm256_shuffle_epi8(lut_112_to_127_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_96_to_111_vec.ymm, source_low_nibble_vec.ymm),  //
             not_fourth_bit_vec.ymm);
-        blended_128_to_159_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_144_to_159_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_128_to_143_vec.ymm, source_bot_vec.ymm), //
+        blended_128_to_159_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_144_to_159_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_128_to_143_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_160_to_191_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_176_to_191_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_160_to_175_vec.ymm, source_bot_vec.ymm), //
+        blended_160_to_191_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_176_to_191_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_160_to_175_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_192_to_223_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_208_to_223_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_192_to_207_vec.ymm, source_bot_vec.ymm), //
+        blended_192_to_223_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_208_to_223_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_192_to_207_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_224_to_255_vec.ymm = _mm256_blendv_epi8(                     //
-            _mm256_shuffle_epi8(lut_240_to_255_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_224_to_239_vec.ymm, source_bot_vec.ymm), //
+        blended_224_to_255_vec.ymm = _mm256_blendv_epi8(                            //
+            _mm256_shuffle_epi8(lut_240_to_255_vec.ymm, source_low_nibble_vec.ymm), //
+            _mm256_shuffle_epi8(lut_224_to_239_vec.ymm, source_low_nibble_vec.ymm), //
             not_fourth_bit_vec.ymm);
 
         // Perform a tree-like reduction of the 8x "blended" YMM registers, depending on the "source" content.

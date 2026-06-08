@@ -45,7 +45,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
 
 /**
  *  @brief Initializes a global static "virtual table" of supported backends
- *         Run it just once to avoiding unnecessary `if`-s.
+ *         Run it just once to avoid unnecessary `if`-s.
  */
 SZ_DYNAMIC void sz_dispatch_table_init(void) {
     sz_capability_t caps = sz_capabilities();
@@ -70,8 +70,8 @@ SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_dispatch_tab
 __declspec(allocate(".CRT$XCS")) void (*sz_dispatch_table_init_)() = sz_dispatch_table_init;
 
 /*  Called either from CRT code or out own `_DLLMainCRTStartup`, when a DLL is loaded. */
-BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
-    switch (forward_reason) {
+BOOL WINAPI DllMain(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_pointer) {
+    switch (reason) {
     case DLL_PROCESS_ATTACH:
         sz_dispatch_table_init(); // Ensure initialization
         return TRUE;
@@ -83,9 +83,9 @@ BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
 }
 
 #if SZ_AVOID_LIBC
-/*  Called when the DLL is loaded, and ther is no CRT code. */
-BOOL WINAPI _DllMainCRTStartup(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
-    DllMain(hints, forward_reason, lp);
+/*  Called when the DLL is loaded, and there is no CRT code. */
+BOOL WINAPI _DllMainCRTStartup(HINSTANCE instance_handle, DWORD reason, LPVOID reserved_pointer) {
+    DllMain(instance_handle, reason, reserved_pointer);
     return TRUE;
 }
 #endif

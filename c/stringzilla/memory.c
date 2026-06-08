@@ -145,12 +145,12 @@ SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, c
 #else
 #pragma comment(linker, "/export:_memcpy")
 #endif
-void *__cdecl memcpy(void *dest, void const *src, size_t n) {
+void *__cdecl memcpy(void *target, void const *source, size_t length) {
 #else
-SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
+SZ_DYNAMIC void *memcpy(void *target, void const *source, size_t length) {
 #endif
-    sz_copy(dest, src, n);
-    return (void *)dest;
+    sz_copy(target, source, length);
+    return (void *)target;
 }
 
 #if defined(_MSC_VER)
@@ -159,12 +159,12 @@ SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
 #else
 #pragma comment(linker, "/export:_memmove")
 #endif
-void *__cdecl memmove(void *dest, void const *src, size_t n) {
+void *__cdecl memmove(void *target, void const *source, size_t length) {
 #else
-SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
+SZ_DYNAMIC void *memmove(void *target, void const *source, size_t length) {
 #endif
-    sz_move(dest, src, n);
-    return (void *)dest;
+    sz_move(target, source, length);
+    return (void *)target;
 }
 
 #if defined(_MSC_VER)
@@ -173,12 +173,12 @@ SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
 #else
 #pragma comment(linker, "/export:_memset")
 #endif
-void *__cdecl memset(void *s, int c, size_t n) {
+void *__cdecl memset(void *target, int value, size_t length) {
 #else
-SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
+SZ_DYNAMIC void *memset(void *target, int value, size_t length) {
 #endif
-    sz_fill(s, n, c);
-    return (void *)s;
+    sz_fill(target, length, value);
+    return (void *)target;
 }
 
 #endif // SZ_OVERRIDE_LIBC

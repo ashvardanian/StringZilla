@@ -74,9 +74,9 @@ using carray = char[count_characters];
 
 /**
  *  @brief Analog to @b `std::memset`, but with a more efficient implementation.
- *  @param[in] target The pointer to the target memory region.
- *  @param[in] value The byte value to set.
- *  @param[in] n The number of bytes to copy.
+ *  @param target The pointer to the target memory region.
+ *  @param value The byte value to set.
+ *  @param n The number of bytes to copy.
  *  @see https://en.cppreference.com/w/cpp/string/byte/memset
  */
 inline void memset(void *target, char value, std::size_t n) noexcept {
@@ -85,9 +85,9 @@ inline void memset(void *target, char value, std::size_t n) noexcept {
 
 /**
  *  @brief Analog to @b `std::memmove`, but with a more efficient implementation.
- *  @param[in] target The pointer to the target memory region.
- *  @param[in] source The pointer to the source memory region.
- *  @param[in] n The number of bytes to copy.
+ *  @param target The pointer to the target memory region.
+ *  @param source The pointer to the source memory region.
+ *  @param n The number of bytes to copy.
  *  @see https://en.cppreference.com/w/cpp/string/byte/memmove
  */
 inline void memmove(void *target, void const *source, std::size_t n) noexcept {
@@ -96,9 +96,9 @@ inline void memmove(void *target, void const *source, std::size_t n) noexcept {
 
 /**
  *  @brief Analog to @b `std::memcpy`, but with a more efficient implementation.
- *  @param[in] target The pointer to the target memory region.
- *  @param[in] source The pointer to the source memory region.
- *  @param[in] n The number of bytes to copy.
+ *  @param target The pointer to the target memory region.
+ *  @param source The pointer to the source memory region.
+ *  @param n The number of bytes to copy.
  *  @see https://en.cppreference.com/w/cpp/string/byte/memcpy
  */
 inline void memcpy(void *target, void const *source, std::size_t n) noexcept {
@@ -911,8 +911,8 @@ class range_rsplits {
         iterator(string_view_type haystack, matcher_type matcher) noexcept
             : start_(haystack.data()), end_(haystack.data() + haystack.size()), match_length_(0), matcher_(matcher) {
             auto position = matcher_(haystack);
-            match_length_ =
-                position != string_type::npos ? haystack.size() - position - matcher_.needle_length() : haystack.size();
+            match_length_ = position != string_type::npos ? haystack.size() - position - matcher_.needle_length()
+                                                          : haystack.size();
         }
 
         iterator(string_view_type, matcher_type matcher, end_sentinel_type) noexcept
@@ -1185,10 +1185,10 @@ class range_utf8_line_splits {
             : start_(text.data()), end_(text.data() + text.size()), match_length_(0) {
             // Find first segment length
             size_type newline_length = 0;
-            char const *newline_ptr =
-                sz_utf8_find_newline(start_, static_cast<size_type>(end_ - start_), &newline_length);
-            match_length_ =
-                newline_ptr ? static_cast<size_type>(newline_ptr - start_) : static_cast<size_type>(end_ - start_);
+            char const *newline_ptr = sz_utf8_find_newline(start_, static_cast<size_type>(end_ - start_),
+                                                           &newline_length);
+            match_length_ = newline_ptr ? static_cast<size_type>(newline_ptr - start_)
+                                        : static_cast<size_type>(end_ - start_);
         }
         iterator(string_view_type text, end_sentinel_type) noexcept
             : start_(text.data() + text.size() + 1), end_(text.data() + text.size()), match_length_(0) {}
@@ -2255,7 +2255,7 @@ class basic_string_slice {
 #pragma region Character Set Arguments
     /**
      *  @brief Find the first occurrence of a character from a @p `set`.
-     *  @param[in] skip Number of characters to skip before the search.
+     *  @param skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(byteset set, size_type skip = 0) const noexcept {
@@ -2265,7 +2265,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence of a character outside a @p `set`.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_not_of(byteset set, size_type skip = 0) const noexcept {
@@ -2287,7 +2287,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character from a @p `set`.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(byteset set, size_type until) const noexcept {
         auto len = sz_min_of_two(until + 1, length_);
@@ -2297,7 +2297,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character outside a @p `set`.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return find_last_of(set.inverted(), until);
@@ -2305,7 +2305,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
-     *  @param[out] match_length Length of the matched newline sequence.
+     *  @param match_length Length of the matched newline sequence.
      */
     size_type find_newline_utf8(size_type &match_length) const noexcept {
         auto ptr = sz_utf8_find_newline(start_, length_, &match_length);
@@ -2314,7 +2314,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
-     *  @param[out] match_length Length of the matched whitespace sequence.
+     *  @param match_length Length of the matched whitespace sequence.
      */
     size_type find_whitespace_utf8(size_type &match_length) const noexcept {
         auto ptr = sz_utf8_find_whitespace(start_, length_, &match_length);
@@ -2323,7 +2323,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence Unicode newline in UTF-8 encoding.
-     *  @param[out] match_length Length of the matched newline sequence.
+     *  @param match_length Length of the matched newline sequence.
      */
     size_type find_newline_utf8() const noexcept {
         size_type match_length;
@@ -2332,7 +2332,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence Unicode whitespace in UTF-8 encoding.
-     *  @param[out] match_length Length of the matched whitespace sequence.
+     *  @param match_length Length of the matched whitespace sequence.
      */
     size_type find_whitespace_utf8() const noexcept {
         size_type match_length;
@@ -2347,7 +2347,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the byte offset of the Nth UTF-8 character.
-     *  @param[in] n Zero-indexed character position.
+     *  @param n Zero-indexed character position.
      *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
      */
     size_type utf8_find_nth(size_type n) const noexcept {
@@ -2393,7 +2393,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the byte offset of the first occurrence of a pre-compiled case-insensitive pattern.
-     *  @param[in] needle A pre-compiled pattern with cached metadata for efficient repeated searches.
+     *  @param needle A pre-compiled pattern with cached metadata for efficient repeated searches.
      *  @return Match info with offset and length, or @c npos offset if not found.
      */
     template <typename needle_char_type_>
@@ -2435,7 +2435,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence of a character from the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      */
     size_type find_first_of(string_view other, size_type skip = 0) const noexcept {
         return find_first_of(other.as_set(), skip);
@@ -2443,7 +2443,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence of a character missing in the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      */
     size_type find_first_not_of(string_view other, size_type skip = 0) const noexcept {
         return find_first_not_of(other.as_set(), skip);
@@ -2451,7 +2451,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character from the @p `other` string.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(string_view other, size_type until = npos) const noexcept {
         return find_last_of(other.as_set(), until);
@@ -2459,7 +2459,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character missing in the @p `other` string.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_not_of(string_view other, size_type until = npos) const noexcept {
         return find_last_not_of(other.as_set(), until);
@@ -2470,7 +2470,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence of a character from the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(const_pointer other, size_type skip, size_type count) const noexcept {
@@ -2479,7 +2479,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the first occurrence of a character missing in the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
@@ -2488,7 +2488,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character from the @p `other` string.
-     *  @param[in] until The number of first characters to be considered.
+     *  @param until The number of first characters to be considered.
      */
     size_type find_last_of(const_pointer other, size_type until, size_type count) const noexcept {
         return find_last_of(string_view(other, count), until);
@@ -2496,7 +2496,7 @@ class basic_string_slice {
 
     /**
      *  @brief Find the last occurrence of a character missing in the @p `other` string.
-     *  @param[in] until The number of first characters to be considered.
+     *  @param until The number of first characters to be considered.
      */
     size_type find_last_not_of(const_pointer other, size_type until, size_type count) const noexcept {
         return find_last_not_of(string_view(other, count), until);
@@ -3270,14 +3270,14 @@ class basic_string {
 
     /**
      *  @brief Find the first occurrence of a character from a @p `set`.
-     *  @param[in] skip Number of characters to skip before the search.
+     *  @param skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(byteset set, size_type skip = 0) const noexcept { return view().find_first_of(set, skip); }
 
     /**
      *  @brief Find the first occurrence of a character outside a @p `set`.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_not_of(byteset set, size_type skip = 0) const noexcept {
@@ -3292,13 +3292,13 @@ class basic_string {
 
     /**
      *  @brief Find the last occurrence of a character from a @p `set`.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(byteset set, size_type until) const noexcept { return view().find_last_of(set, until); }
 
     /**
      *  @brief Find the last occurrence of a character outside a @p `set`.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return view().find_last_not_of(set, until);
@@ -3309,7 +3309,7 @@ class basic_string {
 
     /**
      *  @brief Find the first occurrence of a character from the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      */
     size_type find_first_of(string_view other, size_type skip = 0) const noexcept {
         return view().find_first_of(other, skip);
@@ -3317,7 +3317,7 @@ class basic_string {
 
     /**
      *  @brief Find the first occurrence of a character outside the @p `other` string.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      */
     size_type find_first_not_of(string_view other, size_type skip = 0) const noexcept {
         return view().find_first_not_of(other, skip);
@@ -3325,7 +3325,7 @@ class basic_string {
 
     /**
      *  @brief Find the last occurrence of a character from the @p `other` string.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(string_view other, size_type until = npos) const noexcept {
         return view().find_last_of(other, until);
@@ -3333,7 +3333,7 @@ class basic_string {
 
     /**
      *  @brief Find the last occurrence of a character outside the @p `other` string.
-     *  @param[in] until The offset of the last character to be considered.
+     *  @param until The offset of the last character to be considered.
      */
     size_type find_last_not_of(string_view other, size_type until = npos) const noexcept {
         return view().find_last_not_of(other, until);
@@ -3344,7 +3344,7 @@ class basic_string {
 
     /**
      *  @brief Find the first occurrence of a character from a set.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(const_pointer other, size_type skip, size_type count) const noexcept {
@@ -3353,7 +3353,7 @@ class basic_string {
 
     /**
      *  @brief Find the first occurrence of a character outside a set.
-     *  @param[in] skip The number of first characters to be skipped.
+     *  @param skip The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
@@ -3362,7 +3362,7 @@ class basic_string {
 
     /**
      *  @brief Find the last occurrence of a character from a set.
-     *  @param[in] until The number of first characters to be considered.
+     *  @param until The number of first characters to be considered.
      */
     size_type find_last_of(const_pointer other, size_type until, size_type count) const noexcept {
         return view().find_last_of(other, until, count);
@@ -3370,7 +3370,7 @@ class basic_string {
 
     /**
      *  @brief Find the last occurrence of a character outside a set.
-     *  @param[in] until The number of first characters to be considered.
+     *  @param until The number of first characters to be considered.
      */
     size_type find_last_not_of(const_pointer other, size_type until, size_type count) const noexcept {
         return view().find_last_not_of(other, until, count);
@@ -3413,8 +3413,8 @@ class basic_string {
 
     /**
      *  @brief Resizes the string to a specified number of characters, padding with the specified character if needed.
-     *  @param[in] count The new size of the string.
-     *  @param[in] character The character to fill new elements with, if expanding. Defaults to null character.
+     *  @param count The new size of the string.
+     *  @param character The character to fill new elements with, if expanding. Defaults to null character.
      *  @return `true` if the resizing was successful, `false` otherwise.
      */
     bool try_resize(size_type count, value_type character = '\0') noexcept;
@@ -3432,7 +3432,7 @@ class basic_string {
 
     /**
      *  @brief Attempts to reserve enough space for a specified number of characters.
-     *  @param[in] capacity The new capacity to reserve.
+     *  @param capacity The new capacity to reserve.
      *  @return `true` if the reservation was successful, `false` otherwise.
      */
     bool try_reserve(size_type capacity) noexcept {
@@ -3444,14 +3444,14 @@ class basic_string {
 
     /**
      *  @brief Assigns a new value to the string, replacing its current contents.
-     *  @param[in] other The string view whose contents to assign.
+     *  @param other The string view whose contents to assign.
      *  @return `true` if the assignment was successful, `false` otherwise.
      */
     bool try_assign(string_view other) noexcept;
 
     /**
      *  @brief Assigns a concatenated sequence to the string, replacing its current contents.
-     *  @param[in] other The concatenation object representing the sequence to assign.
+     *  @param other The concatenation object representing the sequence to assign.
      *  @return `true` if the assignment was successful, `false` otherwise.
      */
     template <typename first_type_, typename second_type_>
@@ -3459,22 +3459,22 @@ class basic_string {
 
     /**
      *  @brief Attempts to add a single character to the end of the string.
-     *  @param[in] c The character to add.
+     *  @param c The character to add.
      *  @return `true` if the character was successfully added, `false` otherwise.
      */
     bool try_push_back(char_type c) noexcept;
 
     /**
      *  @brief Attempts to append a given character array to the string.
-     *  @param[in] str The pointer to the array of characters to append.
-     *  @param[in] length The number of characters to append.
+     *  @param str The pointer to the array of characters to append.
+     *  @param length The number of characters to append.
      *  @return `true` if the append operation was successful, `false` otherwise.
      */
     bool try_append(const_pointer str, size_type length) noexcept;
 
     /**
      *  @brief Attempts to append a string view to the string.
-     *  @param[in] str The string view to append.
+     *  @param str The string view to append.
      *  @return `true` if the append operation was successful, `false` otherwise.
      */
     bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
@@ -3534,8 +3534,8 @@ class basic_string {
     /**
      *  @brief Resizes the string to a specified number of characters without initializing new elements.
      *         The provided callback is called to overwrite the contents of the resized string.
-     *  @param[in] count The new size of the string.
-     *  @param[in] operation A callback that receives a pointer and the new size, and returns the actual new size.
+     *  @param count The new size of the string.
+     *  @param operation A callback that receives a pointer and the new size, and returns the actual new size.
      *  @return `true` if the resizing was successful, `false` otherwise.
      *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
      */
@@ -3617,8 +3617,8 @@ class basic_string {
     /**
      *  @brief Resizes the string to a specified number of characters without initializing new elements.
      *         The provided callback is called to overwrite the contents of the resized string.
-     *  @param[in] count The new size of the string.
-     *  @param[in] operation A callback that receives a pointer and the new size, and returns the actual new size.
+     *  @param count The new size of the string.
+     *  @param operation A callback that receives a pointer and the new size, and returns the actual new size.
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
      *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
@@ -4079,7 +4079,7 @@ class basic_string {
 
     /**
      *  @brief Overwrites the string with random binary data.
-     *  @param[in] nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
+     *  @param nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      */
     basic_string &fill_random(sz_u64_t nonce) noexcept {
         sz_ptr_t start;
@@ -4104,8 +4104,8 @@ class basic_string {
 
     /**
      *  @brief Generate a new random binary string of given @p length.
-     *  @param[in] length The length of the generated string.
-     *  @param[in] nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
+     *  @param length The length of the generated string.
+     *  @param nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     static basic_string random(size_type length, sz_u64_t nonce) noexcept(false) {
@@ -4114,7 +4114,7 @@ class basic_string {
 
     /**
      *  @brief Generate a new random binary string of given @p length.
-     *  @param[in] length The length of the generated string.
+     *  @param length The length of the generated string.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').fill_random(); }
@@ -4180,7 +4180,7 @@ class basic_string {
 
     /**
      *  @brief Maps all characters in the current string into the @p output buffer using the provided lookup @p table.
-     *  @param[in] output The buffer to write the transformed string into.
+     *  @param output The buffer to write the transformed string into.
      *  @sa sz_lookup
      */
     void lookup(look_up_table const &table, pointer output) const noexcept {
@@ -4612,8 +4612,8 @@ typename concatenation_result<first_type_, second_type_, following_types_...>::t
 
 /**
  *  @brief Overwrites the @p string slice with random bytes.
- *  @param[in] string The string to overwrite.
- *  @param[in] nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
+ *  @param string The string to overwrite.
+ *  @param nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
  *  @sa sz_fill_random
  */
 template <typename char_type_>
@@ -4624,7 +4624,7 @@ void fill_random(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept
 
 /**
  *  @brief Overwrites the @p string slice with random bytes using `std::rand` for the nonce.
- *  @param[in] string The string to overwrite.
+ *  @param string The string to overwrite.
  *  @sa sz_fill_random
  */
 template <typename char_type_>
@@ -4685,10 +4685,10 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
  *         Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
  *  @sa sz_sequence_argsort
  *
- *  @param[in] begin The pointer to the first element of the array.
- *  @param[in] end The pointer to the element after the last element of the array.
- *  @param[in] extractor The function object that extracts the string from the object.
- *  @param[out] order The pointer to the output array of indices, that will be populated with the permutation.
+ *  @param begin The pointer to the first element of the array.
+ *  @param end The pointer to the element after the last element of the array.
+ *  @param extractor The function object that extracts the string from the object.
+ *  @param order The pointer to the output array of indices, that will be populated with the permutation.
  */
 template <typename container_type_, typename string_extractor_>
 status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor,
@@ -4712,14 +4712,14 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
  *  @brief Locates the positions of the elements in 2 deduplicated string arrays that have identical values.
  *  @sa sz_sequence_intersect
  *
- *  @param[in] first_begin The pointer to the first element of the first array.
- *  @param[in] first_end The pointer to the element after the last element of the first array.
- *  @param[in] second_begin The pointer to the first element of the second array.
- *  @param[in] second_end The pointer to the element after the last element of the second array.
- *  @param[out] first_positions The pointer to the output array of indices from the first array.
- *  @param[out] second_positions The pointer to the output array of indices from the second array.
- *  @param[in] first_extractor The function object that extracts the string from the object in the first array.
- *  @param[in] second_extractor The function object that extracts the string from the object in the second array.
+ *  @param first_begin The pointer to the first element of the first array.
+ *  @param first_end The pointer to the element after the last element of the first array.
+ *  @param second_begin The pointer to the first element of the second array.
+ *  @param second_end The pointer to the element after the last element of the second array.
+ *  @param first_positions The pointer to the output array of indices from the first array.
+ *  @param second_positions The pointer to the output array of indices from the second array.
+ *  @param first_extractor The function object that extracts the string from the object in the first array.
+ *  @param second_extractor The function object that extracts the string from the object in the second array.
  */
 template <typename first_container_, typename second_container_, typename first_extractor_, typename second_extractor_>
 status_t try_intersect(                                                                   //
