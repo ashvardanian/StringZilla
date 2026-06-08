@@ -315,29 +315,16 @@ SZ_INTERNAL __m256i sz_utf8_wb_classify_lasx_(__m256i bytes_vec) {
 // 32-bit mask: bit i set when position base+i is a proven non-boundary (safe interior of a letter/digit run).
 SZ_INTERNAL sz_u32_t sz_utf8_wb_safe_mask_lasx_(sz_cptr_t text, sz_size_t base) {
     sz_u8_t const *text_bytes = (sz_u8_t const *)text;
-    __m256i bytes_vec = __lasx_xvld(text_bytes + base, 0);
-    __m256i classes_vec = sz_utf8_wb_classify_lasx_(bytes_vec);
-    // Position i is a proven non-boundary when its class equals the class of byte i-1 and both are
-    // letter(0)/digit(1). LASX cross-128-bit-lane byte shifts are awkward, so we store the vector-computed
-    // classes and fold them against the previous byte's class scalar-side (cheap relative to the 32-wide
-    // classification above). The class of byte (base-1) seeds lane 0.
-    sz_u8_t class_bytes[32];
-    __lasx_xvst(classes_vec, class_bytes, 0);
-    sz_u8_t previous_class = 2;
-    {
-        sz_u8_t previous_byte = text_bytes[base - 1];
-        if (previous_byte >= 0x80) previous_class = 3;
-        else if (previous_byte >= '0' && previous_byte <= '9')
-            previous_class = 1;
-        else if ((previous_byte >= 'A' && previous_byte <= 'Z') || (previous_byte >= 'a' && previous_byte <= 'z'))
-            previous_class = 0;
-    }
-    sz_u32_t safe_mask = 0;
-    for (sz_size_t i = 0; i < 32; ++i) {
-        sz_u8_t predecessor_class = (i == 0) ? previous_class : class_bytes[i - 1];
-        if (class_bytes[i] == predecessor_class && class_bytes[i] <= 1) safe_mask |= (sz_u32_t)1 << i;
-    }
-    return safe_mask;
+    // Position base+i is a proven non-boundary when its class equals the class of byte base+i-1 and both are
+    // letter(0)/digit(1). Rather than store the class window and walk it scalar-side, we classify a SECOND
+    // window loaded one byte earlier: its lane i holds the class of byte base+i-1 — exactly the per-lane
+    // predecessor, lane 0 included. Callers guarantee base >= 1 and base+32 <= length, so both loads are
+    // in-bounds (see `sz_utf8_word_find_boundary_lasx` / `_rfind_`).
+    __m256i classes_vec = sz_utf8_wb_classify_lasx_(__lasx_xvld(text_bytes + base, 0));
+    __m256i predecessor_vec = sz_utf8_wb_classify_lasx_(__lasx_xvld(text_bytes + base - 1, 0));
+    __m256i same_class_vec = __lasx_xvseq_b(classes_vec, predecessor_vec);          // class[i] == class[i-1]
+    __m256i word_class_vec = __lasx_xvsle_bu(classes_vec, __lasx_xvreplgr2vr_b(1)); // class[i] in {letter, digit}
+    return sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(same_class_vec, word_class_vec));
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {

@@ -48,10 +48,12 @@ SZ_PUBLIC sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t length) {
             long_sums_vec = __lasx_xvadd_d(long_sums_vec, __lasx_xvhaddw_du_wu(widened_to_u32, widened_to_u32));
         }
 
-        // Reduce the 4 accumulated 64-bit lanes.
-        sz_u64_t result =
-            (sz_u64_t)__lasx_xvpickve2gr_du(long_sums_vec, 0) + (sz_u64_t)__lasx_xvpickve2gr_du(long_sums_vec, 1) +
-            (sz_u64_t)__lasx_xvpickve2gr_du(long_sums_vec, 2) + (sz_u64_t)__lasx_xvpickve2gr_du(long_sums_vec, 3);
+        // Reduce the 4 accumulated 64-bit lanes. `xvhaddw_q_d` folds adjacent doublewords into the two
+        // 128-bit quadword lanes (lane 0 = sums[0]+sums[1], lane 1 = sums[2]+sums[3]), so a single op
+        // replaces two of the four vector->GPR extracts the naive 4-way sum would need.
+        __m256i pairwise_sums_vec = __lasx_xvhaddw_q_d(long_sums_vec, long_sums_vec);
+        sz_u64_t result = (sz_u64_t)__lasx_xvpickve2gr_du(pairwise_sums_vec, 0) +
+                          (sz_u64_t)__lasx_xvpickve2gr_du(pairwise_sums_vec, 2);
         if (length) result += sz_bytesum_serial(text, length);
         return result;
     }
@@ -360,8 +362,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
+        data0_vec.lsx = __lsx_vld(start, 0);
+        data1_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_minimal_update_lasx_(&state, data0_vec);
         sz_hash_minimal_update_lasx_(&state, data1_vec);
@@ -371,9 +373,9 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
+        data0_vec.lsx = __lsx_vld(start, 0);
+        data1_vec.lsx = __lsx_vld(start + 16, 0);
+        data2_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_minimal_update_lasx_(&state, data0_vec);
         sz_hash_minimal_update_lasx_(&state, data1_vec);
@@ -384,10 +386,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
+        data0_vec.lsx = __lsx_vld(start, 0);
+        data1_vec.lsx = __lsx_vld(start + 16, 0);
+        data2_vec.lsx = __lsx_vld(start + 32, 0);
+        data3_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_minimal_update_lasx_(&state, data0_vec);
         sz_hash_minimal_update_lasx_(&state, data1_vec);
@@ -399,11 +401,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_lasx(&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            for (sz_size_t i = 0; i < 64; ++i) state.ins[i] = start[state.ins_length + i];
+            __lasx_xvst(__lasx_xvld(start + state.ins_length, 0), state.ins, 0);
+            __lasx_xvst(__lasx_xvld(start + state.ins_length + 32, 0), state.ins + 32, 0);
             sz_hash_state_update_lasx_(&state);
         }
         if (state.ins_length < length) {
-            for (sz_size_t i = 0; i != 64; ++i) state.ins[i] = 0;
+            __m256i zero_vec = __lasx_xvreplgr2vr_b(0);
+            __lasx_xvst(zero_vec, state.ins, 0);
+            __lasx_xvst(zero_vec, state.ins + 32, 0);
             for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
                 state.ins[i] = start[state.ins_length];
             sz_hash_state_update_lasx_(&state);
@@ -463,7 +468,9 @@ SZ_PUBLIC void sz_hash_state_update_lasx(sz_hash_state_t *state, sz_cptr_t text,
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_lasx_(state);
-            for (sz_size_t i = 0; i < 64; ++i) state->ins[i] = 0;
+            __m256i zero_vec = __lasx_xvreplgr2vr_b(0);
+            __lasx_xvst(zero_vec, state->ins, 0);
+            __lasx_xvst(zero_vec, state->ins + 32, 0);
         }
     }
 }
@@ -518,14 +525,152 @@ SZ_PUBLIC void sz_fill_random_lasx(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
-SZ_PUBLIC void sz_sha256_state_init_lasx(sz_sha256_state_t *state) { sz_sha256_state_init_serial(state); }
+/*  SHA-256 with a SIMD-vectorized message schedule.
+ *
+ *  The compression rounds are inherently sequential (each updates `a..h` from the previous round), so for a
+ *  single message they cannot be vectorized — that part stays scalar and identical to the serial reference.
+ *  The @b message @b schedule, however, is a fixed recurrence we can compute four words at a time in 128-bit
+ *  LSX lanes: `W[t] = sigma1(W[t-2]) + W[t-7] + sigma0(W[t-15]) + W[t-16]`. Within a group of four, `W[t+2]`
+ *  and `W[t+3]` depend on `W[t]`/`W[t+1]` produced by the same group, so we finish in two steps. There is no
+ *  SHA hardware on LoongArch (unlike x86 SHA-NI / Arm `sha256h`); this is a pure-SIMD-ALU acceleration.
+ *
+ *  @see FIPS 180-4 (SHA-256) and J. Guilford et al., "Fast SHA-256 Implementations on Intel Architecture
+ *       Processors" (the standard SIMD message-schedule decomposition this mirrors).
+ *  @see `sz_sha256_process_block_serial_` (hash/serial.h) — the byte-exact oracle this is validated against. */
 
-SZ_PUBLIC void sz_sha256_state_update_lasx(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
-    sz_sha256_state_update_serial(state, data, length);
+/** @brief  Lane-wise SHA-256 lowercase-sigma0: `ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)` over 4x u32. */
+SZ_INTERNAL __m128i sz_sha256_sigma0_lower_lasx_(__m128i words_vec) {
+    return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_vec, 7), __lsx_vrotri_w(words_vec, 18)),
+                        __lsx_vsrli_w(words_vec, 3));
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_lasx(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
-    sz_sha256_state_digest_serial(state, digest);
+/** @brief  Lane-wise SHA-256 lowercase-sigma1: `ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)` over 4x u32. */
+SZ_INTERNAL __m128i sz_sha256_sigma1_lower_lasx_(__m128i words_vec) {
+    return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_vec, 17), __lsx_vrotri_w(words_vec, 19)),
+                        __lsx_vsrli_w(words_vec, 10));
+}
+
+SZ_INTERNAL void sz_sha256_process_block_lasx_(sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(64)]) {
+    sz_u32_t const *round_constants = sz_sha256_round_constants_();
+    sz_align_(16) sz_u32_t message_schedule[64];
+
+    // Load W[0..15]: byte-reverse each 4-byte group (big-endian) with one `vshuf_b` per 16-byte chunk.
+    static
+        sz_align_(16) sz_u8_t const byte_reverse_indices[16] = {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12};
+    __m128i byte_reverse_vec = __lsx_vld(byte_reverse_indices, 0);
+    for (sz_size_t group = 0; group < 4; ++group) {
+        __m128i raw_vec = __lsx_vld(block + group * 16, 0);
+        __lsx_vst(__lsx_vshuf_b(raw_vec, raw_vec, byte_reverse_vec), &message_schedule[group * 4], 0);
+    }
+
+    // Expand W[16..63] four lanes at a time. `low_pair_mask` keeps lanes 0,1 and zeroes lanes 2,3 so that
+    // `sigma1` of the not-yet-computed high pair contributes nothing in step one.
+    __m128i const low_pair_mask = __lsx_vinsgr2vr_d(__lsx_vreplgr2vr_d(-1), 0, 1); // [~0, ~0, 0, 0]
+    for (sz_size_t t = 16; t < 64; t += 4) {
+        __m128i window_16_vec = __lsx_vld(&message_schedule[t - 16], 0); // W[t-16 .. t-13]
+        __m128i window_15_vec = __lsx_vld(&message_schedule[t - 15], 0); // W[t-15 .. t-12]
+        __m128i window_7_vec = __lsx_vld(&message_schedule[t - 7], 0);   // W[t-7  .. t-4]
+        __m128i base_vec =
+            __lsx_vadd_w(__lsx_vadd_w(window_16_vec, sz_sha256_sigma0_lower_lasx_(window_15_vec)), window_7_vec);
+        // Step 1: sigma1 of [W[t-2], W[t-1], 0, 0] finalizes lanes 0,1 (W[t], W[t+1]).
+        __m128i prev_pair_vec = __lsx_vand_v(__lsx_vld(&message_schedule[t - 2], 0), low_pair_mask);
+        __m128i schedule_vec = __lsx_vadd_w(base_vec, sz_sha256_sigma1_lower_lasx_(prev_pair_vec));
+        // Step 2: shift the fresh low pair into lanes 2,3 and add its sigma1 to finalize W[t+2], W[t+3].
+        __m128i new_pair_vec = __lsx_vbsll_v(schedule_vec, 8); // [0, 0, W[t], W[t+1]]
+        schedule_vec = __lsx_vadd_w(schedule_vec, sz_sha256_sigma1_lower_lasx_(new_pair_vec));
+        __lsx_vst(schedule_vec, &message_schedule[t], 0);
+    }
+
+    // Scalar compression — sequential, identical to `sz_sha256_process_block_serial_`.
+    sz_u32_t a = hash[0], b = hash[1], c = hash[2], d = hash[3];
+    sz_u32_t e = hash[4], f = hash[5], g = hash[6], h = hash[7], temp1, temp2;
+    for (sz_size_t i = 0; i < 64; ++i) {
+        temp1 = h + sz_sha256_sigma1_(e) + sz_sha256_ch_(e, f, g) + round_constants[i] + message_schedule[i];
+        temp2 = sz_sha256_sigma0_(a) + sz_sha256_maj_(a, b, c);
+        h = g, g = f, f = e;
+        e = d + temp1;
+        d = c, c = b, b = a;
+        a = temp1 + temp2;
+    }
+    hash[0] += a, hash[1] += b, hash[2] += c, hash[3] += d;
+    hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
+}
+
+SZ_PUBLIC void sz_sha256_state_init_lasx(sz_sha256_state_t *state) { sz_sha256_state_init_serial(state); }
+
+SZ_PUBLIC void sz_sha256_state_update_lasx(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
+    sz_u8_t const *input = (sz_u8_t const *)data;
+    sz_size_t const current_block_index = state_ptr->block_length / 64;
+    sz_size_t const final_block_index = (state_ptr->block_length + length) / 64;
+    int const stays_in_the_block = current_block_index == final_block_index;
+    int const fills_the_block = (state_ptr->block_length + length) % 64 == 0;
+
+    state_ptr->total_length += length;
+
+    // Fast path: stays in the same block and doesn't fill it.
+    if (stays_in_the_block && !fills_the_block) {
+        for (; length; --length, ++state_ptr->block_length, ++input) state_ptr->block[state_ptr->block_length] = *input;
+        return;
+    }
+
+    sz_size_t const head_length = (64 - state_ptr->block_length) % 64;
+    sz_size_t const tail_length = (state_ptr->block_length + length) % 64;
+    sz_size_t const body_length = length - head_length - tail_length;
+
+    sz_align_(32) sz_u32_t hash[8];
+    hash[0] = state_ptr->hash[0], hash[1] = state_ptr->hash[1], hash[2] = state_ptr->hash[2],
+    hash[3] = state_ptr->hash[3], hash[4] = state_ptr->hash[4], hash[5] = state_ptr->hash[5],
+    hash[6] = state_ptr->hash[6], hash[7] = state_ptr->hash[7];
+
+    // Complete the partial block with the head, then run aligned bodies, then buffer the tail.
+    if (head_length) {
+        for (sz_size_t i = 0; i < head_length; ++i) state_ptr->block[state_ptr->block_length++] = input[i];
+        sz_sha256_process_block_lasx_(hash, state_ptr->block);
+        state_ptr->block_length = 0;
+        input += head_length;
+    }
+    for (sz_size_t processed = 0; processed < body_length; processed += 64, input += 64)
+        sz_sha256_process_block_lasx_(hash, input);
+    for (sz_size_t i = 0; i < tail_length; ++i) state_ptr->block[i] = input[i];
+    state_ptr->block_length = tail_length;
+
+    state_ptr->hash[0] = hash[0], state_ptr->hash[1] = hash[1], state_ptr->hash[2] = hash[2],
+    state_ptr->hash[3] = hash[3], state_ptr->hash[4] = hash[4], state_ptr->hash[5] = hash[5],
+    state_ptr->hash[6] = hash[6], state_ptr->hash[7] = hash[7];
+}
+
+SZ_PUBLIC void sz_sha256_state_digest_lasx(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
+    sz_sha256_state_t state = *state_ptr;
+
+    // Append the '1' bit (0x80), then pad with zeros, processing an extra block if the length doesn't fit.
+    state.block[state.block_length++] = 0x80;
+    if (state.block_length > 56) {
+        for (sz_size_t i = state.block_length; i < 64; ++i) state.block[i] = 0;
+        sz_sha256_process_block_lasx_(state.hash, state.block);
+        state.block_length = 0;
+    }
+    for (sz_size_t i = state.block_length; i < 56; ++i) state.block[i] = 0;
+    state.block_length = 56;
+
+    // Append the message length in bits as a 64-bit big-endian integer, then process the final block.
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block[56] = (sz_u8_t)(bit_length >> 56);
+    state.block[57] = (sz_u8_t)(bit_length >> 48);
+    state.block[58] = (sz_u8_t)(bit_length >> 40);
+    state.block[59] = (sz_u8_t)(bit_length >> 32);
+    state.block[60] = (sz_u8_t)(bit_length >> 24);
+    state.block[61] = (sz_u8_t)(bit_length >> 16);
+    state.block[62] = (sz_u8_t)(bit_length >> 8);
+    state.block[63] = (sz_u8_t)(bit_length >> 0);
+    sz_sha256_process_block_lasx_(state.hash, state.block);
+
+    // Emit the digest big-endian.
+    for (sz_size_t i = 0; i < 8; ++i) {
+        digest[i * 4 + 0] = (sz_u8_t)(state.hash[i] >> 24);
+        digest[i * 4 + 1] = (sz_u8_t)(state.hash[i] >> 16);
+        digest[i * 4 + 2] = (sz_u8_t)(state.hash[i] >> 8);
+        digest[i * 4 + 3] = (sz_u8_t)(state.hash[i] >> 0);
+    }
 }
 
 #endif // SZ_USE_LASX
