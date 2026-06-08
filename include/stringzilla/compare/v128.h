@@ -17,9 +17,6 @@ extern "C" {
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("simd128")
 #endif
 
 SZ_PUBLIC sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
@@ -31,28 +28,34 @@ SZ_PUBLIC sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 SZ_PUBLIC sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 16) return sz_equal_serial(a, b, length);
 
-    sz_u128_vec_t a_vec, b_vec;
+    // Per block we `xor` the inputs and test with `wasm_v128_any_true` (a single cheap reduction the
+    // engines lower to one `ptest`), instead of `wasm_i8x16_eq` + `wasm_i8x16_all_true` (a lane
+    // minimum). Four 16-byte differences are OR-ed so a single `any_true` covers a 64-byte stride.
     sz_size_t offset = 0;
-    do {
-        a_vec.v128 = wasm_v128_load(a + offset);
-        b_vec.v128 = wasm_v128_load(b + offset);
-        // `wasm_i8x16_eq` yields 0xFF where bytes match; `wasm_i8x16_all_true` of the equality
-        // mask is true only if every lane matched.
-        if (!wasm_i8x16_all_true(wasm_i8x16_eq(a_vec.v128, b_vec.v128))) return sz_false_k;
+    while (offset + 64 <= length) {
+        v128_t diff_at_0_vec = wasm_v128_xor(wasm_v128_load(a + offset + 0), wasm_v128_load(b + offset + 0));
+        v128_t diff_at_16_vec = wasm_v128_xor(wasm_v128_load(a + offset + 16), wasm_v128_load(b + offset + 16));
+        v128_t diff_at_32_vec = wasm_v128_xor(wasm_v128_load(a + offset + 32), wasm_v128_load(b + offset + 32));
+        v128_t diff_at_48_vec = wasm_v128_xor(wasm_v128_load(a + offset + 48), wasm_v128_load(b + offset + 48));
+        v128_t any_diff_vec =
+            wasm_v128_or(wasm_v128_or(diff_at_0_vec, diff_at_16_vec), wasm_v128_or(diff_at_32_vec, diff_at_48_vec));
+        if (wasm_v128_any_true(any_diff_vec)) return sz_false_k;
+        offset += 64;
+    }
+    while (offset + 16 <= length) {
+        if (wasm_v128_any_true(wasm_v128_xor(wasm_v128_load(a + offset), wasm_v128_load(b + offset))))
+            return sz_false_k;
         offset += 16;
-    } while (offset + 16 <= length);
+    }
 
     // Final overlapping check on the last 16-byte window.
-    a_vec.v128 = wasm_v128_load(a + length - 16);
-    b_vec.v128 = wasm_v128_load(b + length - 16);
-    if (!wasm_i8x16_all_true(wasm_i8x16_eq(a_vec.v128, b_vec.v128))) return sz_false_k;
+    if (wasm_v128_any_true(wasm_v128_xor(wasm_v128_load(a + length - 16), wasm_v128_load(b + length - 16))))
+        return sz_false_k;
     return sz_true_k;
 }
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128
 

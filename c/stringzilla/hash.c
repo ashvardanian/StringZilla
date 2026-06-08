@@ -137,7 +137,19 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 #endif
 
 #if SZ_USE_V128RELAXED
-    if (caps & sz_cap_v128relaxed_k) { impl->bytesum = sz_bytesum_v128relaxed; }
+    if (caps & sz_cap_v128relaxed_k) {
+        impl->bytesum = sz_bytesum_v128relaxed;
+        impl->hash = sz_hash_v128relaxed;
+        impl->hash_state_init = sz_hash_state_init_v128relaxed;
+        impl->hash_state_update = sz_hash_state_update_v128relaxed;
+        impl->hash_state_digest = sz_hash_state_digest_v128relaxed;
+        impl->fill_random = sz_fill_random_v128relaxed;
+        // SHA-256's only permutation is the big-endian byteswap, a compile-time-constant `i8x16.shuffle`
+        // (not a data-dependent table swizzle), so relaxed-SIMD offers nothing here; reuse the SIMD128 path.
+        impl->sha256_state_init = sz_sha256_state_init_v128;
+        impl->sha256_state_update = sz_sha256_state_update_v128;
+        impl->sha256_state_digest = sz_sha256_state_digest_v128;
+    }
 #endif
 
 #if SZ_USE_RVV

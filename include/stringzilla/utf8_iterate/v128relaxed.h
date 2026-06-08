@@ -18,9 +18,6 @@ extern "C" {
 #if SZ_USE_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("relaxed-simd")
 #endif
 
 /*  The UTF-8 kernels are built from `wasm_i8x16_eq`, range compares, `wasm_i8x16_shuffle` rotations,
@@ -46,8 +43,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128relaxed(sz_cptr_t text, sz_size_
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128RELAXED
 

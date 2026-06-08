@@ -17,14 +17,80 @@ extern "C" {
 #if SZ_USE_V128
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("simd128")
 #endif
+
+/*  Branch-light partial load/store of 0..16 bytes — the shared building block for WASM tails, so the
+ *  kernels never fall back to a scalar byte loop and never over-read/over-write past the buffer. WASM
+ *  lane load/store need compile-time-constant lane indices, so the 0..7 byte assembly is a small
+ *  constant-lane switch; the 8..15 case loads the low 8 with `load64_zero` and folds the remaining
+ *  bytes in with one constant `i8x16.shuffle`. Other `v128` backends `#include` this header to reuse
+ *  these (hash short-string loads, `fill_random` tails, …). */
+SZ_INTERNAL v128_t sz_load_partial_lo8_v128_(sz_u8_t const *p, sz_size_t r) {
+    v128_t v = wasm_u64x2_splat(0);
+    switch (r) {
+    case 1: v = wasm_v128_load8_lane(p, v, 0); break;
+    case 2: v = wasm_v128_load16_lane(p, v, 0); break;
+    case 3: v = wasm_v128_load16_lane(p, v, 0); v = wasm_v128_load8_lane(p + 2, v, 2); break;
+    case 4: v = wasm_v128_load32_lane(p, v, 0); break;
+    case 5: v = wasm_v128_load32_lane(p, v, 0); v = wasm_v128_load8_lane(p + 4, v, 4); break;
+    case 6: v = wasm_v128_load32_lane(p, v, 0); v = wasm_v128_load16_lane(p + 4, v, 2); break;
+    case 7:
+        v = wasm_v128_load32_lane(p, v, 0);
+        v = wasm_v128_load16_lane(p + 4, v, 2);
+        v = wasm_v128_load8_lane(p + 6, v, 6);
+        break;
+    default: break;
+    }
+    return v;
+}
+
+/** @brief Load exactly `length` (0..16) bytes into a v128; remaining lanes zero; no over-read. */
+SZ_INTERNAL v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
+    sz_u8_t const *p = (sz_u8_t const *)source;
+    if (length >= 16) return wasm_v128_load(p);
+    if (length & 8) {
+        v128_t lo = wasm_v128_load64_zero(p);
+        v128_t hi = sz_load_partial_lo8_v128_(p + 8, length & 7);
+        return wasm_i8x16_shuffle(lo, hi, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+    }
+    return sz_load_partial_lo8_v128_(p, length);
+}
+
+SZ_INTERNAL void sz_store_partial_lo8_v128_(sz_u8_t *p, v128_t v, sz_size_t r) {
+    switch (r) {
+    case 1: wasm_v128_store8_lane(p, v, 0); break;
+    case 2: wasm_v128_store16_lane(p, v, 0); break;
+    case 3: wasm_v128_store16_lane(p, v, 0); wasm_v128_store8_lane(p + 2, v, 2); break;
+    case 4: wasm_v128_store32_lane(p, v, 0); break;
+    case 5: wasm_v128_store32_lane(p, v, 0); wasm_v128_store8_lane(p + 4, v, 4); break;
+    case 6: wasm_v128_store32_lane(p, v, 0); wasm_v128_store16_lane(p + 4, v, 2); break;
+    case 7:
+        wasm_v128_store32_lane(p, v, 0);
+        wasm_v128_store16_lane(p + 4, v, 2);
+        wasm_v128_store8_lane(p + 6, v, 6);
+        break;
+    default: break;
+    }
+}
+
+/** @brief Store exactly `length` (0..16) bytes from a v128; no over-write past the buffer. */
+SZ_INTERNAL void sz_store_partial_v128_(sz_ptr_t dst, v128_t v, sz_size_t length) {
+    sz_u8_t *p = (sz_u8_t *)dst;
+    if (length >= 16) {
+        wasm_v128_store(p, v);
+        return;
+    }
+    if (length & 8) {
+        wasm_v128_store64_lane(p, v, 0);
+        v128_t hi = wasm_i8x16_shuffle(v, v, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7);
+        sz_store_partial_lo8_v128_(p + 8, hi, length & 7);
+    }
+    else { sz_store_partial_lo8_v128_(p, v, length); }
+}
 
 SZ_PUBLIC void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 16; target += 16, source += 16, length -= 16) wasm_v128_store(target, wasm_v128_load(source));
-    if (length) sz_copy_serial(target, source, length);
+    if (length) sz_store_partial_v128_(target, sz_load_partial_v128_(source, length), length);
 }
 
 SZ_PUBLIC void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -54,7 +120,7 @@ SZ_PUBLIC void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
         target += 16;
         length -= 16;
     }
-    if (length) sz_fill_serial(target, length, value);
+    if (length) sz_store_partial_v128_(target, fill_vec, length);
 }
 
 SZ_PUBLIC void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
@@ -111,8 +177,6 @@ SZ_PUBLIC void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128
 

@@ -1,31 +1,52 @@
-# Clang cross-compilation toolchain for WebAssembly (wasm32) with SIMD128.
+# Clang cross-compilation toolchain for WebAssembly (wasm32) with SIMD128 + relaxed-SIMD.
 #
-# WebAssembly has no full libc/loader in this environment that CMake's compiler checks expect, so this toolchain is
-# intended for *compile-checking* the headers (and a self-contained probe), NOT for driving the full CMake test/library
-# suite. Functional WASM validation compiles the kernel-vs-serial probe against the wasi-sdk sysroot and runs it under
-# wasmtime + node for both `-msimd128` (v128) and `-msimd128 -mrelaxed-simd` (v128relaxed).
+# Usage: cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/wasm32.cmake ... ; ctest --test-dir build_wasm
+# # builds the wasm32 test binaries and runs each .wasm under the selected runtime via CTest.
+#
+# Pick the runtime with -DSZ_WASM_RUNTIME=wasmtime (default) or =wasmer; both execute a `.wasm` WASI command
+# directly, so CTest can use them as a CMAKE_CROSSCOMPILING_EMULATOR with no wrapper script. (node cannot run a
+# bare `.wasm` from the CLI, so it is intentionally not wired here.)
+#
+# Requires the wasi-sdk (self-contained clang + wasi-sysroot + libc). Point at it with -DWASI_SDK_PREFIX=... or the
+# WASI_SDK_PREFIX environment variable; the default falls back to ~/wasi-sdk then /opt/wasi-sdk. Using the wasi-sdk
+# clang keeps the toolchain dependency-free: no merged resource directory, no separate builtins archive.
 
 set(CMAKE_SYSTEM_NAME WASI)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
 
-set(CMAKE_C_COMPILER clang-23)
-set(CMAKE_CXX_COMPILER clang++-23)
+# Locate the wasi-sdk (cache var > environment > common install locations).
+if(NOT DEFINED WASI_SDK_PREFIX)
+    if(DEFINED ENV{WASI_SDK_PREFIX})
+        set(WASI_SDK_PREFIX "$ENV{WASI_SDK_PREFIX}")
+    elseif(EXISTS "$ENV{HOME}/wasi-sdk/bin/clang")
+        set(WASI_SDK_PREFIX "$ENV{HOME}/wasi-sdk")
+    else()
+        set(WASI_SDK_PREFIX "/opt/wasi-sdk")
+    endif()
+endif()
 
-# A wasi-sdk sysroot supplies libc; clang-23's own resource dir lacks the wasm builtins archive, so we redirect the
-# resource dir to one that combines clang-23 headers with the wasi-sdk builtins.
-set(SZ_WASI_SYSROOT /home/ubuntu/wasi-sdk/share/wasi-sysroot)
-set(SZ_WASM_RESOURCE_DIR /home/ubuntu/.sz-wasm-resource)
+set(CMAKE_C_COMPILER "${WASI_SDK_PREFIX}/bin/clang")
+set(CMAKE_CXX_COMPILER "${WASI_SDK_PREFIX}/bin/clang++")
+set(SZ_SYSROOT "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 
-set(SZ_TARGET_FLAGS
-    "--target=wasm32-wasip1 --sysroot=${SZ_WASI_SYSROOT} -resource-dir=${SZ_WASM_RESOURCE_DIR} -msimd128"
-)
-
+# `-msimd128` defines `__wasm_simd128__` so `SZ_USE_V128` auto-detects to 1 in types.h; `-mrelaxed-simd` likewise
+# enables `SZ_USE_V128RELAXED`. Both backends are therefore exercised by the same build.
+set(SZ_TARGET_FLAGS "--target=wasm32-wasip1 --sysroot=${SZ_SYSROOT} -msimd128 -mrelaxed-simd")
 set(CMAKE_C_FLAGS_INIT "${SZ_TARGET_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${SZ_TARGET_FLAGS}")
 
-set(CMAKE_CROSSCOMPILING_EMULATOR "/home/ubuntu/.wasmtime/bin/wasmtime")
+# Choose the runtime that CTest invokes on each cross binary.
+set(SZ_WASM_RUNTIME "wasmtime" CACHE STRING "WASM runtime used to run tests via CTest (wasmtime or wasmer)")
+if(SZ_WASM_RUNTIME STREQUAL "wasmer")
+    find_program(SZ_WASMER wasmer PATHS "$ENV{HOME}/.cargo/bin" "$ENV{HOME}/.wasmer/bin")
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${SZ_WASMER};run")
+else()
+    find_program(SZ_WASMTIME wasmtime PATHS "$ENV{HOME}/.wasmtime/bin")
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${SZ_WASMTIME}")
+endif()
 
-set(CMAKE_FIND_ROOT_PATH ${SZ_WASI_SYSROOT})
+# Look for headers/libraries inside the target sysroot, host tools on the host.
+set(CMAKE_FIND_ROOT_PATH ${SZ_SYSROOT})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

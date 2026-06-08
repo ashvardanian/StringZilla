@@ -24,9 +24,6 @@ extern "C" {
  *  sequence straddling the boundary is re-examined. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("simd128")
 #endif
 
 SZ_INTERNAL v128_t sz_utf8_rotate1_wasm_(v128_t v) {
@@ -40,7 +37,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
 
     sz_u128_vec_t text_vec;
     v128_t n_vec = wasm_i8x16_splat('\n');
-    v128_t v_vec = wasm_i8x16_splat('\v');
     v128_t f_vec = wasm_i8x16_splat('\f');
     v128_t r_vec = wasm_i8x16_splat('\r');
     v128_t x_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
@@ -57,12 +53,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
     while (length >= 16) {
         text_vec.v128 = wasm_v128_load(text);
 
-        // 1-byte matches
-        v128_t n_cmp = wasm_i8x16_eq(text_vec.v128, n_vec);
-        v128_t v_cmp = wasm_i8x16_eq(text_vec.v128, v_vec);
-        v128_t f_cmp = wasm_i8x16_eq(text_vec.v128, f_vec);
+        // 1-byte matches: the contiguous control range '\n'..'\f' as one range compare (instead of
+        // three separate equalities), plus '\r' which is masked at the last lane for the `\r\n` rule.
+        v128_t nvf_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, n_vec), wasm_u8x16_le(text_vec.v128, f_vec));
         v128_t r_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, r_vec), drop1_vec); // mask out \r at pos 15
-        v128_t one_byte_cmp = wasm_v128_or(wasm_v128_or(n_cmp, v_cmp), wasm_v128_or(f_cmp, r_cmp));
+        v128_t one_byte_cmp = wasm_v128_or(nvf_cmp, r_cmp);
 
         // 2- & 3-byte matches with shifted views
         v128_t text1 = sz_utf8_rotate1_wasm_(text_vec.v128);
@@ -83,7 +78,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
             sz_u32_t three_mask = (sz_u32_t)wasm_i8x16_bitmask(three_byte_cmp);
             sz_u32_t combined_mask = one_byte_mask | two_mask | three_mask;
 
-            int bit_index = __builtin_ctz(combined_mask);
+            int bit_index = sz_u32_ctz(combined_mask);
             sz_u32_t first_match_mask = (sz_u32_t)1 << bit_index;
             sz_size_t length_value = 1;
             length_value += (first_match_mask & (two_mask | three_mask)) != 0;
@@ -147,8 +142,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
             continue;
         }
         else if (one_byte_mask) {
-            int first_one_byte_offset = __builtin_ctz(one_byte_mask);
-            int first_prefix_offset = __builtin_ctz(prefix_byte_mask);
+            int first_one_byte_offset = sz_u32_ctz(one_byte_mask);
+            int first_prefix_offset = sz_u32_ctz(prefix_byte_mask);
             if (first_one_byte_offset < first_prefix_offset) {
                 *matched_length = 1;
                 return text + first_one_byte_offset;
@@ -189,7 +184,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
         sz_u32_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
 
         if (combined_mask) {
-            int bit_index = __builtin_ctz(combined_mask);
+            int bit_index = sz_u32_ctz(combined_mask);
             sz_u32_t first_match_mask = (sz_u32_t)1 << bit_index;
             sz_size_t length_value = 1;
             length_value += (first_match_mask & (two_byte_mask | three_byte_mask)) != 0;
@@ -206,14 +201,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
 
 SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    v128_t continuation_mask_vec = wasm_i8x16_splat((sz_i8_t)0xC0);
-    v128_t continuation_pattern_vec = wasm_i8x16_splat((sz_i8_t)0x80);
+    // A continuation byte satisfies `(byte & 0xC0) == 0x80`, i.e. it lies in `[0x80, 0xBF]`, which as a
+    // SIGNED int8 is `[-128, -65]` — exactly the values strictly less than `0xC0` (= -64). So a single
+    // signed compare `byte < 0xC0` flags continuation bytes, replacing the `and` + `eq` pair.
+    v128_t continuation_threshold_vec = wasm_i8x16_splat((sz_i8_t)0xC0);
 
-    // The UTF-8 code-point count equals (#bytes - #continuation bytes), where a continuation byte
-    // satisfies `(byte & 0xC0) == 0x80`. Instead of a per-block `bitmask` + `popcount` horizontal
-    // reduction, we keep a per-lane counter in a vector register: `wasm_i8x16_eq` yields 0xFF (= -1)
-    // for each continuation lane, so SUBTRACTING it adds +1 per match. A u8 lane can hold up to 255
-    // matches, so we flush into a wider u64 accumulator every 255 blocks and reduce ONCE at the end.
+    // The UTF-8 code-point count equals (#bytes - #continuation bytes). Instead of a per-block
+    // `bitmask` + `popcount` horizontal reduction, we keep a per-lane counter in a vector register:
+    // the compare yields 0xFF (= -1) for each continuation lane, so SUBTRACTING it adds +1 per match.
+    // A u8 lane can hold up to 255 matches, so we flush into a wider u64 accumulator every 255 blocks
+    // and reduce ONCE at the end.
     sz_size_t total_bytes = (length / 16) * 16;
     sz_u128_vec_t cont8_vec, cont64_vec;
     cont8_vec.v128 = wasm_u64x2_splat(0);  // 16x u8 per-lane match counters
@@ -225,8 +222,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
         length -= blocks * 16;
         for (sz_size_t i = 0; i < blocks; ++i, text_u8 += 16) {
             v128_t text_vec = wasm_v128_load(text_u8);
-            v128_t headers_vec = wasm_v128_and(text_vec, continuation_mask_vec);
-            v128_t continuation_vec = wasm_i8x16_eq(headers_vec, continuation_pattern_vec);
+            v128_t continuation_vec = wasm_i8x16_lt(text_vec, continuation_threshold_vec);
             // `continuation_vec` lane is 0xFF (-1) on a match; subtract to increment the counter.
             cont8_vec.v128 = wasm_i8x16_sub(cont8_vec.v128, continuation_vec);
         }
@@ -297,63 +293,29 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
  *  through the *interior* of long ASCII/Latin words and numbers — every byte there is a non-boundary,
  *  yet the serial scanner pays a full property lookup + rule cascade per byte.
  *
- *  We accelerate exactly that case. The Word_Break property of an ASCII byte is one of a handful of
- *  contiguous ranges (digits, A-Z, a-z, '_' = ExtendNumLet, control chars, mid punctuation). We
- *  classify 16 bytes at once with a short range-compare cascade (`sz_wb_classify_ascii_v128_`). For a
- *  candidate at byte offset `i`, if both `prop(byte[i-1])` and `prop(byte[i])` fall in the
- *  word-interior set {ALetter, Numeric, ExtendNumLet}, then *every* UAX-29 rule that could fire
- *  (WB5/8/9/10/13a/13b and their context-needing siblings) resolves to "do NOT break" — verified
+ *  We accelerate exactly that case. The word-interior set is exactly the ASCII bytes {A-Z, a-z, 0-9,
+ *  '_' = ExtendNumLet}, which `sz_wb_interior_mask_v128_` detects directly. For a candidate at byte
+ *  offset `i`, if both `byte[i-1]` and `byte[i]` are word-interior, then *every* UAX-29 rule that could
+ *  fire (WB5/8/9/10/13a/13b and their context-needing siblings) resolves to "do NOT break" — verified
  *  exhaustively against the serial decision table — because ASCII contains no Extend/Format/ZWJ/RI/
  *  Hebrew/Katakana, so WB4 ignorable-skipping and RI parity never apply between two such bytes. Those
  *  positions are skipped with a single `wasm_i8x16_bitmask`. Any byte that is non-ASCII, or whose pair
  *  is not a guaranteed interior, is handed to `sz_utf8_is_word_boundary_serial` verbatim, so the result
  *  is bit-for-bit identical to the serial reference (the hard, stateful sub-rules stay serial). */
 
-/** @brief Classify 16 ASCII bytes into their UAX-29 Word_Break property values (0-15) per lane. */
-SZ_INTERNAL v128_t sz_wb_classify_ascii_v128_(v128_t bytes) {
-    // Start with property 0 (Other) and overwrite each contiguous ASCII property range.
-    v128_t prop = wasm_i8x16_splat(0);
-    // Helper: where (lo <= bytes <= hi), set lanes to `value` (signed compares are safe: ASCII < 0x80).
-    // [0x41..0x5A] A-Z -> ALetter(8), [0x61..0x7A] a-z -> ALetter(8)
-    v128_t upper =
-        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x41)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x5A)));
-    v128_t lower =
-        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x61)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x7A)));
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(8), prop, wasm_v128_or(upper, lower));
-    // [0x30..0x39] 0-9 -> Numeric(10)
-    v128_t digit =
-        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x30)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x39)));
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(10), prop, digit);
-    // 0x5F '_' -> ExtendNumLet(12)
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(12), prop, wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x5F)));
-    // 0x0A LF -> 2 ; [0x0B..0x0C] VT/FF -> Newline(3) ; 0x0D CR -> 1
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(2), prop, wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x0A)));
-    v128_t vtff =
-        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x0B)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x0C)));
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(3), prop, vtff);
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(1), prop, wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x0D)));
-    // Mid punctuation: 0x22 '"' & 0x27 '\'' & 0x2E '.' -> MidNumLet/Quotes(15)
-    v128_t q = wasm_v128_or(
-        wasm_v128_or(wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x22)), wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x27))),
-        wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x2E)));
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(15), prop, q);
-    // 0x2C ',' & 0x3B ';' -> MidNum(14)
-    v128_t mn =
-        wasm_v128_or(wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x2C)), wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x3B)));
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(14), prop, mn);
-    // 0x3A ':' -> MidLetter(13)
-    prop = wasm_v128_bitselect(wasm_i8x16_splat(13), prop, wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x3A)));
-    return prop;
-}
-
 /** @brief Per-byte mask (0xFF) where a byte is ASCII and word-interior {ALetter,Numeric,ExtendNumLet}. */
 SZ_INTERNAL v128_t sz_wb_interior_mask_v128_(v128_t bytes) {
-    // ASCII: high bit clear (signed >= 0).
-    v128_t is_ascii = wasm_i8x16_ge(bytes, wasm_i8x16_splat(0));
-    v128_t prop = sz_wb_classify_ascii_v128_(bytes);
-    v128_t interior =
-        wasm_v128_or(wasm_v128_or(wasm_i8x16_eq(prop, wasm_i8x16_splat(8)), wasm_i8x16_eq(prop, wasm_i8x16_splat(10))),
-                     wasm_i8x16_eq(prop, wasm_i8x16_splat(12)));
+    // The interior set is exactly {A-Z, a-z, 0-9, '_'}, so we test it directly instead of running the
+    // full Word_Break classifier and then matching three property values. ASCII letters fold to a-z
+    // by OR-ing 0x20; the `is_ascii` guard rejects any high byte that the fold might alias into range.
+    v128_t is_ascii = wasm_i8x16_ge(bytes, wasm_i8x16_splat(0)); // high bit clear (signed >= 0)
+    v128_t lowered_vec = wasm_v128_or(bytes, wasm_i8x16_splat(0x20));
+    v128_t is_alpha = wasm_v128_and(wasm_i8x16_ge(lowered_vec, wasm_i8x16_splat(0x61)),
+                                    wasm_i8x16_le(lowered_vec, wasm_i8x16_splat(0x7A)));
+    v128_t is_digit =
+        wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x30)), wasm_i8x16_le(bytes, wasm_i8x16_splat(0x39)));
+    v128_t is_underscore = wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x5F));
+    v128_t interior = wasm_v128_or(wasm_v128_or(is_alpha, is_digit), is_underscore);
     return wasm_v128_and(is_ascii, interior);
 }
 
@@ -389,7 +351,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_v128(sz_cptr_t text, sz_size_t le
                 pos += 15;
                 continue;
             }
-            int first = __builtin_ctz(candidate_bits); // lane index 1..15
+            int first = sz_u32_ctz(candidate_bits); // lane index 1..15
             pos += (sz_size_t)(first - 1);             // move to that codepoint-aligned candidate offset
             // Fall through to the serial check at this `pos`.
         }
@@ -436,7 +398,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t l
                 pos = base; // base == pos-15 > 0 here; loop re-checks pos>0
                 continue;
             }
-            int last = 31 - __builtin_clz(candidate_bits); // highest candidate lane 1..15
+            int last = 31 - sz_u32_clz(candidate_bits); // highest candidate lane 1..15
             pos = base + (sz_size_t)last;                  // first real candidate at/below current pos
             // Fall through to serial check at this `pos`.
         }
@@ -455,8 +417,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t l
 
 #if defined(__clang__)
 #pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
 #endif
 #endif // SZ_USE_V128
 

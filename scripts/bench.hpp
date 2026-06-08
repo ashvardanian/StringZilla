@@ -121,8 +121,10 @@ inline std::uint64_t cpu_cycle_counter() {
     unsigned int lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
     return (static_cast<std::uint64_t>(hi) << 32) | lo;
-#elif defined(__aarch64__) || defined(SZ_IS_64BIT_ARM_)
+#elif defined(__aarch64__) || SZ_IS_64BIT_ARM_
     // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
+    // (`SZ_IS_64BIT_ARM_` is a 0/1 value macro — testing `defined()` of it would be true everywhere,
+    // wrongly selecting this branch on non-ARM targets such as wasm32.)
     std::uint64_t cnt;
     asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
     return cnt;

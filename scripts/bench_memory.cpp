@@ -139,6 +139,26 @@ void bench_copy(environment_t const &env) {
     bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve> {env, o}).log(align);
     bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1> {env, o}).log(align, shift);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_copy_v128(align)", copy_from_sz<sz_copy_v128> {env, o}).log(align);
+    bench_unary(env, "sz_copy_v128(shift)", copy_from_sz<sz_copy_v128, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_copy_v128relaxed(align)", copy_from_sz<sz_copy_v128relaxed> {env, o}).log(align);
+    bench_unary(env, "sz_copy_v128relaxed(shift)", copy_from_sz<sz_copy_v128relaxed, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_copy_rvv(align)", copy_from_sz<sz_copy_rvv> {env, o}).log(align);
+    bench_unary(env, "sz_copy_rvv(shift)", copy_from_sz<sz_copy_rvv, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_copy_lasx(align)", copy_from_sz<sz_copy_lasx> {env, o}).log(align);
+    bench_unary(env, "sz_copy_lasx(shift)", copy_from_sz<sz_copy_lasx, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_copy_powervsx(align)", copy_from_sz<sz_copy_powervsx> {env, o}).log(align);
+    bench_unary(env, "sz_copy_powervsx(shift)", copy_from_sz<sz_copy_powervsx, 1> {env, o}).log(align, shift);
+#endif
 
     bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {env, o}).log(align);
     bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {env, o}).log(align, shift);
@@ -209,6 +229,26 @@ void bench_move(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_move_v128(by1)", move_from_sz<sz_move_v128, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_v128(by64)", move_from_sz<sz_move_v128, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_move_v128relaxed(by1)", move_from_sz<sz_move_v128relaxed, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_v128relaxed(by64)", move_from_sz<sz_move_v128relaxed, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_move_rvv(by1)", move_from_sz<sz_move_rvv, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_rvv(by64)", move_from_sz<sz_move_rvv, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_move_lasx(by1)", move_from_sz<sz_move_lasx, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_lasx(by64)", move_from_sz<sz_move_lasx, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_move_powervsx(by1)", move_from_sz<sz_move_powervsx, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_powervsx(by64)", move_from_sz<sz_move_powervsx, 64> {env, o}).log(byte, page);
 #endif
 
     bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {env, o}).log(byte);
@@ -315,6 +355,32 @@ void bench_fill(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_fill_v128", fill_from_sz<sz_fill_v128> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_v128", random_call, fill_random_from_sz<sz_fill_random_v128> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_fill_v128relaxed", fill_from_sz<sz_fill_v128relaxed> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_v128relaxed", random_call,
+                fill_random_from_sz<sz_fill_random_v128relaxed> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_fill_rvv", fill_from_sz<sz_fill_rvv> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_rvv", random_call, fill_random_from_sz<sz_fill_random_rvv> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_fill_lasx", fill_from_sz<sz_fill_lasx> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_lasx", random_call, fill_random_from_sz<sz_fill_random_lasx> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_fill_powervsx", fill_from_sz<sz_fill_powervsx> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_powervsx", random_call, fill_random_from_sz<sz_fill_random_powervsx> {env, o})
+        .log(zeros, random);
+#endif
     bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz> {env, o}).log(zeros);
     bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
 }
@@ -384,6 +450,21 @@ void bench_lookup(environment_t const &env) {
 #endif
 #if SZ_USE_SVE
     bench_unary(env, "sz_lookup_sve", lookup_from_sz<sz_lookup_sve> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_lookup_v128", lookup_from_sz<sz_lookup_v128> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_lookup_v128relaxed", lookup_from_sz<sz_lookup_v128relaxed> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_lookup_rvv", lookup_from_sz<sz_lookup_rvv> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_lookup_lasx", lookup_from_sz<sz_lookup_lasx> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_lookup_powervsx", lookup_from_sz<sz_lookup_powervsx> {env, o, lut}).log(zeros);
 #endif
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }

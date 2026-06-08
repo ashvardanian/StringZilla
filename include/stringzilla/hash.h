@@ -534,7 +534,9 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
 }
 
 SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
-#if SZ_USE_V128
+#if SZ_USE_V128RELAXED
+    return sz_hash_v128relaxed(text, length, seed);
+#elif SZ_USE_V128
     return sz_hash_v128(text, length, seed);
 #elif SZ_USE_RVV
     return sz_hash_rvv(text, length, seed);
@@ -558,7 +560,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 }
 
 SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-#if SZ_USE_V128
+#if SZ_USE_V128RELAXED
+    sz_fill_random_v128relaxed(text, length, nonce);
+#elif SZ_USE_V128
     sz_fill_random_v128(text, length, nonce);
 #elif SZ_USE_RVV
     sz_fill_random_rvv(text, length, nonce);
@@ -582,7 +586,9 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
 }
 
 SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
-#if SZ_USE_V128
+#if SZ_USE_V128RELAXED
+    sz_hash_state_init_v128relaxed(state, seed);
+#elif SZ_USE_V128
     sz_hash_state_init_v128(state, seed);
 #elif SZ_USE_RVV
     sz_hash_state_init_rvv(state, seed);
@@ -606,7 +612,9 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
 }
 
 SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-#if SZ_USE_V128
+#if SZ_USE_V128RELAXED
+    sz_hash_state_update_v128relaxed(state, text, length);
+#elif SZ_USE_V128
     sz_hash_state_update_v128(state, text, length);
 #elif SZ_USE_RVV
     sz_hash_state_update_rvv(state, text, length);
@@ -630,7 +638,9 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
 }
 
 SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
-#if SZ_USE_V128
+#if SZ_USE_V128RELAXED
+    return sz_hash_state_digest_v128relaxed(state);
+#elif SZ_USE_V128
     return sz_hash_state_digest_v128(state);
 #elif SZ_USE_RVV
     return sz_hash_state_digest_rvv(state);

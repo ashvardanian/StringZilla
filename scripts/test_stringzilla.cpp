@@ -1105,6 +1105,46 @@ void test_equivalence() {
         sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
 #endif
+#if SZ_USE_V128
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_v128, sz_hash_state_init_v128,                    //
+        sz_hash_state_update_v128, sz_hash_state_digest_v128);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_v128relaxed, sz_hash_state_init_v128relaxed,      //
+        sz_hash_state_update_v128relaxed, sz_hash_state_digest_v128relaxed);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_rvv, sz_hash_state_init_rvv,                      //
+        sz_hash_state_update_rvv, sz_hash_state_digest_rvv);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_rvv);
+#endif
+#if SZ_USE_LASX
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_lasx, sz_hash_state_init_lasx,                    //
+        sz_hash_state_update_lasx, sz_hash_state_digest_lasx);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_powervsx, sz_hash_state_init_powervsx,            //
+        sz_hash_state_update_powervsx, sz_hash_state_digest_powervsx);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_powervsx);
+#endif
 
     // Test SHA256 implementations
 #if SZ_USE_ICELAKE
@@ -1123,6 +1163,30 @@ void test_equivalence() {
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
         sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
+    );
+#endif
+#if SZ_USE_V128
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_v128, sz_sha256_state_update_v128, sz_sha256_state_digest_v128        //
+    );
+#endif
+#if SZ_USE_RVV
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_rvv, sz_sha256_state_update_rvv, sz_sha256_state_digest_rvv           //
+    );
+#endif
+#if SZ_USE_LASX
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_lasx, sz_sha256_state_update_lasx, sz_sha256_state_digest_lasx        //
+    );
+#endif
+#if SZ_USE_POWERVSX
+    test_sha256_equivalence(                                                                            //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,      //
+        sz_sha256_state_init_powervsx, sz_sha256_state_update_powervsx, sz_sha256_state_digest_powervsx //
     );
 #endif
 
@@ -1180,6 +1244,126 @@ void test_equivalence() {
         sz_utf8_find_newline_sve2,                //
         sz_utf8_find_whitespace_serial,           //
         sz_utf8_find_whitespace_sve2);
+#endif
+#if SZ_USE_V128
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_v128, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_v128,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_v128);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_V128RELAXED
+    test_utf8_equivalence(                               //
+        sz_utf8_count_serial, sz_utf8_count_v128relaxed, //
+        sz_utf8_find_newline_serial,                     //
+        sz_utf8_find_newline_v128relaxed,                //
+        sz_utf8_find_whitespace_serial,                  //
+        sz_utf8_find_whitespace_v128relaxed);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_RVV
+    test_utf8_equivalence(                       //
+        sz_utf8_count_serial, sz_utf8_count_rvv, //
+        sz_utf8_find_newline_serial,             //
+        sz_utf8_find_newline_rvv,                //
+        sz_utf8_find_whitespace_serial,          //
+        sz_utf8_find_whitespace_rvv);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_LASX
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_lasx, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_lasx,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_lasx);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_POWERVSX
+    test_utf8_equivalence(                            //
+        sz_utf8_count_serial, sz_utf8_count_powervsx, //
+        sz_utf8_find_newline_serial,                  //
+        sz_utf8_find_newline_powervsx,                //
+        sz_utf8_find_whitespace_serial,               //
+        sz_utf8_find_whitespace_powervsx);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
 #endif
 };
 

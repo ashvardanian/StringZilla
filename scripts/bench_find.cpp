@@ -240,6 +240,46 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_neon>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_find_v128", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_v128>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_v128", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_v128>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_find_v128relaxed", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_v128relaxed>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_v128relaxed", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_v128relaxed>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_find_rvv", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_rvv>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_rvv", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_rvv>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_find_lasx", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_lasx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_lasx", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_lasx>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_find_powervsx", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_powervsx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_powervsx", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_powervsx>>(env))
+        .log(base_reverse);
+#endif
 
     // Include LibC functionality
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
@@ -428,6 +468,46 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_sve>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_find_byte_v128", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_v128>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_v128", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_v128>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_find_byte_v128relaxed", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_v128relaxed>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_v128relaxed", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_v128relaxed>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_find_byte_rvv", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_rvv>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_rvv", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_rvv>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_find_byte_lasx", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_lasx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_lasx", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_lasx>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_find_byte_powervsx", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_powervsx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_powervsx", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_powervsx>>(env))
+        .log(base_reverse);
+#endif
 
     // Include LibC functionality
     bench_unary(env, "find_byte<std::strchr>", base_call, //
@@ -590,6 +670,66 @@ void bench_byteset_search(environment_t const &env) {
                                             sz::byteset>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_V128
+    bench_unary( //
+        env, "sz_find_byteset_v128", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_v128>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_v128", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_v128>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary( //
+        env, "sz_find_byteset_v128relaxed", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_v128relaxed>,
+                                    sz::byteset>(env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_v128relaxed", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_v128relaxed>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary( //
+        env, "sz_find_byteset_rvv", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_rvv>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_rvv", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_rvv>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary( //
+        env, "sz_find_byteset_lasx", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_lasx>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_lasx", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_lasx>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary( //
+        env, "sz_find_byteset_powervsx", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_powervsx>,
+                                    sz::byteset>(env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_powervsx", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_powervsx>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
 
     // Include LibC functionality
     bench_unary(env, "find_byteset<std::strcspn>", base_call,
@@ -693,6 +833,66 @@ void bench_utf8_find_boundary(environment_t const &env) {
         env, "sz_utf8_find_whitespace_sve2", base_whitespace_call,
         callable_for_utf8_find_boundary<sz::range_matches,
                                         matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_sve2>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_V128
+    bench_unary( //
+        env, "sz_utf8_find_newline_v128", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_v128>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_v128", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_v128>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary( //
+        env, "sz_utf8_find_newline_v128relaxed", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_v128relaxed>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_v128relaxed", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_v128relaxed>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_RVV
+    bench_unary( //
+        env, "sz_utf8_find_newline_rvv", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_rvv>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_rvv", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_rvv>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_LASX
+    bench_unary( //
+        env, "sz_utf8_find_newline_lasx", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_lasx>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_lasx", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_lasx>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary( //
+        env, "sz_utf8_find_newline_powervsx", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_powervsx>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_powervsx", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_powervsx>>(env))
         .log(base_whitespace);
 #endif
 }
