@@ -36,7 +36,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     }
 
     // Final reduction of `sum_vec` to a single scalar
-    sz_u64_t sum = vgetq_lane_u64(sum_vec, 0) + vgetq_lane_u64(sum_vec, 1);
+    sz_u64_t sum = vaddvq_u64(sum_vec);
     while (length--) sum += *(sz_u8_t const *)text++; // Same as the scalar version
     return sum;
 }

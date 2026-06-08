@@ -80,9 +80,6 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
  *  fixed compile-time constants. The construction is validated to be bit-exact against
  *  `sz_emulate_aesenc_si128_serial_` over millions of random inputs at `vlen` 128 and 256. */
 
-/** @brief Length of the fixed 16-byte AES state vector operated on by the RVV round. */
-#define SZ_RVV_AES_VL_ 16
-
 /*  Tower-field S-box tables (16 entries each, indexed by a nibble):
  *  - `M*Tbl` : GF(2)-linear basis change from the AES field into GF((2^4)^2), split by input nibble.
  *  - `G*Tbl` : composition of the inverse basis change with the AES affine *linear* part, split by
@@ -139,7 +136,7 @@ SZ_INTERNAL vuint8m1_t sz_rvv_gf16_mul_(vuint8m1_t a, vuint8m1_t b, vuint8m1_t l
  *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions" (CHES 2009).
  */
 SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    size_t vl = __riscv_vsetvl_e8m1(SZ_RVV_AES_VL_);
+    size_t vl = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
     sz_u8_t const *tables = sz_rvv_aes_tables_();
 
     vuint8m1_t state_bytes_vec = __riscv_vle8_v_u8m1(state_vec.u8s, vl);
@@ -287,49 +284,59 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_t const *state) {
     return mixed_in_register.u64s[0];
 }
 
+/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `src` into `dst->u8s`,
+ *          replacing a scalar byte loop. `src` must have a full block of readable bytes. */
+SZ_INTERNAL void sz_hash_load_block_rvv_(sz_u128_vec_t *dst, sz_cptr_t src) {
+    size_t vl = __riscv_vsetvl_e8m1(sizeof(dst->u8s));
+    __riscv_vse8_v_u8m1(dst->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)src, vl), vl);
+}
+
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
-    if (length <= 16) {
+    sz_size_t const block = sizeof(sz_u128_vec_t); // one AES block
+    if (length <= block) {
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_serial_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
-        for (sz_size_t i = 0; i < length; ++i) data_vec.u8s[i] = start[i];
+        // A length-agnostic load drops the zero pad and the scalar byte loop: VL covers the partial bytes.
+        size_t vl = __riscv_vsetvl_e8m1(length);
+        __riscv_vse8_v_u8m1(data_vec.u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)start, vl), vl);
         sz_hash_minimal_update_rvv_(&state, data_vec);
         return sz_hash_minimal_finalize_rvv_(&state, length);
     }
-    else if (length <= 32) {
+    else if (length <= 2 * block) {
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
-        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
+        sz_hash_load_block_rvv_(&data0_vec, start);
+        sz_hash_load_block_rvv_(&data1_vec, start + length - block);
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(2 * block - length));
         sz_hash_minimal_update_rvv_(&state, data0_vec);
         sz_hash_minimal_update_rvv_(&state, data1_vec);
         return sz_hash_minimal_finalize_rvv_(&state, length);
     }
-    else if (length <= 48) {
+    else if (length <= 3 * block) {
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
-        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
+        sz_hash_load_block_rvv_(&data0_vec, start);
+        sz_hash_load_block_rvv_(&data1_vec, start + block);
+        sz_hash_load_block_rvv_(&data2_vec, start + length - block);
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(3 * block - length));
         sz_hash_minimal_update_rvv_(&state, data0_vec);
         sz_hash_minimal_update_rvv_(&state, data1_vec);
         sz_hash_minimal_update_rvv_(&state, data2_vec);
         return sz_hash_minimal_finalize_rvv_(&state, length);
     }
-    else if (length <= 64) {
+    else if (length <= 4 * block) {
         sz_align_(16) sz_hash_minimal_t_ state;
         sz_hash_minimal_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
-        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
-        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
-        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
-        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
+        sz_hash_load_block_rvv_(&data0_vec, start);
+        sz_hash_load_block_rvv_(&data1_vec, start + block);
+        sz_hash_load_block_rvv_(&data2_vec, start + 2 * block);
+        sz_hash_load_block_rvv_(&data3_vec, start + length - block);
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(4 * block - length));
         sz_hash_minimal_update_rvv_(&state, data0_vec);
         sz_hash_minimal_update_rvv_(&state, data1_vec);
         sz_hash_minimal_update_rvv_(&state, data2_vec);
@@ -338,15 +345,19 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t 
     }
     else {
         sz_align_(64) sz_hash_state_t state;
+        sz_size_t const window = sizeof(state.ins); // the 64-byte hashing window
         sz_hash_state_init_serial(&state, seed);
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
-            for (sz_size_t i = 0; i < 64; ++i) state.ins[i] = start[state.ins_length + i];
+        for (; state.ins_length + window <= length; state.ins_length += window) {
+            size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
+            __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vl), vl);
             sz_hash_state_update_rvv_(&state);
         }
         if (state.ins_length < length) {
-            for (sz_size_t i = 0; i != 64; ++i) state.ins[i] = 0;
-            for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
-                state.ins[i] = start[state.ins_length];
+            size_t zero_vl = __riscv_vsetvl_e8m8(window);
+            __riscv_vse8_v_u8m8(state.ins, __riscv_vmv_v_x_u8m8(0, zero_vl), zero_vl);
+            size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
+            __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, tail_vl),
+                                tail_vl);
             sz_hash_state_update_rvv_(&state);
             state.ins_length = length;
         }
@@ -366,7 +377,8 @@ SZ_PUBLIC void sz_hash_state_update_rvv(sz_hash_state_t *state, sz_cptr_t text, 
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_rvv_(state);
-            for (sz_size_t i = 0; i < 64; ++i) state->ins[i] = 0;
+            size_t vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
+            __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, vl), vl);
         }
     }
 }
@@ -416,7 +428,11 @@ SZ_PUBLIC void sz_fill_random_rvv(sz_ptr_t text, sz_size_t length, sz_u64_t nonc
         key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
         generated_vec = sz_emulate_aesenc_rvv_(input_vec, key_vec);
-        for (sz_size_t i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+        // VL deletes both the per-byte loop and the `&& length` tail guard: it clamps to the bytes left,
+        // capped at the block we just generated.
+        size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
+        __riscv_vse8_v_u8m1((sz_u8_t *)text, __riscv_vle8_v_u8m1(generated_vec.u8s, out_vl), out_vl);
+        text += out_vl, length -= out_vl;
     }
 }
 
