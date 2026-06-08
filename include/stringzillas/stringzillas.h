@@ -23,7 +23,8 @@
 #ifndef STRINGZILLAS_H_
 #define STRINGZILLAS_H_
 
-#include <stringzilla/stringzilla.h> // `sz_sequence_t` and other types
+#include <stringzilla/stringzilla.h>  // `sz_sequence_t` and other types
+#include "stringzillas/types.h"       // `sz_substitution_costs_t`, engine/scope PODs
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,7 +78,7 @@ typedef struct sz_sequence_u64tape_t {
 
 /**
  *  @brief Prepares the default allocator for unified memory management.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param error_message Optional output pointer for detailed error information.
  *  @note When compiled on CUDA-capable systems, this function will use `cudaMallocManaged`.
  */
 SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc, char const **error_message);
@@ -98,59 +99,59 @@ typedef void *szs_device_scope_t;
 
 /**
  * @brief Initialize device scope with system defaults.
- * @param[out] scope Pointer to device scope handle.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param scope Pointer to device scope handle.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope, char const **error_message);
 
 /**
  * @brief Initialize device scope for CPU parallel execution.
- * @param[in] cpu_cores Number of CPU cores to use, or zero for all cores.
- * @param[out] scope Pointer to device scope handle.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param cpu_cores Number of CPU cores to use, or zero for all cores.
+ * @param scope Pointer to device scope handle.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope,
                                                        char const **error_message);
 
 /**
  * @brief Initialize device scope for GPU execution.
- * @param[in] gpu_device GPU device index to target.
- * @param[out] scope Pointer to device scope handle.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param gpu_device GPU device index to target.
+ * @param scope Pointer to device scope handle.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope,
                                                         char const **error_message);
 
 /**
  * @brief Query configured CPU cores count.
- * @param[in] scope Device scope handle.
- * @param[out] cpu_cores Number of CPU cores configured.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param scope Device scope handle.
+ * @param cpu_cores Number of CPU cores configured.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope, sz_size_t *cpu_cores,
                                                       char const **error_message);
 
 /**
  * @brief Query configured GPU device ID.
- * @param[in] scope Device scope handle.
- * @param[out] gpu_device GPU device index.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param scope Device scope handle.
+ * @param gpu_device GPU device index.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope, sz_size_t *gpu_device,
                                                        char const **error_message);
 
 /**
  * @brief Get device scope hardware capabilities.
- * @param[in] scope Device scope handle.
- * @param[out] capabilities Hardware capabilities mask.
- * @param[out] error_message Optional output pointer for detailed error information.
+ * @param scope Device scope handle.
+ * @param capabilities Hardware capabilities mask.
+ * @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope, sz_capability_t *capabilities,
                                                          char const **error_message);
 
 /**
  * @brief Free device scope resources.
- * @param[in] scope Device scope handle to free.
+ * @param scope Device scope handle to free.
  */
 SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope);
 
@@ -166,14 +167,14 @@ typedef void *szs_levenshtein_distances_utf8_t;
  *  Creates an engine for computing edit distances between binary sequences using
  *  the Wagner-Fischer dynamic programming algorithm with configurable costs.
  *
- *  @param[in] match Cost for character matches (typically negative or zero).
- *  @param[in] mismatch Cost for character mismatches (typically positive).
- *  @param[in] open Cost for opening a gap (typically positive).
- *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
- *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
- *  @param[out] engine Pointer to initialized engine handle.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param match Cost for character matches (typically negative or zero).
+ *  @param mismatch Cost for character mismatches (typically positive).
+ *  @param open Cost for opening a gap (typically positive).
+ *  @param extend Cost for extending an existing gap (typically smaller than open).
+ *  @param alloc Memory allocator (NULL for default).
+ *  @param capabilities Hardware capabilities mask.
+ *  @param engine Pointer to initialized engine handle.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                                             //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
@@ -182,13 +183,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
 
 /**
  *  @brief Compute Levenshtein distances for sequence pairs.
- *  @param[in] engine Initialized distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence collection.
+ *  @param b Second sequence collection.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_sequence(         //
     szs_levenshtein_distances_t engine, szs_device_scope_t device, //
@@ -198,13 +199,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_sequence(         //
 
 /**
  *  @brief Compute Levenshtein distances for 32-bit tape format.
- *  @param[in] engine Initialized distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(           //
     szs_levenshtein_distances_t engine, szs_device_scope_t device,  //
@@ -214,13 +215,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(           //
 
 /**
  *  @brief Compute Levenshtein distances for 64-bit tape format.
- *  @param[in] engine Initialized distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(           //
     szs_levenshtein_distances_t engine, szs_device_scope_t device,  //
@@ -230,7 +231,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(           //
 
 /**
  *  @brief Free Levenshtein distance engine resources.
- *  @param[in] engine Engine handle to free.
+ *  @param engine Engine handle to free.
  */
 SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine);
 
@@ -240,14 +241,14 @@ SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engin
  *  Creates an engine for computing edit distances between UTF-8 encoded strings
  *  using character-level comparison instead of byte-level.
  *
- *  @param[in] match Cost for character matches (typically negative or zero).
- *  @param[in] mismatch Cost for character mismatches (typically positive).
- *  @param[in] open Cost for opening a gap (typically positive).
- *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
- *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
- *  @param[out] engine Pointer to initialized engine handle.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param match Cost for character matches (typically negative or zero).
+ *  @param mismatch Cost for character mismatches (typically positive).
+ *  @param open Cost for opening a gap (typically positive).
+ *  @param extend Cost for extending an existing gap (typically smaller than open).
+ *  @param alloc Memory allocator (NULL for default).
+ *  @param capabilities Hardware capabilities mask.
+ *  @param engine Pointer to initialized engine handle.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                                        //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
@@ -256,13 +257,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
 
 /**
  *  @brief Compute UTF-8 aware Levenshtein distances for sequences.
- *  @param[in] engine Initialized UTF-8 distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized UTF-8 distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence collection.
+ *  @param b Second sequence collection.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_sequence(         //
     szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
@@ -272,13 +273,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_sequence(         //
 
 /**
  *  @brief Compute UTF-8 aware distances for 32-bit tape format.
- *  @param[in] engine Initialized UTF-8 distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized UTF-8 distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(          //
     szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
@@ -288,13 +289,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(          //
 
 /**
  *  @brief Compute UTF-8 aware distances for 64-bit tape format.
- *  @param[in] engine Initialized UTF-8 distance engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized UTF-8 distance engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output distance array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(          //
     szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
@@ -304,7 +305,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(          //
 
 /**
  *  @brief Free UTF-8 Levenshtein distance engine resources.
- *  @param[in] engine Engine handle to free.
+ *  @param engine Engine handle to free.
  */
 SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine);
 
@@ -319,30 +320,31 @@ typedef void *szs_smith_waterman_scores_t;
  *  @brief Initialize Needleman-Wunsch global alignment scorer.
  *
  *  Creates an engine for computing global alignment scores between sequences using
- *  the Needleman-Wunsch algorithm with configurable substitution matrix and gap costs.
+ *  the Needleman-Wunsch algorithm with a compact class-based substitution LUT and gap costs.
  *
- *  @param[in] subs 256x256 substitution matrix for scoring character pairs.
- *  @param[in] open Cost for opening a gap (typically positive).
- *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
- *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
- *  @param[out] engine Pointer to initialized engine handle.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param subs Compact class-based substitution cost model (alphabet + class x class costs); build it
+ *         with the `sz_substitution_costs_init_*` helpers, or by populating @c byte_to_class & @c costs.
+ *  @param open Cost for opening a gap.
+ *  @param extend Cost for extending an existing gap (== open for linear gaps).
+ *  @param alloc Memory allocator (NULL for default).
+ *  @param capabilities Hardware capabilities mask.
+ *  @param engine Pointer to initialized engine handle.
+ *  @param error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       //
-    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                              //
+    sz_substitution_costs_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                 //
     szs_needleman_wunsch_scores_t *engine, char const **error_message);
 
 /**
  *  @brief Calculate Needleman-Wunsch global alignment scores for sequences.
- *  @param[in] engine Initialized global alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized global alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence collection.
+ *  @param b Second sequence collection.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_sequence(         //
     szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
@@ -352,13 +354,13 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_sequence(         //
 
 /**
  *  @brief Calculate global alignment scores for 32-bit tape format.
- *  @param[in] engine Initialized global alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized global alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(          //
     szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
@@ -368,13 +370,13 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(          //
 
 /**
  *  @brief Calculate global alignment scores for 64-bit tape format.
- *  @param[in] engine Initialized global alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized global alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(          //
     szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
@@ -384,7 +386,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(          //
 
 /**
  *  @brief Free Needleman-Wunsch scorer resources.
- *  @param[in] engine Engine handle to free.
+ *  @param engine Engine handle to free.
  */
 SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t engine);
 
@@ -392,30 +394,30 @@ SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t e
  *  @brief Initialize Smith-Waterman local alignment scorer.
  *
  *  Creates an engine for computing local alignment scores between sequences using
- *  the Smith-Waterman algorithm with configurable substitution matrix and gap costs.
+ *  the Smith-Waterman algorithm with a compact class-based substitution LUT and gap costs.
  *
- *  @param[in] subs 256x256 substitution matrix for scoring character pairs.
- *  @param[in] open Cost for opening a gap (typically positive).
- *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
- *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
- *  @param[out] engine Pointer to initialized engine handle.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param subs Compact class-based substitution cost model (alphabet + class x class costs).
+ *  @param open Cost for opening a gap.
+ *  @param extend Cost for extending an existing gap (== open for linear gaps).
+ *  @param alloc Memory allocator (NULL for default).
+ *  @param capabilities Hardware capabilities mask.
+ *  @param engine Pointer to initialized engine handle.
+ *  @param error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         //
-    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                                //
+    sz_substitution_costs_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                 //
     szs_smith_waterman_scores_t *engine, char const **error_message);
 
 /**
  *  @brief Calculate Smith-Waterman local alignment scores for sequences.
- *  @param[in] engine Initialized local alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized local alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence collection.
+ *  @param b Second sequence collection.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(         //
     szs_smith_waterman_scores_t engine, szs_device_scope_t device, //
@@ -425,13 +427,13 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(         //
 
 /**
  *  @brief Calculate local alignment scores for 32-bit tape format.
- *  @param[in] engine Initialized local alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized local alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(           //
     szs_smith_waterman_scores_t engine, szs_device_scope_t device,  //
@@ -441,13 +443,13 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(           //
 
 /**
  *  @brief Calculate local alignment scores for 64-bit tape format.
- *  @param[in] engine Initialized local alignment engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized local alignment engine.
+ *  @param device Device scope for execution.
+ *  @param a First sequence tape.
+ *  @param b Second sequence tape.
+ *  @param results Output score array.
+ *  @param results_stride Stride between results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(           //
     szs_smith_waterman_scores_t engine, szs_device_scope_t device,  //
@@ -457,7 +459,7 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(           //
 
 /**
  *  @brief Free Smith-Waterman scorer resources.
- *  @param[in] engine Engine handle to free.
+ *  @param engine Engine handle to free.
  */
 SZ_DYNAMIC void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t engine);
 
@@ -492,14 +494,14 @@ typedef void *szs_fingerprints_utf8_t;
  *  Creates an engine for computing rolling hash fingerprints using multiple
  *  configurable window sizes and dimensions for efficient similarity detection.
  *
- *  @param[in] dimensions Total dimensions per fingerprint, ideally 1024 or a (64 * window_widths_count) multiple.
- *  @param[in] alphabet_size Size of the alphabet (256 for binary, 128 for ASCII, 4 for DNA, 22 for protein).
- *  @param[in] window_widths Array of window widths (NULL for defaults like [3, 4, 5, 7, 9, 11, 15, 31]).
- *  @param[in] window_widths_count Number of window widths in array (0 for defaults).
- *  @param[in] alloc Memory allocator (NULL for default).
- *  @param[in] capabilities Hardware capabilities mask.
- *  @param[out] engine Pointer to initialized engine handle.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param dimensions Total dimensions per fingerprint, ideally 1024 or a (64 * window_widths_count) multiple.
+ *  @param alphabet_size Size of the alphabet (256 for binary, 128 for ASCII, 4 for DNA, 22 for protein).
+ *  @param window_widths Array of window widths (NULL for defaults like [3, 4, 5, 7, 9, 11, 15, 31]).
+ *  @param window_widths_count Number of window widths in array (0 for defaults).
+ *  @param alloc Memory allocator (NULL for default).
+ *  @param capabilities Hardware capabilities mask.
+ *  @param engine Pointer to initialized engine handle.
+ *  @param error_message Optional output pointer for detailed error information.
  *  @note If alphabet_size is 0, defaults to 256. If window_widths is NULL, uses default widths.
  */
 SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
@@ -510,14 +512,14 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
 
 /**
  *  @brief Compute Min-Hash fingerprints for sequences.
- *  @param[in] engine Initialized fingerprinting engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] texts Input sequence collection.
- *  @param[out] min_hashes Output Min-Hash array.
- *  @param[in] min_hashes_stride Stride between hash results in bytes.
- *  @param[out] min_counts Output Count-Min-Sketch array.
- *  @param[in] min_counts_stride Stride between count results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized fingerprinting engine.
+ *  @param device Device scope for execution.
+ *  @param texts Input sequence collection.
+ *  @param min_hashes Output Min-Hash array.
+ *  @param min_hashes_stride Stride between hash results in bytes.
+ *  @param min_counts Output Count-Min-Sketch array.
+ *  @param min_counts_stride Stride between count results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(         //
     szs_fingerprints_t engine, szs_device_scope_t device, //
@@ -528,14 +530,14 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(         //
 
 /**
  *  @brief Compute Min-Hash fingerprints for 64-bit tape format.
- *  @param[in] engine Initialized fingerprinting engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] texts Input sequence tape.
- *  @param[out] min_hashes Output Min-Hash array.
- *  @param[in] min_hashes_stride Stride between hash results in bytes.
- *  @param[out] min_counts Output Count-Min-Sketch array.
- *  @param[in] min_counts_stride Stride between count results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized fingerprinting engine.
+ *  @param device Device scope for execution.
+ *  @param texts Input sequence tape.
+ *  @param min_hashes Output Min-Hash array.
+ *  @param min_hashes_stride Stride between hash results in bytes.
+ *  @param min_counts Output Count-Min-Sketch array.
+ *  @param min_counts_stride Stride between count results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(          //
     szs_fingerprints_t engine, szs_device_scope_t device, //
@@ -546,14 +548,14 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(          //
 
 /**
  *  @brief Compute Min-Hash fingerprints for 32-bit tape format.
- *  @param[in] engine Initialized fingerprinting engine.
- *  @param[in] device Device scope for execution.
- *  @param[in] texts Input sequence tape.
- *  @param[out] min_hashes Output Min-Hash array.
- *  @param[in] min_hashes_stride Stride between hash results in bytes.
- *  @param[out] min_counts Output Count-Min-Sketch array.
- *  @param[in] min_counts_stride Stride between count results in bytes.
- *  @param[out] error_message Optional output pointer for detailed error information.
+ *  @param engine Initialized fingerprinting engine.
+ *  @param device Device scope for execution.
+ *  @param texts Input sequence tape.
+ *  @param min_hashes Output Min-Hash array.
+ *  @param min_hashes_stride Stride between hash results in bytes.
+ *  @param min_counts Output Count-Min-Sketch array.
+ *  @param min_counts_stride Stride between count results in bytes.
+ *  @param error_message Optional output pointer for detailed error information.
  */
 SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(          //
     szs_fingerprints_t engine, szs_device_scope_t device, //
@@ -564,13 +566,13 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(          //
 
 /**
  *  @brief Free fingerprinting engine resources.
- *  @param[in] engine Engine handle to free.
+ *  @param engine Engine handle to free.
  */
 SZ_DYNAMIC void szs_fingerprints_free(szs_fingerprints_t engine);
 
 /**
  *  @brief Allocates memory using unified memory allocator.
- *  @param[in] size_bytes Number of bytes to allocate.
+ *  @param size_bytes Number of bytes to allocate.
  *  @return Pointer to allocated memory, or NULL on failure.
  *
  *  Uses CUDA unified memory when available, falls back to malloc otherwise.
@@ -580,8 +582,8 @@ SZ_DYNAMIC void *szs_unified_alloc(sz_size_t size_bytes);
 
 /**
  *  @brief Deallocates memory allocated by szs_unified_alloc.
- *  @param[in] ptr Pointer to memory to deallocate.
- *  @param[in] size_bytes Size of the allocation (for compatibility, may be ignored).
+ *  @param ptr Pointer to memory to deallocate.
+ *  @param size_bytes Size of the allocation (for compatibility, may be ignored).
  */
 SZ_DYNAMIC void szs_unified_free(void *ptr, sz_size_t size_bytes);
 

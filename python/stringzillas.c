@@ -937,6 +937,26 @@ static PyObject *NeedlemanWunsch_new(PyTypeObject *type, PyObject *args, PyObjec
     return (PyObject *)self;
 }
 
+/**
+ *  @brief Convert a legacy 256x256 int8 substitution matrix into the v5 compact `sz_substitution_costs_t`.
+ *
+ *  v5 @b Break (SPLIT.md SS6): NW/SW init now takes a small class-based LUT (<= 32 classes) instead of the
+ *  64KB 256x256 matrix. We map each of the first @c SZ_SUBS_MAX_CLASSES byte values to its own class and copy
+ *  the top-left class x class block of the matrix. This is faithful for the bio alphabets these scorers target
+ *  (DNA/protein, <= 32 symbols laid out in the low byte range); larger or sparse alphabets are a follow-up.
+ */
+static void subs_matrix_to_costs_(sz_error_cost_t const *matrix_256x256, sz_error_cost_t open, sz_error_cost_t extend,
+                                  sz_substitution_costs_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->alphabet_size = SZ_SUBS_MAX_CLASSES;
+    out->unknown_class = 0;
+    out->gap_open = open;
+    out->gap_extend = extend;
+    for (int b = 0; b < 256; ++b) out->byte_to_class[b] = (sz_u8_t)(b % SZ_SUBS_MAX_CLASSES);
+    for (int i = 0; i < SZ_SUBS_MAX_CLASSES; ++i)
+        for (int j = 0; j < SZ_SUBS_MAX_CLASSES; ++j) out->costs[i][j] = matrix_256x256[i * 256 + j];
+}
+
 static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject *kwargs) {
     PyObject *substitution_matrix_obj = NULL;
     sz_error_cost_t open = -1, extend = -1;
@@ -987,8 +1007,10 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
         subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
 
     char const *error_detail = NULL;
+    sz_substitution_costs_t subs_costs;
+    subs_matrix_to_costs_(subs_data, open, extend, &subs_costs);
     sz_status_t status =
-        szs_needleman_wunsch_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle, &error_detail);
+        szs_needleman_wunsch_scores_init(&subs_costs, open, extend, NULL, capabilities, &self->handle, &error_detail);
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "NeedlemanWunsch initialization");
         return -1;
@@ -1279,8 +1301,10 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
     // Initialize the engine
     sz_error_cost_t *subs_data = (sz_error_cost_t *)PyArray_DATA(subs_array);
     char const *error_detail = NULL;
+    sz_substitution_costs_t subs_costs;
+    subs_matrix_to_costs_(subs_data, open, extend, &subs_costs);
     sz_status_t status =
-        szs_smith_waterman_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle, &error_detail);
+        szs_smith_waterman_scores_init(&subs_costs, open, extend, NULL, capabilities, &self->handle, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "SmithWaterman initialization");

@@ -381,7 +381,14 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/utf8_case_insensitive.c",
 ]
 STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
-STRINGZILLAS_CPU_SOURCES = [f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS]
+# v5 lowering: the CPU StringZillas extension is plain C (runtime + per-domain dispatch TUs) plus the
+# fork_union C-ABI TU. The CUDA extension still uses the legacy CUDA shims (GPU rewiring is a follow-up).
+STRINGZILLAS_CPU_SOURCES = [
+    "c/stringzillas/runtime.c",
+    "c/stringzillas/similarities.c",
+    "c/stringzillas/fingerprints.c",
+    "fork_union/c/lib.cpp",
+]
 STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
 
 ext_modules = []

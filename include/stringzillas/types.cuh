@@ -285,17 +285,18 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     warp_tasks_groups<task_t> result;
 
     // Determine if there are tasks that require the whole device memory.
-    size_t const device_level_tasks =
-        std::partition(tasks.begin(), tasks.end(),
-                       [](task_t const &task) { return task.density == warps_working_together_k; }) -
-        tasks.begin();
+    size_t const device_level_tasks = std::partition(
+                                          tasks.begin(), tasks.end(),
+                                          [](task_t const &task) { return task.density == warps_working_together_k; }) -
+                                      tasks.begin();
 
     // Determine the number of empty tasks and put them aside.
     auto const warp_tasks_begin = tasks.begin() + device_level_tasks;
-    size_t const non_empty_tasks =
-        std::partition(warp_tasks_begin, tasks.end(),
-                       [](task_t const &task) { return task.density != infinite_warps_per_multiprocessor_k; }) -
-        warp_tasks_begin;
+    size_t const non_empty_tasks = std::partition(warp_tasks_begin, tasks.end(),
+                                                  [](task_t const &task) {
+                                                      return task.density != infinite_warps_per_multiprocessor_k;
+                                                  }) -
+                                   warp_tasks_begin;
 
     // The remaining tasks will be sorted from smallest memory consumption to largest.
     auto const warp_tasks_end = warp_tasks_begin + non_empty_tasks;
@@ -316,13 +317,13 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     while (tasks_remaining > 1) { // 1 task or less ~ nothing to merge
         size_t const first_task_index = result.warp_level_tasks.size() - tasks_remaining;
         task_t &indicative_task = tasks[first_task_index];
-        size_t const tasks_with_same_density =
-            std::find_if(&indicative_task, result.warp_level_tasks.end(),
-                         [&](task_t const &task) {
-                             return task.bytes_per_cell != indicative_task.bytes_per_cell ||
-                                    task.density != indicative_task.density;
-                         }) -
-            &indicative_task;
+        size_t const tasks_with_same_density = std::find_if(&indicative_task, result.warp_level_tasks.end(),
+                                                            [&](task_t const &task) {
+                                                                return task.bytes_per_cell !=
+                                                                           indicative_task.bytes_per_cell ||
+                                                                       task.density != indicative_task.density;
+                                                            }) -
+                                               &indicative_task;
         size_t const following_tasks = tasks_remaining - tasks_with_same_density;
         if (!following_tasks) break; // No more tasks to merge
 
@@ -342,8 +343,8 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
 
         // Update all the operations in the current group to have the same "sparser" density
         // as the next group.
-        for (size_t i = 0; i < tasks_with_same_density; ++i) {
-            task_t &task = tasks[first_task_index + i];
+        for (size_t group_task_index = 0; group_task_index < tasks_with_same_density; ++group_task_index) {
+            task_t &task = tasks[first_task_index + group_task_index];
             task.density = next_indicative_task.density;
         }
     }

@@ -74,8 +74,8 @@ struct similarities_callable {
     engine_t engine = {};
     std::tuple<extra_args_...> extra_args = {};
 
-    similarities_callable(environment_t const &env, similarities_t &res, engine_t eng = {}, extra_args_... args)
-        : env(env), results(res), engine(eng), extra_args(args...) {
+    similarities_callable(environment_t const &env, similarities_t &results_ref, engine_t eng = {}, extra_args_... args)
+        : env(env), results(results_ref), engine(eng), extra_args(args...) {
         if (env.tokens.size() <= results.size()) throw std::runtime_error("Batch size is too large.");
     }
 
