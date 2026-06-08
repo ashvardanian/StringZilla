@@ -33,6 +33,8 @@
 # * stringzilla_bench_token_cpp20: A benchmark for comparators and hash functions.
 # * stringzilla_bench_container_cpp20: A benchmark for STL containers powered by StringZilla.
 # * stringzilla_bench_memory_cpp20: A benchmark for LibC-style low-level memory operations.
+# * stringzilla_bench_utf8_case_cpp20: A benchmark for the `sz_utf8_case_*` folding/search family.
+# * stringzilla_bench_utf8_iterate_cpp20: A benchmark for the `sz_utf8_*` iteration/segmentation family.
 #
 # Parallel Benchmarks:
 #
@@ -449,7 +451,8 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_find_cpp20 scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_sequence_cpp20 scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token_cpp20 scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_unicode_cpp20 scripts/bench_unicode.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_case_cpp20 scripts/bench_utf8_case.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_iterate_cpp20 scripts/bench_utf8_iterate.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container_cpp20 scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory_cpp20 scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 

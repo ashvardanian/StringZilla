@@ -1,12 +1,15 @@
 /**
- *  @file scripts/bench_unicode.cpp
- *  @brief Benchmarks Unicode text processing operations like case folding.
+ *  @file scripts/bench_utf8_case.cpp
+ *  @brief Benchmarks the @b `sz_utf8_case_*` family — case folding and case-insensitive search.
  *         The program accepts a file path to a dataset and benchmarks the case folding operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_case_fold.
  *  - Case-insensitive substring search for Unicode text - @b utf8_case_insensitive_find.
+ *
+ *  Its sibling @b `bench_utf8_iterate.cpp` covers the @b `sz_utf8_*` iteration/segmentation family
+ *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word boundaries, transcoding).
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -25,12 +28,13 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_unicode_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_bench_utf8_case_cpp20
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words STRINGWARS_UNIQUE=1 \
- *      build_release/stringzilla_bench_unicode_cpp20
+ *      build_release/stringzilla_bench_utf8_case_cpp20
  *  @endcode
  *
- *  This file is the sibling of `bench_token.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_utf8_iterate.cpp`, `bench_token.cpp`, `bench_find.cpp`,
+ *  `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include "bench.hpp"
 #include "test_stringzilla.hpp" // `log_environment`
@@ -78,6 +82,30 @@ void bench_utf8_case_fold(environment_t const &env) {
 
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_utf8_case_fold_icelake", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_case_fold_neon", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_case_fold_v128", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_utf8_case_fold_v128relaxed", validator,
+                utf8_case_fold_from_sz<sz_utf8_case_fold_v128relaxed> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_case_fold_rvv", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_rvv> {env}).log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_case_fold_lasx", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_lasx> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_case_fold_powervsx", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_powervsx> {env})
         .log(base);
 #endif
 }
@@ -141,12 +169,37 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
                 utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_neon> {env})
         .log(base);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_case_insensitive_find_v128", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_utf8_case_insensitive_find_v128relaxed", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_v128relaxed> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_case_insensitive_find_rvv", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_case_insensitive_find_lasx", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_lasx> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_case_insensitive_find_powervsx", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_powervsx> {env})
+        .log(base);
+#endif
 }
 
 #pragma endregion
 
 int main(int argc, char const **argv) {
-    std::printf("Welcome to StringZilla Unicode Benchmarks!\n");
+    std::printf("Welcome to StringZilla UTF-8 Case Benchmarks!\n");
     if (auto code = log_environment(); code != 0) return code;
 
     std::printf("Building up the environment...\n");
