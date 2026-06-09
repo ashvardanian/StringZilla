@@ -542,7 +542,7 @@ void test_utf8_equivalence(                                 //
  */
 void test_utf8_case_fold_equivalence(                             //
     sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd, //
-    std::size_t min_text_length = 4000, std::size_t min_iterations = 10000) {
+    std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
 
     // Output buffers (3x input for worst-case expansion)
     std::vector<char> output_base(min_text_length * 3 + 256);
