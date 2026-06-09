@@ -73,7 +73,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         // dealing with most values being unaligned!
         sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
         sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
+        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec;
         sz_u32_vec_t cell_score_vec;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
@@ -96,9 +96,11 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
                 (equality_vec.u32 & match_cost_vec.u32) + //
                 (~equality_vec.u32 & mismatch_cost_vec.u32);
             if_substitution_vec.u32 = __vaddus2(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
-            if_insertion_vec.u32 = __vaddus2(pre_insertion_vec.u32, gap_cost_vec.u32);
-            if_deletion_vec.u32 = __vaddus2(pre_deletion_vec.u32, gap_cost_vec.u32);
-            cell_score_vec.u32 = __vimin3_u16x2(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
+            // The two gap branches share the same `gap_cost`, so `min(ins, del) + gap == min(ins + gap, del + gap)`.
+            // We fold that single add and the final 2-way `min` against the substitution branch into one fused DPX
+            // `__viaddmin_u16x2`, replacing the previous two `__vaddus2` adds plus a `__vimin3_u16x2`.
+            cell_score_vec.u32 = __viaddmin_u16x2(__vminu2(pre_insertion_vec.u32, pre_deletion_vec.u32),
+                                                  gap_cost_vec.u32, if_substitution_vec.u32);
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
             scores_new[i + 0] = cell_score_vec.u16s[0];
@@ -307,8 +309,8 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
-            if_deletion_or_insertion_vec.u32 =
-                __vaddss2(__vmaxs2(pre_insertion_vec.u32, pre_deletion_vec.u32), gap_cost_vec.u32);
+            if_deletion_or_insertion_vec.u32 = __vaddss2(__vmaxs2(pre_insertion_vec.u32, pre_deletion_vec.u32),
+                                                         gap_cost_vec.u32);
 
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
@@ -492,8 +494,8 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_
                 sz_unused_(final_score_vec);
             }
             else {
-                cell_score_vec.u32 =
-                    __vimax3_s16x2_relu(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
+                cell_score_vec.u32 = __vimax3_s16x2_relu(if_substitution_vec.u32, if_insertion_vec.u32,
+                                                         if_deletion_vec.u32);
                 // In the last iteration of the loop the second half-word contains noise,
                 // so we have to discard it from affecting the final score.
                 bool const is_tail = i + 1 == tasks_count;
@@ -567,10 +569,10 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
             sz_i32_t if_substitution = pre_substitution + cost_of_substitution;
-            sz_i32_t if_insertion =
-                __viaddmax_s32(pre_insertion_opening, gap_open_cost, pre_insertion_expansion + gap_extend_cost);
-            sz_i32_t if_deletion =
-                __viaddmax_s32(pre_deletion_opening, gap_open_cost, pre_deletion_expansion + gap_extend_cost);
+            sz_i32_t if_insertion = __viaddmax_s32(pre_insertion_opening, gap_open_cost,
+                                                   pre_insertion_expansion + gap_extend_cost);
+            sz_i32_t if_deletion = __viaddmax_s32(pre_deletion_opening, gap_open_cost,
+                                                  pre_deletion_expansion + gap_extend_cost);
             sz_i32_t cell_score;
 
             // For local scoring we should use the ReLU variants of 3-way `max`.
