@@ -614,11 +614,10 @@ using smith_waterman_icelake_t =
 using affine_levenshtein_icelake_t = levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 using affine_levenshtein_utf8_icelake_t = levenshtein_distances_utf8<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
-// TODO: Ice Lake optimizations don't yield massive improvements, but can be added later.
-// using affine_needleman_wunsch_icelake_t =
-//     needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
-// using affine_smith_waterman_icelake_t =
-//     smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
+using affine_needleman_wunsch_icelake_t =
+    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
+using affine_smith_waterman_icelake_t =
+    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 #pragma endregion - Common Aliases
 
