@@ -67,6 +67,16 @@ struct multiplying_rolling_hasher {
         for (size_t i = 0; i + 1 < window_width_; ++i) highest_power_ = highest_power_ * multiplier_;
     }
 
+    /**
+     *  @brief Seeds dimension @p dim of a fingerprint from a reproducibility @p seed.
+     *
+     *  Draws a per-dimension multiplier from a `splitmix64` stream of `seed + dim`, so neighbouring dimensions
+     *  never share parameters. This hasher carries no modulo, relying on the integer type's natural overflow.
+     */
+    explicit multiplying_rolling_hasher(size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept
+        : multiplying_rolling_hasher(window_width,
+                                     static_cast<hash_t>(alphabet_size + 1u + (splitmix64(seed + dim) % 256u))) {}
+
     constexpr size_t window_width() const noexcept { return window_width_; }
 
     constexpr state_t push(state_t state, byte_t new_char) const noexcept { return state * multiplier_ + new_char; }
@@ -83,6 +93,8 @@ struct multiplying_rolling_hasher {
     state_t multiplier_;
     state_t highest_power_;
 };
+
+inline u64_t choose_coprime_modulo(u64_t multiplier, u64_t limit) noexcept; // ? Defined just below the hasher
 
 /**
  *  @brief Rabin-Karp-style rolling polynomial hash function.
@@ -127,6 +139,17 @@ struct rabin_karp_rolling_hasher {
             discarding_multiplier_ = mul_mod(discarding_multiplier_, multiplier_);
     }
 
+    /**
+     *  @brief Seeds dimension @p dim of a fingerprint from a reproducibility @p seed.
+     *
+     *  Draws a per-dimension multiplier from a `splitmix64` stream of `seed + dim`, then pairs it with a
+     *  per-dimension co-prime modulo, so neighbouring dimensions share neither parameter - the property that
+     *  keeps the resulting MinHashes statistically independent.
+     */
+    explicit rabin_karp_rolling_hasher(size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept
+        : rabin_karp_rolling_hasher(window_width, seeded_multiplier(alphabet_size, dim, seed),
+                                    seeded_modulo(alphabet_size, dim, seed)) {}
+
     constexpr size_t window_width() const noexcept { return window_width_; }
 
     constexpr state_t push(state_t state, byte_t new_char) const noexcept {
@@ -146,6 +169,14 @@ struct rabin_karp_rolling_hasher {
     constexpr hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
   private:
+    static hash_t seeded_multiplier(size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        return static_cast<hash_t>(alphabet_size + (splitmix64(seed + dim) % 256u));
+    }
+    static hash_t seeded_modulo(size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        u64_t const modulo = choose_coprime_modulo(seeded_multiplier(alphabet_size, dim, seed), default_modulo_base_k);
+        return static_cast<hash_t>(modulo ? modulo : static_cast<u64_t>(default_modulo_base_k));
+    }
+
     constexpr state_t mul_mod(state_t a, state_t b) const noexcept { return (a * b) % modulo_; }
     constexpr state_t add_mod(state_t a, state_t b) const noexcept { return (a + b) % modulo_; }
     constexpr state_t sub_mod(state_t a, state_t b) const noexcept { return (a + modulo_ - b) % modulo_; }
@@ -166,12 +197,24 @@ struct buz_rolling_hasher {
     using state_t = hash_type_;
     using hash_t = hash_type_;
 
+    constexpr buz_rolling_hasher() noexcept : window_width_ {0}, table_ {} {}
+
     explicit buz_rolling_hasher(size_t window_width, u64_t seed = 0x9E3779B97F4A7C15ull) noexcept
-        : window_width_ {window_width} {
+        : window_width_ {window_width}, table_ {} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
-        for (size_t i = 0; i < 256; ++i) table_[i] = split_mix64(seed);
+        for (size_t i = 0; i < 256; ++i) table_[i] = static_cast<state_t>(splitmix64(seed + i));
     }
+
+    /**
+     *  @brief Seeds dimension @p dim of a fingerprint from a reproducibility @p seed.
+     *
+     *  Folds `seed + dim` through `splitmix64` into the table seed, so neighbouring dimensions get independent
+     *  substitution tables. The alphabet size is unused - BuzHash always covers the full 256-byte table.
+     */
+    explicit buz_rolling_hasher(size_t window_width, [[maybe_unused]] size_t alphabet_size, size_t dim,
+                                u64_t seed) noexcept
+        : buz_rolling_hasher(window_width, splitmix64(seed + dim)) {}
 
     constexpr size_t window_width() const noexcept { return window_width_; }
 
@@ -192,14 +235,6 @@ struct buz_rolling_hasher {
     static constexpr state_t rotl(state_t v, unsigned r) noexcept {
         constexpr unsigned bits_k = sizeof(state_t) * 8u;
         return (v << r) | (v >> (bits_k - r));
-    }
-
-    static constexpr u64_t split_mix64(u64_t &state) noexcept {
-        state += 0x9E3779B97F4A7C15ull;
-        u64_t z = state;
-        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-        return z ^ (z >> 31);
     }
 
     size_t window_width_;
@@ -288,6 +323,16 @@ struct floating_rolling_hasher<f32_t> {
         negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
+    /**
+     *  @brief Seeds dimension @p dim of a fingerprint from a reproducibility @p seed.
+     *
+     *  Pulls the per-dimension multiplier and modulo from independent `splitmix64` streams of `seed + dim`, so
+     *  neighbouring dimensions share neither parameter. Both ranges stay within the narrow `f32` overflow headroom.
+     */
+    explicit floating_rolling_hasher(size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept
+        : floating_rolling_hasher(window_width, static_cast<hash_t>(seeded_multiplier(alphabet_size, dim, seed)),
+                                  static_cast<hash_t>(seeded_modulo(alphabet_size, dim, seed))) {}
+
     SZ_INLINE size_t window_width() const noexcept { return window_width_; }
 
     SZ_INLINE state_t push(state_t state, byte_t new_char) const noexcept {
@@ -307,6 +352,15 @@ struct floating_rolling_hasher<f32_t> {
     SZ_INLINE hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
   private:
+    static state_t seeded_multiplier([[maybe_unused]] size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        // The multiplier range already spans a full 256-symbol alphabet.
+        return static_cast<state_t>(default_alphabet_size_k + (splitmix64(seed + dim) % 256ull)); // Range [256, 512)
+    }
+    static state_t seeded_modulo([[maybe_unused]] size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        // A second, independent stream nudges the per-dimension modulo just below the validated base.
+        return static_cast<state_t>(default_modulo_base_k - (splitmix64(splitmix64(seed + dim)) % 256ull));
+    }
+
     SZ_INLINE state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
 
     /**
@@ -440,6 +494,17 @@ struct floating_rolling_hasher<f64_t> {
         negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
+    /**
+     *  @brief Seeds dimension @p dim of a fingerprint from a reproducibility @p seed.
+     *
+     *  Pulls the per-dimension multiplier and modulo from independent `splitmix64` streams of `seed + dim`. Varying
+     *  the modulo per dimension - rather than only the multiplier over one shared modulo - is what makes the
+     *  resulting MinHashes statistically independent, while both ranges stay within the Barrett overflow headroom.
+     */
+    explicit floating_rolling_hasher(size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept
+        : floating_rolling_hasher(window_width, seeded_multiplier(alphabet_size, dim, seed),
+                                  seeded_modulo(alphabet_size, dim, seed)) {}
+
     constexpr floating_rolling_hasher() noexcept = default;
     constexpr floating_rolling_hasher(floating_rolling_hasher &&) noexcept = default;
     constexpr floating_rolling_hasher(floating_rolling_hasher const &) noexcept = default;
@@ -468,6 +533,17 @@ struct floating_rolling_hasher<f64_t> {
     constexpr state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
 
   private:
+    static state_t seeded_multiplier([[maybe_unused]] size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        // The multiplier range already spans a full 256-symbol alphabet.
+        return static_cast<state_t>(256ull + (splitmix64(seed + dim) % 384ull)); // Range [256, 640)
+    }
+    static state_t seeded_modulo([[maybe_unused]] size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+        // A second, independent stream keeps the per-dimension modulo just below the validated base, preserving
+        // the Barrett-reduction overflow headroom.
+        u64_t const modulo_drop = splitmix64(splitmix64(seed + dim)) % (1ull << 20);
+        return static_cast<state_t>(static_cast<u64_t>(default_modulo_base_k) - modulo_drop);
+    }
+
     constexpr state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
 
     /**
@@ -497,34 +573,6 @@ struct floating_rolling_hasher<f64_t> {
     state_t inverse_modulo_ = 0.0;
     state_t negative_discarding_multiplier_ = 0.0;
 };
-
-/**
- *  @brief Derives a per-dimension `floating_rolling_hasher<f64_t>` for a seeded fingerprint engine.
- *  @param[in] window_width Width of the rolling window shared across all dimensions.
- *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
- *  @param[in] dim The dimension index within the full fingerprint, used to diversify the hasher.
- *  @param[in] seed The reproducibility seed; every value derives independent per-dimension parameters.
- *
- *  Both the multiplier and the modulo are pulled from independent `splitmix64` streams of `seed + dim`. Varying
- *  the modulo per dimension - rather than only the multiplier over one shared modulo - is what makes the resulting
- *  MinHashes statistically independent. The ranges are kept within the `floating_rolling_hasher<f64_t>` overflow
- *  headroom: multipliers in `[256, 640)` and moduli within a narrow band just below `default_modulo_base_k`.
- */
-inline floating_rolling_hasher<f64_t> make_seeded_floating_hasher( //
-    size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept {
-
-    using hasher_t = floating_rolling_hasher<f64_t>;
-    sz_unused_(alphabet_size); // The multiplier range already spans a full 256-symbol alphabet
-
-    // Two independent `splitmix64` streams keyed by the same `seed + dim`, so neighbouring dimensions don't
-    // share either parameter. The narrow modulo band stays below the validated `default_modulo_base_k` to
-    // preserve the Barrett-reduction overflow guarantees baked into the `floating_rolling_hasher<f64_t>`.
-    u64_t const stream = splitmix64(seed + dim);
-    u64_t const multiplier = 256ull + (stream % 384ull);             // ? Range [256, 640)
-    u64_t const modulo_drop = splitmix64(stream) % (1ull << 20);     // ? Up to ~1M below the base
-    u64_t const modulo = static_cast<u64_t>(hasher_t::default_modulo_base_k) - modulo_drop;
-    return hasher_t(window_width, static_cast<hasher_t::state_t>(multiplier), static_cast<hasher_t::state_t>(modulo));
-}
 
 #pragma endregion - Baseline Rolling Hashers
 
@@ -637,10 +685,9 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         if (hashers_.try_reserve(old_dims + new_dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t new_dim = 0; new_dim < new_dims; ++new_dim) {
             size_t const dim = old_dims + new_dim;
-            // Every dimension pulls its multiplier from a `splitmix64` stream of `seed + dim`, so neighbouring
-            // dimensions never share parameters.
-            size_t const multiplier = alphabet_size + (splitmix64(seed + dim) % 65536ull);
-            status_t status = try_append(hasher_t(window_width, multiplier));
+            // Seeding goes through the hasher's own constructor, so every backend - AoS or SoA - derives identical
+            // per-dimension parameters from `seed + dim`.
+            status_t status = try_append(hasher_t(window_width, alphabet_size, dim, seed));
             sz_assert_(status == status_t::success_k && "Couldn't fail after the reserve");
         }
         return status_t::success_k;
@@ -1092,7 +1139,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
     SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256, size_t first_dimension_offset = 0,
                                   u64_t seed = default_seed_k) noexcept {
         for (size_t dim = 0; dim < dimensions_k; ++dim) {
-            hasher_t hasher = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
+            hasher_t hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
             multipliers_[dim] = hasher.multiplier();
             modulos_[dim] = hasher.modulo();
             inverse_modulos_[dim] = hasher.inverse_modulo();
