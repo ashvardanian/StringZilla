@@ -246,10 +246,12 @@ struct buz_rolling_hasher {
  *  @retval 0 on failure, or a valid prime number otherwise.
  */
 inline u64_t choose_coprime_modulo(u64_t multiplier, u64_t limit) noexcept {
-    if (multiplier == 0 || multiplier >= limit || limit <= 1) return 0;
+    u64_t max_input = std::numeric_limits<byte_t>::max() + 1u;
+    // Reject `multiplier`/`limit` combinations that would underflow `limit - (max_input + 1)` below into an
+    // enormous unsigned `bound` and spin the search loop effectively forever.
+    if (multiplier == 0 || multiplier >= limit || limit <= max_input + 1) return 0;
 
     // Upper bound guaranteeing no overflow in non-discarding `update` calls
-    u64_t max_input = std::numeric_limits<byte_t>::max() + 1u;
     u64_t bound = (limit - (max_input + 1)) / multiplier + 1;
 
     if (!(bound & 1u)) --bound; // Make odd
@@ -476,7 +478,7 @@ struct floating_rolling_hasher<f64_t> {
         state_t const modulo = default_modulo_base_k) noexcept
         : window_width_ {window_width}, multiplier_ {static_cast<state_t>(multiplier)},
           modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0 / modulo_},
-          negative_discarding_multiplier_ {1.0} {
+          negative_discarding_multiplier_ {1.0}, discarding_multiplier_ {0.0} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
         sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
@@ -492,6 +494,17 @@ struct floating_rolling_hasher<f64_t> {
         for (size_t i = 0; i + 1 < window_width_; ++i)
             negative_discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_);
         negative_discarding_multiplier_ = -negative_discarding_multiplier_;
+
+        // The single-reduction `roll` fuses both updates into one Barrett pass. It folds the multiplier into the
+        // discarding coefficient and uses its non-negative complement, so the combined intermediate never goes
+        // negative before reduction: `state * multiplier + new_term + discarding_multiplier * old_term`.
+        discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_) + modulo_;
+        if (discarding_multiplier_ >= modulo_) discarding_multiplier_ -= modulo_;
+
+        // The fused intermediate adds a second `largest_normalized_state * input_term` summand on top of the
+        // classic one, so it requires a slightly tighter headroom than the two-reduction `push`/two-step `roll`.
+        state_t const largest_fused_intermediary = largest_intermediary + largest_normalized_state * largest_input_term;
+        sz_assert_(largest_fused_intermediary < limit_k && "Fused intermediate state overflows the limit");
     }
 
     /**
@@ -521,8 +534,13 @@ struct floating_rolling_hasher<f64_t> {
     constexpr state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
         state_t old_term = state_t(old_char) + 1.0;
         state_t new_term = state_t(new_char) + 1.0;
-        state_t without_old = fma_mod(negative_discarding_multiplier_, old_term, state);
-        return fma_mod(without_old, multiplier_, new_term);
+
+        // A single Barrett reduction handles both the discarded head symbol and the incoming tail symbol.
+        // `discarding_multiplier_` already folds in the `multiplier_` and uses the non-negative complement,
+        // so the intermediate stays within `[0, limit_k)` without underflowing zero before the reduction.
+        state_t fused = state * multiplier_ + new_term;
+        fused = fused + discarding_multiplier_ * old_term;
+        return barrett_mod(fused);
     }
 
     constexpr hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
@@ -531,6 +549,7 @@ struct floating_rolling_hasher<f64_t> {
     constexpr state_t modulo() const noexcept { return modulo_; }
     constexpr state_t inverse_modulo() const noexcept { return inverse_modulo_; }
     constexpr state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
+    constexpr state_t discarding_multiplier() const noexcept { return discarding_multiplier_; }
 
   private:
     static state_t seeded_multiplier([[maybe_unused]] size_t alphabet_size, size_t dim, u64_t seed) noexcept {
@@ -572,6 +591,7 @@ struct floating_rolling_hasher<f64_t> {
     state_t modulo_ = 0.0;
     state_t inverse_modulo_ = 0.0;
     state_t negative_discarding_multiplier_ = 0.0;
+    state_t discarding_multiplier_ = 0.0;
 };
 
 #pragma endregion - Baseline Rolling Hashers
@@ -737,10 +757,10 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         for (auto &minimum : rolling_minimums_buffer) minimum = skipped_rolling_hash_k;
 
         // Roll through the entire `text`
-        auto rolling_states =
-            span<rolling_state_t, dimensions_>(rolling_states_buffer.data(), rolling_states_buffer.size());
-        auto rolling_minimums =
-            span<rolling_hash_t, dimensions_>(rolling_minimums_buffer.data(), rolling_minimums_buffer.size());
+        auto rolling_states = span<rolling_state_t, dimensions_>(rolling_states_buffer.data(),
+                                                                 rolling_states_buffer.size());
+        auto rolling_minimums = span<rolling_hash_t, dimensions_>(rolling_minimums_buffer.data(),
+                                                                  rolling_minimums_buffer.size());
         fingerprint_chunk<dimensions_>(text, rolling_states, rolling_minimums, min_hashes, min_counts);
         return status_t::success_k;
     }
@@ -919,8 +939,8 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
                 // ? This overlap will be different for different window widths, but assuming we are
                 // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
                 // ? same slices isn't a big deal.
-                auto overlapping_text_end =
-                    (std::min)(text_start + chunk_size + max_window_width_ - 1, text_view.end());
+                auto overlapping_text_end = (std::min)(text_start + chunk_size + max_window_width_ - 1,
+                                                       text_view.end());
                 auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
                 auto thread_local_states = span<rolling_state_t> {rolling_states.data() + thread_index * dims, dims};
                 auto thread_local_minimums = span<rolling_hash_t> {rolling_minimums.data() + thread_index * dims, dims};
