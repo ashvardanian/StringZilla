@@ -408,8 +408,8 @@ inline bool test_should_run(char const *name) noexcept {
  *  handler); this wrapper additionally turns thrown exceptions into a localized, named failure instead
  *  of a bare `what()` at the top of `main`, and surfaces per-test durations so slow tests are obvious.
  */
-template <typename test_function_type_>
-inline int run_test(char const *name, test_function_type_ &&test_function) noexcept {
+template <typename function_type_>
+inline int run_test(char const *name, function_type_ &&test_function) noexcept {
     if (!test_should_run(name)) {
         std::printf("- %s ... skipped (SZ_TESTS_FILTER)\n", name);
         std::fflush(stdout);
