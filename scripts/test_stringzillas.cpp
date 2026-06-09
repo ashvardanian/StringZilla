@@ -44,10 +44,10 @@ int main(int argc, char const **argv) {
     print_test_environment();
 
     int failures = 0;
-    failures += run_test("test_rolling_hashers_equivalence", [] { test_rolling_hashers_equivalence(); });
-    failures += run_test("test_rolling_hasher", [] { test_rolling_hasher(); });
-    failures += run_test("test_similarity_scores_equivalence", [] { test_similarity_scores_equivalence(); });
-    failures += run_test("test_similarity_scores_memory_usage", [] { test_similarity_scores_memory_usage(); });
+    failures += run_test("test_rolling_hashers_equivalence", test_rolling_hashers_equivalence);
+    failures += run_test("test_rolling_hasher", test_rolling_hasher);
+    failures += run_test("test_similarity_scores_equivalence", test_similarity_scores_equivalence);
+    failures += run_test("test_similarity_scores_memory_usage", test_similarity_scores_memory_usage);
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%d test(s) failed.\n", failures);

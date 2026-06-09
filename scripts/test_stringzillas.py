@@ -674,7 +674,7 @@ def test_needleman_wunsch_against_affine_gaps(
     byte_to_class = np.zeros(256, dtype=np.uint8)
     byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
     class_costs = np.zeros((32, 32), dtype=np.int8)
-    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix[:residue_count, :residue_count]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.NeedlemanWunschScores(
@@ -757,7 +757,7 @@ def test_smith_waterman_against_affine_gaps(
     byte_to_class = np.zeros(256, dtype=np.uint8)
     byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
     class_costs = np.zeros((32, 32), dtype=np.int8)
-    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix[:residue_count, :residue_count]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.SmithWatermanScores(
