@@ -61,7 +61,7 @@ struct fingerprint_callable {
     fingerprint_callable(arrow_strings_tape_t const &tape, fingerprints_min_hashes_t &fingerprints_hashes,
                          fingerprints_min_counts_t &fingerprints_counts, engine_t &eng, extra_args_... args)
         : tape(tape), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
-          extra_args(args...) {}
+          extra_args(std::forward<extra_args_>(args)...) {}
 
     call_result_t operator()() noexcept(false) {
 
@@ -191,6 +191,14 @@ void bench_fingerprints(environment_t const &env) {
     bench_result_t basic_rolling_f64_serial_result =
         bench_nullary(env, "basic_rolling_f64_serial", basic_rolling_f64_serial_call).log();
 
+    // A matching CPU baseline for the Rabin-Karp accelerated backend, as its hashes differ from the f64 ones.
+    // Only the CUDA backend consumes this as its equality reference, so guard it to keep CPU-only builds free
+    // of an unused-but-set variable under `-Werror`.
+#if SZ_USE_CUDA
+    auto basic_rabin_u64_serial_call = fingerprint_callable<basic_rabin_u64_serial_t, fu::basic_pool_t &>(
+        tape, min_hashes_baseline, min_counts_baseline, *basic_rabin_u64_serial, pool);
+#endif // SZ_USE_CUDA
+
     // Semi-serial variants
     bench_nullary(env, "basic_rolling_f32_serial",
                   fingerprint_callable<basic_rolling_f32_serial_t, fu::basic_pool_t &>(
@@ -217,8 +225,8 @@ void bench_fingerprints(environment_t const &env) {
     scramble_accelerated_results();
 
 #if SZ_USE_CUDA
-    bench_nullary(                                                  //
-        env, "basic_rabin_u64_cuda", basic_rolling_f64_serial_call, //
+    bench_nullary(                                               //
+        env, "basic_rabin_u64_cuda", basic_rabin_u64_serial_call, //
         fingerprint_callable<basic_rabin_u64_cuda_t, cuda_executor_t, gpu_specs_t>(
             tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_cuda, cuda_executor_t {}, specs), //
         callable_no_op_t {},        // preprocessing

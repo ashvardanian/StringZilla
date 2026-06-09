@@ -154,20 +154,20 @@ double seconds_per_call(function_type_ &&function) {
  *  @brief Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
  *         Use as `for (auto running_seconds : repeat_up_to(5.0)) { ... }`.
  */
-struct repeat_up_to {
+struct repeat_up_to_t {
     double max_seconds = 0;
     double passed_seconds = 0;
 
-    struct end_sentinel {};
-    class iterator {
+    struct end_sentinel_t {};
+    class iterator_t {
         accurate_clock_t::time_point start_time_;
         double max_seconds_ = 0;
         double &passed_seconds_;
 
       public:
-        inline iterator(double max_seconds, double &passed_seconds)
+        inline iterator_t(double max_seconds, double &passed_seconds)
             : start_time_(accurate_clock_t::now()), max_seconds_(max_seconds), passed_seconds_(passed_seconds) {}
-        inline bool operator!=(end_sentinel) const {
+        inline bool operator!=(end_sentinel_t) const {
             accurate_clock_t::time_point current_time = accurate_clock_t::now();
             passed_seconds_ = stdc::duration_cast<stdc::nanoseconds>(current_time - start_time_).count() / 1.e9;
             return max_seconds_ != 0 && passed_seconds_ < max_seconds_;
@@ -176,22 +176,24 @@ struct repeat_up_to {
         constexpr void operator++() {} // No-op
     };
 
-    inline repeat_up_to(double max_seconds) : max_seconds(max_seconds) {}
-    inline repeat_up_to(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
-    inline iterator begin() { return {max_seconds, passed_seconds}; }
-    inline end_sentinel end() const noexcept { return {}; }
+    inline repeat_up_to_t(double max_seconds) : max_seconds(max_seconds) {}
+    inline repeat_up_to_t(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
+    inline iterator_t begin() { return {max_seconds, passed_seconds}; }
+    inline end_sentinel_t end() const noexcept { return {}; }
     inline double seconds() const noexcept { return passed_seconds; }
 };
+
+inline repeat_up_to_t repeat_up_to(double max_seconds) noexcept { return repeat_up_to_t {max_seconds}; }
 
 /**
  *  @brief Stops compilers from optimizing out the expression.
  *         Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
  */
-template <typename argument_type>
-static void do_not_optimize(argument_type &&value) noexcept {
+template <typename argument_type_>
+static void do_not_optimize(argument_type_ &&value) noexcept {
 
 #if defined(_MSC_VER) // MSVC
-    using plain_type = typename std::remove_reference<argument_type>::type;
+    using plain_type = typename std::remove_reference<argument_type_>::type;
     // Use the `volatile` keyword and a memory barrier to prevent optimization
     volatile plain_type *p = &value;
     _ReadWriteBarrier();
@@ -308,6 +310,10 @@ struct environment_t {
     std::size_t stress_limit = 1;
     /** @brief Whether to deduplicate tokens before benchmarking. */
     bool unique = false;
+    /** @brief Optional cap on the number of tokens kept, 0 means unlimited; `STRINGWARS_MAX_TOKENS`. */
+    std::size_t max_tokens = 0;
+    /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
+    std::vector<std::size_t> batch_sizes_override;
 
     /** @brief Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
@@ -425,6 +431,21 @@ inline environment_t build_environment(                                        /
         env.unique = is_one;
     }
 
+    // Use `STRINGWARS_MAX_TOKENS` to cap the number of tokens kept, for faster and more targeted runs.
+    if (char const *env_var = std::getenv("STRINGWARS_MAX_TOKENS")) { env.max_tokens = std::stoull(env_var); }
+
+    // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
+    // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
+    if (char const *env_var = std::getenv("STRINGWARS_BATCH")) {
+        std::string const batch_argument = env_var;
+        for (std::size_t start = 0; start < batch_argument.size();) {
+            std::size_t const comma = batch_argument.find(',', start);
+            std::size_t const end = comma == std::string::npos ? batch_argument.size() : comma;
+            if (end > start) env.batch_sizes_override.push_back(std::stoull(batch_argument.substr(start, end - start)));
+            start = end + 1;
+        }
+    }
+
     env.dataset = read_file(env.path);
     env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
 
@@ -446,6 +467,8 @@ inline environment_t build_environment(                                        /
         env.tokens.erase(last, env.tokens.end());
     }
 
+    // Optionally cap the token count before the power-of-two shrink, for faster and more targeted runs.
+    if (env.max_tokens != 0 && env.tokens.size() > env.max_tokens) env.tokens.resize(env.max_tokens);
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
