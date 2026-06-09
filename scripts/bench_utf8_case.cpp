@@ -199,6 +199,7 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
 #pragma endregion
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla UTF-8 Case Benchmarks!\n");
     if (auto code = log_environment(); code != 0) return code;
 

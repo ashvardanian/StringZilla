@@ -4470,6 +4470,7 @@ int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
     sz_unused_(argc && argv);
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
     std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");

@@ -38,25 +38,21 @@ using namespace sz::scripts;
 
 int main(int argc, char const **argv) {
     sz_unused_(argc && argv);
+    install_test_signal_handlers();
     std::printf("Hi, dear tester! You look nice today!\n");
     if (auto code = log_environment(); code != 0) return code;
     print_test_environment();
 
-    try {
-        std::printf("- test_rolling_hashers_equivalence...\n");
-        test_rolling_hashers_equivalence();
-        std::printf("- test_rolling_hasher...\n");
-        test_rolling_hasher();
-        std::printf("- test_similarity_scores_equivalence...\n");
-        test_similarity_scores_equivalence();
-        std::printf("- test_similarity_scores_memory_usage...\n");
-        test_similarity_scores_memory_usage();
-    }
-    catch (std::exception const &e) {
-        std::fprintf(stderr, "Failed with: %s\n", e.what());
+    int failures = 0;
+    failures += run_test("test_rolling_hashers_equivalence", [] { test_rolling_hashers_equivalence(); });
+    failures += run_test("test_rolling_hasher", [] { test_rolling_hasher(); });
+    failures += run_test("test_similarity_scores_equivalence", [] { test_similarity_scores_equivalence(); });
+    failures += run_test("test_similarity_scores_memory_usage", [] { test_similarity_scores_memory_usage(); });
+
+    if (failures != 0) {
+        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
         return 1;
     }
-
     std::printf("\nAll tests passed!\n");
     return 0;
 }

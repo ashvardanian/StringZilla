@@ -243,6 +243,7 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
 }
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla!\n");
     if (auto code = log_environment(); code != 0) return code;
 

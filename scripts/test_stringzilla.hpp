@@ -34,15 +34,24 @@
  *  @endcode
  */
 #pragma once
+#include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdio>  // `std::printf`, `std::fflush`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::strcmp`
 
-#include <fstream>   // `std::ifstream`
-#include <random>    // `std::random_device`
-#include <string>    // `std::string`
-#include <vector>    // `std::vector`
-#include <algorithm> // `std::copy`, `std::generate`
+#include <algorithm>  // `std::copy`, `std::generate`
+#include <chrono>     // `std::chrono::steady_clock` for per-test timing
+#include <exception>  // `std::exception`
+#include <fstream>    // `std::ifstream`
+#include <random>     // `std::random_device`
+#include <regex>      // `std::regex_search` for `SZ_TESTS_FILTER`
+#include <string>     // `std::string`
+#include <vector>     // `std::vector`
+
+#if defined(__linux__)
+#include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
+#include <unistd.h>   // `STDERR_FILENO`
+#endif
 
 #include "stringzilla/types.hpp"
 #if SZ_USE_CUDA
@@ -341,6 +350,89 @@ inline void print_test_environment() noexcept {
     if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
     std::fflush(stdout); // Ensure output is visible even on crash
 }
+
+#pragma region - Test Runner
+
+/**
+ *  @brief Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes
+ *         instead of dying silently - especially under output redirection in CI.
+ */
+inline void test_fatal_signal_handler(int signal_number) noexcept {
+    std::fprintf(stderr, "\n*** Fatal signal %d - backtrace follows ***\n", signal_number);
+#if defined(__linux__)
+    void *frames[64];
+    int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
+    backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
+#endif
+    std::signal(signal_number, SIG_DFL);
+    std::raise(signal_number);
+}
+
+/**
+ *  @brief Installs SIGSEGV/SIGABRT backtrace handlers and line-buffers stdout.
+ *         Shared by the serial (`.cpp`) and CUDA (`.cu`) test entry points; call once from `main`.
+ */
+inline void install_test_signal_handlers() noexcept {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0); // Line-buffer, so progress survives a crash under output redirection.
+    std::signal(SIGSEGV, test_fatal_signal_handler);
+    std::signal(SIGABRT, test_fatal_signal_handler);
+}
+
+/**
+ *  @brief Returns true if a test named @p name should run, honoring the `SZ_TESTS_FILTER` regex.
+ *
+ *  `SZ_TESTS_FILTER` is an ECMAScript regular expression matched against the test name (e.g.
+ *  `SZ_TESTS_FILTER=fingerprint` runs only the rolling-hasher tests, skipping the slower similarity
+ *  suite). An empty or unset filter runs everything; an invalid pattern runs everything rather than
+ *  silently skipping the whole suite.
+ */
+inline bool test_should_run(char const *name) noexcept {
+    static std::string const filter = []() -> std::string {
+        char const *env = std::getenv("SZ_TESTS_FILTER");
+        return env && env[0] != '\0' ? std::string(env) : std::string();
+    }();
+    if (filter.empty()) return true;
+    try {
+        return std::regex_search(name, std::regex(filter));
+    }
+    catch (std::regex_error const &) {
+        return true;
+    }
+}
+
+/**
+ *  @brief Runs one named test: honors `SZ_TESTS_FILTER`, wall-clock times it, and reports the outcome.
+ *  @return The number of failures (0 on success or when skipped, 1 on a thrown exception).
+ *
+ *  Hard failures via `sz_assert_` abort the process (and self-localize through the installed signal
+ *  handler); this wrapper additionally turns thrown exceptions into a localized, named failure instead
+ *  of a bare `what()` at the top of `main`, and surfaces per-test durations so slow tests are obvious.
+ */
+template <typename test_function_type_>
+inline int run_test(char const *name, test_function_type_ &&test_function) noexcept {
+    if (!test_should_run(name)) {
+        std::printf("- %s ... skipped (SZ_TESTS_FILTER)\n", name);
+        std::fflush(stdout);
+        return 0;
+    }
+    std::printf("- %s ...\n", name);
+    std::fflush(stdout);
+    auto const start = std::chrono::steady_clock::now();
+    try {
+        test_function();
+    }
+    catch (std::exception const &error) {
+        std::fprintf(stderr, "- %s ... FAILED: %s\n", name, error.what());
+        std::fflush(stderr);
+        return 1;
+    }
+    double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("- %s ... ok (%.2f s)\n", name, seconds);
+    std::fflush(stdout);
+    return 0;
+}
+
+#pragma endregion - Test Runner
 
 } // namespace scripts
 } // namespace stringzilla

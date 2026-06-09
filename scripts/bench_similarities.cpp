@@ -54,6 +54,7 @@ namespace szs = ashvardanian::stringzillas;
 using namespace sz::scripts;
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZillas on CPU!\n");
     if (auto code = log_environment(); code != 0) return code;
 
