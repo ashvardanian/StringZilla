@@ -695,7 +695,8 @@ extern "C" {
 
     // Needleman-Wunsch scoring functions
     fn szs_needleman_wunsch_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
+        byte_to_class: *const u8,             // 256 byte-to-class map
+        class_substitution_costs: *const i8,  // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,
@@ -738,7 +739,8 @@ extern "C" {
 
     // Smith-Waterman scoring functions
     fn szs_smith_waterman_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
+        byte_to_class: *const u8,             // 256 byte-to-class map
+        class_substitution_costs: *const i8,  // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,
@@ -1404,21 +1406,26 @@ unsafe impl Sync for LevenshteinDistancesUtf8 {}
 
 /// Needleman-Wunsch global sequence alignment scoring engine.
 ///
-/// Finds optimal global alignments using a substitution matrix and gap penalties.
-/// Returns alignment scores rather than distances.
+/// Finds optimal global alignments using a compact class-based substitution matrix and gap
+/// penalties. Returns alignment scores rather than distances.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Create scoring matrix (match=2, mismatch=-1)
-/// let mut matrix = [[-1i8; 256]; 256];
+/// // Map each byte to one of 32 classes; here every byte is its own class modulo 32.
+/// let mut byte_to_class = [0u8; 256];
 /// for i in 0..256 {
-///     matrix[i][i] = 2;
+///     byte_to_class[i] = (i % 32) as u8;
+/// }
+/// // Class scoring matrix (match=2, mismatch=-1)
+/// let mut class_costs = [[-1i8; 32]; 32];
+/// for i in 0..32 {
+///     class_costs[i][i] = 2;
 /// }
 ///
 /// let device = DeviceScope::default().unwrap();
-/// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+/// let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
 ///
 /// let seq_a = vec!["ACGT"];
 /// let seq_b = vec!["AGCT"];
@@ -1432,12 +1439,14 @@ impl NeedlemanWunschScores {
     /// Create a new Needleman-Wunsch global alignment scoring engine.
     ///
     /// # Parameters
-    /// - `substitution_matrix`: 256x256 matrix of alignment scores
+    /// - `byte_to_class`: 256-entry map from each input byte to one of 32 character classes
+    /// - `class_substitution_costs`: 32x32 matrix of alignment scores between character classes
     /// - `open_cost`: Penalty for opening a gap (typically negative)
     /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
     pub fn new(
         device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
+byte_to_class: &[u8; 256],
+        class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
     ) -> Result<Self, Error> {
@@ -1446,7 +1455,8 @@ impl NeedlemanWunschScores {
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_needleman_wunsch_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
+byte_to_class.as_ptr() as *const u8,
+                class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
                 ptr::null(),
@@ -1489,10 +1499,12 @@ impl NeedlemanWunschScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 2; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// # let mut byte_to_class = [0u8; 256];
+    /// # for i in 0..256 { byte_to_class[i] = (i % 32) as u8; }
+    /// # let mut class_costs = [[-1i8; 32]; 32];
+    /// # for i in 0..32 { class_costs[i][i] = 2; }
     /// let device = DeviceScope::default().unwrap();
-    /// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     ///
     /// // Compare DNA sequences
     /// let dna_a = vec!["ATCGATCG", "GGCCTTAA"];
@@ -1507,9 +1519,10 @@ impl NeedlemanWunschScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    /// # let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// // Process large batches efficiently
     /// let sequences: Vec<&str> = vec![
     ///     "PROTEIN_SEQUENCE_1", "PROTEIN_SEQUENCE_2", /* ... */
@@ -1672,21 +1685,26 @@ unsafe impl Sync for NeedlemanWunschScores {}
 
 /// Smith-Waterman local sequence alignment scoring engine.
 ///
-/// Finds optimal local alignments within sequences using a substitution matrix
-/// and gap penalties. Returns maximum scores found anywhere in the alignment matrix.
+/// Finds optimal local alignments within sequences using a compact class-based substitution
+/// matrix and gap penalties. Returns maximum scores found anywhere in the alignment matrix.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// // Create scoring matrix
-/// let mut matrix = [[-1i8; 256]; 256];
+/// // Map each byte to one of 32 classes; here every byte is its own class modulo 32.
+/// let mut byte_to_class = [0u8; 256];
 /// for i in 0..256 {
-///     matrix[i][i] = 2;
+///     byte_to_class[i] = (i % 32) as u8;
+/// }
+/// // Class scoring matrix (match=2, mismatch=-1)
+/// let mut class_costs = [[-1i8; 32]; 32];
+/// for i in 0..32 {
+///     class_costs[i][i] = 2;
 /// }
 ///
 /// let device = DeviceScope::default().unwrap();
-/// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+/// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
 ///
 /// let seq_a = vec!["ACGTAAACGT"];
 /// let seq_b = vec!["ACGT"];
@@ -1705,15 +1723,16 @@ impl SmithWatermanScores {
     /// # Parameters
     ///
     /// - `device`: Device scope for execution context
-    /// - `substitution_matrix`: 256x256 scoring matrix for character pairs
+    /// - `byte_to_class`: 256-entry map from each input byte to one of 32 character classes
+    /// - `class_substitution_costs`: 32x32 scoring matrix between character classes
     /// - `open_cost`: Gap opening penalty (typically negative)
     /// - `extend_cost`: Gap extension penalty (typically negative, ≥ open_cost)
     ///
     /// # Matrix Design for Local Alignment
     ///
-    /// For effective local alignment, the matrix should have:
-    /// - **Positive match scores**: Reward similar characters
-    /// - **Negative mismatch scores**: Penalize dissimilar characters
+    /// For effective local alignment, the class matrix should have:
+    /// - **Positive match scores**: Reward similar classes
+    /// - **Negative mismatch scores**: Penalize dissimilar classes
     /// - **Balanced penalties**: Prevent excessive gap formation
     ///
     /// # Examples
@@ -1722,37 +1741,43 @@ impl SmithWatermanScores {
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// let device = DeviceScope::default().unwrap();
     ///
-    /// // Protein alignment matrix (simplified)
-    /// let mut protein_matrix = [[-1i8; 256]; 256];  // Default mismatch
-    ///
-    /// // Set positive scores for similar amino acids
+    /// // Assign one class per amino-acid, everything else falls into class 0.
+    /// let mut byte_to_class = [0u8; 256];
     /// let amino_acids = b"ACDEFGHIKLMNPQRSTVWY";
-    /// for &aa in amino_acids {
-    ///     protein_matrix[aa as usize][aa as usize] = 5; // Identity
+    /// for (i, &aa) in amino_acids.iter().enumerate() {
+    ///     byte_to_class[aa as usize] = (i + 1) as u8;
     /// }
     ///
-    /// // Similar amino acids get positive but lower scores
-    /// protein_matrix[b'L' as usize][b'I' as usize] = 2; // Leucine-Isoleucine
-    /// protein_matrix[b'I' as usize][b'L' as usize] = 2;
+    /// // Default mismatch, identity on the diagonal, plus a similar-residue bonus.
+    /// let mut class_costs = [[-1i8; 32]; 32];
+    /// for i in 0..32 {
+    ///     class_costs[i][i] = 5; // Identity
+    /// }
+    /// let leucine = byte_to_class[b'L' as usize] as usize;
+    /// let isoleucine = byte_to_class[b'I' as usize] as usize;
+    /// class_costs[leucine][isoleucine] = 2; // Leucine-Isoleucine
+    /// class_costs[isoleucine][leucine] = 2;
     ///
-    /// let engine = SmithWatermanScores::new(&device, &protein_matrix, -3, -1).unwrap();
+    /// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -3, -1).unwrap();
     /// ```
     ///
     /// # Gap Penalty Strategy
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
     /// // Conservative gaps (discourage insertions/deletions)
-    /// let conservative = SmithWatermanScores::new(&device, &matrix, -10, -2).unwrap();
+    /// let conservative = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -10, -2).unwrap();
     ///
     /// // Permissive gaps (allow more insertions/deletions)
-    /// let permissive = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let permissive = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// ```
     pub fn new(
         device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
+byte_to_class: &[u8; 256],
+        class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
     ) -> Result<Self, Error> {
@@ -1761,7 +1786,8 @@ impl SmithWatermanScores {
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_smith_waterman_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
+byte_to_class.as_ptr() as *const u8,
+                class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
                 ptr::null(),
@@ -1804,10 +1830,12 @@ impl SmithWatermanScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 3; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// # let mut byte_to_class = [0u8; 256];
+    /// # for i in 0..256 { byte_to_class[i] = (i % 32) as u8; }
+    /// # let mut class_costs = [[-1i8; 32]; 32];
+    /// # for i in 0..32 { class_costs[i][i] = 3; }
     /// let device = DeviceScope::default().unwrap();
-    /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     ///
     /// // Local similarity search
     /// let sequences = vec![
@@ -1830,9 +1858,10 @@ impl SmithWatermanScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// # let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// // Find homologous sequences in a database
     /// let query_seq = vec!["PROTEIN_QUERY_SEQUENCE"];
     /// let database_seqs = vec![
@@ -2686,24 +2715,29 @@ impl Drop for Fingerprints {
 unsafe impl Send for Fingerprints {}
 unsafe impl Sync for Fingerprints {}
 
-/// Creates a diagonal substitution matrix for sequence alignment.
-/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
-/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
-pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
-    let mut result = [[0i8; 256]; 256];
-
+/// Creates a compact class-based diagonal substitution scheme for sequence alignment.
+/// Returns a `(byte_to_class, class_substitution_costs)` pair, where each byte maps to one of 32
+/// classes (`byte % 32`), matching classes get `match_score`, and mismatching classes get
+/// `mismatch_score`.
+pub fn error_costs_classes_diagonal(match_score: i8, mismatch_score: i8) -> ([u8; 256], [[i8; 32]; 32]) {
+    let mut byte_to_class = [0u8; 256];
     for i in 0..256 {
-        for j in 0..256 {
-            result[i][j] = if i == j { match_score } else { mismatch_score };
+byte_to_class[i] = (i % 32) as u8;
+    }
+
+    let mut class_costs = [[0i8; 32]; 32];
+        for i in 0..32 {
+            for j in 0..32 {
+            class_costs[i][j] = if i == j { match_score } else { mismatch_score };
         }
     }
 
-    result
+    (byte_to_class, class_costs)
 }
 
-/// Equivalent to `error_costs_256x256_diagonal(0, -1)`.
-pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
-    error_costs_256x256_diagonal(0, -1)
+/// Equivalent to `error_costs_classes_diagonal(0, -1)`.
+pub fn error_costs_classes_unary() -> ([u8; 256], [[i8; 32]; 32]) {
+    error_costs_classes_diagonal(0, -1)
 }
 
 /// Check if either byte collection requires 64-bit tapes
@@ -3004,13 +3038,10 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Create simple scoring matrix
-        let mut matrix = [[-1i8; 256]; 256];
-        for i in 0..256 {
-            matrix[i][i] = 2; // Match score
-        }
+        // Create a simple class-based scoring scheme
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
 
-        let engine_result = NeedlemanWunschScores::new(&device, &matrix, -2, -1);
+        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping Needleman-Wunsch test - engine initialization failed");
             return;
@@ -3039,13 +3070,10 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Create simple scoring matrix
-        let mut matrix = [[-1i8; 256]; 256];
-        for i in 0..256 {
-            matrix[i][i] = 3; // Match score
-        }
+        // Create a simple class-based scoring scheme
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(3, -1);
 
-        let engine_result = SmithWatermanScores::new(&device, &matrix, -2, -1);
+        let engine_result = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping Smith-Waterman test - engine initialization failed");
             return;
@@ -3263,9 +3291,9 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Test our diagonal matrix function with NW aligner
-        let matrix = error_costs_256x256_diagonal(2, -1);
-        let engine_result = NeedlemanWunschScores::new(&device, &matrix, -2, -1);
+        // Test our diagonal class-based scoring function with NW aligner
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
+        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping error_costs test - NW engine initialization failed");
             return;

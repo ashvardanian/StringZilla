@@ -23,8 +23,7 @@ namespace scripts {
 
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::affine_gap_costs_t;
-using ashvardanian::stringzillas::error_costs_256x256_t;
-using ashvardanian::stringzillas::error_costs_26x26ascii_t;
+using ashvardanian::stringzillas::error_costs_32x32_t;
 using ashvardanian::stringzillas::levenshtein_distances;
 using ashvardanian::stringzillas::levenshtein_distances_utf8;
 using ashvardanian::stringzillas::linear_gap_costs_t;
@@ -177,10 +176,10 @@ inline std::size_t levenshtein_gotoh_baseline(                          //
         for (std::size_t j = 1; j < cols; ++j) {
             std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
             std::size_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::size_t if_insertion =
-                std::min<std::size_t>(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
-            std::size_t if_deletion =
-                std::min<std::size_t>(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::size_t if_insertion = std::min<std::size_t>(row[j - 1] + gap_opening_cost,
+                                                             row_inserts[j - 1] + gap_extension_cost);
+            std::size_t if_deletion = std::min<std::size_t>(last_row[j] + gap_opening_cost,
+                                                            last_deletes_row[j] + gap_extension_cost);
             std::size_t if_deletion_or_insertion = std::min(if_deletion, if_insertion);
             row[j] = std::min(if_deletion_or_insertion, if_substitution);
             row_inserts[j] = if_insertion;
@@ -229,10 +228,10 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
             std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_insertion =
-                std::max(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
-            std::ptrdiff_t if_deletion =
-                std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_insertion = std::max(row[j - 1] + gap_opening_cost,
+                                                   row_inserts[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion = std::max(last_row[j] + gap_opening_cost,
+                                                  last_deletes_row[j] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
             row[j] = std::max(if_deletion_or_insertion, if_substitution);
             row_inserts[j] = if_insertion;
@@ -284,10 +283,10 @@ inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
             std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_insertion =
-                std::max(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
-            std::ptrdiff_t if_deletion =
-                std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_insertion = std::max(row[j - 1] + gap_opening_cost,
+                                                   row_inserts[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion = std::max(last_row[j] + gap_opening_cost,
+                                                  last_deletes_row[j] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
             std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
             std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
@@ -318,29 +317,29 @@ struct levenshtein_baselines_t {
         sz_assert_(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] =
-                gap_opening_cost == gap_extension_cost
-                    ? levenshtein_baseline(first[i].data(), first[i].size(),   //
-                                           second[i].data(), second[i].size(), //
-                                           substitution_costs.match, substitution_costs.mismatch, gap_opening_cost)
-                    : levenshtein_gotoh_baseline(first[i].data(), first[i].size(),   //
-                                                 second[i].data(), second[i].size(), //
-                                                 substitution_costs.match, substitution_costs.mismatch,
-                                                 gap_opening_cost, gap_extension_cost);
+            results[i] = gap_opening_cost == gap_extension_cost
+                             ? levenshtein_baseline(first[i].data(), first[i].size(),   //
+                                                    second[i].data(), second[i].size(), //
+                                                    substitution_costs.match, substitution_costs.mismatch,
+                                                    gap_opening_cost)
+                             : levenshtein_gotoh_baseline(first[i].data(), first[i].size(),   //
+                                                          second[i].data(), second[i].size(), //
+                                                          substitution_costs.match, substitution_costs.mismatch,
+                                                          gap_opening_cost, gap_extension_cost);
         return status_t::success_k;
     }
 };
 
 struct needleman_wunsch_baselines_t {
 
-    error_costs_256x256_t substitution_costs = error_costs_256x256_t::diagonal();
+    error_costs_32x32_t substitution_costs {};
     error_cost_t gap_opening_cost = -1;
     error_cost_t gap_extension_cost = -1;
 
     needleman_wunsch_baselines_t() = default;
-    needleman_wunsch_baselines_t(error_costs_256x256_t subs, linear_gap_costs_t gap)
+    needleman_wunsch_baselines_t(error_costs_32x32_t subs, linear_gap_costs_t gap)
         : substitution_costs(subs), gap_opening_cost(gap.open_or_extend), gap_extension_cost(gap.open_or_extend) {}
-    needleman_wunsch_baselines_t(error_costs_256x256_t subs, affine_gap_costs_t gap)
+    needleman_wunsch_baselines_t(error_costs_32x32_t subs, affine_gap_costs_t gap)
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
@@ -348,28 +347,28 @@ struct needleman_wunsch_baselines_t {
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] =
-                gap_opening_cost == gap_extension_cost
-                    ? needleman_wunsch_baseline(first[i].data(), first[i].size(),   //
-                                                second[i].data(), second[i].size(), //
-                                                substitution_costs, gap_opening_cost)
-                    : needleman_wunsch_gotoh_baseline(first[i].data(), first[i].size(),   //
-                                                      second[i].data(), second[i].size(), //
-                                                      substitution_costs, gap_opening_cost, gap_extension_cost);
+            results[i] = gap_opening_cost == gap_extension_cost
+                             ? needleman_wunsch_baseline(first[i].data(), first[i].size(),   //
+                                                         second[i].data(), second[i].size(), //
+                                                         substitution_costs, gap_opening_cost)
+                             : needleman_wunsch_gotoh_baseline(first[i].data(), first[i].size(),   //
+                                                               second[i].data(), second[i].size(), //
+                                                               substitution_costs, gap_opening_cost,
+                                                               gap_extension_cost);
         return status_t::success_k;
     }
 };
 
 struct smith_waterman_baselines_t {
 
-    error_costs_256x256_t substitution_costs = error_costs_256x256_t::diagonal();
+    error_costs_32x32_t substitution_costs {};
     error_cost_t gap_opening_cost = -1;
     error_cost_t gap_extension_cost = -1;
 
     smith_waterman_baselines_t() = default;
-    smith_waterman_baselines_t(error_costs_256x256_t subs, linear_gap_costs_t gap)
+    smith_waterman_baselines_t(error_costs_32x32_t subs, linear_gap_costs_t gap)
         : substitution_costs(subs), gap_opening_cost(gap.open_or_extend), gap_extension_cost(gap.open_or_extend) {}
-    smith_waterman_baselines_t(error_costs_256x256_t subs, affine_gap_costs_t gap)
+    smith_waterman_baselines_t(error_costs_32x32_t subs, affine_gap_costs_t gap)
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
@@ -463,32 +462,32 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
            "Երևան, თბილისი, και Αθήνα – երեք մայրքաղաքներ: բարև, სტუმრები, και Καλώς ήρθατε!");
 
     // ~200 characters in ASCII English, Traditional Chinese, and Russian, describing their capitals.
-    append("London, the iconic capital of the United Kingdom, seamlessly blends centuries-old traditions with bold "
-           "modernity;"
-           "倫敦作為英國的標誌性首都，其歷史沉澱與當代創新彼此交融，展現獨特風範;"
-           "Лондон, столица Великобритании, объединяет древние традиции с динамичной современностью, "
+    append("London, the iconic capital of the United Kingdom, seamlessly blends centuries-old traditions with bold " //
+           "modernity;"                                                                                              //
+           "倫敦作為英國的標誌性首都，其歷史沉澱與當代創新彼此交融，展現獨特風範;"                                   //
+           "Лондон, столица Великобритании, объединяет древние традиции с динамичной современностью, "               //
            "offering a rich tapestry of cultural heritage and visionary progress.", // First string ends here ;)
-           "London, the renowned capital of the UK, fuses its rich historical legacy with a spirit of modern "
-           "innovation;"
-           "倫敦，作為英國的著名首都，以悠久歷史與現代創意相互融合，呈現獨特都市風貌;"
-           "Лондон – известная столица Великобритании, где древность встречается с современной энергией, "
+           "London, the renowned capital of the UK, fuses its rich historical legacy with a spirit of modern " //
+           "innovation;"                                                                                       //
+           "倫敦，作為英國的著名首都，以悠久歷史與現代創意相互融合，呈現獨特都市風貌;"                         //
+           "Лондон – известная столица Великобритании, где древность встречается с современной энергией, "     //
            "creating an inspiring environment for cultural exploration and future development.");
 
     // ~300 characters; a complex variant with translations and visible regions of Korean, Japanese, Chinese
     // (traditional and simplified), German, French, Spanish.
-    append("An epic voyage through multicultural realms: "
-           "In a city where ancient traditions fuse with modern innovation, dynamic energy permeates every street. "
-           "서울의 번화한 거리에선 전통과 현대가 어우러져 감동을 주며, 東京では伝統美と未来の夢が共鳴する。在這裡, "
-           "傳統文化與現代科技和諧並存, 而这里, 传统文化与现代科技交织创新; "
-           "Deutschland zeigt eine reiche Geschichte, "
-           "la France révèle une élégance subtile, "
-           "y España irradia pasión y color.", // First string ends here ;)
-           "An epic journey through diverse cultures: "
-           "In a town where old traditions fuse with innovation, energy permeates every historic street. "
-           "서울의 번화한 거리는 전통과 현대가 어울려 독특한 풍경을 이루며, "
-           "東京では伝統美と未来への展望が響き合う。在這裡, 傳統與現代科技融合無間, 而这里, 传统与现代科技紧密相连; "
-           "Deutschland offenbart eine stolze Geschichte, "
-           "la France incarne une élégance fine, "
+    append("An epic voyage through multicultural realms: "                                                           //
+           "In a city where ancient traditions fuse with modern innovation, dynamic energy permeates every street. " //
+           "서울의 번화한 거리에선 전통과 현대가 어우러져 감동을 주며, 東京では伝統美と未来の夢が共鳴する。在這裡, " //
+           "傳統文化與現代科技和諧並存, 而这里, 传统文化与现代科技交织创新; "                                        //
+           "Deutschland zeigt eine reiche Geschichte, "                                                              //
+           "la France révèle une élégance subtile, "                                                                 //
+           "y España irradia pasión y color.",          // First string ends here ;)
+           "An epic journey through diverse cultures: " //
+           "In a town where old traditions fuse with innovation, energy permeates every historic street. "            //
+           "서울의 번화한 거리는 전통과 현대가 어울려 독특한 풍경을 이루며, "                                         //
+           "東京では伝統美と未来への展望が響き合う。在這裡, 傳統與現代科技融合無間, 而这里, 传统与现代科技紧密相连; " //
+           "Deutschland offenbart eine stolze Geschichte, "                                                           //
+           "la France incarne une élégance fine, "                                                                    //
            "y España resplandece con pasión y vivacidad.");
 
     // First check with a batch-size of 1
@@ -543,8 +542,8 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd =
-            simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), simd_extra_args...);
+        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
+                                             simd_extra_args...);
         sz_assert_(status_base == status_t::success_k);
         sz_assert_(status_simd == status_t::success_k);
 
@@ -579,8 +578,8 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd =
-            simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), simd_extra_args...);
+        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
+                                             simd_extra_args...);
         sz_assert_(status_base == status_t::success_k);
         sz_assert_(status_simd == status_t::success_k);
 
@@ -607,8 +606,7 @@ void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd
 void test_similarity_scores_equivalence() {
 
     using error_t = error_cost_t;
-    using error_matrix_t = error_costs_256x256_t; // ? Full matrix for all 256 ASCII characters
-    using error_mat_t = error_costs_26x26ascii_t; // ? Smaller compact form for 26 capital ASCII characters
+    using error_matrix32_t = error_costs_32x32_t;
 
     // Our logic of computing NW and SW alignment similarity scores differs in sign from most implementations.
     // It's similar to how the "cosine distance" is the inverse of the "cosine similarity".
@@ -617,7 +615,7 @@ void test_similarity_scores_equivalence() {
         constexpr error_t unary_match_score = 1;
         constexpr error_t unary_mismatch_score = 0;
         constexpr error_t unary_gap_score = 0;
-        error_matrix_t substituter_unary = error_matrix_t::diagonal(unary_match_score, unary_mismatch_score);
+        uniform_substitution_costs_t substituter_unary {unary_match_score, unary_mismatch_score};
         auto distance_l = levenshtein_baseline("abcdefg", 7, "abc_efg", 7);
         auto similarity_nw = needleman_wunsch_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
         auto similarity_sw = smith_waterman_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
@@ -667,55 +665,54 @@ void test_similarity_scores_equivalence() {
     // Now let's take non-unary substitution costs, like BLOSUM62
     constexpr linear_gap_costs_t blosum62_linear_cost {-4};
     constexpr affine_gap_costs_t blosum62_affine_cost {-4, -1};
-    error_mat_t blosum62_mat = error_costs_26x26ascii_t::blosum62();
-    error_matrix_t blosum62_matrix = blosum62_mat.decompressed();
+    error_matrix32_t blosum62_matrix = error_costs_32x32_t::blosum62();
 
     // Single-threaded serial NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Multi-threaded parallel NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Single-threaded serial SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Multi-threaded parallel SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Single-threaded serial NW implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
     // Multi-threaded parallel NW implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
     // Single-threaded serial SW implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
     // Multi-threaded parallel SW implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
 #if SZ_USE_ICELAKE
@@ -747,14 +744,31 @@ void test_similarity_scores_equivalence() {
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Ice Lake Smith-Waterman distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
             blosum62_matrix, blosum62_linear_cost});
+
+#endif
+
+#if SZ_USE_HASWELL
+    // Haswell Needleman-Wunsch distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t,
+                                (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
+                                                                                        blosum62_linear_cost});
+
+    // Haswell Smith-Waterman distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t,
+                              (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
+                                                                                      blosum62_linear_cost});
 
 #endif
 
@@ -788,68 +802,68 @@ void test_similarity_scores_equivalence() {
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
             blosum62_matrix, blosum62_linear_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
             blosum62_matrix, blosum62_affine_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                                  blosum62_linear_cost},
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                                  blosum62_affine_cost},
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_affine_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_HOPPER
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
             blosum62_matrix, blosum62_linear_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+        needleman_wunsch_scores<char, error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
             blosum62_matrix, blosum62_affine_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                                  blosum62_linear_cost},
+        smith_waterman_scores<char, error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_linear_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                                  blosum62_affine_cost},
+        smith_waterman_scores<char, error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_affine_cost},
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
 #endif

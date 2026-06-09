@@ -255,15 +255,15 @@ struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs
  *  @note Requires Hopper generation GPUs to handle 2x `i16` scores at a time.
  */
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                    linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
@@ -276,7 +276,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         sz_i16_t const *scores_pre_deletion,     //
         sz_i16_t *scores_new) noexcept {
 
-        error_costs_256x256_in_cuda_constant_memory_t substituter;
+        error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
         sz_i16_t const gap_cost = this->gap_costs_.open_or_extend;
         sz_u32_vec_t gap_cost_vec;
         gap_cost_vec.i16s[0] = gap_cost_vec.i16s[1] = gap_cost;
@@ -345,15 +345,15 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                    linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
@@ -368,7 +368,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
 
         // Make sure we are called for an anti-diagonal traversal order
         sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
-        error_costs_256x256_in_cuda_constant_memory_t substituter;
+        error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
         sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         sz_i32_t final_score = 0;
 
@@ -415,15 +415,15 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
  *  @note Requires Hopper generation GPUs to handle 2x `i16` scores at a time.
  */
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                    affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
@@ -440,7 +440,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         sz_i16_t *scores_new_insertions,           //
         sz_i16_t *scores_new_deletions) noexcept {
 
-        error_costs_256x256_in_cuda_constant_memory_t substituter;
+        error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
         sz_i16_t const gap_open_cost = this->gap_costs_.open;
         sz_i16_t const gap_extend_cost = this->gap_costs_.extend;
         sz_u32_vec_t gap_open_cost_vec, gap_extend_cost_vec;
@@ -524,15 +524,15 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                    affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
@@ -553,7 +553,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
         sz_i32_t const gap_open_cost = this->gap_costs_.open;
         sz_i32_t const gap_extend_cost = this->gap_costs_.extend;
-        error_costs_256x256_in_cuda_constant_memory_t substituter;
+        error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
         sz_i32_t final_score = 0;
 
         for (unsigned i = tasks_offset; i < tasks_count; i += tasks_step) {
@@ -603,23 +603,23 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                    linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
-    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                    affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
-    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_cuda_constant_memory_t,
+    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };

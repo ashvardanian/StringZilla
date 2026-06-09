@@ -37,24 +37,24 @@ using levenshtein_hopper_t = levenshtein_distances<char, linear_gap_costs_t, ual
 using affine_levenshtein_hopper_t = levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 using needleman_wunsch_cuda_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 using smith_waterman_cuda_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
 using affine_needleman_wunsch_cuda_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 using affine_smith_waterman_cuda_t =
-    smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
 using needleman_wunsch_hopper_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 using smith_waterman_hopper_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 using affine_needleman_wunsch_hopper_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 using affine_smith_waterman_hopper_t =
-    smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 #pragma endregion - Common Aliases
 
@@ -616,6 +616,9 @@ __global__ void linear_score_across_cuda_device_(              //
     using cuda_warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t,
                                            objective_k, locality_k, capability_k>;
 
+// Cooperatively copy the substitution costs into static shared memory for the inner-loop lookups.
+    substituter_t const substituter_shared = load_substituter_into_shared_(substituter);
+
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = blockIdx.x == 0 && threadIdx.x == 0;
 
@@ -638,7 +641,7 @@ __global__ void linear_score_across_cuda_device_(              //
     score_t *next_scores = diagonals_ptr + 2 * max_diagonal_length;
 
     // Initialize the first two diagonals:
-    cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
+    cuda_warp_scorer_t diagonal_aligner {substituter_shared, gap_costs};
     if (is_main_thread) {
         diagonal_aligner.init_score(previous_scores[0], 0);
         diagonal_aligner.init_score(current_scores[0], 1);
@@ -793,6 +796,9 @@ __global__ void affine_score_across_cuda_device(               //
     using cuda_warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t,
                                            objective_k, locality_k, capability_k>;
 
+// Cooperatively copy the substitution costs into static shared memory for the inner-loop lookups.
+    substituter_t const substituter_shared = load_substituter_into_shared_(substituter);
+
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = blockIdx.x == 0 && threadIdx.x == 0; // ! Differs for warp-wide
 
@@ -819,7 +825,7 @@ __global__ void affine_score_across_cuda_device(               //
     score_t *next_deletes = diagonals_ptr + 6 * max_diagonal_length;
 
     // Initialize the first two diagonals:
-    cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
+    cuda_warp_scorer_t diagonal_aligner {substituter_shared, gap_costs};
     if (is_main_thread) {
         diagonal_aligner.init_score(previous_scores[0], 0);
         diagonal_aligner.init_score(current_scores[0], 1);
@@ -1002,11 +1008,14 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_for_block[];
-    char *const shared_memory_for_warp =
-        shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
+    char *const shared_memory_for_warp = shared_memory_for_block +
+(global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
 
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = thread_in_warp_index == 0;
+
+    // Cooperatively copy the substitution costs into static shared memory for the inner-loop lookups.
+    substituter_t const substituter_shared = load_substituter_into_shared_(substituter);
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -1045,7 +1054,7 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         for (unsigned i = thread_in_warp_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
-        cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
+        cuda_warp_scorer_t diagonal_aligner {substituter_shared, gap_costs};
         if (is_main_thread) {
             diagonal_aligner.init_score(previous_scores[0], 0);
             diagonal_aligner.init_score(current_scores[0], 1);
@@ -1195,11 +1204,14 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_for_block[];
-    char *const shared_memory_for_warp =
-        shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
+    char *const shared_memory_for_warp = shared_memory_for_block +
+(global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
 
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = thread_in_warp_index == 0;
+
+    // Cooperatively copy the substitution costs into static shared memory for the inner-loop lookups.
+    substituter_t const substituter_shared = load_substituter_into_shared_(substituter);
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -1242,7 +1254,7 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         for (unsigned i = thread_in_warp_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
-        cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
+        cuda_warp_scorer_t diagonal_aligner {substituter_shared, gap_costs};
         if (is_main_thread) {
             diagonal_aligner.init_score(previous_scores[0], 0);
             diagonal_aligner.init_score(current_scores[0], 1);
@@ -1667,21 +1679,36 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
 #pragma region - Needleman Wunsch and Smith Waterman Scores in CUDA
 
 /**
- *  @brief Convenience buffer of the size matching the size of the CUDA constant memory,
- *         used to cheaper store and access the substitution costs for the characters.
- *  @see CUDA constant memory docs: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#constant
- *  @note `static` so each translation unit that includes this header gets its own internal copy;
- *        the symbol is only ever referenced within this header (device reads + `cudaMemcpyToSymbol`),
- *        so per-TU duplication is correct and avoids multiple-definition errors when the parallel
- *        shim is split into one translation unit per algorithm.
+ *  @brief Device-side view of a compact @b `error_costs_32x32_t` substitution table.
+ *
+ *  Holds raw pointers to a `byte_to_class[256]` map and an `class_substitution_costs[32][32]` table,
+ *  which may live either in global or shared memory. The fixed @b stride of 32 entries per row matches
+ *  @b `error_costs_classes_count_k`, so a substitution cost is looked up as:
+ *
+ *      class_substitution_costs[byte_to_class[a] * 32 + byte_to_class[b]]
+ *
+ *  The whole table (1 KB) plus the class map (256 B) fits in shared memory, replacing the divergent
+ *  serialization of a full 256 x 256 table in CUDA @b constant memory.
  */
-static __constant__ char error_costs_in_cuda_constant_memory_[256 * 256];
+struct error_costs_classes_in_cuda_shared_memory_t {
+    static constexpr unsigned classes_count_k = static_cast<unsigned>(error_costs_classes_count_k);
 
-struct error_costs_256x256_in_cuda_constant_memory_t {
+    sz_u8_t const *byte_to_class = nullptr;
+    error_cost_t const *class_substitution_costs = nullptr;
+
     __host__ error_cost_t magnitude() const noexcept { return 0; }
-    __forceinline__ __host__ __device__ error_cost_t operator()(char a, char b) const noexcept {
+
+    /**
+     *  @brief Looks up the substitution cost between two bytes. Accepts any byte-like integral type,
+     *         so the Hopper kernels can pass packed 16-bit lanes without ambiguous overload resolution.
+     */
+    template <typename first_byte_type_, typename second_byte_type_>
+    __forceinline__ __host__ __device__ error_cost_t operator()(first_byte_type_ a,
+                                                                second_byte_type_ b) const noexcept {
 #if defined(__CUDA_ARCH__)
-        return error_costs_in_cuda_constant_memory_[static_cast<u8_t>(a) * 256 + static_cast<u8_t>(b)];
+        unsigned const class_a = byte_to_class[static_cast<sz_u8_t>(a)];
+        unsigned const class_b = byte_to_class[static_cast<sz_u8_t>(b)];
+return class_substitution_costs[class_a * classes_count_k + class_b];
 #else
         sz_unused_(a && b);
         return 0;
@@ -1690,33 +1717,69 @@ struct error_costs_256x256_in_cuda_constant_memory_t {
 };
 
 /**
+ *  @brief Cooperatively materializes a substituter into block-local @b static shared memory.
+ *
+ *  Generic substituters (e.g. `uniform_substitution_costs_t`) carry no out-of-band state, so the
+ *  pass-through overload simply returns them unchanged. The `error_costs_classes_in_cuda_shared_memory_t`
+ *  overload copies the 256 B class map and the 1 KB cost table into static `__shared__` buffers,
+ *  letting every thread in the block read the cost table from fast shared memory.
+ */
+template <typename substituter_type_>
+__forceinline__ __device__ substituter_type_
+load_substituter_into_shared_(substituter_type_ const substituter) noexcept {
+    return substituter;
+}
+
+__forceinline__ __device__ error_costs_classes_in_cuda_shared_memory_t
+load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const substituter) noexcept {
+
+    constexpr unsigned classes_count_k = error_costs_classes_in_cuda_shared_memory_t::classes_count_k;
+    __shared__ sz_u8_t shared_byte_to_class[256];
+    __shared__ error_cost_t shared_class_substitution_costs[classes_count_k * classes_count_k];
+
+    for (unsigned i = threadIdx.x; i < 256; i += blockDim.x) shared_byte_to_class[i] = substituter.byte_to_class[i];
+    for (unsigned i = threadIdx.x; i < classes_count_k * classes_count_k; i += blockDim.x)
+        shared_class_substitution_costs[i] = substituter.class_substitution_costs[i];
+    __syncthreads();
+
+    error_costs_classes_in_cuda_shared_memory_t shared_substituter;
+    shared_substituter.byte_to_class = shared_byte_to_class;
+    shared_substituter.class_substitution_costs = shared_class_substitution_costs;
+    return shared_substituter;
+}
+
+/**
  *  @brief Dispatches baseline NW or SW scoring algorithm to the GPU.
  *         Before starting the kernels, bins them by size to maximize the number of blocks
  *         per grid that can run simultaneously, while fitting into the shared memory.
- *         Unlike the Levenshtein distances, also places byte-level @b `error_costs_256x256_t`
- *         substitution costs into the CUDA @b constant memory, addressing it via
- *          @b `error_costs_256x256_in_cuda_constant_memory_t` struct.
+ *         Unlike the Levenshtein distances, also uploads the compact byte-level @b `error_costs_32x32_t`
+ *         substitution costs to device memory, addressing them via
+ *          @b `error_costs_classes_in_cuda_shared_memory_t`, which every block then mirrors into
+ *         its own static shared memory.
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_similarity_locality_t locality_,
           sz_capability_t capability_>
 struct cuda_nw_or_sw_byte_level_scores_ {
 
     using char_t = char;
-    using substituter_t = error_costs_256x256_t;
+    using substituter_t = error_costs_32x32_t;
+    using device_substituter_t = error_costs_classes_in_cuda_shared_memory_t;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
     using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+using byte_to_class_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<sz_u8_t>;
+    using class_costs_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<error_cost_t>;
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task_<char_t>;
     using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
 
-    error_costs_256x256_t substituter_ {};
+    error_costs_32x32_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    cuda_nw_or_sw_byte_level_scores_(error_costs_256x256_t subs = {}, gap_costs_t gaps = {},
+    cuda_nw_or_sw_byte_level_scores_(error_costs_32x32_t subs = {}, gap_costs_t gaps = {},
                                      allocator_t const &alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
@@ -1956,7 +2019,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
 
 /** @brief Dispatches baseline Needleman Wunsch algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
-struct needleman_wunsch_scores<char, error_costs_256x256_t, gap_costs_type_, allocator_type_, capability_,
+struct needleman_wunsch_scores<char, error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                                std::enable_if_t<capability_ & sz_cap_cuda_k>>
     : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
 
@@ -1966,7 +2029,7 @@ struct needleman_wunsch_scores<char, error_costs_256x256_t, gap_costs_type_, all
 
 /** @brief Dispatches baseline Smith Waterman algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
-struct smith_waterman_scores<char, error_costs_256x256_t, gap_costs_type_, allocator_type_, capability_,
+struct smith_waterman_scores<char, error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>>
     : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
 
