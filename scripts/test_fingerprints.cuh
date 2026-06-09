@@ -185,20 +185,20 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_dna_like_inputs() {
+std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 100 * 1024) {
     std::vector<std::string> strings;
 
     fuzzy_config_t config;
     config.alphabet = "ACGT";
     config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
-    config.max_string_length = 100 * 1024;
+    config.max_string_length = max_len;
 
     randomize_strings(config, strings);
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_inconvenient_inputs() {
+std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len = 100 * 1024) {
     std::vector<std::string> strings;
 
     static std::uint8_t const inconvenient_chars[4] = {0x00, 0x01, 0x7F, 0xFF};
@@ -207,7 +207,7 @@ std::vector<std::string> rolling_hasher_inconvenient_inputs() {
     config.alphabet = {reinterpret_cast<char const *>(&inconvenient_chars[0]), 4};
     config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
-    config.max_string_length = 100 * 1024;
+    config.max_string_length = max_len;
 
     randomize_strings(config, strings);
     return strings;
@@ -436,7 +436,10 @@ void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
  *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<f64_t>, ..., u32_t>`.
  */
 template <std::size_t window_width_, std::size_t dims_>
-void test_rolling_hashers_equivalence_for_width() {
+void test_rolling_hashers_equivalence_for_width(            //
+    std::vector<std::string> const &unit_strings,          //
+    std::vector<std::string> const &dna_like_strings,      //
+    std::vector<std::string> const &inconvenient_strings) {
 
     constexpr std::size_t window_width_k = window_width_;
     constexpr std::size_t dims_k = dims_;
@@ -445,11 +448,6 @@ void test_rolling_hashers_equivalence_for_width() {
     using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t>;
     rolling_f64_t rolling_f64;
     sz_assert_(rolling_f64.try_extend(window_width_k, dims_k) == status_t::success_k);
-
-    // Test on each individual dataset
-    auto unit_strings = rolling_hasher_basic_inputs();
-    auto dna_like_strings = rolling_hasher_dna_like_inputs();
-    auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
 
     using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, dims_k>;
     rolling_serial_t rolling_serial;
@@ -487,21 +485,29 @@ void test_rolling_hashers_equivalence_for_width() {
 }
 
 void test_rolling_hashers_equivalence() {
+    // AoS-vs-SoA agreement is deterministic per character, so a few KB per string already exercises every
+    // window width tested here (<= 64) across the unrolled paths. Generate the fuzz inputs once with a small
+    // cap and reuse them across all widths - the 100 KB strings are reserved for `test_rolling_hasher`, which
+    // needs them for its super-wide windows.
+    auto const unit = rolling_hasher_basic_inputs();
+    auto const dna = rolling_hasher_dna_like_inputs(4 * 1024);
+    auto const bad = rolling_hasher_inconvenient_inputs(4 * 1024);
+
     // Just 2 hashes per input
-    // test_rolling_hashers_equivalence_for_width<3, 2>();
-    test_rolling_hashers_equivalence_for_width<7, 2>();
+    // test_rolling_hashers_equivalence_for_width<3, 2>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<7, 2>(unit, dna, bad);
 
     // 32 hashes per input
-    test_rolling_hashers_equivalence_for_width<3, 32>();
-    test_rolling_hashers_equivalence_for_width<7, 32>();
-    test_rolling_hashers_equivalence_for_width<33, 32>();
-    test_rolling_hashers_equivalence_for_width<64, 32>();
+    test_rolling_hashers_equivalence_for_width<3, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<7, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<33, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<64, 32>(unit, dna, bad);
 
     // 32 hashes per input with windows divisible by 4
-    test_rolling_hashers_equivalence_for_width<4, 32>();
-    test_rolling_hashers_equivalence_for_width<8, 32>();
-    test_rolling_hashers_equivalence_for_width<12, 32>();
-    test_rolling_hashers_equivalence_for_width<16, 32>();
+    test_rolling_hashers_equivalence_for_width<4, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<8, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<12, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<16, 32>(unit, dna, bad);
 }
 
 } // namespace scripts
