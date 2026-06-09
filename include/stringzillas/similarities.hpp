@@ -29,6 +29,7 @@
 #include "stringzillas/similarities/serial.hpp"  // ISA-agnostic template core + serial aliases
 #include "stringzillas/similarities/haswell.hpp" // AVX2 (Haswell) specializations
 #include "stringzillas/similarities/icelake.hpp" // AVX-512 (Ice Lake) specializations
+#include "stringzillas/similarities/neon.hpp"    // ARM NEON (AArch64) specializations
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -43,6 +44,17 @@ using needleman_wunsch_haswell_t =
 using smith_waterman_haswell_t =
     smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 #endif // SZ_USE_HASWELL
+
+#if SZ_USE_NEON
+/**
+ *  @brief In @b ARM NEON (AArch64) the per-character class lookups use the native `vqtbl4q_u8` byte-gather,
+ *         feeding the anti-diagonal scorers.
+ */
+using needleman_wunsch_neon_t =
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using smith_waterman_neon_t =
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+#endif // SZ_USE_NEON
 
 } // namespace stringzillas
 } // namespace ashvardanian
