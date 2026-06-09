@@ -1671,6 +1671,108 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_on_each_cuda_thread_( 
 }
 
 /**
+ *  @brief Register-only @b affine-gap Levenshtein for strings up to @p max_text_length_ bytes with @b 2-byte cells,
+ *         one thread per pair. Like @ref register_optimal_levenshtein_u16 but runs the Gotoh recurrence: it keeps a
+ *         second register row for the insertion matrix @b I (`ins_vec_`) and carries the deletion matrix @b D as a
+ *         scalar across the row, so gap opening and extension are priced separately.
+ */
+template <unsigned max_text_length_>
+struct register_optimal_levenshtein_u16_affine {
+    static constexpr unsigned max_text_length_k = max_text_length_;
+    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two `sz_u16_t` cells per `sz_u32_t`
+
+    sz_u32_t row_vec_[vec_count_k]; // ? the score matrix M
+    sz_u32_t ins_vec_[vec_count_k]; // ? the insertion matrix I (gap from the row above)
+    sz_u8_t longer_chars_[max_text_length_k];
+
+    __forceinline__ __device__ sz_u16_t operator()(             //
+        sz_u8_t const *longer_string, unsigned longer_length,   //
+        sz_u8_t const *shorter_string, unsigned shorter_length, //
+        uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
+
+        sz_u16_t const open = gap_costs.open, extend = gap_costs.extend;
+        sz_u32_t const open_vec = (sz_u32_t)open | ((sz_u32_t)open << 16);
+        sz_u32_t const extend_vec = (sz_u32_t)extend | ((sz_u32_t)extend << 16);
+        sz_u32_t const match_vec = (sz_u32_t)substituter.match | ((sz_u32_t)substituter.match << 16);
+        sz_u32_t const mismatch_vec = (sz_u32_t)substituter.mismatch | ((sz_u32_t)substituter.mismatch << 16);
+
+        // Row 0: M[0][j] = open + extend*(j-1); the gap matrix gets the higher-magnitude "discard" boundary so it
+        // never wins, but stays bounded (no overflow on later additions) - matching the serial/warp affine scorer.
+        for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
+            unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
+            sz_u16_t const m0 = open + extend * (col0 - 1), m1 = open + extend * (col1 - 1);
+            row_vec_[vec_idx] = (sz_u32_t)m0 | ((sz_u32_t)m1 << 16);
+            sz_u16_t const g0 = (open + extend) + (open + extend * (col0 - 1));
+            sz_u16_t const g1 = (open + extend) + (open + extend * (col1 - 1));
+            ins_vec_[vec_idx] = (sz_u32_t)g0 | ((sz_u32_t)g1 << 16);
+        }
+        for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
+
+        for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
+            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
+            sz_u32_t const shorter_char_vec = (sz_u32_t)shorter_char | ((sz_u32_t)shorter_char << 16);
+            sz_u16_t left_M = open + extend * (row_idx - 1);                  // M[row][0]
+            sz_u16_t diag_M = row_idx == 1 ? 0 : (open + extend * (row_idx - 2)); // M[row-1][0]
+            sz_u16_t left_D = (open + extend) + (open + extend * (row_idx - 1));  // D[row][0] (discard boundary)
+            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
+                sz_u32_t const top = row_vec_[vec_idx];
+                sz_u16_t const top0 = top & 0xFFFF, top1 = top >> 16;
+                sz_u32_t const prev_ins = ins_vec_[vec_idx];
+                // I[row][j] = min(M[row-1][j] + open, I[row-1][j] + extend) - independent per cell, so packed.
+                sz_u32_t const ins = __vminu2(__vaddus2(top, open_vec), __vaddus2(prev_ins, extend_vec));
+                // diag = (M[row-1][2v], M[row-1][2v+1]); subst cost per cell; the substitution candidate, packed.
+                sz_u32_t const diag = (sz_u32_t)diag_M | ((sz_u32_t)top0 << 16);
+                sz_u32_t const chars = (sz_u32_t)longer_chars_[2 * vec_idx] |
+                                       ((sz_u32_t)longer_chars_[2 * vec_idx + 1] << 16);
+                sz_u32_t const equal = __vcmpeq2(shorter_char_vec, chars);
+                sz_u32_t const subst = (match_vec & equal) | (mismatch_vec & ~equal);
+                // min(diag + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
+                sz_u32_t const partial = __vminu2(__vaddus2(diag, subst), ins);
+                sz_u16_t const partial0 = partial & 0xFFFF, partial1 = partial >> 16;
+                // Deletion D carries left across the row (sequential): cell 0 then cell 1.
+                sz_u16_t const d0_open = left_M + open, d0_ext = left_D + extend;
+                sz_u16_t const d0 = sz_min_of_two(d0_open, d0_ext);
+                sz_u16_t const m0 = sz_min_of_two(partial0, d0);
+                sz_u16_t const d1_open = m0 + open, d1_ext = d0 + extend;
+                sz_u16_t const d1 = sz_min_of_two(d1_open, d1_ext);
+                sz_u16_t const m1 = sz_min_of_two(partial1, d1);
+                row_vec_[vec_idx] = (sz_u32_t)m0 | ((sz_u32_t)m1 << 16);
+                ins_vec_[vec_idx] = ins;
+                left_M = m1;
+                left_D = d1;
+                diag_M = top1;
+            }
+        }
+        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
+        return (row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF;
+    }
+};
+
+/** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref levenshtein_u16_on_each_cuda_thread_. */
+template <                                                                           //
+    typename task_type_,                                                            //
+    typename char_type_ = char,                                                      //
+    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
+    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+    >
+__global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_on_each_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                            //
+    uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) {
+
+    using task_t = task_type_;
+    register_optimal_levenshtein_u16_affine<max_text_length_> levenshtein_computer;
+    size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
+    for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
+         task_idx += threads_per_device) {
+        task_t &task = tasks[task_idx];
+        task.result = levenshtein_computer(                                                                 //
+            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+            substituter, gap_costs);
+    }
+}
+
+/**
  *  @brief Dispatches baseline Levenshtein edit distance algorithm to the GPU.
  *         Before starting the kernels, bins them by size to maximize the number of blocks
  *         per grid that can run simultaneously, while fitting into the shared memory.
@@ -1768,42 +1870,42 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             tasks[i] = task;
         }
 
-        // Tiny linear tasks (1-byte cells, both strings within the register limit) run as a register-only
-        // thread-per-pair kernel - far faster than the warp anti-diagonal wavefront for short inputs. Partition
-        // them to the front, launch the register kernel, and let the warp/device tiers handle only the rest.
+        // Tiny tasks (both strings within the register limit) run as a register-only thread-per-pair kernel - far
+        // faster than the warp anti-diagonal wavefront for short inputs. Partition them to the front, launch the
+        // register kernel, and let the warp/device tiers handle only the rest.
         size_t count_register_level_tasks = 0;
-        if constexpr (!is_affine_k) {
-            for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
-            if (count_register_level_tasks) {
-                std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
+        for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
+        if (count_register_level_tasks) {
+            std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
+
+            // Launches a register thread-per-pair kernel over `tasks[first, first + count)`.
+            cuda_status_t register_status {status_t::success_k, cudaSuccess};
+            auto const launch_register_kernel = [&](void *kernel, size_t first, size_t count) noexcept {
+                if (!count || register_status.status != status_t::success_k) return;
+                cudaFunction_t function = nullptr;
+                cudaError_t function_error = cudaGetFuncBySymbol(&function, kernel);
+                if (function_error != cudaSuccess) return (void)(register_status = make_cuda_status(function_error));
+                task_t *tasks_ptr = tasks.data() + first;
+                void *kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count), (void *)(&substituter_),
+                                        (void *)(&gap_costs_)};
+                unsigned const threads_per_block = 256;
+                unsigned blocks_per_grid = 0;
+                cuda_status_t occupancy_status = occupancy_grid(blocks_per_grid, kernel, threads_per_block, 0, specs);
+                if (occupancy_status.status != status_t::success_k) return (void)(register_status = occupancy_status);
+                CUresult launch_error = cuda_launch_t {}
+                                            .grid(blocks_per_grid)
+                                            .block(threads_per_block)
+                                            .shared(0)
+                                            .stream(executor.stream())
+                                            .launch(function, kernel_args);
+                if (launch_error != CUDA_SUCCESS) register_status = make_cuda_status(launch_error);
+            };
+            if constexpr (!is_affine_k) {
                 // Within the register tier, 1-byte cells go to the (4×-SIMD) u8 kernel and the rest to the u16 one.
                 size_t const count_u8_register_tasks =
                     std::partition(tasks.begin(), tasks.begin() + count_register_level_tasks,
                                    [](task_t const &task) { return task.bytes_per_cell == one_byte_per_cell_k; }) -
                     tasks.begin();
-
-                // Launches a register thread-per-pair kernel over `tasks[first, first + count)`.
-                cuda_status_t register_status {status_t::success_k, cudaSuccess};
-                auto const launch_register_kernel = [&](void *kernel, size_t first, size_t count) noexcept {
-                    if (!count || register_status.status != status_t::success_k) return;
-                    cudaFunction_t function = nullptr;
-                    cudaError_t function_error = cudaGetFuncBySymbol(&function, kernel);
-                    if (function_error != cudaSuccess) return (void)(register_status = make_cuda_status(function_error));
-                    task_t *tasks_ptr = tasks.data() + first;
-                    void *kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count), (void *)(&substituter_),
-                                            (void *)(&gap_costs_)};
-                    unsigned const threads_per_block = 256;
-                    unsigned blocks_per_grid = 0;
-                    cuda_status_t occupancy_status = occupancy_grid(blocks_per_grid, kernel, threads_per_block, 0, specs);
-                    if (occupancy_status.status != status_t::success_k) return (void)(register_status = occupancy_status);
-                    CUresult launch_error = cuda_launch_t {}
-                                                .grid(blocks_per_grid)
-                                                .block(threads_per_block)
-                                                .shared(0)
-                                                .stream(executor.stream())
-                                                .launch(function, kernel_args);
-                    if (launch_error != CUDA_SUCCESS) register_status = make_cuda_status(launch_error);
-                };
                 launch_register_kernel(
                     (void *)&levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k,
                                                              levenshtein_on_each_cuda_thread_default_text_limit_k>,
@@ -1812,8 +1914,16 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     (void *)&levenshtein_u16_on_each_cuda_thread_<task_t, char_t, capability_k,
                                                                  levenshtein_on_each_cuda_thread_default_text_limit_k>,
                     count_u8_register_tasks, count_register_level_tasks - count_u8_register_tasks);
-                if (register_status.status != status_t::success_k) return register_status;
             }
+            else {
+                // Affine gaps need 2-byte cells (gap opening overflows the 1-byte variant), so the whole register
+                // tier runs the u16 affine kernel.
+                launch_register_kernel(
+                    (void *)&levenshtein_u16_affine_on_each_cuda_thread_<
+                        task_t, char_t, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>,
+                    0, count_register_level_tasks);
+            }
+            if (register_status.status != status_t::success_k) return register_status;
         }
 
         auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
@@ -2230,6 +2340,119 @@ __global__ __launch_bounds__(256, 2) void nw_sw_score_on_each_cuda_thread_( //
 }
 
 /**
+ *  @brief Register-only @b affine-gap NW/SW scoring for strings up to @p max_text_length_ bytes with @b signed
+ *         2-byte cells, one thread per pair. Like @ref register_optimal_nw_sw but runs the Gotoh recurrence: a
+ *         second register row holds the insertion matrix @b I (`ins_vec_`) and the deletion matrix @b D is carried
+ *         as a scalar across the row, so gap opening and extension are priced separately.
+ */
+template <unsigned max_text_length_, sz_similarity_locality_t locality_>
+struct register_optimal_nw_sw_affine {
+    static constexpr unsigned max_text_length_k = max_text_length_;
+    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two signed `sz_i16_t` cells per `sz_u32_t`
+    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+
+    sz_u32_t row_vec_[vec_count_k]; // ? the score matrix M
+    sz_u32_t ins_vec_[vec_count_k]; // ? the insertion matrix I (gap from the row above)
+    sz_u8_t longer_chars_[max_text_length_k];
+
+    __forceinline__ __device__ sz_i16_t operator()(             //
+        sz_u8_t const *longer_string, unsigned longer_length,   //
+        sz_u8_t const *shorter_string, unsigned shorter_length, //
+        error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
+
+        sz_i16_t const open = gap_costs.open, extend = gap_costs.extend; // ? stored as (negative) penalties
+        sz_u32_t const open_vec = (sz_u16_t)open | ((sz_u32_t)(sz_u16_t)open << 16);
+        sz_u32_t const extend_vec = (sz_u16_t)extend | ((sz_u32_t)(sz_u16_t)extend << 16);
+
+        // Row 0: global M[0][j] = open + extend*(j-1) (local resets to 0); the gap matrix gets the higher-magnitude
+        // "discard" boundary so it never wins, but stays bounded - matching the serial/warp affine scorer.
+        for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
+            unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
+            if constexpr (is_local_k) { row_vec_[vec_idx] = 0; }
+            else {
+                sz_i16_t const m0 = open + extend * (sz_i16_t)(col0 - 1), m1 = open + extend * (sz_i16_t)(col1 - 1);
+                row_vec_[vec_idx] = (sz_u16_t)m0 | ((sz_u32_t)(sz_u16_t)m1 << 16);
+            }
+            sz_i16_t const g0 = (open + extend) + (open + extend * (sz_i16_t)(col0 - 1));
+            sz_i16_t const g1 = (open + extend) + (open + extend * (sz_i16_t)(col1 - 1));
+            ins_vec_[vec_idx] = (sz_u16_t)g0 | ((sz_u32_t)(sz_u16_t)g1 << 16);
+        }
+        for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
+
+        sz_i16_t global_max = 0;
+        for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
+            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
+            sz_i16_t left_M = is_local_k ? (sz_i16_t)0 : (sz_i16_t)(open + extend * (sz_i16_t)(row_idx - 1)); // M[row][0]
+            sz_i16_t diag_M = is_local_k ? (sz_i16_t)0
+                                         : (sz_i16_t)(row_idx == 1 ? 0 : (open + extend * (sz_i16_t)(row_idx - 2)));
+            sz_i16_t left_D = (open + extend) + (open + extend * (sz_i16_t)(row_idx - 1)); // D[row][0] (discard)
+            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
+                sz_u32_t const top = row_vec_[vec_idx];
+                sz_i16_t const top0 = (sz_i16_t)(top & 0xFFFF), top1 = (sz_i16_t)(top >> 16);
+                sz_u32_t const prev_ins = ins_vec_[vec_idx];
+                // I[row][j] = max(M[row-1][j] + open, I[row-1][j] + extend) - independent per cell, so packed.
+                sz_u32_t const ins = __vmaxs2(__vaddss2(top, open_vec), __vaddss2(prev_ins, extend_vec));
+                // diag = (M[row-1][2v], M[row-1][2v+1]); per-cell substitution cost; the substitution candidate.
+                sz_u32_t const diag = (sz_u16_t)diag_M | ((sz_u32_t)(sz_u16_t)top0 << 16);
+                sz_i16_t const sub0 = substituter(shorter_char, longer_chars_[2 * vec_idx]);
+                sz_i16_t const sub1 = substituter(shorter_char, longer_chars_[2 * vec_idx + 1]);
+                sz_u32_t const subst = (sz_u16_t)sub0 | ((sz_u32_t)(sz_u16_t)sub1 << 16);
+                // max(diag + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
+                sz_u32_t const partial = __vmaxs2(__vaddss2(diag, subst), ins);
+                sz_i16_t const partial0 = (sz_i16_t)(partial & 0xFFFF), partial1 = (sz_i16_t)(partial >> 16);
+                // Deletion D carries left across the row (sequential): cell 0 then cell 1.
+                sz_i16_t const d0_open = left_M + open, d0_ext = left_D + extend;
+                sz_i16_t const d0 = sz_max_of_two(d0_open, d0_ext);
+                sz_i16_t m0 = sz_max_of_two(partial0, d0);
+                sz_i16_t const d1_open = m0 + open, d1_ext = d0 + extend;
+                sz_i16_t const d1 = sz_max_of_two(d1_open, d1_ext);
+                sz_i16_t m1 = sz_max_of_two(partial1, d1);
+                if constexpr (is_local_k) {
+                    if (m0 < 0) m0 = 0;
+                    if (m1 < 0) m1 = 0;
+                    unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
+                    if (col0 <= longer_length && m0 > global_max) global_max = m0;
+                    if (col1 <= longer_length && m1 > global_max) global_max = m1;
+                }
+                row_vec_[vec_idx] = (sz_u16_t)m0 | ((sz_u32_t)(sz_u16_t)m1 << 16);
+                ins_vec_[vec_idx] = ins;
+                left_M = m1;
+                left_D = d1;
+                diag_M = top1;
+            }
+        }
+        if constexpr (is_local_k) return global_max;
+        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
+        return (sz_i16_t)((row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF);
+    }
+};
+
+/** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref nw_sw_score_on_each_cuda_thread_. */
+template <                                                                           //
+    typename task_type_,                                                            //
+    typename char_type_ = char,                                                      //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,                      //
+    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
+    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+    >
+__global__ __launch_bounds__(256, 2) void nw_sw_score_affine_on_each_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                        //
+    error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) {
+
+    using task_t = task_type_;
+    register_optimal_nw_sw_affine<max_text_length_, locality_> nw_sw_computer;
+    size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
+    for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
+         task_idx += threads_per_device) {
+        task_t &task = tasks[task_idx];
+        task.result = nw_sw_computer(                                                                       //
+            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+            substituter, gap_costs);
+    }
+}
+
+/**
  *  @brief Dispatches baseline NW or SW scoring algorithm to the GPU.
  *         Before starting the kernels, bins them by size to maximize the number of blocks
  *         per grid that can run simultaneously, while fitting into the shared memory.
@@ -2359,36 +2582,37 @@ struct cuda_nw_or_sw_byte_level_scores_ {
             tasks[i] = task;
         }
 
-        // Tiny non-affine tasks (within the register length limit) run as a register-only thread-per-pair NW/SW
-        // kernel - far faster than the warp anti-diagonal wavefront for short inputs. Partition them to the front,
-        // launch the register kernel, and let the warp/device tiers handle only the rest.
+        // Tiny tasks (within the register length limit) run as a register-only thread-per-pair NW/SW kernel - far
+        // faster than the warp anti-diagonal wavefront for short inputs. Partition them to the front, launch the
+        // register kernel, and let the warp/device tiers handle only the rest.
         size_t count_register_level_tasks = 0;
-        if constexpr (!is_affine_k) {
-            for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
-            if (count_register_level_tasks) {
-                std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
-                auto thread_level_kernel =
-                    &nw_sw_score_on_each_cuda_thread_<task_t, char_t, locality_k, capability_k,
-                                                      levenshtein_on_each_cuda_thread_default_text_limit_k>;
-                cudaFunction_t thread_level_function = nullptr;
-                cudaError_t function_error = cudaGetFuncBySymbol(&thread_level_function, (void *)thread_level_kernel);
-                if (function_error != cudaSuccess) return make_cuda_status(function_error);
-                task_t *tasks_ptr = tasks.data();
-                void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_register_level_tasks),
-                                                     (void *)(&device_substituter), (void *)(&gap_costs_)};
-                unsigned const threads_per_block = 256;
-                unsigned blocks_per_grid = 0;
-                cuda_status_t occupancy_status =
-                    occupancy_grid(blocks_per_grid, (void *)thread_level_kernel, threads_per_block, 0, specs);
-                if (occupancy_status.status != status_t::success_k) return occupancy_status;
-                CUresult launch_error = cuda_launch_t {}
-                                            .grid(blocks_per_grid)
-                                            .block(threads_per_block)
-                                            .shared(0)
-                                            .stream(executor.stream())
-                                            .launch(thread_level_function, thread_level_kernel_args);
-                if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
-            }
+        for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
+        if (count_register_level_tasks) {
+            std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
+            void *thread_level_kernel =
+                is_affine_k //
+                    ? (void *)&nw_sw_score_affine_on_each_cuda_thread_<
+                          task_t, char_t, locality_k, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>
+                    : (void *)&nw_sw_score_on_each_cuda_thread_<
+                          task_t, char_t, locality_k, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>;
+            cudaFunction_t thread_level_function = nullptr;
+            cudaError_t function_error = cudaGetFuncBySymbol(&thread_level_function, thread_level_kernel);
+            if (function_error != cudaSuccess) return make_cuda_status(function_error);
+            task_t *tasks_ptr = tasks.data();
+            void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_register_level_tasks),
+                                                 (void *)(&device_substituter), (void *)(&gap_costs_)};
+            unsigned const threads_per_block = 256;
+            unsigned blocks_per_grid = 0;
+            cuda_status_t occupancy_status =
+                occupancy_grid(blocks_per_grid, thread_level_kernel, threads_per_block, 0, specs);
+            if (occupancy_status.status != status_t::success_k) return occupancy_status;
+            CUresult launch_error = cuda_launch_t {}
+                                        .grid(blocks_per_grid)
+                                        .block(threads_per_block)
+                                        .shared(0)
+                                        .stream(executor.stream())
+                                        .launch(thread_level_function, thread_level_kernel_args);
+            if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
         }
 
         auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
