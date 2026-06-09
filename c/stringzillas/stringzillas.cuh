@@ -214,8 +214,21 @@ inline sz_status_t propagate_error(sz::status_t status, char const **reporter_me
 #if SZ_USE_CUDA
 inline sz_status_t propagate_error(szs::cuda_status_t cuda_status, char const **reporter_message,
                                    char const *optional_message = nullptr) noexcept {
-    if (cuda_status.cuda_error != cudaSuccess) {
-        if (reporter_message) *reporter_message = cudaGetErrorString(cuda_status.cuda_error);
+    // Prefer the stable driver error *name* (e.g. "CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES") so misconfigured driver
+    // launches are diagnosable instead of collapsing into the generic "Unknown error" of the status-only path.
+    if (cuda_status.driver_error != CUDA_SUCCESS) {
+        if (reporter_message) {
+            char const *driver_error_name = nullptr;
+            if (cuGetErrorName(cuda_status.driver_error, &driver_error_name) != CUDA_SUCCESS)
+                driver_error_name = "Unknown CUDA driver error";
+            *reporter_message = driver_error_name;
+        }
+        return static_cast<sz_status_t>(cuda_status.status);
+    }
+    // Otherwise fall back to the runtime error *name* (e.g. "cudaErrorLaunchOutOfResources") for the runtime
+    // calls we still keep (events, occupancy, malloc).
+    else if (cuda_status.cuda_error != cudaSuccess) {
+        if (reporter_message) *reporter_message = cudaGetErrorName(cuda_status.cuda_error);
         return static_cast<sz_status_t>(cuda_status.status);
     }
     else { return propagate_error(cuda_status.status, reporter_message, optional_message); }
@@ -479,6 +492,9 @@ struct needleman_wunsch_backends_t {
 #if SZ_USE_ICELAKE
         szs::needleman_wunsch_icelake_t, // ! No affine variant here yet
 #endif
+#if SZ_USE_HASWELL
+        szs::needleman_wunsch_haswell_t, // ! No affine variant here yet
+#endif
 #if SZ_USE_CUDA
         szs::needleman_wunsch_cuda_t, szs::affine_needleman_wunsch_cuda_t,
 #endif
@@ -575,6 +591,9 @@ struct smith_waterman_backends_t {
     std::variant<
 #if SZ_USE_ICELAKE
         szs::smith_waterman_icelake_t, // ! No affine variant here yet
+#endif
+#if SZ_USE_HASWELL
+        szs::smith_waterman_haswell_t, // ! No affine variant here yet
 #endif
 #if SZ_USE_CUDA
         szs::smith_waterman_cuda_t, szs::affine_smith_waterman_cuda_t,

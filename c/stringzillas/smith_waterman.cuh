@@ -12,9 +12,10 @@ extern "C" {
 
 #pragma region Smith Waterman
 
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         //
-    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                             //
+    sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
+    sz_error_cost_t open, sz_error_cost_t extend,                                  //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
     szs_smith_waterman_scores_t *engine_punned, char const **error_message) {
 
     sz_unused_(alloc);        // Custom allocator not yet implemented, using default
@@ -25,8 +26,11 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
     auto const can_use_linear_costs = open == extend;
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
-    auto substitution_costs = szs::error_costs_256x256_t {};
-    std::memcpy((void *)&substitution_costs, (void const *)subs, sizeof(substitution_costs));
+    auto substitution_costs = szs::error_costs_32x32_t {};
+    std::memcpy((void *)substitution_costs.byte_to_class, (void const *)byte_to_class,
+                sizeof(substitution_costs.byte_to_class));
+    std::memcpy((void *)substitution_costs.class_substitution_costs, (void const *)class_substitution_costs,
+                sizeof(substitution_costs.class_substitution_costs));
 
 #if SZ_USE_ICELAKE
     bool const can_use_icelake = (capabilities & sz_cap_icelake_k) == sz_cap_icelake_k;
@@ -42,6 +46,21 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
         return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_ICELAKE
+
+#if SZ_USE_HASWELL
+    bool const can_use_haswell = (capabilities & sz_cap_haswell_k) == sz_cap_haswell_k;
+    if (can_use_haswell && can_use_linear_costs) {
+        auto variant = szs::smith_waterman_haswell_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_haswell_t>(), std::move(variant));
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
+
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
+        return propagate_error(sz::status_t::success_k, error_message);
+    }
+#endif // SZ_USE_HASWELL
 
 #if SZ_USE_CUDA
     bool const can_use_cuda = (capabilities & sz_cap_cuda_k) != 0;
