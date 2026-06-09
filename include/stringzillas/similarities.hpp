@@ -20,12 +20,31 @@
  *  in their own per-ISA files. GPU backends are aggregated by `similarities.cuh`.
  *
  *  @sa similarities/serial.hpp
+ *  @sa similarities/haswell.hpp
  *  @sa similarities/icelake.hpp
  */
 #ifndef STRINGZILLAS_SIMILARITIES_HPP_
 #define STRINGZILLAS_SIMILARITIES_HPP_
 
 #include "stringzillas/similarities/serial.hpp"  // ISA-agnostic template core + serial aliases
+#include "stringzillas/similarities/haswell.hpp" // AVX2 (Haswell) specializations
 #include "stringzillas/similarities/icelake.hpp" // AVX-512 (Ice Lake) specializations
+
+namespace ashvardanian {
+namespace stringzillas {
+
+#if SZ_USE_HASWELL
+/**
+ *  @brief In @b AVX2 (Haswell) we vectorize the per-character substitution lookups for horizontal "walkers",
+ *         emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends.
+ */
+using needleman_wunsch_haswell_t =
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using smith_waterman_haswell_t =
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+#endif // SZ_USE_HASWELL
+
+} // namespace stringzillas
+} // namespace ashvardanian
 
 #endif // STRINGZILLAS_SIMILARITIES_HPP_
