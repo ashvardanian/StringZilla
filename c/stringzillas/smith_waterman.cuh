@@ -62,32 +62,7 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
     }
 #endif // SZ_USE_HASWELL
 
-#if SZ_USE_CUDA
-    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) != 0;
-    if (can_use_cuda && can_use_linear_costs) {
-        auto variant = szs::smith_waterman_cuda_t(substitution_costs, linear_costs);
-        auto engine = new (std::nothrow)
-            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_cuda_t>(), std::move(variant));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message,
-                                   "Failed to allocate Smith-Waterman engine");
-
-        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
-    }
-    else if (can_use_cuda) {
-        auto variant = szs::affine_smith_waterman_cuda_t(substitution_costs, affine_costs);
-        auto engine = new (std::nothrow)
-            smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_cuda_t>(), std::move(variant));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message,
-                                   "Failed to allocate Smith-Waterman engine");
-
-        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
-    }
-#endif // SZ_USE_CUDA
-
+    // Hopper reports the base-CUDA bit too, so the Hopper (DPX) tier must be tested before plain CUDA.
 #if SZ_USE_HOPPER
     bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;
     if (can_use_hopper && can_use_linear_costs) {
@@ -113,6 +88,32 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
         return propagate_error(sz::status_t::success_k, error_message);
     }
 #endif // SZ_USE_HOPPER
+
+#if SZ_USE_CUDA
+    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) != 0;
+    if (can_use_cuda && can_use_linear_costs) {
+        auto variant = szs::smith_waterman_cuda_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_cuda_t>(), std::move(variant));
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
+
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
+        return propagate_error(sz::status_t::success_k, error_message);
+    }
+    else if (can_use_cuda) {
+        auto variant = szs::affine_smith_waterman_cuda_t(substitution_costs, affine_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_cuda_t>(), std::move(variant));
+        if (!engine)
+            return propagate_error(sz::status_t::bad_alloc_k, error_message,
+                                   "Failed to allocate Smith-Waterman engine");
+
+        *engine_punned = reinterpret_cast<szs_smith_waterman_scores_t>(engine);
+        return propagate_error(sz::status_t::success_k, error_message);
+    }
+#endif // SZ_USE_CUDA
 
     if (can_use_linear_costs) {
         auto variant = szs::smith_waterman_serial_t(substitution_costs, linear_costs);
