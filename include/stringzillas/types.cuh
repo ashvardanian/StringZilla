@@ -15,6 +15,7 @@
 
 #include "stringzilla/types.hpp"
 
+#include <cuda.h>         // `CUresult`, `cuLaunchKernelEx`, `cuFuncSetAttribute`, `cuGetErrorName`
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
 
 #include <optional>  // `std::optional`
@@ -93,10 +94,60 @@ inline bool is_device_accessible_memory(void const *ptr) noexcept {
 struct cuda_status_t {
     status_t status = status_t::success_k;
     cudaError_t cuda_error = cudaSuccess;
+    CUresult driver_error = CUDA_SUCCESS;
     float elapsed_milliseconds = 0.0;
 
     inline operator status_t() const noexcept { return status; }
 };
+
+/**
+ *  @brief Maps a CUDA runtime error into a first-class `cuda_status_t`, always carrying the `cudaError_t`.
+ *
+ *  Launch-configuration faults (too much shared memory, oversized grid, bad block geometry, etc.) used to
+ *  collapse into an opaque `status_t::unknown_k`, which made misconfigured launches indistinguishable from
+ *  genuine internal failures. We classify the common configuration faults into actionable statuses, while
+ *  forwarding the raw `cudaError_t` so the caller can always print `cudaGetErrorName`/`cudaGetErrorString`.
+ */
+inline cuda_status_t make_cuda_status(cudaError_t cuda_error) noexcept {
+    if (cuda_error == cudaSuccess) return {status_t::success_k, cudaSuccess};
+    status_t status = status_t::unknown_k;
+    switch (cuda_error) {
+        // Out-of-resource faults map onto allocation failures: the launch asked for more registers,
+        // shared memory, or device memory than the multiprocessor (or the device) can provide.
+    case cudaErrorMemoryAllocation:
+    case cudaErrorLaunchOutOfResources: status = status_t::bad_alloc_k; break;
+        // Bad launch geometry (grid/block dimensions, shared-memory size, cooperative co-residency) is a
+        // dimension/configuration problem, distinct from a generic unknown failure.
+    case cudaErrorInvalidValue:
+    case cudaErrorInvalidConfiguration: status = status_t::unexpected_dimensions_k; break;
+    default: status = status_t::unknown_k; break;
+    }
+    return {status, cuda_error};
+}
+
+/**
+ *  @brief Maps a CUDA @b driver error (`CUresult`) into a first-class `cuda_status_t`, carrying the `CUresult`.
+ *
+ *  The driver launch entry points (`cuLaunchKernelEx`, `cuFuncSetAttribute`) return `CUresult` rather than the
+ *  runtime `cudaError_t`. We classify the common launch-configuration faults into actionable statuses, mirroring
+ *  the `make_cuda_status(cudaError_t)` mapping, while forwarding the raw `CUresult` so the caller can always
+ *  print `cuGetErrorName`/`cuGetErrorString`.
+ */
+inline cuda_status_t make_cuda_status(CUresult driver_error) noexcept {
+    if (driver_error == CUDA_SUCCESS) return {status_t::success_k, cudaSuccess, CUDA_SUCCESS};
+    status_t status = status_t::unknown_k;
+    switch (driver_error) {
+        // An out-of-memory fault maps onto an allocation failure, just like the runtime path.
+    case CUDA_ERROR_OUT_OF_MEMORY: status = status_t::bad_alloc_k; break;
+        // Bad launch geometry (oversized grid/block, shared-memory overflow, malformed image) is a
+        // dimension/configuration problem, distinct from a generic unknown failure.
+    case CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES:
+    case CUDA_ERROR_INVALID_VALUE:
+    case CUDA_ERROR_INVALID_IMAGE: status = status_t::unexpected_dimensions_k; break;
+    default: status = status_t::unknown_k; break;
+    }
+    return {status, cudaSuccess, driver_error};
+}
 
 inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
     cudaDeviceProp prop;
@@ -134,8 +185,29 @@ class cuda_executor_t {
 
   public:
     constexpr cuda_executor_t() noexcept = default;
-    constexpr cuda_executor_t(cuda_executor_t const &) noexcept = default;
-    constexpr cuda_executor_t &operator=(cuda_executor_t const &) noexcept = default;
+
+    // The executor owns its `cudaStream_t`. Copying would alias a single stream handle across instances and let
+    // one copy's destructor tear down a stream the others still reference, so the executor is move-only: callers
+    // hold one owner and hand it to the engines by `const &`.
+    cuda_executor_t(cuda_executor_t const &) = delete;
+    cuda_executor_t &operator=(cuda_executor_t const &) = delete;
+    cuda_executor_t(cuda_executor_t &&other) noexcept : stream_(other.stream_), device_id_(other.device_id_) {
+        other.stream_ = 0;
+        other.device_id_ = 0;
+    }
+    cuda_executor_t &operator=(cuda_executor_t &&other) noexcept {
+        if (this != &other) {
+            if (stream_) cudaStreamDestroy(stream_);
+            stream_ = other.stream_;
+            device_id_ = other.device_id_;
+            other.stream_ = 0;
+            other.device_id_ = 0;
+        }
+        return *this;
+    }
+    ~cuda_executor_t() noexcept {
+        if (stream_) cudaStreamDestroy(stream_);
+    }
 
     cuda_status_t try_scheduling(int device_id) noexcept {
         device_id_ = -1; // ? Invalid device ID
@@ -150,6 +222,100 @@ class cuda_executor_t {
     explicit operator bool() const noexcept { return device_id_ >= 0; }
     inline cudaStream_t stream() const noexcept { return stream_; }
     inline int device_id() const noexcept { return device_id_; }
+};
+
+/**
+ *  @brief RAII pair of CUDA events used to time a kernel launch and synchronize on its completion.
+ *
+ *  The two events are created with `cudaEventBlockingSync` so the trailing `cudaEventSynchronize` puts the host
+ *  thread to sleep (freeing the CPU core) while the GPU works, instead of busy-spinning. The destructor releases
+ *  both events on every path, so launch functions can `return` an error directly without manual cleanup.
+ */
+struct cuda_timer_t {
+    cudaEvent_t start_event = nullptr;
+    cudaEvent_t stop_event = nullptr;
+
+    cuda_timer_t() noexcept {
+        cudaEventCreate(&start_event, cudaEventBlockingSync);
+        cudaEventCreate(&stop_event, cudaEventBlockingSync);
+    }
+    ~cuda_timer_t() noexcept {
+        if (start_event) cudaEventDestroy(start_event);
+        if (stop_event) cudaEventDestroy(stop_event);
+    }
+    cuda_timer_t(cuda_timer_t const &) = delete;
+    cuda_timer_t &operator=(cuda_timer_t const &) = delete;
+
+    inline cudaError_t record_start(cudaStream_t stream) noexcept { return cudaEventRecord(start_event, stream); }
+    inline cudaError_t record_stop(cudaStream_t stream) noexcept { return cudaEventRecord(stop_event, stream); }
+    inline cudaError_t synchronize() noexcept { return cudaEventSynchronize(stop_event); }
+    inline float elapsed_milliseconds() noexcept {
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start_event, stop_event);
+        return milliseconds;
+    }
+};
+
+/**
+ *  @brief Sizes a grid to fill the device once: max-active-blocks-per-multiprocessor × multiprocessor count.
+ *
+ *  Extra blocks beyond the supplied tasks exit through the kernels' grid-stride `task_idx < tasks_count` guard,
+ *  so filling the device is never harmful. The block count is floored at one per multiprocessor so a kernel that
+ *  the occupancy query reports as not co-resident still receives a valid grid.
+ */
+inline cuda_status_t occupancy_grid(unsigned &blocks_per_grid, void const *kernel, unsigned threads_per_block,
+                                    unsigned shared_memory_bytes, gpu_specs_t const &specs) noexcept {
+    int blocks_per_multiprocessor = 0;
+    cudaError_t occupancy_error = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &blocks_per_multiprocessor, kernel, static_cast<int>(threads_per_block),
+        static_cast<size_t>(shared_memory_bytes));
+    if (occupancy_error != cudaSuccess) return make_cuda_status(occupancy_error);
+    if (blocks_per_multiprocessor < 1) blocks_per_multiprocessor = 1;
+    blocks_per_grid = static_cast<unsigned>(blocks_per_multiprocessor) * specs.streaming_multiprocessors;
+    return {status_t::success_k, cudaSuccess};
+}
+
+/**
+ *  @brief Fluent builder over `CUlaunchConfig` + `cuLaunchKernelEx`, optionally cooperative.
+ *
+ *  Collapses the verbose `CUlaunchConfig{}` field-by-field setup (and the separate `CU_LAUNCH_ATTRIBUTE_COOPERATIVE`
+ *  attribute block) into a single expression. The cooperative attribute lives inside the builder, so the temporary
+ *  must outlive the `launch()` call - which it does, since both happen within the same full expression.
+ */
+struct cuda_launch_t {
+    CUlaunchConfig config_ {};
+    CUlaunchAttribute cooperative_attribute_ {};
+
+    cuda_launch_t() noexcept {
+        config_.gridDimY = config_.gridDimZ = 1;
+        config_.blockDimY = config_.blockDimZ = 1;
+    }
+    inline cuda_launch_t &grid(unsigned blocks) noexcept {
+        config_.gridDimX = blocks;
+        return *this;
+    }
+    inline cuda_launch_t &block(unsigned threads) noexcept {
+        config_.blockDimX = threads;
+        return *this;
+    }
+    inline cuda_launch_t &shared(unsigned bytes) noexcept {
+        config_.sharedMemBytes = bytes;
+        return *this;
+    }
+    inline cuda_launch_t &stream(cudaStream_t stream) noexcept {
+        config_.hStream = (CUstream)stream;
+        return *this;
+    }
+    inline cuda_launch_t &cooperative() noexcept {
+        cooperative_attribute_.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
+        cooperative_attribute_.value.cooperative = 1;
+        config_.attrs = &cooperative_attribute_;
+        config_.numAttrs = 1;
+        return *this;
+    }
+    inline CUresult launch(cudaFunction_t function, void **arguments) noexcept {
+        return cuLaunchKernelEx(&config_, function, arguments, nullptr);
+    }
 };
 
 /**

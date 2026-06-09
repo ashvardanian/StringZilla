@@ -104,7 +104,7 @@ static constexpr size_t error_costs_classes_count_k = 32;
 
 /**
  *  @brief A @b compact error costs matrix for byte-level similarity scoring.
-*
+ *
  *  Instead of a dense (256 x 256) ~ 65'536 byte table, every input byte is first mapped to one of
  *  @b `error_costs_classes_count_k` (32) classes through `byte_to_class`, and the substitution cost
  *  between two bytes is looked up in the (32 x 32) `class_substitution_costs` table:
@@ -114,7 +114,7 @@ static constexpr size_t error_costs_classes_count_k = 32;
  *  The 1 KB cost table plus the 256 byte class map fit trivially into shared memory or registers,
  *  matching bioinformatics alphabets (≤4 DNA / ≤20 amino-acid classes) and keyboard-distance pricing,
  *  while avoiding the divergent serialization of a full 256 x 256 table on the GPU.
-* 
+ * 
  *  @section Biological Data
  *
  *  For proteins, a (32 x 32) matrix takes 1024 bytes, which is a steep 2.56x increase from (20 x 20) ~ 400 bytes.
@@ -178,8 +178,8 @@ struct error_costs_32x32_t {
     error_cost_t class_substitution_costs[classes_count_k][classes_count_k] = {{0}};
 
     constexpr error_cost_t operator()(char a, char b) const noexcept {
-return class_substitution_costs[byte_to_class[(sz_u8_t)a]][byte_to_class[(sz_u8_t)b]];
-}
+        return class_substitution_costs[byte_to_class[(sz_u8_t)a]][byte_to_class[(sz_u8_t)b]];
+    }
     constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept {
         return class_substitution_costs[byte_to_class[a]][byte_to_class[b]];
     }
@@ -314,6 +314,7 @@ struct similarity_memory_requirements {
     size_t max_diagonal_length = 0;
     bytes_per_cell_t bytes_per_cell = zero_bytes_per_cell_k;
     size_t bytes_per_diagonal = 0;
+    size_t bytes_for_diagonals = 0; // ? Shared-memory bytes for just the DP diagonals (excludes the input strings).
     size_t total = 0;
 
     /**
@@ -343,6 +344,7 @@ struct similarity_memory_requirements {
             this->max_diagonal_length = 0;
             this->bytes_per_cell = zero_bytes_per_cell_k;
             this->bytes_per_diagonal = 0;
+            this->bytes_for_diagonals = 0;
             this->total = 0;
             return;
         }
@@ -379,7 +381,8 @@ struct similarity_memory_requirements {
         size_t diagonals_count = gap_type == sz_gaps_linear_k ? 3 : 7;
         size_t first_length_bytes = round_up_to_multiple<size_t>(first_length * bytes_per_char, register_width);
         size_t second_length_bytes = round_up_to_multiple<size_t>(second_length * bytes_per_char, register_width);
-        this->total = diagonals_count * bytes_per_diagonal + first_length_bytes + second_length_bytes;
+        this->bytes_for_diagonals = diagonals_count * bytes_per_diagonal;
+        this->total = this->bytes_for_diagonals + first_length_bytes + second_length_bytes;
     }
 };
 
@@ -613,9 +616,9 @@ using affine_levenshtein_utf8_icelake_t = levenshtein_distances_utf8<char, affin
 
 // TODO: Ice Lake optimizations don't yield massive improvements, but can be added later.
 // using affine_needleman_wunsch_icelake_t =
-//     needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
+//     needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 // using affine_smith_waterman_icelake_t =
-//     smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
+//     smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 #pragma endregion - Common Aliases
 
@@ -1971,29 +1974,29 @@ struct levenshtein_distance_utf8 {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
-            status_t status =                 diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8,
-executor);
+            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8,
+                                                                               executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
-            status_t status =                 diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16,
-executor);
+            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
-            status_t status =                 diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32,
-executor);
+            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
-            status_t status =                 diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64,
-executor);
+            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
