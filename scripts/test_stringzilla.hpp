@@ -16,6 +16,8 @@
  *    operation complexity. This multiplier scales all baselines
  *    proportionally (e.g., 0.1 for quick smoke tests, 10 for
  *    thorough CI fuzzing).
+ *  - `SZ_TESTS_FILTER` : ECMAScript regex matched against test names; only matching tests run
+ *    (e.g. `SZ_TESTS_FILTER=utf8`). Unset or empty runs everything. Honored by `run_test`.
  *
  *  @section Example Usage
  *
@@ -25,6 +27,9 @@
  *
  *  # Quick smoke test (10% of normal iterations)
  *  SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
+ *
+ *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
+ *  SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
  *
  *  # Thorough CI stress test (10x normal iterations)
  *  SZ_TESTS_MULTIPLIER=10 ./build_release/stringzilla_test_cpp20
