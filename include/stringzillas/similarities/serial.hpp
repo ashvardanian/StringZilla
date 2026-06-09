@@ -25,8 +25,7 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-struct error_costs_256x256_t;
-struct error_costs_26x26ascii_t;
+struct error_costs_32x32_t;
 
 constexpr sz_capability_t serialize_capability(sz_capability_t capability) noexcept {
     sz_capability_t without_parallel = static_cast<sz_capability_t>(capability & ~sz_cap_parallel_k);
@@ -85,7 +84,7 @@ constexpr sz_similarity_gaps_t gap_type() {
 
 /**
  *  @brief A trivial function object for uniform character substitution costs in Levenshtein-like similarity algorithms.
- *  @sa error_costs_256x256_t, error_costs_26x26ascii_t, unary_substitution_costs_t
+ *  @sa error_costs_32x32_t, unary_substitution_costs_t
  */
 struct uniform_substitution_costs_t {
     error_cost_t match = 0;
@@ -97,38 +96,203 @@ struct uniform_substitution_costs_t {
 };
 
 /**
- *  @brief The default most @b space-intensive error costs matrix for byte-level similarity scoring.
- *         Takes (256 x 256) ~ 65'536 bytes of memory. Which equates to 1/3 of the shared memory on the GPU,
- *         so smaller variants should be preferred where possible.
+ *  @brief The number of distinct character classes in a @b `error_costs_32x32_t` table.
+ *         Fixed at 32 to cover the largest practical alphabets - ~4 DNA bases, ~20 amino-acids,
+ *         or keyboard-distance buckets - while keeping the table tiny.
  */
-struct error_costs_256x256_t {
-    error_cost_t cells[256][256] = {{0}};
+static constexpr size_t error_costs_classes_count_k = 32;
 
-    constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a][(sz_u8_t)b]; }
-    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a][b]; }
+/**
+ *  @brief A @b compact error costs matrix for byte-level similarity scoring.
+*
+ *  Instead of a dense (256 x 256) ~ 65'536 byte table, every input byte is first mapped to one of
+ *  @b `error_costs_classes_count_k` (32) classes through `byte_to_class`, and the substitution cost
+ *  between two bytes is looked up in the (32 x 32) `class_substitution_costs` table:
+ *
+ *      cost(a, b) = class_substitution_costs[byte_to_class[a]][byte_to_class[b]]
+ *
+ *  The 1 KB cost table plus the 256 byte class map fit trivially into shared memory or registers,
+ *  matching bioinformatics alphabets (≤4 DNA / ≤20 amino-acid classes) and keyboard-distance pricing,
+ *  while avoiding the divergent serialization of a full 256 x 256 table on the GPU.
+* 
+ *  @section Biological Data
+ *
+ *  For proteins, a (32 x 32) matrix takes 1024 bytes, which is a steep 2.56x increase from (20 x 20) ~ 400 bytes.
+ *  Still, its an acceptable tradeoff given the convenience of using ASCII arithmetic for lookups, and occasional
+ *  use of special "ambiguous" characters. The 20 standard amino-acids are @b ARNDCQEGHILKMFPSTWYV. Others include:
+ *  - @b U: Selenocysteine, sometimes called the 21st amino acid.
+ *  - @b O: Pyrrolysine, occasionally referred to as the 22nd amino acid.
+ *  - @b B: An ambiguous code representing either Aspartic acid (D) or Asparagine (N).
+ *  - @b Z: An ambiguous code representing either Glutamic acid (E) or Glutamine (Q).
+ *  - @b X: Used when the identity of an amino acid is unknown or unspecified.
+ *  - @b *: Denotes a stop codon, signaling the end of the protein sequence during translation.
+ *  This leaves @b J as the only ASCII letter not used in protein sequences and @b (*) asterisk as the the only
+ *  non-letter character used.
+ *
+ *  For DNA and RNA sequences, often a (4 x 4) matrix can be enough, but in the general case, additional characters
+ *  are used to mark ambiguous reads. For nucleic acids the standard alphabets are @b ACGT for @b DNA and @b ACGU
+ *  for @b RNA. There are a lot more ambiguity codes though, where each row lists which of A, C, G, and T/U a
+ *  given code can stand for:
+ *
+ *       Code | Can be A | Can be C | Can be G | Can be T/U
+ *       A    |    X     |          |          |
+ *       C    |          |    X     |          |
+ *       G    |          |          |    X     |
+ *       T    |          |          |          |     X
+ *       R    |    X     |          |    X     |
+ *       Y    |          |    X     |          |     X
+ *       S    |          |    X     |    X     |
+ *       W    |    X     |          |          |     X
+ *       K    |          |          |    X     |     X
+ *       M    |    X     |    X     |          |
+ *       B    |          |    X     |    X     |     X
+ *       D    |    X     |          |    X     |     X
+ *       H    |    X     |    X     |          |     X
+ *       V    |    X     |    X     |    X     |
+ *       N    |    X     |    X     |    X     |     X
+ *
+ *  If the BLOSUM62 matrix is often used for proteins, the IUB or NUC.4.4 are often used for nucleic acids.
+ *  Both can be easily extracted from BioPython and converted to our ASCII order:
+ *
+ *  @code{.py}
+ *  import string
+ *  from Bio.Align import substitution_matrices
+ *
+ *  def map_to_new_alphabet(matrix, new_alphabet: str, default_value: int = -128):
+ *      old_alphabet = str(matrix.alphabet)
+ *      indices = {ch: old_alphabet.find(ch) for ch in new_alphabet}
+ *      return [
+ *          [matrix[indices[r], indices[c]] if indices[r] != -1 and indices[c] != -1 else default_value
+ *          for c in new_alphabet]
+ *          for r in new_alphabet
+ *      ]
+ *
+ *  matrix = substitution_matrices.load("BLOSUM62").astype(int) # Or "NUC.4.4"
+ *  print(map_to_new_alphabet(matrix, string.ascii_uppercase))
+ *  @endcode
+ */
+struct error_costs_32x32_t {
+    static constexpr size_t classes_count_k = error_costs_classes_count_k;
 
-    constexpr error_cost_t &operator()(char a, char b) noexcept { return cells[(sz_u8_t)a][(sz_u8_t)b]; }
-    constexpr error_cost_t &operator()(sz_u8_t a, sz_u8_t b) noexcept { return cells[a][b]; }
+    sz_u8_t byte_to_class[256] = {0};
+    error_cost_t class_substitution_costs[classes_count_k][classes_count_k] = {{0}};
 
-    /**
-     *  @brief Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
-     *         that would yield the same result as the negative Levenshtein distance.
-     */
-    static constexpr error_costs_256x256_t diagonal(error_cost_t match_score = 0,
-                                                    error_cost_t mismatch_score = -1) noexcept {
-        error_costs_256x256_t result;
-        for (int i = 0; i != 256; ++i)
-            for (int j = 0; j != 256; ++j) //
-                result.cells[i][j] = i == j ? match_score : mismatch_score;
-        return result;
+    constexpr error_cost_t operator()(char a, char b) const noexcept {
+return class_substitution_costs[byte_to_class[(sz_u8_t)a]][byte_to_class[(sz_u8_t)b]];
+}
+    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept {
+        return class_substitution_costs[byte_to_class[a]][byte_to_class[b]];
     }
 
     constexpr size_t magnitude() const noexcept {
         size_t max_magnitude = 0;
-        for (int i = 0; i != 256; ++i)
-            for (int j = 0; j != 256; ++j) //
-                max_magnitude = std::max(max_magnitude, error_cost_abs(cells[i][j]));
+        for (size_t i = 0; i != classes_count_k; ++i)
+            for (size_t j = 0; j != classes_count_k; ++j) //
+                max_magnitude = (std::max)(max_magnitude, error_cost_abs(class_substitution_costs[i][j]));
         return max_magnitude;
+    }
+
+    /**
+     *  @brief BLOSUM62 substitution matrix for protein analysis in bioinformatics, folded into the compact form.
+     *  @see https://en.wikipedia.org/wiki/BLOSUM
+     */
+    static constexpr error_costs_32x32_t blosum62() noexcept {
+        constexpr error_cost_t na = -128; // Placeholder for unused residues
+        constexpr error_cost_t cells[26][26] = {
+            {4, -2, 0, -2, -1, -2, 0, -2, -1, na, -1, -1, -1, -2, na, -1, -1, -1, 1, 0, na, 0, -3, 0, -2, -1},
+            {-2, 4, -3, 4, 1, -3, -1, 0, -3, na, 0, -4, -3, 3, na, -2, 0, -1, 0, -1, na, -3, -4, -1, -3, 1},
+            {0, -3, 9, -3, -4, -2, -3, -3, -1, na, -3, -1, -1, -3, na, -3, -3, -3, -1, -1, na, -1, -2, -2, -2, -3},
+            {-2, 4, -3, 6, 2, -3, -1, -1, -3, na, -1, -4, -3, 1, na, -1, 0, -2, 0, -1, na, -3, -4, -1, -3, 1},
+            {-1, 1, -4, 2, 5, -3, -2, 0, -3, na, 1, -3, -2, 0, na, -1, 2, 0, 0, -1, na, -2, -3, -1, -2, 4},
+            {-2, -3, -2, -3, -3, 6, -3, -1, 0, na, -3, 0, 0, -3, na, -4, -3, -3, -2, -2, na, -1, 1, -1, 3, -3},
+            {0, -1, -3, -1, -2, -3, 6, -2, -4, na, -2, -4, -3, 0, na, -2, -2, -2, 0, -2, na, -3, -2, -1, -3, -2},
+            {-2, 0, -3, -1, 0, -1, -2, 8, -3, na, -1, -3, -2, 1, na, -2, 0, 0, -1, -2, na, -3, -2, -1, 2, 0},
+            {-1, -3, -1, -3, -3, 0, -4, -3, 4, na, -3, 2, 1, -3, na, -3, -3, -3, -2, -1, na, 3, -3, -1, -1, -3},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-1, 0, -3, -1, 1, -3, -2, -1, -3, na, 5, -2, -1, 0, na, -1, 1, 2, 0, -1, na, -2, -3, -1, -2, 1},
+            {-1, -4, -1, -4, -3, 0, -4, -3, 2, na, -2, 4, 2, -3, na, -3, -2, -2, -2, -1, na, 1, -2, -1, -1, -3},
+            {-1, -3, -1, -3, -2, 0, -3, -2, 1, na, -1, 2, 5, -2, na, -2, 0, -1, -1, -1, na, 1, -1, -1, -1, -1},
+            {-2, 3, -3, 1, 0, -3, 0, 1, -3, na, 0, -3, -2, 6, na, -2, 0, 0, 1, 0, na, -3, -4, -1, -2, 0},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-1, -2, -3, -1, -1, -4, -2, -2, -3, na, -1, -3, -2, -2, na, 7, -1, -2, -1, -1, na, -2, -4, -2, -3, -1},
+            {-1, 0, -3, 0, 2, -3, -2, 0, -3, na, 1, -2, 0, 0, na, -1, 5, 1, 0, -1, na, -2, -2, -1, -1, 3},
+            {-1, -1, -3, -2, 0, -3, -2, 0, -3, na, 2, -2, -1, 0, na, -2, 1, 5, -1, -1, na, -3, -3, -1, -2, 0},
+            {1, 0, -1, 0, 0, -2, 0, -1, -2, na, 0, -2, -1, 1, na, -1, 0, -1, 4, 1, na, -2, -3, 0, -2, 0},
+            {0, -1, -1, -1, -1, -2, -2, -2, -1, na, -1, -1, -1, 0, na, -1, -1, -1, 1, 5, na, 0, -2, 0, -2, -1},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {0, -3, -1, -3, -2, -1, -3, -3, 3, na, -2, 1, 1, -3, na, -2, -2, -3, -2, 0, na, 4, -3, -1, -1, -2},
+            {-3, -4, -2, -4, -3, 1, -2, -2, -3, na, -3, -2, -1, -4, na, -4, -2, -3, -3, -2, na, -3, 11, -2, 2, -3},
+            {0, -1, -2, -1, -1, -1, -1, -1, -1, na, -1, -1, -1, -1, na, -2, -1, -1, 0, 0, na, -1, -2, -1, -1, -1},
+            {-2, -3, -2, -3, -2, 3, -3, 2, -1, na, -2, -1, -1, -2, na, -3, -1, -2, -2, -2, na, -1, 2, -1, 7, -2},
+            {-1, 1, -3, 1, 4, -3, -2, 0, -3, na, 1, -3, -1, 0, na, -1, 3, 0, 0, -1, na, -2, -3, -1, -2, 4}};
+        return from_ascii_26x26_(cells);
+    }
+
+    /**
+     *  @brief NUC.4.4 substitution matrix for DNA analysis in bioinformatics, folded into the compact form.
+     *  @see https://www.biostars.org/p/73028/#93435
+     */
+    static constexpr error_costs_32x32_t nuc44() noexcept {
+        constexpr error_cost_t na = -128; // Placeholder for unused residues
+        constexpr error_cost_t cells[26][26] = {
+            {5, -4, -4, -1, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, 1, -4, -4, na, -1, 1, na, -4, na},
+            {-4, -1, -1, -2, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -3, -1, -1, na, -2, -3, na, -1, na},
+            {-4, -1, 5, -4, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, -4, 1, -4, na, -1, -4, na, 1, na},
+            {-1, -2, -4, -1, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -1, -3, -1, na, -2, -1, na, -3, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-4, -1, -4, -1, na, na, 5, -4, na, na, 1, na, -4, -2, na, na, na, 1, 1, -4, na, -1, -4, na, -4, na},
+            {-1, -2, -1, -2, na, na, -4, -1, na, na, -3, na, -1, -1, na, na, na, -3, -3, -1, na, -2, -1, na, -1, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-4, -1, -4, -1, na, na, 1, -3, na, na, -1, na, -4, -1, na, na, na, -2, -2, 1, na, -3, -2, na, -2, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {1, -3, 1, -3, na, na, -4, -1, na, na, -4, na, -1, -1, na, na, na, -2, -2, -4, na, -1, -2, na, -2, na},
+            {-2, -1, -2, -1, na, na, -2, -1, na, na, -1, na, -1, -1, na, na, na, -1, -1, -2, na, -1, -1, na, -1, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {1, -3, -4, -1, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -1, -2, -4, na, -1, -2, na, -4, na},
+            {-4, -1, 1, -3, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -2, -1, -4, na, -1, -4, na, -2, na},
+            {-4, -1, -4, -1, na, na, -4, -1, na, na, 1, na, -4, -2, na, na, na, -4, -4, 5, na, -4, 1, na, 1, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-1, -2, -1, -2, na, na, -1, -2, na, na, -3, na, -1, -1, na, na, na, -1, -1, -4, na, -1, -3, na, -3, na},
+            {1, -3, -4, -1, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -2, -4, 1, na, -3, -1, na, -2, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+            {-4, -1, 1, -3, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -4, -2, 1, na, -3, -2, na, -1, na},
+            {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na}};
+        return from_ascii_26x26_(cells);
+    }
+
+  private:
+    /**
+     *  @brief Folds a dense (26 x 26) ASCII substitution matrix into this compact class-based table,
+     *         assigning one class per @b used residue (those with a non-placeholder diagonal cost).
+     *
+     *  Class 0 is the catch-all bucket for every byte that is not a used uppercase residue and costs
+     *  zero against everything. Each used residue receives a distinct class index, so BLOSUM62 (≤20
+     *  amino-acids) and NUC.4.4 (≤5 nucleotides) both fit comfortably within the 32 available classes.
+     */
+    static constexpr error_costs_32x32_t from_ascii_26x26_(error_cost_t const (&cells)[26][26]) noexcept {
+        constexpr error_cost_t na = -128; // Placeholder for unused residues
+        error_costs_32x32_t result;
+
+        // Assign a fresh class to every residue whose diagonal cost is not a placeholder.
+        sz_u8_t residue_to_class[26] = {0};
+        sz_u8_t next_class = 1;
+        for (int i = 0; i != 26; ++i)
+            if (cells[i][i] != na) {
+                residue_to_class[i] = next_class;
+                result.byte_to_class[i + 65] = next_class;
+                ++next_class;
+            }
+
+        // Populate the cost between every pair of used residues.
+        for (int i = 0; i != 26; ++i)
+            for (int j = 0; j != 26; ++j)
+                if (residue_to_class[i] != 0 && residue_to_class[j] != 0)
+                    result.class_substitution_costs[residue_to_class[i]][residue_to_class[j]] = cells[i][j];
+        return result;
     }
 };
 
@@ -382,26 +546,26 @@ template <                                         //
 #endif
 struct levenshtein_distances_utf8;
 
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                            //
+    typename char_type_ = char,                       //
+    typename substituter_type_ = error_costs_32x32_t, //
+    typename gap_costs_type_ = linear_gap_costs_t,    //
+    typename allocator_type_ = dummy_alloc_t,         //
+    sz_capability_t capability_ = sz_cap_serial_k,    //
+    typename enable_ = void                           //
     >
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores;
 
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                            //
+    typename char_type_ = char,                       //
+    typename substituter_type_ = error_costs_32x32_t, //
+    typename gap_costs_type_ = linear_gap_costs_t,    //
+    typename allocator_type_ = dummy_alloc_t,         //
+    sz_capability_t capability_ = sz_cap_serial_k,    //
+    typename enable_ = void                           //
     >
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
@@ -420,17 +584,17 @@ using malloc_t = std::allocator<char>;
 using levenshtein_serial_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using needleman_wunsch_serial_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using smith_waterman_serial_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 
 using affine_levenshtein_serial_t = levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using affine_levenshtein_utf8_serial_t =
     levenshtein_distances_utf8<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using affine_needleman_wunsch_serial_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using affine_smith_waterman_serial_t =
-    smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k>;
 
 /**
  *  In @b AVX-512:
@@ -440,9 +604,9 @@ using affine_smith_waterman_serial_t =
 using levenshtein_icelake_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 using levenshtein_utf8_icelake_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 using needleman_wunsch_icelake_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
+    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 using smith_waterman_icelake_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
+    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 using affine_levenshtein_icelake_t = levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 using affine_levenshtein_utf8_icelake_t = levenshtein_distances_utf8<char, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
@@ -1807,29 +1971,29 @@ struct levenshtein_distance_utf8 {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
-            status_t status =
-                diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8, executor);
+            status_t status =                 diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8,
+executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
-            status_t status =
-                diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16, executor);
+            status_t status =                 diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16,
+executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
-            status_t status =
-                diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32, executor);
+            status_t status =                 diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32,
+executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
-            status_t status =
-                diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64, executor);
+            status_t status =                 diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64,
+executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -1842,13 +2006,13 @@ struct levenshtein_distance_utf8 {
  *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                            //
+    typename char_type_ = char,                       //
+    typename substituter_type_ = error_costs_32x32_t, //
+    typename gap_costs_type_ = linear_gap_costs_t,    //
+    typename allocator_type_ = dummy_alloc_t,         //
+    sz_capability_t capability_ = sz_cap_serial_k,    //
+    typename enable_ = void                           //
     >
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
@@ -1937,13 +2101,13 @@ struct needleman_wunsch_score {
  *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                            //
+    typename char_type_ = char,                       //
+    typename substituter_type_ = error_costs_32x32_t, //
+    typename gap_costs_type_ = linear_gap_costs_t,    //
+    typename allocator_type_ = dummy_alloc_t,         //
+    sz_capability_t capability_ = sz_cap_serial_k,    //
+    typename enable_ = void                           //
     >
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
@@ -2349,167 +2513,6 @@ struct smith_waterman_scores {
             scoring_t {substituter_, gap_costs_, alloc_},                        //
             first_strings, second_strings, std::forward<results_type_>(results), //
             substituter_.magnitude(), gap_costs_.magnitude(), executor, specs);
-    }
-};
-
-#pragma endregion
-
-#pragma region - Substitution Cost Matrices
-
-/**
- *  @brief The recommended @b space-efficient error costs matrix for case-insensitive English word
- *         scoring or protein sequences, which conveniently require only 26 and 20 letters respectively.
- *  @note All lookups are performed by indexing rows/columns from the 'A' character, which is 65 in ASCII.
- *
- *  @section Biological Data
- *
- *  For proteins, a (26 x 26) matrix takes 676 bytes, which is a steep 43% increase from (20 x 20) ~ 400 bytes.
- *  Still, its an acceptable tradeoff given the convenience of using ASCII arithmetic for lookups, and occasional
- *  use of special "ambiguous" characters. The 20 standard amino-acids are @b ARNDCQEGHILKMFPSTWYV. Others include:
- *  - @b U: Selenocysteine, sometimes called the 21st amino acid.
- *  - @b O: Pyrrolysine, occasionally referred to as the 22nd amino acid.
- *  - @b B: An ambiguous code representing either Aspartic acid (D) or Asparagine (N).
- *  - @b Z: An ambiguous code representing either Glutamic acid (E) or Glutamine (Q).
- *  - @b X: Used when the identity of an amino acid is unknown or unspecified.
- *  - @b *: Denotes a stop codon, signaling the end of the protein sequence during translation.
- *  This leaves @b J as the only ASCII letter not used in protein sequences and @b (*) asterisk as the the only
- *  non-letter character used.
- *
- *  For DNA and RNA sequences, often a (4 x 4) matrix can be enough, but in the general case, additional characters
- *  are used to mark ambiguous reads. For nucleic acids the standard alphabets are @b ACGT for @b DNA and @b ACGU
- *  for @b RNA. There are a lot more ambiguity codes though, where each row lists which of A, C, G, and T/U a
- *  given code can stand for:
- *
- *       Code | Can be A | Can be C | Can be G | Can be T/U
- *       A    |    X     |          |          |
- *       C    |          |    X     |          |
- *       G    |          |          |    X     |
- *       T    |          |          |          |     X
- *       R    |    X     |          |    X     |
- *       Y    |          |    X     |          |     X
- *       S    |          |    X     |    X     |
- *       W    |    X     |          |          |     X
- *       K    |          |          |    X     |     X
- *       M    |    X     |    X     |          |
- *       B    |          |    X     |    X     |     X
- *       D    |    X     |          |    X     |     X
- *       H    |    X     |    X     |          |     X
- *       V    |    X     |    X     |    X     |
- *       N    |    X     |    X     |    X     |     X
- *
- *  If the BLOSUM62 matrix is often used for proteins, the IUB or NUC.4.4 are often used for nucleic acids.
- *  Both can be easily extracted from BioPython and converted to our ASCII order:
- *
- *  @code{.py}
- *  import string
- *  from Bio.Align import substitution_matrices
- *
- *  def map_to_new_alphabet(matrix, new_alphabet: str, default_value: int = -128):
- *      old_alphabet = str(matrix.alphabet)
- *      indices = {ch: old_alphabet.find(ch) for ch in new_alphabet}
- *      return [
- *          [matrix[indices[r], indices[c]] if indices[r] != -1 and indices[c] != -1 else default_value
- *          for c in new_alphabet]
- *          for r in new_alphabet
- *      ]
- *
- *  matrix = substitution_matrices.load("BLOSUM62").astype(int) # Or "NUC.4.4"
- *  print(map_to_new_alphabet(matrix, string.ascii_uppercase))
- *  @endcode
- */
-struct error_costs_26x26ascii_t {
-    error_cost_t cells[26][26] = {{0}};
-
-    constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a - 65][(sz_u8_t)b - 65]; }
-    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a - 65][b - 65]; }
-
-    constexpr error_cost_t &operator()(char a, char b) noexcept { return cells[(sz_u8_t)a - 65][(sz_u8_t)b - 65]; }
-    constexpr error_cost_t &operator()(sz_u8_t a, sz_u8_t b) noexcept { return cells[a - 65][b - 65]; }
-
-    constexpr error_costs_256x256_t decompressed() const noexcept {
-        error_costs_256x256_t result;
-        for (int i = 0; i != 26; ++i)
-            for (int j = 0; j != 26; ++j) //
-                result.cells[i + 65][j + 65] = cells[i][j];
-        return result;
-    }
-
-    constexpr size_t magnitude() const noexcept {
-        size_t max_magnitude = 0;
-        for (int i = 0; i != 26; ++i)
-            for (int j = 0; j != 26; ++j) //
-                max_magnitude = std::max(max_magnitude, error_cost_abs(cells[i][j]));
-        return max_magnitude;
-    }
-
-    /**
-     *  @brief BLOSUM62 substitution matrix for protein analysis in bioinformatics, reorganized for ASCII lookups.
-     *  @see https://en.wikipedia.org/wiki/BLOSUM
-     */
-    static constexpr error_costs_26x26ascii_t blosum62() {
-        constexpr error_cost_t na = -128; // Placeholder for unused characters
-        return {
-            {{4, -2, 0, -2, -1, -2, 0, -2, -1, na, -1, -1, -1, -2, na, -1, -1, -1, 1, 0, na, 0, -3, 0, -2, -1},
-             {-2, 4, -3, 4, 1, -3, -1, 0, -3, na, 0, -4, -3, 3, na, -2, 0, -1, 0, -1, na, -3, -4, -1, -3, 1},
-             {0, -3, 9, -3, -4, -2, -3, -3, -1, na, -3, -1, -1, -3, na, -3, -3, -3, -1, -1, na, -1, -2, -2, -2, -3},
-             {-2, 4, -3, 6, 2, -3, -1, -1, -3, na, -1, -4, -3, 1, na, -1, 0, -2, 0, -1, na, -3, -4, -1, -3, 1},
-             {-1, 1, -4, 2, 5, -3, -2, 0, -3, na, 1, -3, -2, 0, na, -1, 2, 0, 0, -1, na, -2, -3, -1, -2, 4},
-             {-2, -3, -2, -3, -3, 6, -3, -1, 0, na, -3, 0, 0, -3, na, -4, -3, -3, -2, -2, na, -1, 1, -1, 3, -3},
-             {0, -1, -3, -1, -2, -3, 6, -2, -4, na, -2, -4, -3, 0, na, -2, -2, -2, 0, -2, na, -3, -2, -1, -3, -2},
-             {-2, 0, -3, -1, 0, -1, -2, 8, -3, na, -1, -3, -2, 1, na, -2, 0, 0, -1, -2, na, -3, -2, -1, 2, 0},
-             {-1, -3, -1, -3, -3, 0, -4, -3, 4, na, -3, 2, 1, -3, na, -3, -3, -3, -2, -1, na, 3, -3, -1, -1, -3},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-1, 0, -3, -1, 1, -3, -2, -1, -3, na, 5, -2, -1, 0, na, -1, 1, 2, 0, -1, na, -2, -3, -1, -2, 1},
-             {-1, -4, -1, -4, -3, 0, -4, -3, 2, na, -2, 4, 2, -3, na, -3, -2, -2, -2, -1, na, 1, -2, -1, -1, -3},
-             {-1, -3, -1, -3, -2, 0, -3, -2, 1, na, -1, 2, 5, -2, na, -2, 0, -1, -1, -1, na, 1, -1, -1, -1, -1},
-             {-2, 3, -3, 1, 0, -3, 0, 1, -3, na, 0, -3, -2, 6, na, -2, 0, 0, 1, 0, na, -3, -4, -1, -2, 0},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-1, -2, -3, -1, -1, -4, -2, -2, -3, na, -1, -3, -2, -2, na, 7, -1, -2, -1, -1, na, -2, -4, -2, -3, -1},
-             {-1, 0, -3, 0, 2, -3, -2, 0, -3, na, 1, -2, 0, 0, na, -1, 5, 1, 0, -1, na, -2, -2, -1, -1, 3},
-             {-1, -1, -3, -2, 0, -3, -2, 0, -3, na, 2, -2, -1, 0, na, -2, 1, 5, -1, -1, na, -3, -3, -1, -2, 0},
-             {1, 0, -1, 0, 0, -2, 0, -1, -2, na, 0, -2, -1, 1, na, -1, 0, -1, 4, 1, na, -2, -3, 0, -2, 0},
-             {0, -1, -1, -1, -1, -2, -2, -2, -1, na, -1, -1, -1, 0, na, -1, -1, -1, 1, 5, na, 0, -2, 0, -2, -1},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {0, -3, -1, -3, -2, -1, -3, -3, 3, na, -2, 1, 1, -3, na, -2, -2, -3, -2, 0, na, 4, -3, -1, -1, -2},
-             {-3, -4, -2, -4, -3, 1, -2, -2, -3, na, -3, -2, -1, -4, na, -4, -2, -3, -3, -2, na, -3, 11, -2, 2, -3},
-             {0, -1, -2, -1, -1, -1, -1, -1, -1, na, -1, -1, -1, -1, na, -2, -1, -1, 0, 0, na, -1, -2, -1, -1, -1},
-             {-2, -3, -2, -3, -2, 3, -3, 2, -1, na, -2, -1, -1, -2, na, -3, -1, -2, -2, -2, na, -1, 2, -1, 7, -2},
-             {-1, 1, -3, 1, 4, -3, -2, 0, -3, na, 1, -3, -1, 0, na, -1, 3, 0, 0, -1, na, -2, -3, -1, -2, 4}}};
-    }
-
-    /**
-     *  @brief NUC.4.4 substitution matrix for DNA analysis in bioinformatics, reorganized for ASCII lookups.
-     *  @see https://www.biostars.org/p/73028/#93435
-     */
-    static constexpr error_costs_26x26ascii_t nuc44() {
-        constexpr error_cost_t na = -128; // Placeholder for unused characters
-        return {
-            {{5, -4, -4, -1, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, 1, -4, -4, na, -1, 1, na, -4, na},
-             {-4, -1, -1, -2, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -3, -1, -1, na, -2, -3, na, -1, na},
-             {-4, -1, 5, -4, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, -4, 1, -4, na, -1, -4, na, 1, na},
-             {-1, -2, -4, -1, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -1, -3, -1, na, -2, -1, na, -3, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-4, -1, -4, -1, na, na, 5, -4, na, na, 1, na, -4, -2, na, na, na, 1, 1, -4, na, -1, -4, na, -4, na},
-             {-1, -2, -1, -2, na, na, -4, -1, na, na, -3, na, -1, -1, na, na, na, -3, -3, -1, na, -2, -1, na, -1, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-4, -1, -4, -1, na, na, 1, -3, na, na, -1, na, -4, -1, na, na, na, -2, -2, 1, na, -3, -2, na, -2, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {1, -3, 1, -3, na, na, -4, -1, na, na, -4, na, -1, -1, na, na, na, -2, -2, -4, na, -1, -2, na, -2, na},
-             {-2, -1, -2, -1, na, na, -2, -1, na, na, -1, na, -1, -1, na, na, na, -1, -1, -2, na, -1, -1, na, -1, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {1, -3, -4, -1, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -1, -2, -4, na, -1, -2, na, -4, na},
-             {-4, -1, 1, -3, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -2, -1, -4, na, -1, -4, na, -2, na},
-             {-4, -1, -4, -1, na, na, -4, -1, na, na, 1, na, -4, -2, na, na, na, -4, -4, 5, na, -4, 1, na, 1, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-1, -2, -1, -2, na, na, -1, -2, na, na, -3, na, -1, -1, na, na, na, -1, -1, -4, na, -1, -3, na, -3, na},
-             {1, -3, -4, -1, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -2, -4, 1, na, -3, -1, na, -2, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
-             {-4, -1, 1, -3, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -4, -2, 1, na, -3, -2, na, -1, na},
-             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na}}};
     }
 };
 

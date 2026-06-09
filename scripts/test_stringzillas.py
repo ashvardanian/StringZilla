@@ -609,16 +609,19 @@ def test_needleman_wunsch_vs_levenshtein_random(
     a_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
     b_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
 
-    character_substitutions = np.zeros((256, 256), dtype=np.int8)
-    character_substitutions.fill(-1)
-    np.fill_diagonal(character_substitutions, 0)
+    # Map each lowercase ASCII letter to its own class (codes 97..122 -> classes 1..26 modulo 32),
+    # then make matches free and mismatches cost 1 to recover the negative Levenshtein distance.
+    byte_to_class = (np.arange(256) % 32).astype(np.uint8)
+    class_costs = np.full((32, 32), -1, dtype=np.int8)
+    np.fill_diagonal(class_costs, 0)
 
     baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)]
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.NeedlemanWunschScores(
+        byte_to_class,
+        class_costs,
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
-        substitution_matrix=character_substitutions,
         open=-1,
         extend=-1,
     )
@@ -665,16 +668,19 @@ def test_needleman_wunsch_against_affine_gaps(
         dtype=np.int64,
     )
 
-    # For StringZillas, blow up the substitution matrix into a 256x256 form
-    subs = np.empty((256, 256), dtype=np.int8)
-    for i, ci in enumerate(alphabet):
-        for j, cj in enumerate(alphabet):
-            subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
+    # For StringZillas, fold the substitution matrix into the compact class representation,
+    # assigning class i+1 to residue i (class 0 is the catch-all bucket).
+    residue_count = len(alphabet)
+    byte_to_class = np.zeros(256, dtype=np.uint8)
+    byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
+    class_costs = np.zeros((32, 32), dtype=np.int8)
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.NeedlemanWunschScores(
+        byte_to_class,
+        class_costs,
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
-        substitution_matrix=subs,
         open=ag.default_gap_opening,
         extend=ag.default_gap_extension,
     )
@@ -745,16 +751,19 @@ def test_smith_waterman_against_affine_gaps(
         dtype=np.int64,
     )
 
-    # For StringZillas, blow up the substitution matrix into a 256x256 form
-    subs = np.empty((256, 256), dtype=np.int8)
-    for i, ci in enumerate(alphabet):
-        for j, cj in enumerate(alphabet):
-            subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
+    # For StringZillas, fold the substitution matrix into the compact class representation,
+    # assigning class i+1 to residue i (class 0 is the catch-all bucket).
+    residue_count = len(alphabet)
+    byte_to_class = np.zeros(256, dtype=np.uint8)
+    byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
+    class_costs = np.zeros((32, 32), dtype=np.int8)
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.SmithWatermanScores(
+        byte_to_class,
+        class_costs,
         capabilities=base_caps if capabilities_mode == "base" else device_scope,
-        substitution_matrix=subs,
         open=ag.default_gap_opening,
         extend=ag.default_gap_extension,
     )

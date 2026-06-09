@@ -162,7 +162,7 @@ enum class status_t : int {
 
 /**
  *  @brief A trivial function object for uniform character substitution costs in Levenshtein-like similarity algorithms.
- *  @sa error_costs_256x256_t, error_costs_26x26ascii_t
+ *  @sa error_costs_32x32_t, error_costs_26x26ascii_t
  */
 struct error_costs_unary_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
