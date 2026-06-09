@@ -51,29 +51,31 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
     }
 #endif // SZ_USE_ICELAKE
 
-#if SZ_USE_CUDA
-    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
-    if (can_use_cuda && can_use_linear_costs) {
-        auto variant = szs::levenshtein_cuda_t(substitution_costs, linear_costs);
+    // GPU tiers are tested most-specific-first: a Hopper device reports the Kepler & base-CUDA bits too, so checking
+    // base CUDA first would shadow the Hopper/Kepler engines. Hopper → Kepler → CUDA keeps each device on its best tier.
+#if SZ_USE_HOPPER
+    bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;
+    if (can_use_hopper && can_use_linear_costs) {
+        auto variant = szs::levenshtein_hopper_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
-            levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
+            levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_hopper_t>(), std::move(variant));
         if (!engine)
             return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return propagate_error(sz::status_t::success_k, error_message);
     }
-    else if (can_use_cuda) {
-        auto variant = szs::affine_levenshtein_cuda_t(substitution_costs, affine_costs);
+    else if (can_use_hopper) {
+        auto variant = szs::affine_levenshtein_hopper_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
-            levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
+            levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_hopper_t>(), std::move(variant));
         if (!engine)
             return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return propagate_error(sz::status_t::success_k, error_message);
     }
-#endif // SZ_USE_CUDA
+#endif // SZ_USE_HOPPER
 
 #if SZ_USE_KEPLER
     bool const can_use_kepler = (capabilities & sz_caps_ck_k) == sz_caps_ck_k;
@@ -99,29 +101,29 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
     }
 #endif // SZ_USE_KEPLER
 
-#if SZ_USE_HOPPER
-    bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;
-    if (can_use_hopper && can_use_linear_costs) {
-        auto variant = szs::levenshtein_hopper_t(substitution_costs, linear_costs);
+#if SZ_USE_CUDA
+    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
+    if (can_use_cuda && can_use_linear_costs) {
+        auto variant = szs::levenshtein_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
-            levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_hopper_t>(), std::move(variant));
+            levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
         if (!engine)
             return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return propagate_error(sz::status_t::success_k, error_message);
     }
-    else if (can_use_hopper) {
-        auto variant = szs::affine_levenshtein_hopper_t(substitution_costs, affine_costs);
+    else if (can_use_cuda) {
+        auto variant = szs::affine_levenshtein_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
-            levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_hopper_t>(), std::move(variant));
+            levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
         if (!engine)
             return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Levenshtein engine");
 
         *engine_punned = reinterpret_cast<szs_levenshtein_distances_t>(engine);
         return propagate_error(sz::status_t::success_k, error_message);
     }
-#endif // SZ_USE_HOPPER
+#endif // SZ_USE_CUDA
 
     if (can_use_linear_costs) {
         auto variant = szs::levenshtein_serial_t(substitution_costs, linear_costs);
