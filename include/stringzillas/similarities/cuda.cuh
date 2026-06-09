@@ -1000,10 +1000,10 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
 
     // We may have multiple warps operating in the same block.
     unsigned const warp_size = warpSize;
-    size_t const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
-    size_t const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
-    size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
+    unsigned const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
+    unsigned const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
+    unsigned const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
+    unsigned const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
 
     // Allocating shared memory is handled on the host side.
@@ -1023,8 +1023,8 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         task_t &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
-        size_t const shorter_length = task.shorter_length;
-        size_t const longer_length = task.longer_length;
+        u32_t const shorter_length = static_cast<u32_t>(task.shorter_length);
+        u32_t const longer_length = static_cast<u32_t>(task.longer_length);
         auto &result_ref = task.result;
 
         // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
@@ -1113,10 +1113,10 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
+            for (unsigned i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
+            for (unsigned i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
                 current_scores[i] = next_scores[i];
             __syncwarp();
         }
@@ -1195,10 +1195,10 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
 
     // We may have multiple warps operating in the same block.
     unsigned const warp_size = warpSize;
-    size_t const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
-    size_t const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
-    size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
+    unsigned const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
+    unsigned const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
+    unsigned const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
+    unsigned const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
 
     // Allocating shared memory is handled on the host side.
@@ -1218,8 +1218,8 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         task_t &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
-        size_t const shorter_length = task.shorter_length;
-        size_t const longer_length = task.longer_length;
+        u32_t const shorter_length = static_cast<u32_t>(task.shorter_length);
+        u32_t const longer_length = static_cast<u32_t>(task.longer_length);
         auto &result_ref = task.result;
 
         // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
@@ -1329,10 +1329,10 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
+            for (unsigned i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
+            for (unsigned i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
                 current_scores[i] = next_scores[i];
             __syncwarp();
         }
