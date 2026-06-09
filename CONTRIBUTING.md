@@ -186,9 +186,11 @@ The C++ and Python test suites support environment variables for reproducible st
 | :-------------------- | :-------------------------------------------------- | ------: |
 | `SZ_TESTS_SEED`       | Seed for the random number generator                |  Random |
 | `SZ_TESTS_MULTIPLIER` | Scales all baseline iteration counts proportionally |     1.0 |
+| `SZ_TESTS_FILTER`     | ECMAScript regex over test names; only matches run  |   (all) |
 
 Each test has its own baseline iteration count tuned for its operation complexity.
 The multiplier scales all baselines proportionally - use `0.1` for quick smoke tests or `10` for thorough stress testing.
+Each top-level test is also wall-clock timed and reported as `- name ... ok (N.NN s)`, so slow tests are obvious.
 
 ```bash
 # Run with a specific seed for reproducibility
@@ -196,6 +198,9 @@ SZ_TESTS_SEED=42 build_debug/stringzilla_test_cpp20
 
 # Quick smoke test (10% of normal iterations)
 SZ_TESTS_MULTIPLIER=0.1 build_debug/stringzilla_test_cpp20
+
+# Fast inner loop: only the UTF-8 tests, at 10% iterations, reproducibly
+SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 SZ_TESTS_SEED=42 build_debug/stringzilla_test_cpp20
 
 # Thorough CI stress test (10x normal iterations)
 SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
@@ -270,6 +275,32 @@ STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla
 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cu20
 STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
 ```
+
+The benchmark harness reads these environment variables:
+
+| Variable              | Description                                                        |   Default |
+| :-------------------- | :---------------------------------------------------------------- | --------: |
+| `STRINGWARS_DATASET`  | Path to the input corpus                                          |  required |
+| `STRINGWARS_FILTER`   | Regex over benchmark names; only matching backends run            |     (all) |
+| `STRINGWARS_DURATION` | Seconds per benchmark (longer = steadier numbers)                 | 1 debug / 10 release |
+| `STRINGWARS_MAX_TOKENS` | Cap on tokens kept, for faster, smaller runs                    | unlimited |
+| `STRINGWARS_BATCH`    | Comma-separated batch-size override (skips the largest sweep)     |  backend default |
+| `STRINGWARS_STRESS`   | Run the correctness stress phase (`0` to skip while timing)       |        on |
+| `STRINGWARS_SEED`     | Non-zero shuffles tokens; `0` keeps deterministic order           |         0 |
+
+For a fast inner loop, scope to one backend on a small dataset, cap tokens, skip the stress phase, and use short runs:
+
+```bash
+STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
+  STRINGWARS_MAX_TOKENS=65536 STRINGWARS_BATCH=1024 \
+  STRINGWARS_STRESS=0 STRINGWARS_DURATION=1 \
+  build_release/stringzilla_bench_find_cpp20
+```
+
+Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the
+ratio between two backends in the *same* run stays stable. Compare A/B within one run; raise
+`STRINGWARS_DURATION` and use a quiet machine when you need stable absolute numbers. The work itself is
+deterministic at seed 0.
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
 All of them feature file-level documentation, and are designed to be self-explanatory.
