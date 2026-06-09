@@ -4492,88 +4492,68 @@ int main(int argc, char const **argv) {
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
 
+    int failures = 0;
+
     std::printf("\n=== Basic Utilities ===\n");
-    std::printf("- test_arithmetical_utilities...\n");
-    test_arithmetical_utilities();
-    std::printf("- test_sequence_struct...\n");
-    test_sequence_struct();
-    std::printf("- test_memory_allocator_struct...\n");
-    test_memory_allocator_struct();
-    std::printf("- test_byteset_struct...\n");
-    test_byteset_struct();
-    std::printf("- test_equivalence...\n");
-    test_equivalence();
+    failures += run_test("test_arithmetical_utilities", test_arithmetical_utilities);
+    failures += run_test("test_sequence_struct", test_sequence_struct);
+    failures += run_test("test_memory_allocator_struct", test_memory_allocator_struct);
+    failures += run_test("test_byteset_struct", test_byteset_struct);
+    failures += run_test("test_equivalence", test_equivalence);
 
     std::printf("\n=== Sequence Algorithms ===\n");
-    std::printf("- test_sorting_algorithms...\n");
-    test_sorting_algorithms();
-    std::printf("- test_intersecting_algorithms...\n");
-    test_intersecting_algorithms();
+    failures += run_test("test_sorting_algorithms", test_sorting_algorithms);
+    failures += run_test("test_intersecting_algorithms", test_intersecting_algorithms);
 
     std::printf("\n=== Core APIs ===\n");
-    std::printf("- test_ascii_utilities<sz::string>...\n");
-    test_ascii_utilities<sz::string>();
-    std::printf("- test_ascii_utilities<sz::string_view>...\n");
-    test_ascii_utilities<sz::string_view>();
-    std::printf("- test_memory_utilities...\n");
-    test_memory_utilities();
-    std::printf("- test_large_memory_utilities...\n");
-    test_large_memory_utilities();
-    std::printf("- test_replacements...\n");
-    test_replacements();
+    failures += run_test("test_ascii_utilities<sz::string>", test_ascii_utilities<sz::string>);
+    failures += run_test("test_ascii_utilities<sz::string_view>", test_ascii_utilities<sz::string_view>);
+    failures += run_test("test_memory_utilities", [] { test_memory_utilities(); }); // ! Defaulted arg
+    failures += run_test("test_large_memory_utilities", test_large_memory_utilities);
+    failures += run_test("test_replacements", [] { test_replacements(); }); // ! Defaulted args
 
     std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    std::printf("- test_stl_compatibility_for_reads<std::string_view>...\n");
-    test_stl_compatibility_for_reads<std::string_view>();
+    failures +=
+        run_test("test_stl_compatibility_for_reads<std::string_view>", test_stl_compatibility_for_reads<std::string_view>);
 #endif
-    std::printf("- test_stl_compatibility_for_reads<std::string>...\n");
-    test_stl_compatibility_for_reads<std::string>();
-    std::printf("- test_stl_compatibility_for_reads<sz::string_view>...\n");
-    test_stl_compatibility_for_reads<sz::string_view>();
-    std::printf("- test_stl_compatibility_for_reads<sz::string>...\n");
-    test_stl_compatibility_for_reads<sz::string>();
-    std::printf("- test_stl_compatibility_for_updates<std::string>...\n");
-    test_stl_compatibility_for_updates<std::string>();
-    std::printf("- test_stl_compatibility_for_updates<sz::string>...\n");
-    test_stl_compatibility_for_updates<sz::string>();
-    std::printf("- test_stl_conversions...\n");
-    test_stl_conversions();
-    std::printf("- test_stl_containers...\n");
-    test_stl_containers();
+    failures += run_test("test_stl_compatibility_for_reads<std::string>", test_stl_compatibility_for_reads<std::string>);
+    failures +=
+        run_test("test_stl_compatibility_for_reads<sz::string_view>", test_stl_compatibility_for_reads<sz::string_view>);
+    failures += run_test("test_stl_compatibility_for_reads<sz::string>", test_stl_compatibility_for_reads<sz::string>);
+    failures +=
+        run_test("test_stl_compatibility_for_updates<std::string>", test_stl_compatibility_for_updates<std::string>);
+    failures += run_test("test_stl_compatibility_for_updates<sz::string>", test_stl_compatibility_for_updates<sz::string>);
+    failures += run_test("test_stl_conversions", test_stl_conversions);
+    failures += run_test("test_stl_containers", test_stl_containers);
 
     std::printf("\n=== StringZilla Extensions ===\n");
-    std::printf("- test_non_stl_extensions_for_reads<sz::string_view>...\n");
-    test_non_stl_extensions_for_reads<sz::string_view>();
-    std::printf("- test_non_stl_extensions_for_reads<sz::string>...\n");
-    test_non_stl_extensions_for_reads<sz::string>();
-    std::printf("- test_non_stl_extensions_for_updates...\n");
-    test_non_stl_extensions_for_updates();
+    failures +=
+        run_test("test_non_stl_extensions_for_reads<sz::string_view>", test_non_stl_extensions_for_reads<sz::string_view>);
+    failures += run_test("test_non_stl_extensions_for_reads<sz::string>", test_non_stl_extensions_for_reads<sz::string>);
+    failures += run_test("test_non_stl_extensions_for_updates", test_non_stl_extensions_for_updates);
 
     std::printf("\n=== String Class Implementation ===\n");
-    std::printf("- test_constructors...\n");
-    test_constructors();
-    std::printf("- test_memory_stability_for_length(1024)...\n");
-    test_memory_stability_for_length(1024);
-    std::printf("- test_memory_stability_for_length(14)...\n");
-    test_memory_stability_for_length(14);
-    std::printf("- test_updates...\n");
-    test_updates();
+    failures += run_test("test_constructors", test_constructors);
+    failures += run_test("test_memory_stability_for_length(1024)", [] { test_memory_stability_for_length(1024); });
+    failures += run_test("test_memory_stability_for_length(14)", [] { test_memory_stability_for_length(14); });
+    failures += run_test("test_updates", [] { test_updates(); }); // ! Defaulted arg
 
     std::printf("\n=== Search and Comparison ===\n");
-    std::printf("- test_comparisons...\n");
-    test_comparisons();
-    std::printf("- test_search...\n");
-    test_search();
-    std::printf("- test_utf8...\n");
-    test_utf8();
-    std::printf("- test_utf8_case...\n");
-    test_utf8_case();
+    failures += run_test("test_comparisons", test_comparisons);
+    failures += run_test("test_search", test_search);
+    failures += run_test("test_utf8", test_utf8);
+    failures += run_test("test_utf8_case", test_utf8_case);
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
+    // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.
     std::printf("- test_search_with_misaligned_repetitions...\n");
     test_search_with_misaligned_repetitions();
 #endif
 
+    if (failures != 0) {
+        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
+        return 1;
+    }
     std::printf("\nAll tests passed!\n");
     return 0;
 }
