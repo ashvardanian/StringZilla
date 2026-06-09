@@ -76,8 +76,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         match_mask = _mm512_cmpeq_epi8_mask(first_vec.zmm, second_vec.zmm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi8(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi8(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                              gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_store_si512(scores_new, cell_score_vec.zmm);
     }
@@ -111,8 +111,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         match_mask = _mm512_cmpeq_epi8_mask(first_vec.zmm, second_vec.zmm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi8(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi8(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                              gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_mask_storeu_epi8(scores_new, load_mask, cell_score_vec.zmm);
     }
@@ -369,8 +369,8 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         match_mask = _mm256_cmpeq_epi8_mask(first_vec.ymm, second_vec.ymm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi16(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                               gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_store_si512(scores_new, cell_score_vec.zmm);
     }
@@ -399,8 +399,8 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         match_mask = _mm256_cmpeq_epi8_mask(first_vec.ymm, second_vec.ymm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi16(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                               gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_mask_storeu_epi16(scores_new, load_mask, cell_score_vec.zmm);
     }
@@ -512,8 +512,8 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
         match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
         cost_of_substitution_vec.ymm = _mm256_mask_blend_epi16(match_mask, mismatch_cost_vec.ymm, match_cost_vec.ymm);
         cost_if_substitution_vec.ymm = _mm256_add_epi16(pre_substitution_vec.ymm, cost_of_substitution_vec.ymm);
-        cost_if_gap_vec.ymm =
-            _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm), gap_cost_vec.ymm);
+        cost_if_gap_vec.ymm = _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm),
+                                               gap_cost_vec.ymm);
         cell_score_vec.ymm = _mm256_min_epu16(cost_if_substitution_vec.ymm, cost_if_gap_vec.ymm);
         _mm256_store_si256((__m256i *)scores_new, cell_score_vec.ymm);
     }
@@ -546,8 +546,8 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
         match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
         cost_of_substitution_vec.ymm = _mm256_mask_blend_epi16(match_mask, mismatch_cost_vec.ymm, match_cost_vec.ymm);
         cost_if_substitution_vec.ymm = _mm256_add_epi16(pre_substitution_vec.ymm, cost_of_substitution_vec.ymm);
-        cost_if_gap_vec.ymm =
-            _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm), gap_cost_vec.ymm);
+        cost_if_gap_vec.ymm = _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm),
+                                               gap_cost_vec.ymm);
         cell_score_vec.ymm = _mm256_min_epu16(cost_if_substitution_vec.ymm, cost_if_gap_vec.ymm);
         _mm256_mask_storeu_epi16(scores_new, load_mask, cell_score_vec.ymm);
     }
@@ -659,8 +659,8 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
         match_mask = _mm_cmpeq_epi8_mask(first_vec.xmm, second_vec.xmm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi32(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi32(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi32(_mm512_min_epu32(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi32(_mm512_min_epu32(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                               gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu32(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_store_si512((__m512i *)scores_new, cell_score_vec.zmm);
     }
@@ -693,8 +693,8 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
         match_mask = _mm_cmpeq_epi8_mask(first_vec.xmm, second_vec.xmm);
         cost_of_substitution_vec.zmm = _mm512_mask_blend_epi32(match_mask, mismatch_cost_vec.zmm, match_cost_vec.zmm);
         cost_if_substitution_vec.zmm = _mm512_add_epi32(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm =
-            _mm512_add_epi32(_mm512_min_epu32(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi32(_mm512_min_epu32(pre_insert_vec.zmm, pre_delete_vec.zmm),
+                                               gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_min_epu32(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_mask_storeu_epi32(scores_new, load_mask, cell_score_vec.zmm);
     }
@@ -820,8 +820,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
                                              _mm512_add_epi8(pre_insert_open_vec.zmm, gap_open_vec.zmm));
         cost_if_delete.zmm = _mm512_min_epu8(_mm512_add_epi8(pre_delete_expand_vec.zmm, gap_expand_vec.zmm),
                                              _mm512_add_epi8(pre_delete_open_vec.zmm, gap_open_vec.zmm));
-        cell_score_vec.zmm =
-            _mm512_min_epu8(cost_if_substitution_vec.zmm, _mm512_min_epu8(cost_if_insert.zmm, cost_if_delete.zmm));
+        cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm,
+                                             _mm512_min_epu8(cost_if_insert.zmm, cost_if_delete.zmm));
 
         // Export results.
         _mm512_mask_storeu_epi8(scores_new, load_mask, cell_score_vec.zmm);
@@ -933,8 +933,8 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
                                               _mm512_add_epi16(pre_insert_open_vec.zmm, gap_open_vec.zmm));
         cost_if_delete.zmm = _mm512_min_epu16(_mm512_add_epi16(pre_delete_expand_vec.zmm, gap_expand_vec.zmm),
                                               _mm512_add_epi16(pre_delete_open_vec.zmm, gap_open_vec.zmm));
-        cell_score_vec.zmm =
-            _mm512_min_epu16(cost_if_substitution_vec.zmm, _mm512_min_epu16(cost_if_insert.zmm, cost_if_delete.zmm));
+        cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm,
+                                              _mm512_min_epu16(cost_if_insert.zmm, cost_if_delete.zmm));
 
         // Export results.
         _mm512_mask_storeu_epi16(scores_new, load_mask, cell_score_vec.zmm);
@@ -1055,8 +1055,8 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
                                               _mm512_add_epi32(pre_insert_open_vec.zmm, gap_open_vec.zmm));
         cost_if_delete.zmm = _mm512_min_epu32(_mm512_add_epi32(pre_delete_expand_vec.zmm, gap_expand_vec.zmm),
                                               _mm512_add_epi32(pre_delete_open_vec.zmm, gap_open_vec.zmm));
-        cell_score_vec.zmm =
-            _mm512_min_epu32(cost_if_substitution_vec.zmm, _mm512_min_epu32(cost_if_insert.zmm, cost_if_delete.zmm));
+        cell_score_vec.zmm = _mm512_min_epu32(cost_if_substitution_vec.zmm,
+                                              _mm512_min_epu32(cost_if_insert.zmm, cost_if_delete.zmm));
 
         // Export results.
         _mm512_mask_storeu_epi32(scores_new, load_mask, cell_score_vec.zmm);
@@ -1300,29 +1300,29 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
         if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8;
-            status_t status =
-                diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8 /* executor */);
+            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32,
+                                                                               result_u8 /* executor */);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16;
-            status_t status =
-                diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16, executor);
+            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32;
-            status_t status =
-                diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32, executor);
+            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64;
-            status_t status =
-                diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64, executor);
+            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64,
+                                                                                executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -1332,381 +1332,926 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
 };
 
 /**
- *  @brief Helper object optimizing the most expensive part of variable-substitution-cost alignment methods for
- *         Ice Lake CPUs. It's designed for horizontal layout "walkers", where we look at just one row
- *         of (256 x 256) substitution matrix and can fit 256 bytes worth of costs in the registers.
+ *  @brief Helper object for Ice Lake CPUs, designed for @b diagonal layout "walkers", where @b both operands
+ *         of every substitution vary per cell, so a single resident cost row is not enough and the entire
+ *         (32 x 32) `class_substitution_costs` matrix must stay resident.
+ *
+ *  The byte-to-class mapping uses the 256-entry `byte_to_class` table (the 4x `VPERMB`-blend technique, since
+ *  a single `VPERMB` register only holds 64 bytes) and is exposed via `classify64`,
+ *  so diagonal walkers can pre-classify both strings @b once and feed class streams into the hot loop. The
+ *  second stage looks up the cost for two varying class operands at once by keeping the matrix folded into 16
+ *  loop-invariant 64-byte windows, addressed as `idx = ((first_class & 1) << 5) | second_class` with the window
+ *  `window = first_class >> 1`, resolved through 16x `VPERMB` and a balanced tree of mask-blends.
  *
  *  This is a common abstraction for both:
  *  - Local SW and global NW alignment.
  *  - Serial and parallel implementations.
- *  - 8-bit, 16-bit, 32-bit, and even 64-bit costs.
+ *  - 16-bit and 32-bit costs.
  *  - Any memory allocator used.
  */
-struct lookup_in256bytes_icelake_t_ {
-    sz_u512_vec_t row_subs_vecs_[4];
+struct substitution_matrix_lookup_icelake_t_ {
+    sz_u512_vec_t byte_to_class_vecs_[4];
     sz_u512_vec_t is_third_or_fourth_vec_, is_second_or_fourth_vec_;
+    sz_u512_vec_t cost_windows_vecs_[16];
 
-    inline lookup_in256bytes_icelake_t_() noexcept {
+    inline substitution_matrix_lookup_icelake_t_() noexcept {
         char is_third_or_fourth_check, is_second_or_fourth_check;
         *(sz_u8_t *)&is_third_or_fourth_check = 0x80, *(sz_u8_t *)&is_second_or_fourth_check = 0x40;
         is_third_or_fourth_vec_.zmm = _mm512_set1_epi8(is_third_or_fourth_check);
         is_second_or_fourth_vec_.zmm = _mm512_set1_epi8(is_second_or_fourth_check);
     }
 
-    inline void reload(sz_error_cost_t const *row_subs) noexcept {
-        row_subs_vecs_[0].zmm = _mm512_loadu_si512(row_subs + 64 * 0);
-        row_subs_vecs_[1].zmm = _mm512_loadu_si512(row_subs + 64 * 1);
-        row_subs_vecs_[2].zmm = _mm512_loadu_si512(row_subs + 64 * 2);
-        row_subs_vecs_[3].zmm = _mm512_loadu_si512(row_subs + 64 * 3);
+    inline void reload_classes(sz_u8_t const *byte_to_class) noexcept {
+        byte_to_class_vecs_[0].zmm = _mm512_loadu_si512(byte_to_class + 64 * 0);
+        byte_to_class_vecs_[1].zmm = _mm512_loadu_si512(byte_to_class + 64 * 1);
+        byte_to_class_vecs_[2].zmm = _mm512_loadu_si512(byte_to_class + 64 * 2);
+        byte_to_class_vecs_[3].zmm = _mm512_loadu_si512(byte_to_class + 64 * 3);
     }
 
-    inline sz_u512_vec_t lookup64(sz_u512_vec_t const &text_vec) const noexcept {
+    /**
+     *  @brief Folds the (32 x 32) class cost matrix into 16 resident 64-byte windows for `lookup64`.
+     *  @param transpose When set, the matrix is loaded as @b transposed, so that `lookup64(first, second)`
+     *         still returns the original `class_substitution_costs[first][second]` even when the diagonal walker
+     *         has swapped the shorter and longer strings (which flips the order of the two class operands).
+     */
+    inline void reload_costs(
+        error_cost_t const (&class_substitution_costs)[error_costs_classes_count_k][error_costs_classes_count_k],
+        bool transpose) noexcept {
+        alignas(64) error_cost_t windows[16 * 64];
+        for (size_t window = 0; window != 16; ++window)
+            for (size_t low_bit = 0; low_bit != 2; ++low_bit) {
+                size_t const first_class = window * 2 + low_bit;
+                for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                    windows[window * 64 + low_bit * 32 + second_class] =
+                        transpose ? class_substitution_costs[second_class][first_class]
+                                  : class_substitution_costs[first_class][second_class];
+            }
+        for (size_t window = 0; window != 16; ++window)
+            cost_windows_vecs_[window].zmm = _mm512_load_si512(windows + window * 64);
+    }
 
-        sz_u512_vec_t shuffled_subs_vecs[4];
-        sz_u512_vec_t substituted_vec;
+    inline sz_u512_vec_t classify64(sz_u512_vec_t const &text_vec) const noexcept {
+
+        sz_u512_vec_t shuffled_class_vecs[4];
+        sz_u512_vec_t class_vec;
         __mmask64 is_third_or_fourth, is_second_or_fourth;
 
-        // Only the bottom 6 bits of a byte are used in `VPERB`, so we don't even need to mask.
-        shuffled_subs_vecs[0].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[0].zmm);
-        shuffled_subs_vecs[1].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[1].zmm);
-        shuffled_subs_vecs[2].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[2].zmm);
-        shuffled_subs_vecs[3].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[3].zmm);
+        // Map each input byte to its class using the 256-entry `byte_to_class` table.
+        // Only the bottom 6 bits of a byte are used in `VPERMB`, so we don't even need to mask.
+        shuffled_class_vecs[0].zmm = _mm512_permutexvar_epi8(text_vec.zmm, byte_to_class_vecs_[0].zmm);
+        shuffled_class_vecs[1].zmm = _mm512_permutexvar_epi8(text_vec.zmm, byte_to_class_vecs_[1].zmm);
+        shuffled_class_vecs[2].zmm = _mm512_permutexvar_epi8(text_vec.zmm, byte_to_class_vecs_[2].zmm);
+        shuffled_class_vecs[3].zmm = _mm512_permutexvar_epi8(text_vec.zmm, byte_to_class_vecs_[3].zmm);
 
-        // To blend we can invoke three `_mm512_cmplt_epu8_mask`, but we can also achieve the same using
-        // the AND logical operation, checking the top two bits of every byte. Continuing this thought,
-        // we can use the `VPTESTMB` instruction to output the mask after the AND.
         is_third_or_fourth = _mm512_test_epi8_mask(text_vec.zmm, is_third_or_fourth_vec_.zmm);
         is_second_or_fourth = _mm512_test_epi8_mask(text_vec.zmm, is_second_or_fourth_vec_.zmm);
-        substituted_vec.zmm = _mm512_mask_blend_epi8(
+        class_vec.zmm = _mm512_mask_blend_epi8(
             is_third_or_fourth,
-            // Choose between the first and the second.
-            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_subs_vecs[0].zmm, shuffled_subs_vecs[1].zmm),
-            // Choose between the third and the fourth.
-            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_subs_vecs[2].zmm, shuffled_subs_vecs[3].zmm));
+            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_class_vecs[0].zmm, shuffled_class_vecs[1].zmm),
+            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_class_vecs[2].zmm, shuffled_class_vecs[3].zmm));
+        return class_vec;
+    }
 
+    inline sz_u512_vec_t lookup64(sz_u512_vec_t const &first_class_vec,
+                                  sz_u512_vec_t const &second_class_vec) const noexcept {
+
+        sz_u512_vec_t index_vec, substituted_vec;
+        sz_u512_vec_t permuted_vecs[16], blend4_vecs[8], blend3_vecs[4], blend2_vecs[2];
+        sz_u512_vec_t window_vec;
+
+        // The permute index inside every window is `((first_class & 1) << 5) | second_class`.
+        index_vec.zmm = _mm512_or_si512(                                                                   //
+            _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(first_class_vec.zmm, _mm512_set1_epi8(1)), //
+                                               5),                                                         //
+                             _mm512_set1_epi8((char)0x20)),                                                //
+            second_class_vec.zmm);
+        for (size_t window = 0; window != 16; ++window)
+            permuted_vecs[window].zmm = _mm512_permutexvar_epi8(index_vec.zmm, cost_windows_vecs_[window].zmm);
+
+        // Select the correct window per lane via a balanced tree of mask-blends over `window = first_class >> 1`.
+        window_vec.zmm = _mm512_and_si512(_mm512_srli_epi16(first_class_vec.zmm, 1), _mm512_set1_epi8(15));
+        __mmask64 const window_bit0 = _mm512_test_epi8_mask(window_vec.zmm, _mm512_set1_epi8(1));
+        for (size_t pair = 0; pair != 8; ++pair)
+            blend4_vecs[pair].zmm = _mm512_mask_blend_epi8(window_bit0, permuted_vecs[2 * pair].zmm,
+                                                           permuted_vecs[2 * pair + 1].zmm);
+        __mmask64 const window_bit1 = _mm512_test_epi8_mask(window_vec.zmm, _mm512_set1_epi8(2));
+        for (size_t pair = 0; pair != 4; ++pair)
+            blend3_vecs[pair].zmm = _mm512_mask_blend_epi8(window_bit1, blend4_vecs[2 * pair].zmm,
+                                                           blend4_vecs[2 * pair + 1].zmm);
+        __mmask64 const window_bit2 = _mm512_test_epi8_mask(window_vec.zmm, _mm512_set1_epi8(4));
+        for (size_t pair = 0; pair != 2; ++pair)
+            blend2_vecs[pair].zmm = _mm512_mask_blend_epi8(window_bit2, blend3_vecs[2 * pair].zmm,
+                                                           blend3_vecs[2 * pair + 1].zmm);
+        __mmask64 const window_bit3 = _mm512_test_epi8_mask(window_vec.zmm, _mm512_set1_epi8(8));
+        substituted_vec.zmm = _mm512_mask_blend_epi8(window_bit3, blend2_vecs[0].zmm, blend2_vecs[1].zmm);
         return substituted_vec;
     }
 };
 
 /**
- *  @brief Helper object for Ice Lake CPUs, designed for horizontal layout "walkers", operating over 16-bit costs.
- *         It's based on the idea, that substitutions are the most expensive part of the algorithm, so those are
- *         parallelized, while the running minimums within a row are computed in a serial fashion.
+ *  @brief Variant of `tile_scorer` - maximizes the @b global Needleman-Wunsch score with class-based
+ *         substitution costs, for inputs whose diagonal exceeds the tiny horizontal threshold.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
  *
- *  This is a common abstraction for both:
- *  - Local SW and global NW alignment.
- *  - Serial and parallel implementations.
- *  - Any memory allocator used.
+ *  Mirrors the uniform `sz_u16_t` diagonal scorer (reversed-first / forward-second loads, aligned stores,
+ *  head-body-tail split), but replaces the `cmpeq(first, second) -> select(match, mismatch)` substitution
+ *  term with `sign_extend_i8_i16(lookup(first_class, second_class))`, evaluated over @b pre-classified class
+ *  streams and the resident (32 x 32) cost table built by `prepare`. The objective is maximization, so the
+ *  recurrence uses `max`/`add` with a negative gap, exactly like the horizontal class scorer above.
  */
-template <sz_similarity_locality_t locality_>
-struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, linear_gap_costs_t,
-                   sz_maximize_score_k, locality_, sz_cap_icelake_k>
-    : public tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, linear_gap_costs_t,
-                         sz_maximize_score_k, locality_, sz_cap_serial_k, void> {
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>>
+    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, linear_gap_costs_t,
-                      sz_maximize_score_k, locality_, sz_cap_serial_k,
-                      void>::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                      sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
 
-    lookup_in256bytes_icelake_t_ lookup_;
+    static constexpr size_t step_k = 64;
+
+    substitution_matrix_lookup_icelake_t_ lookup_;
+
+    void prepare(bool transpose) noexcept {
+        lookup_.reload_costs(this->substituter_.class_substitution_costs, transpose);
+    }
+
+    SZ_INLINE void slice_aligned64chars(                                               //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice,              //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+        sz_u512_vec_t pre_substitution_vecs[2], pre_insert_vecs[2], pre_delete_vecs[2];
+        sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec.zmm = _mm512_loadu_epi8(first_reversed_slice);
+        second_vec.zmm = _mm512_loadu_epi8(second_slice);
+        pre_substitution_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_substitution + 0);
+        pre_substitution_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_substitution + 32);
+        pre_insert_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_insertion + 0);
+        pre_insert_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_insertion + 32);
+        pre_delete_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_deletion + 0);
+        pre_delete_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_deletion + 32);
+
+        // First, sign-extend the 64 class-pair substitution costs into two `i16` halves.
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i16_vecs[0].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
+
+        cost_if_substitution_vecs[0].zmm = _mm512_add_epi16(pre_substitution_vecs[0].zmm,
+                                                            cost_of_substitution_i16_vecs[0].zmm);
+        cost_if_substitution_vecs[1].zmm = _mm512_add_epi16(pre_substitution_vecs[1].zmm,
+                                                            cost_of_substitution_i16_vecs[1].zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[0].zmm, pre_delete_vecs[0].zmm),
+                                                   gap_cost_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[1].zmm, pre_delete_vecs[1].zmm),
+                                                   gap_cost_vec.zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
+        _mm512_store_si512(scores_new + 0, cell_score_vecs[0].zmm);
+        _mm512_store_si512(scores_new + 32, cell_score_vecs[1].zmm);
+    }
+
+    SZ_INLINE void slice_upto64chars(                                                  //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice, size_t n,    //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        __mmask64 load_mask;
+        __mmask32 load_masks[2];
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+        sz_u512_vec_t pre_substitution_vecs[2], pre_insert_vecs[2], pre_delete_vecs[2];
+        sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
+
+        load_mask = sz_u64_mask_until_(n);
+        load_masks[0] = sz_u32_mask_until_(n);
+        load_masks[1] = sz_u32_mask_until_(n > 32 ? n - 32 : 0);
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
+        pre_substitution_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_substitution + 0);
+        pre_substitution_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_substitution + 32);
+        pre_insert_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_insertion + 0);
+        pre_insert_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_insertion + 32);
+        pre_delete_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_deletion + 0);
+        pre_delete_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_deletion + 32);
+
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i16_vecs[0].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
+
+        cost_if_substitution_vecs[0].zmm = _mm512_add_epi16(pre_substitution_vecs[0].zmm,
+                                                            cost_of_substitution_i16_vecs[0].zmm);
+        cost_if_substitution_vecs[1].zmm = _mm512_add_epi16(pre_substitution_vecs[1].zmm,
+                                                            cost_of_substitution_i16_vecs[1].zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[0].zmm, pre_delete_vecs[0].zmm),
+                                                   gap_cost_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[1].zmm, pre_delete_vecs[1].zmm),
+                                                   gap_cost_vec.zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
+        _mm512_mask_storeu_epi16(scores_new + 0, load_masks[0], cell_score_vecs[0].zmm);
+        _mm512_mask_storeu_epi16(scores_new + 32, load_masks[1], cell_score_vecs[1].zmm);
+    }
 
     template <typename executor_type_ = dummy_executor_t>
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    void operator()(                                                                   //
-        constant_iterator<char> first_char, char const *second_slice, size_t n,        //
-        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion,   //
         sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // Load a new substitution row.
-        sz_i16_t const gap = static_cast<sz_i16_t>(this->gap_costs_.open_or_extend);
-        error_cost_t const *substitutions_row = &this->substituter_.cells[(sz_u8_t)*first_char][0];
-        lookup_.reload(substitutions_row);
+        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        sz_u8_t const *first_reversed_classes = (sz_u8_t const *)first_reversed_slice;
+        sz_u8_t const *second_classes = (sz_u8_t const *)second_slice;
 
-        // Progress through the row 64 characters at a time.
-        size_t const count_slices = n / 64;
-        executor.for_n(count_slices, [&](size_t idx_slice) noexcept {
-            slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
+        sz_u512_vec_t gap_cost_vec;
+        gap_cost_vec.zmm = _mm512_set1_epi16(this->gap_costs_.open_or_extend);
+
+        // On very small inputs, avoid the headache of splitting the input into chunks:
+        if (length <= step_k) {
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, length,                                 //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+            this->last_score_ = scores_new[0];
+            return;
+        }
+
+        // First handle the misaligned slice of the output buffer:
+        head_body_tail_t hbt = head_body_tail<step_k>(scores_new, length);
+
+        // Misaligned head and tail:
+        if (hbt.head)
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, hbt.head,                               //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+        first_reversed_classes += hbt.head, second_classes += hbt.head, scores_pre_substitution += hbt.head,
+            scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
+        if (hbt.tail)
+            slice_upto64chars(                                                          //
+                first_reversed_classes + hbt.body, second_classes + hbt.body, hbt.tail, //
+                scores_pre_substitution + hbt.body, scores_pre_insertion + hbt.body,    //
+                scores_pre_deletion + hbt.body, scores_new + hbt.body,                  //
+                gap_cost_vec);
+
+        size_t const body_pages = hbt.body / step_k;
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
+            size_t const progress = page * step_k;
+            slice_aligned64chars(                                                                                 //
+                first_reversed_classes + progress, second_classes + progress, scores_pre_substitution + progress, //
+                scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,           //
+                gap_cost_vec);
         });
 
-        // Handle the tail with a less efficient kernel - at most 2 iterations of the following loop:
-        for (size_t idx_half_slice = count_slices * 2; idx_half_slice * 32 < n; ++idx_half_slice)
-            slice_upto32chars(second_slice, idx_half_slice * 32, n, gap, scores_pre_substitution, scores_pre_insertion,
-                              scores_new);
+        if (length == 1) this->last_score_ = scores_new[0];
+    }
+};
 
-        // Horizontally compute the running minimum of the last row.
-        // Simply disabling this operation results in 5x performance improvement, meaning
-        //
-        // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
-        // that will involve multiple steps. It's quite expensive and should be first tested in the
-        // "experimental" section.
-        sz_assert_(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
-        sz_assert_(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
-        sz_i16_t last_in_row = scores_pre_deletion[0];
-        for (size_t i = 0; i < n; ++i) scores_new[i] = last_in_row = sz_max_of_two(scores_new[i], last_in_row + gap);
-        this->last_score_ = last_in_row;
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b local Smith-Waterman score with class-based
+ *         substitution costs, for inputs whose diagonal exceeds the tiny horizontal threshold.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ *
+ *  Identical to the global diagonal scorer above, but adds the local zero-clamp on every cell and tracks
+ *  the running best across the whole matrix, mirroring the uniform local diagonal scorer and the horizontal
+ *  class scorer.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>>
+    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                      sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    static constexpr size_t step_k = 64;
+
+    substitution_matrix_lookup_icelake_t_ lookup_;
+
+    void prepare(bool transpose) noexcept {
+        lookup_.reload_costs(this->substituter_.class_substitution_costs, transpose);
     }
 
-    void slice_64chars(char const *second_slice, size_t i, sz_i16_t gap,                              //
-                       sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
-                       sz_i16_t *scores_new) const noexcept {
+    SZ_INLINE void slice_aligned64chars(                                               //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice,              //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
 
-        sz_u512_vec_t second_vec;
-        sz_u512_vec_t pre_substitution_vecs[2], pre_gap_vecs[2];
+        sz_u512_vec_t first_vec, second_vec;
         sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+        sz_u512_vec_t pre_substitution_vecs[2], pre_insert_vecs[2], pre_delete_vecs[2];
         sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
 
-        // Initialize constats:
-        sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi16(gap);
+        first_vec.zmm = _mm512_loadu_epi8(first_reversed_slice);
+        second_vec.zmm = _mm512_loadu_epi8(second_slice);
+        pre_substitution_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_substitution + 0);
+        pre_substitution_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_substitution + 32);
+        pre_insert_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_insertion + 0);
+        pre_insert_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_insertion + 32);
+        pre_delete_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_deletion + 0);
+        pre_delete_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_deletion + 32);
 
-        // Load the data without any masks:
-        second_vec.zmm = _mm512_loadu_epi8(second_slice + i);
-        pre_substitution_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_substitution + i + 0);
-        pre_substitution_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_substitution + i + 32);
-        pre_gap_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_insertion + i + 0);
-        pre_gap_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_insertion + i + 32);
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i16_vecs[0].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
 
-        // First, sign-extend the substitution cost vector.
-        cost_of_substitution_i8_vec = lookup_.lookup64(second_vec);
-        cost_of_substitution_i16_vecs[0].zmm =
-            _mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
-        cost_of_substitution_i16_vecs[1].zmm =
-            _mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
-
-        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
-        // left to right outside of this loop.
-        cost_if_substitution_vecs[0].zmm =
-            _mm512_add_epi16(pre_substitution_vecs[0].zmm, cost_of_substitution_i16_vecs[0].zmm);
-        cost_if_substitution_vecs[1].zmm =
-            _mm512_add_epi16(pre_substitution_vecs[1].zmm, cost_of_substitution_i16_vecs[1].zmm);
-        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(pre_gap_vecs[0].zmm, gap_cost_vec.zmm);
-        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(pre_gap_vecs[1].zmm, gap_cost_vec.zmm);
+        cost_if_substitution_vecs[0].zmm = _mm512_add_epi16(pre_substitution_vecs[0].zmm,
+                                                            cost_of_substitution_i16_vecs[0].zmm);
+        cost_if_substitution_vecs[1].zmm = _mm512_add_epi16(pre_substitution_vecs[1].zmm,
+                                                            cost_of_substitution_i16_vecs[1].zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[0].zmm, pre_delete_vecs[0].zmm),
+                                                   gap_cost_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[1].zmm, pre_delete_vecs[1].zmm),
+                                                   gap_cost_vec.zmm);
         cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
         cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
 
         // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
-        if constexpr (locality_ == sz_similarity_local_k)
-            cell_score_vecs[0].zmm = _mm512_max_epi16(cell_score_vecs[0].zmm, _mm512_setzero_epi32()),
-            cell_score_vecs[1].zmm = _mm512_max_epi16(cell_score_vecs[1].zmm, _mm512_setzero_epi32());
-
-        // Dump partial results to the output buffer.
-        _mm512_storeu_epi16(scores_new + i + 0, cell_score_vecs[0].zmm);
-        _mm512_storeu_epi16(scores_new + i + 32, cell_score_vecs[1].zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cell_score_vecs[0].zmm, _mm512_setzero_epi32());
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cell_score_vecs[1].zmm, _mm512_setzero_epi32());
+        _mm512_store_si512(scores_new + 0, cell_score_vecs[0].zmm);
+        _mm512_store_si512(scores_new + 32, cell_score_vecs[1].zmm);
     }
 
-    void slice_upto32chars(char const *second_slice, size_t i, size_t n, sz_i16_t gap,                    //
-                           sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
-                           sz_i16_t *scores_new) const noexcept {
+    SZ_INLINE void slice_upto64chars(                                                  //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice, size_t n,    //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
 
-        __mmask32 load_mask;
-        sz_u512_vec_t second_vec; // ! Only up to 32 bytes in the low YMM section will be used
-        sz_u512_vec_t pre_substitution_vec, pre_gap_vec;
-        sz_u512_vec_t cost_of_substitution_vec;
-        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+        __mmask64 load_mask;
+        __mmask32 load_masks[2];
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+        sz_u512_vec_t pre_substitution_vecs[2], pre_insert_vecs[2], pre_delete_vecs[2];
+        sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
 
-        // Initialize constats:
-        sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi16(gap);
+        load_mask = sz_u64_mask_until_(n);
+        load_masks[0] = sz_u32_mask_until_(n);
+        load_masks[1] = sz_u32_mask_until_(n > 32 ? n - 32 : 0);
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
+        pre_substitution_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_substitution + 0);
+        pre_substitution_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_substitution + 32);
+        pre_insert_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_insertion + 0);
+        pre_insert_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_insertion + 32);
+        pre_delete_vecs[0].zmm = _mm512_maskz_loadu_epi16(load_masks[0], scores_pre_deletion + 0);
+        pre_delete_vecs[1].zmm = _mm512_maskz_loadu_epi16(load_masks[1], scores_pre_deletion + 32);
 
-        // Load the data with a mask:
-        load_mask = sz_u32_mask_until_(n - i);
-        second_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
-        pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
-        pre_gap_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i16_vecs[0].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
 
-        // First, sign-extend the substitution cost vector.
-        cost_of_substitution_vec.zmm = _mm512_cvtepi8_epi16(lookup_.lookup64(second_vec).ymms[0]);
-
-        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
-        // left to right outside of this loop.
-        cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm = _mm512_add_epi16(pre_gap_vec.zmm, gap_cost_vec.zmm);
-        cell_score_vec.zmm = _mm512_max_epi16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+        cost_if_substitution_vecs[0].zmm = _mm512_add_epi16(pre_substitution_vecs[0].zmm,
+                                                            cost_of_substitution_i16_vecs[0].zmm);
+        cost_if_substitution_vecs[1].zmm = _mm512_add_epi16(pre_substitution_vecs[1].zmm,
+                                                            cost_of_substitution_i16_vecs[1].zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[0].zmm, pre_delete_vecs[0].zmm),
+                                                   gap_cost_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(_mm512_max_epi16(pre_insert_vecs[1].zmm, pre_delete_vecs[1].zmm),
+                                                   gap_cost_vec.zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
 
         // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
-        if constexpr (locality_ == sz_similarity_local_k)
-            cell_score_vec.zmm = _mm512_max_epi16(cell_score_vec.zmm, _mm512_setzero_epi32());
-
-        // Dump partial results to the output buffer.
-        _mm512_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cell_score_vecs[0].zmm, _mm512_setzero_epi32());
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cell_score_vecs[1].zmm, _mm512_setzero_epi32());
+        _mm512_mask_storeu_epi16(scores_new + 0, load_masks[0], cell_score_vecs[0].zmm);
+        _mm512_mask_storeu_epi16(scores_new + 32, load_masks[1], cell_score_vecs[1].zmm);
     }
-};
-
-template <sz_similarity_locality_t locality_>
-struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_256x256_t, linear_gap_costs_t,
-                   sz_maximize_score_k, locality_, sz_cap_icelake_k, void>
-    : public tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_256x256_t, linear_gap_costs_t,
-                         sz_maximize_score_k, locality_, sz_cap_serial_k, void> {
-
-    using tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_256x256_t, linear_gap_costs_t,
-                      sz_maximize_score_k, locality_, sz_cap_serial_k,
-                      void>::tile_scorer; // Make the constructors visible
-
-    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
-
-    lookup_in256bytes_icelake_t_ lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    void operator()(                                                                   //
-        constant_iterator<char> first_char, char const *second_slice, size_t n,        //
-        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
-        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion,   //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
-        // Load a new substitution row.
-        sz_i32_t const gap = static_cast<sz_i32_t>(this->gap_costs_.open_or_extend);
-        error_cost_t const *substitutions_row = &this->substituter_.cells[(sz_u8_t)*first_char][0];
-        lookup_.reload(substitutions_row);
+        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        sz_u8_t const *first_reversed_classes = (sz_u8_t const *)first_reversed_slice;
+        sz_u8_t const *second_classes = (sz_u8_t const *)second_slice;
+        sz_i16_t *const scores_new_begin = scores_new;
 
-        // Progress through the row 64 characters at a time.
-        size_t const count_slices = n / 64;
-        executor.for_n(count_slices, [&](size_t idx_slice) noexcept {
-            slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
-        });
-
-        // Handle the tail with a less efficient kernel - at most 4 iterations of the following loop:
-        for (size_t idx_quarter_slice = count_slices * 4; idx_quarter_slice * 16 < n; ++idx_quarter_slice)
-            slice_upto16chars(second_slice, idx_quarter_slice * 16, n, gap, scores_pre_substitution,
-                              scores_pre_insertion, scores_new);
-
-        // Horizontally compute the running minimum of the last row.
-        // Simply disabling this operation results in 5x performance improvement, meaning
-        //
-        // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
-        // that will involve multiple steps. It's quite expensive and should be first tested in the
-        // "experimental" section.
-        sz_assert_(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
-        sz_assert_(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
-        sz_i32_t last_in_row = scores_pre_deletion[0];
-        for (size_t i = 0; i < n; ++i) scores_new[i] = last_in_row = sz_max_of_two(scores_new[i], last_in_row + gap);
-        this->last_score_ = last_in_row;
-    }
-
-    void slice_64chars(char const *second_slice, size_t i, sz_i32_t gap,                              //
-                       sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
-                       sz_i32_t *scores_new) const noexcept {
-
-        sz_u512_vec_t second_vec;
-        sz_u512_vec_t pre_substitution_vecs[4], pre_gap_vecs[4];
-        sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i32_vecs[4];
-        sz_u512_vec_t cost_if_substitution_vecs[4], cost_if_gap_vecs[4], cell_score_vecs[4];
-
-        // Initialize constats:
         sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi32(gap);
+        gap_cost_vec.zmm = _mm512_set1_epi16(this->gap_costs_.open_or_extend);
 
-        // Load the data without any masks:
-        second_vec.zmm = _mm512_loadu_epi8(second_slice + i);
-        pre_substitution_vecs[0].zmm = _mm512_loadu_epi32(scores_pre_substitution + i + 16 * 0);
-        pre_substitution_vecs[1].zmm = _mm512_loadu_epi32(scores_pre_substitution + i + 16 * 1);
-        pre_substitution_vecs[2].zmm = _mm512_loadu_epi32(scores_pre_substitution + i + 16 * 2);
-        pre_substitution_vecs[3].zmm = _mm512_loadu_epi32(scores_pre_substitution + i + 16 * 3);
-        pre_gap_vecs[0].zmm = _mm512_loadu_epi32(scores_pre_insertion + i + 16 * 0);
-        pre_gap_vecs[1].zmm = _mm512_loadu_epi32(scores_pre_insertion + i + 16 * 1);
-        pre_gap_vecs[2].zmm = _mm512_loadu_epi32(scores_pre_insertion + i + 16 * 2);
-        pre_gap_vecs[3].zmm = _mm512_loadu_epi32(scores_pre_insertion + i + 16 * 3);
+        if (length <= step_k) {
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, length,                                 //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+        }
+        else {
+            head_body_tail_t hbt = head_body_tail<step_k>(scores_new, length);
+            if (hbt.head)
+                slice_upto64chars(                                                                  //
+                    first_reversed_classes, second_classes, hbt.head,                               //
+                    scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                    gap_cost_vec);
+            first_reversed_classes += hbt.head, second_classes += hbt.head, scores_pre_substitution += hbt.head,
+                scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
+            if (hbt.tail)
+                slice_upto64chars(                                                          //
+                    first_reversed_classes + hbt.body, second_classes + hbt.body, hbt.tail, //
+                    scores_pre_substitution + hbt.body, scores_pre_insertion + hbt.body,    //
+                    scores_pre_deletion + hbt.body, scores_new + hbt.body,                  //
+                    gap_cost_vec);
+            size_t const body_pages = hbt.body / step_k;
+            executor.for_n(body_pages, [&](size_t const page) noexcept {
+                size_t const progress = page * step_k;
+                slice_aligned64chars(                                                                                 //
+                    first_reversed_classes + progress, second_classes + progress, scores_pre_substitution + progress, //
+                    scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,           //
+                    gap_cost_vec);
+            });
+        }
 
-        // First, sign-extend the substitution cost vector.
-        cost_of_substitution_i8_vec = lookup_.lookup64(second_vec);
-        cost_of_substitution_i32_vecs[0].zmm =
-            _mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 0));
-        cost_of_substitution_i32_vecs[1].zmm =
-            _mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 1));
-        cost_of_substitution_i32_vecs[2].zmm =
-            _mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 2));
-        cost_of_substitution_i32_vecs[3].zmm =
-            _mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 3));
-
-        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
-        // left to right outside of this loop.
-        cost_if_substitution_vecs[0].zmm =
-            _mm512_add_epi32(pre_substitution_vecs[0].zmm, cost_of_substitution_i32_vecs[0].zmm);
-        cost_if_substitution_vecs[1].zmm =
-            _mm512_add_epi32(pre_substitution_vecs[1].zmm, cost_of_substitution_i32_vecs[1].zmm);
-        cost_if_substitution_vecs[2].zmm =
-            _mm512_add_epi32(pre_substitution_vecs[2].zmm, cost_of_substitution_i32_vecs[2].zmm);
-        cost_if_substitution_vecs[3].zmm =
-            _mm512_add_epi32(pre_substitution_vecs[3].zmm, cost_of_substitution_i32_vecs[3].zmm);
-        cost_if_gap_vecs[0].zmm = _mm512_add_epi32(pre_gap_vecs[0].zmm, gap_cost_vec.zmm);
-        cost_if_gap_vecs[1].zmm = _mm512_add_epi32(pre_gap_vecs[1].zmm, gap_cost_vec.zmm);
-        cost_if_gap_vecs[2].zmm = _mm512_add_epi32(pre_gap_vecs[2].zmm, gap_cost_vec.zmm);
-        cost_if_gap_vecs[3].zmm = _mm512_add_epi32(pre_gap_vecs[3].zmm, gap_cost_vec.zmm);
-        cell_score_vecs[0].zmm = _mm512_max_epi32(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
-        cell_score_vecs[1].zmm = _mm512_max_epi32(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
-        cell_score_vecs[2].zmm = _mm512_max_epi32(cost_if_substitution_vecs[2].zmm, cost_if_gap_vecs[2].zmm);
-        cell_score_vecs[3].zmm = _mm512_max_epi32(cost_if_substitution_vecs[3].zmm, cost_if_gap_vecs[3].zmm);
-
-        // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
-        if constexpr (locality_ == sz_similarity_local_k)
-            cell_score_vecs[0].zmm = _mm512_max_epi32(cell_score_vecs[0].zmm, _mm512_setzero_epi32()),
-            cell_score_vecs[1].zmm = _mm512_max_epi32(cell_score_vecs[1].zmm, _mm512_setzero_epi32()),
-            cell_score_vecs[2].zmm = _mm512_max_epi32(cell_score_vecs[2].zmm, _mm512_setzero_epi32()),
-            cell_score_vecs[3].zmm = _mm512_max_epi32(cell_score_vecs[3].zmm, _mm512_setzero_epi32());
-
-        // Dump partial results to the output buffer.
-        _mm512_storeu_epi32(scores_new + i + 16 * 0, cell_score_vecs[0].zmm);
-        _mm512_storeu_epi32(scores_new + i + 16 * 1, cell_score_vecs[1].zmm);
-        _mm512_storeu_epi32(scores_new + i + 16 * 2, cell_score_vecs[2].zmm);
-        _mm512_storeu_epi32(scores_new + i + 16 * 3, cell_score_vecs[3].zmm);
-    }
-
-    void slice_upto16chars(char const *second_slice, size_t i, size_t n, sz_i32_t gap,                    //
-                           sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
-                           sz_i32_t *scores_new) const noexcept {
-
-        __mmask16 load_mask;
-        sz_u512_vec_t second_vec; // ! Only up to 16 bytes in the low YMM section will be used
-        sz_u512_vec_t pre_substitution_vec, pre_gap_vec;
-        sz_u512_vec_t cost_of_substitution_vec;
-        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
-
-        // Initialize constats:
-        sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi32(gap);
-
-        // Load the data with a mask:
-        load_mask = sz_u16_clamp_mask_until_(n - i);
-        second_vec.xmms[0] = _mm_maskz_loadu_epi8(load_mask, second_slice + i);
-        pre_substitution_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_substitution + i);
-        pre_gap_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_insertion + i);
-
-        // First, sign-extend the substitution cost vector.
-        cost_of_substitution_vec.zmm = _mm512_cvtepi8_epi32(lookup_.lookup64(second_vec).xmms[0]);
-
-        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
-        // left to right outside of this loop.
-        cost_if_substitution_vec.zmm = _mm512_add_epi32(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm = _mm512_add_epi32(pre_gap_vec.zmm, gap_cost_vec.zmm);
-        cell_score_vec.zmm = _mm512_max_epi32(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
-
-        // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
-        if constexpr (locality_ == sz_similarity_local_k)
-            cell_score_vec.zmm = _mm512_max_epi32(cell_score_vec.zmm, _mm512_setzero_epi32());
-
-        // Dump partial results to the output buffer.
-        _mm512_mask_storeu_epi32(scores_new + i, load_mask, cell_score_vec.zmm);
+        // The running best across the whole matrix is the reported local-alignment score.
+        sz_i16_t best_in_diagonal = this->best_score_;
+        for (size_t i = 0; i != length; ++i) best_in_diagonal = sz_max_of_two(best_in_diagonal, scores_new_begin[i]);
+        this->best_score_ = best_in_diagonal;
     }
 };
 
-template <sz_similarity_locality_t locality_>
-struct tile_scorer<constant_iterator<char>, char const *, sz_i64_t, error_costs_256x256_t, linear_gap_costs_t,
-                   sz_maximize_score_k, locality_, sz_cap_icelake_k>
-    : public tile_scorer<constant_iterator<char>, char const *, sz_i64_t, error_costs_256x256_t, linear_gap_costs_t,
-                         sz_maximize_score_k, locality_, sz_cap_serial_k, void> {
+/**
+ *  @brief Variant of the global diagonal class scorer over @b `sz_i32_t` cells, for inputs whose scores
+ *         exceed the 16-bit range. Mirrors the `sz_i16_t` scorer but folds the 64 class-pair costs into
+ *         four 16-lane `i32` halves via `_mm512_cvtepi8_epi32`.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>>
+    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer<constant_iterator<char>, char const *, sz_i64_t, error_costs_256x256_t, linear_gap_costs_t,
-                      sz_maximize_score_k, locality_, sz_cap_serial_k,
-                      void>::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                      sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    static constexpr size_t step_k = 64;
+
+    substitution_matrix_lookup_icelake_t_ lookup_;
+
+    void prepare(bool transpose) noexcept {
+        lookup_.reload_costs(this->substituter_.class_substitution_costs, transpose);
+    }
+
+    SZ_INLINE void slice_aligned64chars(                                               //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice,              //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec, cost_of_substitution_i8_vec;
+        sz_u512_vec_t cost_of_substitution_i32_vecs[4];
+        sz_u512_vec_t pre_substitution_vecs[4], pre_insert_vecs[4], pre_delete_vecs[4];
+        sz_u512_vec_t cost_if_substitution_vecs[4], cost_if_gap_vecs[4], cell_score_vecs[4];
+
+        first_vec.zmm = _mm512_loadu_epi8(first_reversed_slice);
+        second_vec.zmm = _mm512_loadu_epi8(second_slice);
+        for (size_t part = 0; part != 4; ++part) {
+            pre_substitution_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_substitution + part * 16);
+            pre_insert_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_insertion + part * 16);
+            pre_delete_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_deletion + part * 16);
+        }
+
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i32_vecs[0].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i32_vecs[1].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 1));
+        cost_of_substitution_i32_vecs[2].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 2));
+        cost_of_substitution_i32_vecs[3].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 3));
+
+        for (size_t part = 0; part != 4; ++part) {
+            cost_if_substitution_vecs[part].zmm = _mm512_add_epi32(pre_substitution_vecs[part].zmm,
+                                                                   cost_of_substitution_i32_vecs[part].zmm);
+            cost_if_gap_vecs[part].zmm = _mm512_add_epi32(
+                _mm512_max_epi32(pre_insert_vecs[part].zmm, pre_delete_vecs[part].zmm), gap_cost_vec.zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cost_if_substitution_vecs[part].zmm,
+                                                         cost_if_gap_vecs[part].zmm);
+            _mm512_store_si512(scores_new + part * 16, cell_score_vecs[part].zmm);
+        }
+    }
+
+    SZ_INLINE void slice_upto64chars(                                                  //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice, size_t n,    //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec, cost_of_substitution_i8_vec;
+        sz_u512_vec_t cost_of_substitution_i32_vecs[4];
+        sz_u512_vec_t pre_substitution_vecs[4], pre_insert_vecs[4], pre_delete_vecs[4];
+        sz_u512_vec_t cost_if_substitution_vecs[4], cost_if_gap_vecs[4], cell_score_vecs[4];
+
+        // The four 16-lane score sub-masks are just consecutive slices of the single 64-lane byte mask.
+        __mmask64 const load_mask = sz_u64_mask_until_(n);
+        __mmask16 const load_masks[4] = {(__mmask16)load_mask, (__mmask16)(load_mask >> 16),
+                                         (__mmask16)(load_mask >> 32), (__mmask16)(load_mask >> 48)};
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
+        for (size_t part = 0; part != 4; ++part) {
+            pre_substitution_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part],
+                                                                       scores_pre_substitution + part * 16);
+            pre_insert_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part], scores_pre_insertion + part * 16);
+            pre_delete_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part], scores_pre_deletion + part * 16);
+        }
+
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i32_vecs[0].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i32_vecs[1].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 1));
+        cost_of_substitution_i32_vecs[2].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 2));
+        cost_of_substitution_i32_vecs[3].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 3));
+
+        for (size_t part = 0; part != 4; ++part) {
+            cost_if_substitution_vecs[part].zmm = _mm512_add_epi32(pre_substitution_vecs[part].zmm,
+                                                                   cost_of_substitution_i32_vecs[part].zmm);
+            cost_if_gap_vecs[part].zmm = _mm512_add_epi32(
+                _mm512_max_epi32(pre_insert_vecs[part].zmm, pre_delete_vecs[part].zmm), gap_cost_vec.zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cost_if_substitution_vecs[part].zmm,
+                                                         cost_if_gap_vecs[part].zmm);
+            _mm512_mask_storeu_epi32(scores_new + part * 16, load_masks[part], cell_score_vecs[part].zmm);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion,   //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        sz_u8_t const *first_reversed_classes = (sz_u8_t const *)first_reversed_slice;
+        sz_u8_t const *second_classes = (sz_u8_t const *)second_slice;
+
+        sz_u512_vec_t gap_cost_vec;
+        gap_cost_vec.zmm = _mm512_set1_epi32(this->gap_costs_.open_or_extend);
+
+        if (length <= step_k) {
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, length,                                 //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+            this->last_score_ = scores_new[0];
+            return;
+        }
+
+        head_body_tail_t hbt = head_body_tail<step_k>(scores_new, length);
+        if (hbt.head)
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, hbt.head,                               //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+        first_reversed_classes += hbt.head, second_classes += hbt.head, scores_pre_substitution += hbt.head,
+            scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
+        if (hbt.tail)
+            slice_upto64chars(                                                          //
+                first_reversed_classes + hbt.body, second_classes + hbt.body, hbt.tail, //
+                scores_pre_substitution + hbt.body, scores_pre_insertion + hbt.body,    //
+                scores_pre_deletion + hbt.body, scores_new + hbt.body,                  //
+                gap_cost_vec);
+
+        size_t const body_pages = hbt.body / step_k;
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
+            size_t const progress = page * step_k;
+            slice_aligned64chars(                                                                                 //
+                first_reversed_classes + progress, second_classes + progress, scores_pre_substitution + progress, //
+                scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,           //
+                gap_cost_vec);
+        });
+
+        if (length == 1) this->last_score_ = scores_new[0];
+    }
+};
+
+/**
+ *  @brief Variant of the local diagonal class scorer over @b `sz_i32_t` cells. Mirrors the `sz_i32_t` global
+ *         scorer, plus the per-cell zero-clamp and the running-best reduction of Smith-Waterman.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>>
+    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                      sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    static constexpr size_t step_k = 64;
+
+    substitution_matrix_lookup_icelake_t_ lookup_;
+
+    void prepare(bool transpose) noexcept {
+        lookup_.reload_costs(this->substituter_.class_substitution_costs, transpose);
+    }
+
+    SZ_INLINE void slice_aligned64chars(                                               //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice,              //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec, cost_of_substitution_i8_vec;
+        sz_u512_vec_t cost_of_substitution_i32_vecs[4];
+        sz_u512_vec_t pre_substitution_vecs[4], pre_insert_vecs[4], pre_delete_vecs[4];
+        sz_u512_vec_t cost_if_substitution_vecs[4], cost_if_gap_vecs[4], cell_score_vecs[4];
+
+        first_vec.zmm = _mm512_loadu_epi8(first_reversed_slice);
+        second_vec.zmm = _mm512_loadu_epi8(second_slice);
+        for (size_t part = 0; part != 4; ++part) {
+            pre_substitution_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_substitution + part * 16);
+            pre_insert_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_insertion + part * 16);
+            pre_delete_vecs[part].zmm = _mm512_loadu_epi32(scores_pre_deletion + part * 16);
+        }
+
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i32_vecs[0].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i32_vecs[1].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 1));
+        cost_of_substitution_i32_vecs[2].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 2));
+        cost_of_substitution_i32_vecs[3].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 3));
+
+        for (size_t part = 0; part != 4; ++part) {
+            cost_if_substitution_vecs[part].zmm = _mm512_add_epi32(pre_substitution_vecs[part].zmm,
+                                                                   cost_of_substitution_i32_vecs[part].zmm);
+            cost_if_gap_vecs[part].zmm = _mm512_add_epi32(
+                _mm512_max_epi32(pre_insert_vecs[part].zmm, pre_delete_vecs[part].zmm), gap_cost_vec.zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cost_if_substitution_vecs[part].zmm,
+                                                         cost_if_gap_vecs[part].zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cell_score_vecs[part].zmm, _mm512_setzero_epi32());
+            _mm512_store_si512(scores_new + part * 16, cell_score_vecs[part].zmm);
+        }
+    }
+
+    SZ_INLINE void slice_upto64chars(                                                  //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice, size_t n,    //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion, //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new,                     //
+        sz_u512_vec_t gap_cost_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec, cost_of_substitution_i8_vec;
+        sz_u512_vec_t cost_of_substitution_i32_vecs[4];
+        sz_u512_vec_t pre_substitution_vecs[4], pre_insert_vecs[4], pre_delete_vecs[4];
+        sz_u512_vec_t cost_if_substitution_vecs[4], cost_if_gap_vecs[4], cell_score_vecs[4];
+
+        // The four 16-lane score sub-masks are just consecutive slices of the single 64-lane byte mask.
+        __mmask64 const load_mask = sz_u64_mask_until_(n);
+        __mmask16 const load_masks[4] = {(__mmask16)load_mask, (__mmask16)(load_mask >> 16),
+                                         (__mmask16)(load_mask >> 32), (__mmask16)(load_mask >> 48)};
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
+        for (size_t part = 0; part != 4; ++part) {
+            pre_substitution_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part],
+                                                                       scores_pre_substitution + part * 16);
+            pre_insert_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part], scores_pre_insertion + part * 16);
+            pre_delete_vecs[part].zmm = _mm512_maskz_loadu_epi32(load_masks[part], scores_pre_deletion + part * 16);
+        }
+
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i32_vecs[0].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i32_vecs[1].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 1));
+        cost_of_substitution_i32_vecs[2].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 2));
+        cost_of_substitution_i32_vecs[3].zmm = _mm512_cvtepi8_epi32(
+            _mm512_extracti32x4_epi32(cost_of_substitution_i8_vec.zmm, 3));
+
+        for (size_t part = 0; part != 4; ++part) {
+            cost_if_substitution_vecs[part].zmm = _mm512_add_epi32(pre_substitution_vecs[part].zmm,
+                                                                   cost_of_substitution_i32_vecs[part].zmm);
+            cost_if_gap_vecs[part].zmm = _mm512_add_epi32(
+                _mm512_max_epi32(pre_insert_vecs[part].zmm, pre_delete_vecs[part].zmm), gap_cost_vec.zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cost_if_substitution_vecs[part].zmm,
+                                                         cost_if_gap_vecs[part].zmm);
+            cell_score_vecs[part].zmm = _mm512_max_epi32(cell_score_vecs[part].zmm, _mm512_setzero_epi32());
+            _mm512_mask_storeu_epi32(scores_new + part * 16, load_masks[part], cell_score_vecs[part].zmm);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_i32_t const *scores_pre_substitution, sz_i32_t const *scores_pre_insertion,   //
+        sz_i32_t const *scores_pre_deletion, sz_i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        sz_u8_t const *first_reversed_classes = (sz_u8_t const *)first_reversed_slice;
+        sz_u8_t const *second_classes = (sz_u8_t const *)second_slice;
+        sz_i32_t *const scores_new_begin = scores_new;
+
+        sz_u512_vec_t gap_cost_vec;
+        gap_cost_vec.zmm = _mm512_set1_epi32(this->gap_costs_.open_or_extend);
+
+        if (length <= step_k) {
+            slice_upto64chars(                                                                  //
+                first_reversed_classes, second_classes, length,                                 //
+                scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                gap_cost_vec);
+        }
+        else {
+            head_body_tail_t hbt = head_body_tail<step_k>(scores_new, length);
+            if (hbt.head)
+                slice_upto64chars(                                                                  //
+                    first_reversed_classes, second_classes, hbt.head,                               //
+                    scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
+                    gap_cost_vec);
+            first_reversed_classes += hbt.head, second_classes += hbt.head, scores_pre_substitution += hbt.head,
+                scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
+            if (hbt.tail)
+                slice_upto64chars(                                                          //
+                    first_reversed_classes + hbt.body, second_classes + hbt.body, hbt.tail, //
+                    scores_pre_substitution + hbt.body, scores_pre_insertion + hbt.body,    //
+                    scores_pre_deletion + hbt.body, scores_new + hbt.body,                  //
+                    gap_cost_vec);
+            size_t const body_pages = hbt.body / step_k;
+            executor.for_n(body_pages, [&](size_t const page) noexcept {
+                size_t const progress = page * step_k;
+                slice_aligned64chars(                                                                                 //
+                    first_reversed_classes + progress, second_classes + progress, scores_pre_substitution + progress, //
+                    scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,           //
+                    gap_cost_vec);
+            });
+        }
+
+        // The running best across the whole matrix is the reported local-alignment score.
+        sz_i32_t best_in_diagonal = this->best_score_;
+        for (size_t i = 0; i != length; ++i) best_in_diagonal = sz_max_of_two(best_in_diagonal, scores_new_begin[i]);
+        this->best_score_ = best_in_diagonal;
+    }
+};
+
+/**
+ *  @brief Ice Lake @b affine-gap diagonal class scorer - maximizes the global Needleman-Wunsch score over
+ *         `sz_i16_t` cells. Mirrors the linear class scorer, but threads the separate insertion and deletion
+ *         gap diagonals of the Gotoh recurrence (open vs extend) alongside the main score diagonal.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>>
+    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, affine_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_32x32_t, affine_gap_costs_t,
+                      sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    static constexpr size_t step_k = 64;
+
+    substitution_matrix_lookup_icelake_t_ lookup_;
+
+    void prepare(bool transpose) noexcept {
+        lookup_.reload_costs(this->substituter_.class_substitution_costs, transpose);
+    }
+
+    SZ_INLINE void slice_upto64chars(                                                   //
+        sz_u8_t const *first_reversed_slice, sz_u8_t const *second_slice, size_t n,     //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion,  //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t const *scores_running_insertions, //
+        sz_i16_t const *scores_running_deletions, sz_i16_t *scores_new,                 //
+        sz_i16_t *scores_new_insertions, sz_i16_t *scores_new_deletions,                //
+        sz_u512_vec_t gap_open_vec, sz_u512_vec_t gap_expand_vec) const noexcept {
+
+        sz_u512_vec_t first_vec, second_vec, cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+
+        // The two 32-lane score sub-masks are consecutive slices of the single 64-lane byte mask.
+        __mmask64 const load_mask = sz_u64_mask_until_(n);
+        __mmask32 const load_masks[2] = {(__mmask32)load_mask, (__mmask32)(load_mask >> 32)};
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
+        cost_of_substitution_i8_vec = lookup_.lookup64(first_vec, second_vec);
+        cost_of_substitution_i16_vecs[0].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm = _mm512_cvtepi8_epi16(
+            _mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
+
+        for (size_t part = 0; part != 2; ++part) {
+            __mmask32 const part_mask = load_masks[part];
+            size_t const offset = part * 32;
+            sz_u512_vec_t pre_substitution, pre_insert_open, pre_delete_open, run_insert, run_delete;
+            sz_u512_vec_t cost_if_insert, cost_if_delete, cell_score;
+            pre_substitution.zmm = _mm512_maskz_loadu_epi16(part_mask, scores_pre_substitution + offset);
+            pre_insert_open.zmm = _mm512_maskz_loadu_epi16(part_mask, scores_pre_insertion + offset);
+            pre_delete_open.zmm = _mm512_maskz_loadu_epi16(part_mask, scores_pre_deletion + offset);
+            run_insert.zmm = _mm512_maskz_loadu_epi16(part_mask, scores_running_insertions + offset);
+            run_delete.zmm = _mm512_maskz_loadu_epi16(part_mask, scores_running_deletions + offset);
+            cost_if_insert.zmm = _mm512_max_epi16(_mm512_add_epi16(run_insert.zmm, gap_expand_vec.zmm),
+                                                  _mm512_add_epi16(pre_insert_open.zmm, gap_open_vec.zmm));
+            cost_if_delete.zmm = _mm512_max_epi16(_mm512_add_epi16(run_delete.zmm, gap_expand_vec.zmm),
+                                                  _mm512_add_epi16(pre_delete_open.zmm, gap_open_vec.zmm));
+            cell_score.zmm = _mm512_max_epi16(
+                _mm512_add_epi16(pre_substitution.zmm, cost_of_substitution_i16_vecs[part].zmm),
+                _mm512_max_epi16(cost_if_insert.zmm, cost_if_delete.zmm));
+            _mm512_mask_storeu_epi16(scores_new + offset, part_mask, cell_score.zmm);
+            _mm512_mask_storeu_epi16(scores_new_insertions + offset, part_mask, cost_if_insert.zmm);
+            _mm512_mask_storeu_epi16(scores_new_deletions + offset, part_mask, cost_if_delete.zmm);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion,   //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t const *scores_running_insertions,  //
+        sz_i16_t const *scores_running_deletions, sz_i16_t *scores_new,                  //
+        sz_i16_t *scores_new_insertions, sz_i16_t *scores_new_deletions,                 //
+        executor_type_ &&executor = {}) noexcept {
+
+        // ! Both slices already carry @b class bytes, pre-classified once by the diagonal walker.
+        sz_u8_t const *first_reversed_classes = (sz_u8_t const *)first_reversed_slice;
+        sz_u8_t const *second_classes = (sz_u8_t const *)second_slice;
+
+        sz_u512_vec_t gap_open_vec, gap_expand_vec;
+        gap_open_vec.zmm = _mm512_set1_epi16(this->gap_costs_.open);
+        gap_expand_vec.zmm = _mm512_set1_epi16(this->gap_costs_.extend);
+
+        size_t const body_pages = length / step_k;
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
+            size_t const progress = page * step_k;
+            slice_upto64chars(                                                        //
+                first_reversed_classes + progress, second_classes + progress, step_k, //
+                scores_pre_substitution + progress, scores_pre_insertion + progress,  //
+                scores_pre_deletion + progress, scores_running_insertions + progress, //
+                scores_running_deletions + progress, scores_new + progress,           //
+                scores_new_insertions + progress, scores_new_deletions + progress,    //
+                gap_open_vec, gap_expand_vec);
+        });
+
+        size_t const progress = body_pages * step_k;
+        size_t const tail = length - progress;
+        if (tail)
+            slice_upto64chars(                                                        //
+                first_reversed_classes + progress, second_classes + progress, tail,   //
+                scores_pre_substitution + progress, scores_pre_insertion + progress,  //
+                scores_pre_deletion + progress, scores_running_insertions + progress, //
+                scores_running_deletions + progress, scores_new + progress,           //
+                scores_new_insertions + progress, scores_new_deletions + progress,    //
+                gap_open_vec, gap_expand_vec);
+
+        if (length == 1) this->last_score_ = scores_new[0];
+    }
 };
 
 /** @brief Redirects the Ice Lake template specialization to the serial version. */
@@ -1725,26 +2270,220 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_t
 };
 
 /**
+ *  @brief Ice Lake diagonal "walker" for class-based substitution costs with linear gaps.
+ *         Mirrors the serial diagonal walker, but pre-classifies @b both strings once into class streams
+ *         feeding the AVX-512 diagonal scorers above, which the generic serial walker (operating on raw
+ *         characters) would otherwise leave on the scalar serial path.
+ *
+ *  Because the walker swaps the shorter string into the reversed `first` operand, an @b asymmetric (32 x 32)
+ *  cost matrix would be looked up as `T[second][first]` after a swap. We compensate by threading a `transpose`
+ *  bit into `tile_scorer_t::prepare`, which folds the resident table from `T` transposed (one-time, off the
+ *  hot path), so the recurrence keeps reading the original `class_substitution_costs[first][second]`.
+ */
+template <typename score_type_, typename allocator_type_, sz_similarity_objective_t objective_,
+          sz_similarity_locality_t locality_>
+struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_t, allocator_type_, objective_,
+                       locality_, sz_cap_icelake_k, void> {
+
+    using char_t = char;
+    using score_t = score_type_;
+    using substituter_t = error_costs_32x32_t;
+    using gap_costs_t = linear_gap_costs_t;
+    using allocator_t = allocator_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
+
+    using allocated_t = typename allocator_t::value_type;
+    static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
+    using tile_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
+                                      locality_k, capability_k>;
+
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+    mutable allocator_t alloc_ {};
+
+    diagonal_walker(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
+    diagonal_walker(substituter_t subs, linear_gap_costs_t gaps, allocator_t alloc) noexcept
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
+
+    /**
+     *  @param[in] first The first string.
+     *  @param[in] second The second string.
+     *  @param[out] result_ref Location to dump the calculated score.
+     */
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
+
+        // Early exit for empty strings.
+        if (first.empty() || second.empty()) {
+            result_ref = 0;
+            if constexpr (locality_k == sz_similarity_global_k) {
+                if (!first.empty() && second.empty()) { result_ref = gap_costs_.open_or_extend * first.size(); }
+                else if (first.empty() && !second.empty()) { result_ref = gap_costs_.open_or_extend * second.size(); }
+            }
+            return status_t::success_k;
+        }
+
+        // Make sure the size relation between the strings is correct.
+        char_t const *shorter = first.data(), *longer = second.data();
+        size_t shorter_length = first.size(), longer_length = second.size();
+        bool transpose = false;
+        if (shorter_length > longer_length) {
+            trivial_swap(shorter, longer);
+            trivial_swap(shorter_length, longer_length);
+            transpose = true;
+        }
+
+        // We are going to store 3 diagonals of the matrix.
+        // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
+        size_t const shorter_dim = shorter_length + 1;
+        size_t const longer_dim = longer_length + 1;
+        size_t const diagonals_count = shorter_dim + longer_dim - 1;
+        size_t const max_diagonal_length = shorter_length + 1;
+
+        // Beyond the 3 score diagonals, we also keep the @b reversed shorter string as class bytes and the
+        // longer string as class bytes. Both class streams are over-allocated by one 64-byte slice, so the
+        // full-width unaligned loads in the body never read out of bounds.
+        size_t const padding = step_classes_k;
+        size_t const buffer_length = sizeof(score_t) * max_diagonal_length * 3 + (shorter_length + padding) * 2 +
+                                     (longer_length + padding);
+        score_t *const buffer = (score_t *)alloc_.allocate(buffer_length);
+        if (!buffer) return status_t::bad_alloc_k;
+
+        // The next few pointers will be swapped around.
+        score_t *previous_scores = buffer;
+        score_t *current_scores = previous_scores + max_diagonal_length;
+        score_t *next_scores = current_scores + max_diagonal_length;
+        char_t *const shorter_reversed = (char_t *)(next_scores + max_diagonal_length);
+        char_t *const shorter_reversed_classes = shorter_reversed + shorter_length + padding;
+        char_t *const longer_classes = shorter_reversed_classes + shorter_length + padding;
+
+        // Export the reversed shorter string, then classify both strings @b once into their class streams.
+        for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
+
+        tile_scorer_t scorer {substituter_, gap_costs_};
+        scorer.lookup_.reload_classes(substituter_.byte_to_class);
+        scorer.prepare(transpose);
+        classify_into_(scorer.lookup_, shorter_reversed, shorter_length, shorter_reversed_classes);
+        classify_into_(scorer.lookup_, longer, longer_length, longer_classes);
+
+        // Initialize the first two diagonals:
+        scorer.init_score(previous_scores[0], 0);
+        scorer.init_score(current_scores[0], 1);
+        scorer.init_score(current_scores[1], 1);
+
+        size_t next_diagonal_index = 2;
+
+        // Progress through the upper-left triangle of the matrix.
+        for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
+
+            size_t const next_diagonal_length = next_diagonal_index + 1;
+            scorer(                                                                  //
+                shorter_reversed_classes + shorter_length - next_diagonal_index + 1, // first sequence of classes
+                longer_classes,                                                      // second sequence of classes
+                next_diagonal_length - 2,           // number of elements to compute with the `scorer`
+                previous_scores,                    // costs pre substitution
+                current_scores, current_scores + 1, // costs pre insertion/deletion
+                next_scores + 1,                    // new scores for the next diagonal
+                executor);                          // parallel execution within the diagonal
+
+            // Don't forget to populate the first row and the first column of the matrix.
+            scorer.init_score(next_scores[0], next_diagonal_index);
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            rotate_three(previous_scores, current_scores, next_scores);
+        }
+
+        // Now let's handle the anti-diagonal band of the matrix.
+        for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
+
+            size_t const next_diagonal_length = shorter_dim;
+            scorer(                                                          //
+                shorter_reversed_classes + shorter_length - shorter_dim + 1, // first sequence of classes
+                longer_classes + next_diagonal_index - shorter_dim,          // second sequence of classes
+                next_diagonal_length - 1,                                    // number of elements to compute
+                previous_scores,                                             // costs pre substitution
+                current_scores, current_scores + 1,                          // costs pre insertion/deletion
+                next_scores,                                                 // new scores for the next diagonal
+                executor);                                                   // parallel execution within the diagonal
+
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            rotate_three(previous_scores, current_scores, next_scores);
+            sz_move_serial((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+                           (max_diagonal_length - 1) * sizeof(score_t));
+        }
+
+        // Now let's handle the bottom-right triangle of the matrix.
+        for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
+
+            size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+            scorer(                                                          //
+                shorter_reversed_classes + shorter_length - shorter_dim + 1, // first sequence of classes
+                longer_classes + next_diagonal_index - shorter_dim,          // second sequence of classes
+                next_diagonal_length,                                        // number of elements to compute
+                previous_scores,                                             // costs pre substitution
+                current_scores, current_scores + 1,                          // costs pre insertion/deletion
+                next_scores,                                                 // new scores for the next diagonal
+                executor);                                                   // parallel execution within the diagonal
+
+            rotate_three(previous_scores, current_scores, next_scores);
+            previous_scores++;
+        }
+
+        // Export the scalar before `free` call.
+        result_ref = scorer.score();
+        alloc_.deallocate((allocated_t *)buffer, buffer_length);
+        return status_t::success_k;
+    }
+
+  private:
+    static constexpr size_t step_classes_k = 64;
+
+    /** @brief Maps a raw byte string into class bytes using the resident `byte_to_class` lookup, @b amortized. */
+    static void classify_into_(substitution_matrix_lookup_icelake_t_ const &lookup, char_t const *source, size_t length,
+                               char_t *classes) noexcept {
+        sz_u512_vec_t source_vec, classes_vec;
+        size_t progress = 0;
+        for (; progress + step_classes_k <= length; progress += step_classes_k) {
+            source_vec.zmm = _mm512_loadu_epi8(source + progress);
+            classes_vec = lookup.classify64(source_vec);
+            _mm512_storeu_epi8(classes + progress, classes_vec.zmm);
+        }
+        if (progress < length) {
+            __mmask64 const load_mask = sz_u64_mask_until_(length - progress);
+            source_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, source + progress);
+            classes_vec = lookup.classify64(source_vec);
+            _mm512_mask_storeu_epi8(classes + progress, load_mask, classes_vec.zmm);
+        }
+    }
+};
+
+/**
  *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the Ice Lake backend.
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <typename allocator_type_>
-struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, allocator_type_, sz_caps_sil_k> {
+struct needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, allocator_type_, sz_caps_sil_k> {
 
     using char_t = char;
-    using substituter_t = error_costs_256x256_t;
+    using substituter_t = error_costs_32x32_t;
     using gap_costs_t = linear_gap_costs_t;
     using allocator_t = allocator_type_;
 
-    using horizontal_i16_t =                                                         //
-        horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_global_k, sz_cap_icelake_k>;
-    using horizontal_i32_t =                                                         //
-        horizontal_walker<char_t, sz_i32_t, substituter_t, gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_global_k, sz_cap_icelake_k>;
-    using horizontal_i64_t =                                                         //
-        horizontal_walker<char_t, sz_i64_t, substituter_t, gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k>;
+    using diagonal_i16_t =                                                         //
+        diagonal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_global_k, sz_cap_icelake_k>;
+    using diagonal_i32_t =                                                         //
+        diagonal_walker<char_t, sz_i32_t, substituter_t, gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_global_k, sz_cap_icelake_k>;
+    using diagonal_i64_t =                                                         //
+        diagonal_walker<char_t, sz_i64_t, substituter_t, gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -1773,28 +2512,26 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
-        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
-        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        // The diagonal class scorer owns all input sizes; we only differentiate the cell type, since smaller
+        // ones overflow for larger inputs while larger-than-needed types waste memory and bandwidth.
+        status_t status = status_t::success_k;
         if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16;
-            status_t status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i16;
+            status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
+            if (status == status_t::success_k) result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32;
-            status_t status = horizontal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i32;
+            status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
+            if (status == status_t::success_k) result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64;
-            status_t status = horizontal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i64;
+            status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
+            if (status == status_t::success_k) result_ref = result_i64;
         }
 
-        return status_t::success_k;
+        return status;
     }
 };
 
@@ -1803,22 +2540,22 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <typename allocator_type_>
-struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, allocator_type_, sz_caps_sil_k> {
+struct smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, allocator_type_, sz_caps_sil_k> {
 
     using char_t = char;
-    using substituter_t = error_costs_256x256_t;
+    using substituter_t = error_costs_32x32_t;
     using gap_costs_t = linear_gap_costs_t;
     using allocator_t = allocator_type_;
 
-    using horizontal_i16_t =                                                                //
-        horizontal_walker<char_t, sz_i16_t, substituter_t, linear_gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_local_k, sz_cap_icelake_k>;
-    using horizontal_i32_t =                                                                //
-        horizontal_walker<char_t, sz_i32_t, substituter_t, linear_gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_local_k, sz_cap_icelake_k>;
-    using horizontal_i64_t =                                                                //
-        horizontal_walker<char_t, sz_i64_t, substituter_t, linear_gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k>;
+    using diagonal_i16_t =                                                                //
+        diagonal_walker<char_t, sz_i16_t, substituter_t, linear_gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_local_k, sz_cap_icelake_k>;
+    using diagonal_i32_t =                                                                //
+        diagonal_walker<char_t, sz_i32_t, substituter_t, linear_gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_local_k, sz_cap_icelake_k>;
+    using diagonal_i64_t =                                                                //
+        diagonal_walker<char_t, sz_i64_t, substituter_t, linear_gap_costs_t, allocator_t, //
+                        sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -1847,28 +2584,26 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
-        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
-        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        // The diagonal class scorer owns all input sizes; we only differentiate the cell type, since smaller
+        // ones overflow for larger inputs while larger-than-needed types waste memory and bandwidth.
+        status_t status = status_t::success_k;
         if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16;
-            status_t status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i16;
+            status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
+            if (status == status_t::success_k) result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32;
-            status_t status = horizontal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i32;
+            status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
+            if (status == status_t::success_k) result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64;
-            status_t status = horizontal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
-            if (status != status_t::success_k) return status;
-            result_ref = result_i64;
+            status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
+            if (status == status_t::success_k) result_ref = result_i64;
         }
 
-        return status_t::success_k;
+        return status;
     }
 };
 
