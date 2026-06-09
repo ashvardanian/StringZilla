@@ -142,9 +142,10 @@ static inline sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
 
     if (!success) {
         // Always fatal: GPU kernels require unified/device-accessible memory
-        PyErr_SetString(PyExc_RuntimeError, "Device memory mismatch: GPU kernels require unified/device-accessible "
-                                            "memory. " "Consider reducing input size, freeing memory, or using CPU "
-                                                       "capabilities.");
+        PyErr_SetString( //
+            PyExc_RuntimeError,
+            "Device memory mismatch: GPU kernels require unified/device-accessible memory. " //
+            "Consider reducing input size, freeing memory, or using CPU capabilities.");
         return sz_false_k;
     }
     return sz_true_k;
@@ -1799,40 +1800,40 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     return result_tuple;
 }
 
-static char const doc_Fingerprints[] =                                                                                //
-    "Fingerprints(ndim, window_widths=None, alphabet_size=256, seed=0, capabilities=None)\n"                          //
-    "\n"                                                                                                              //
-    "Compute MinHash fingerprints for binary strings.\n"                                                              //
-    "\n"                                                                                                              //
-    "Args:\n"                                                                                                         //
-    "  ndim (int): Number of dimensions per fingerprint.\n"                                                           //
-    "  window_widths (numpy.array, optional): 1D uint64 contiguous array of window widths. Uses defaults if None.\n"  //
-    "  alphabet_size (int, optional): Alphabet size, default 256 for binary strings.\n"                               //
-    "  seed (int, optional): Per-dimension diversity seed; 0 (default) reproduces the legacy parameters, any other\n" //
-    "                        value derives per-dimension multipliers and moduli for stronger MinHash independence.\n" //
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                           //
-    "                                       Can be explicit capabilities like ('serial', 'parallel', 'cuda')\n"       //
-    "                                       or a DeviceScope for automatic capability inference.\n"                   //
-    "\n"                                                                                                              //
-    "Call with:\n"                                                                                                    //
-    "  texts (sequence): Sequence of strings to fingerprint.\n"                                                       //
-    "  device (DeviceScope, optional): Device execution context.\n"                                                   //
-    "\n"                                                                                                              //
-    "Returns:\n"                                                                                                      //
-    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).\n"               //
-    "\n"                                                                                                              //
-    "Examples:\n"                                                                                                     //
-    "  ```python\n"                                                                                                   //
-    "  # Minimal CPU example with auto-inferred capabilities\n"                                                       //
-    "  import stringzilla as sz, stringzillas as szs\n"                                                               //
-    "  engine = szs.Fingerprints(ndim=128)\n"                                                                         //
-    "  docs = sz.Strs(['document one', 'document two', 'document three'])\n"                                          //
-    "  hashes, counts = engine(docs)\n"                                                                               //
-    "  \n"                                                                                                            //
-    "  # GPU example with custom dimensions\n"                                                                        //
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"                                                                   //
-    "  engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)\n"                                                 //
-    "  hashes, counts = engine(docs, device=gpu_scope)\n"                                                             //
+static char const doc_Fingerprints[] =                                                                               //
+    "Fingerprints(ndim, window_widths=None, alphabet_size=256, seed=0, capabilities=None)\n"                         //
+    "\n"                                                                                                             //
+    "Compute MinHash fingerprints for binary strings.\n"                                                             //
+    "\n"                                                                                                             //
+    "Args:\n"                                                                                                        //
+    "  ndim (int): Number of dimensions per fingerprint.\n"                                                          //
+    "  window_widths (numpy.array, optional): 1D uint64 contiguous array of window widths. Uses defaults if None.\n" //
+    "  alphabet_size (int, optional): Alphabet size, default 256 for binary strings.\n"                              //
+    "  seed (int, optional): Reproducibility seed; every value derives independent per-dimension multipliers and\n"  //
+    "                        moduli for MinHash independence (0 is the default seed, not a special mode).\n"         //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                          //
+    "                                       Can be explicit capabilities like ('serial', 'parallel', 'cuda')\n"      //
+    "                                       or a DeviceScope for automatic capability inference.\n"                  //
+    "\n"                                                                                                             //
+    "Call with:\n"                                                                                                   //
+    "  texts (sequence): Sequence of strings to fingerprint.\n"                                                      //
+    "  device (DeviceScope, optional): Device execution context.\n"                                                  //
+    "\n"                                                                                                             //
+    "Returns:\n"                                                                                                     //
+    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).\n"              //
+    "\n"                                                                                                             //
+    "Examples:\n"                                                                                                    //
+    "  ```python\n"                                                                                                  //
+    "  # Minimal CPU example with auto-inferred capabilities\n"                                                      //
+    "  import stringzilla as sz, stringzillas as szs\n"                                                              //
+    "  engine = szs.Fingerprints(ndim=128)\n"                                                                        //
+    "  docs = sz.Strs(['document one', 'document two', 'document three'])\n"                                         //
+    "  hashes, counts = engine(docs)\n"                                                                              //
+    "  \n"                                                                                                           //
+    "  # GPU example with custom dimensions\n"                                                                       //
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"                                                                  //
+    "  engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)\n"                                                //
+    "  hashes, counts = engine(docs, device=gpu_scope)\n"                                                            //
     "  ```";
 
 static PyGetSetDef Fingerprints_getsetters[] = {

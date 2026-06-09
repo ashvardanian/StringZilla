@@ -332,7 +332,7 @@ typedef void *szs_smith_waterman_scores_t;
  */
 SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                           //
     sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
-sz_error_cost_t open, sz_error_cost_t extend,                                  //
+    sz_error_cost_t open, sz_error_cost_t extend,                                  //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
     szs_needleman_wunsch_scores_t *engine, char const **error_message);
 
@@ -407,7 +407,7 @@ SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t e
  */
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                             //
     sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
-sz_error_cost_t open, sz_error_cost_t extend,                                  //
+    sz_error_cost_t open, sz_error_cost_t extend,                                  //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
     szs_smith_waterman_scores_t *engine, char const **error_message);
 
@@ -500,16 +500,17 @@ typedef void *szs_fingerprints_utf8_t;
  *  @param[in] alphabet_size Size of the alphabet (256 for binary, 128 for ASCII, 4 for DNA, 22 for protein).
  *  @param[in] window_widths Array of window widths (NULL for defaults like [3, 4, 5, 7, 9, 11, 15, 31]).
  *  @param[in] window_widths_count Number of window widths in array (0 for defaults).
+ *  @param[in] seed Reproducibility seed; every value derives independent per-dimension multipliers.
  *  @param[in] alloc Memory allocator (NULL for default).
  *  @param[in] capabilities Hardware capabilities mask.
  *  @param[out] engine Pointer to initialized engine handle.
  *  @param[out] error_message Optional output pointer for detailed error information.
  *  @note If alphabet_size is 0, defaults to 256. If window_widths is NULL, uses default widths.
  */
-SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
-    sz_size_t dimensions, sz_size_t alphabet_size,                    //
-    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                     //
+    sz_size_t dimensions, sz_size_t alphabet_size,                                //
+    sz_size_t const *window_widths, sz_size_t window_widths_count, sz_u64_t seed, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,             //
     szs_fingerprints_t *engine, char const **error_message);
 
 /**

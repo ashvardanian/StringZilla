@@ -461,12 +461,16 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
      *  hashers("some text", fingerprint);
      *  @endcode
      */
-    SZ_NOINLINE status_t try_extend(size_t window_width, size_t new_dims, size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_extend(size_t window_width, size_t new_dims, size_t alphabet_size = 256,
+                                    u64_t seed = default_seed_k) noexcept {
         size_t const old_dims = hashers_.size();
         if (hashers_.try_reserve(old_dims + new_dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t new_dim = 0; new_dim < new_dims; ++new_dim) {
             size_t const dim = old_dims + new_dim;
-            status_t status = try_append(hasher_t(window_width, alphabet_size + dim));
+            // Every dimension pulls its multiplier from a `splitmix64` stream of `seed + dim`, so neighbouring
+            // dimensions never share parameters.
+            size_t const multiplier = alphabet_size + (splitmix64(seed + dim) % 65536ull);
+            status_t status = try_append(hasher_t(window_width, multiplier));
             sz_assert_(status == status_t::success_k && "Couldn't fail after the reserve");
         }
         return status_t::success_k;
@@ -630,13 +634,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      *  @param[in] first_dimension_offset The offset for the first dimension within a larger fingerprint, typically 0.
+     *  @param[in] seed Reproducibility seed; every value derives independent per-dimension multipliers and moduli.
      */
-    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256,
-                                  size_t first_dimension_offset = 0) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256, size_t first_dimension_offset = 0,
+                                  u64_t seed = default_seed_k) noexcept {
         if (hashers_.try_resize(aligned_dimensions_k) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t dim = 0; dim < dimensions_k; ++dim)
-            hashers_[dim] =
-                hasher_t(window_width, alphabet_size + first_dimension_offset + dim, hasher_t::default_modulo_base_k);
+            hashers_[dim] = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
         window_width_ = window_width;
         return status_t::success_k;
     }

@@ -27,6 +27,29 @@ namespace stringzillas {
 #pragma region - Baseline Rolling Hashers
 
 /**
+ *  @brief The default reproducibility seed for fingerprint engines.
+ *
+ *  Every seed - including this default - derives per-dimension multipliers @b and per-dimension moduli from a
+ *  `splitmix64` stream of `seed + dim`, which is what gives the MinHashes their statistical independence. The
+ *  default simply yields one deterministic, well-distributed set of per-dimension parameters.
+ */
+static constexpr u64_t default_seed_k = 0;
+
+/**
+ *  @brief SplitMix64 finalizer - a fast, well-distributed integer mixer used to derive per-dimension parameters.
+ *  @param[in] state The input state to mix, typically `seed + dim` for a per-dimension stream.
+ *  @return A thoroughly mixed 64-bit value.
+ *  @sa https://prng.di.unimi.it/splitmix64.c
+ */
+inline constexpr u64_t splitmix64(u64_t state) noexcept {
+    state += 0x9E3779B97F4A7C15ull;
+    u64_t z = state;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+
+/**
  *  @brief The simplest example of a rolling hash function, leveraging 2^N modulo arithmetic.
  *  @tparam hash_type_ Type of the hash value, e.g., `u64_t`.
  */
@@ -475,6 +498,34 @@ struct floating_rolling_hasher<f64_t> {
     state_t negative_discarding_multiplier_ = 0.0;
 };
 
+/**
+ *  @brief Derives a per-dimension `floating_rolling_hasher<f64_t>` for a seeded fingerprint engine.
+ *  @param[in] window_width Width of the rolling window shared across all dimensions.
+ *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
+ *  @param[in] dim The dimension index within the full fingerprint, used to diversify the hasher.
+ *  @param[in] seed The reproducibility seed; every value derives independent per-dimension parameters.
+ *
+ *  Both the multiplier and the modulo are pulled from independent `splitmix64` streams of `seed + dim`. Varying
+ *  the modulo per dimension - rather than only the multiplier over one shared modulo - is what makes the resulting
+ *  MinHashes statistically independent. The ranges are kept within the `floating_rolling_hasher<f64_t>` overflow
+ *  headroom: multipliers in `[256, 640)` and moduli within a narrow band just below `default_modulo_base_k`.
+ */
+inline floating_rolling_hasher<f64_t> make_seeded_floating_hasher( //
+    size_t window_width, size_t alphabet_size, size_t dim, u64_t seed) noexcept {
+
+    using hasher_t = floating_rolling_hasher<f64_t>;
+    sz_unused_(alphabet_size); // The multiplier range already spans a full 256-symbol alphabet
+
+    // Two independent `splitmix64` streams keyed by the same `seed + dim`, so neighbouring dimensions don't
+    // share either parameter. The narrow modulo band stays below the validated `default_modulo_base_k` to
+    // preserve the Barrett-reduction overflow guarantees baked into the `floating_rolling_hasher<f64_t>`.
+    u64_t const stream = splitmix64(seed + dim);
+    u64_t const multiplier = 256ull + (stream % 384ull);             // ? Range [256, 640)
+    u64_t const modulo_drop = splitmix64(stream) % (1ull << 20);     // ? Up to ~1M below the base
+    u64_t const modulo = static_cast<u64_t>(hasher_t::default_modulo_base_k) - modulo_drop;
+    return hasher_t(window_width, static_cast<hasher_t::state_t>(multiplier), static_cast<hasher_t::state_t>(modulo));
+}
+
 #pragma endregion - Baseline Rolling Hashers
 
 #pragma region - Optimized Rolling MinHashers
@@ -580,12 +631,16 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
      *  hashers("some text", fingerprint);
      *  @endcode
      */
-    SZ_NOINLINE status_t try_extend(size_t window_width, size_t new_dims, size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_extend(size_t window_width, size_t new_dims, size_t alphabet_size = 256,
+                                    u64_t seed = default_seed_k) noexcept {
         size_t const old_dims = hashers_.size();
         if (hashers_.try_reserve(old_dims + new_dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t new_dim = 0; new_dim < new_dims; ++new_dim) {
             size_t const dim = old_dims + new_dim;
-            status_t status = try_append(hasher_t(window_width, alphabet_size + dim));
+            // Every dimension pulls its multiplier from a `splitmix64` stream of `seed + dim`, so neighbouring
+            // dimensions never share parameters.
+            size_t const multiplier = alphabet_size + (splitmix64(seed + dim) % 65536ull);
+            status_t status = try_append(hasher_t(window_width, multiplier));
             sz_assert_(status == status_t::success_k && "Couldn't fail after the reserve");
         }
         return status_t::success_k;
@@ -1032,12 +1087,12 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      *  @param[in] first_dimension_offset The offset for the first dimension within a larger fingerprint, typically 0.
+     *  @param[in] seed Reproducibility seed; every value derives independent per-dimension multipliers and moduli.
      */
-    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256,
-                                  size_t first_dimension_offset = 0) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256, size_t first_dimension_offset = 0,
+                                  u64_t seed = default_seed_k) noexcept {
         for (size_t dim = 0; dim < dimensions_k; ++dim) {
-            hasher_t hasher(window_width, alphabet_size + first_dimension_offset + dim,
-                            hasher_t::default_modulo_base_k);
+            hasher_t hasher = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
             multipliers_[dim] = hasher.multiplier();
             modulos_[dim] = hasher.modulo();
             inverse_modulos_[dim] = hasher.inverse_modulo();

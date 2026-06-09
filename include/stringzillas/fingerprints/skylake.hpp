@@ -96,12 +96,12 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      *  @param[in] first_dimension_offset The offset for the first dimension within a larger fingerprint, typically 0.
+     *  @param[in] seed Reproducibility seed; every value derives independent per-dimension multipliers and moduli.
      */
-    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256,
-                                  size_t first_dimension_offset = 0) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256, size_t first_dimension_offset = 0,
+                                  u64_t seed = default_seed_k) noexcept {
         for (size_t dim = 0; dim < dimensions_k; ++dim) {
-            hasher_t hasher(window_width, alphabet_size + first_dimension_offset + dim,
-                            hasher_t::default_modulo_base_k);
+            hasher_t hasher = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
             multipliers_[dim] = hasher.multiplier();
             modulos_[dim] = hasher.modulo();
             inverse_modulos_[dim] = hasher.inverse_modulo();
