@@ -787,6 +787,7 @@ extern "C" {
         alphabet_size: usize,
         window_widths: *const usize,
         window_widths_count: usize,
+        seed: u64,
         alloc: *const c_void, // MemoryAllocator - using null for default
         capabilities: Capability,
         engine: *mut FingerprintsHandle,
@@ -1445,7 +1446,7 @@ impl NeedlemanWunschScores {
     /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
     pub fn new(
         device: &DeviceScope,
-byte_to_class: &[u8; 256],
+        byte_to_class: &[u8; 256],
         class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
@@ -1455,7 +1456,7 @@ byte_to_class: &[u8; 256],
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_needleman_wunsch_scores_init(
-byte_to_class.as_ptr() as *const u8,
+                byte_to_class.as_ptr() as *const u8,
                 class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
@@ -1776,7 +1777,7 @@ impl SmithWatermanScores {
     /// ```
     pub fn new(
         device: &DeviceScope,
-byte_to_class: &[u8; 256],
+        byte_to_class: &[u8; 256],
         class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
@@ -1786,7 +1787,7 @@ byte_to_class: &[u8; 256],
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_smith_waterman_scores_init(
-byte_to_class.as_ptr() as *const u8,
+                byte_to_class.as_ptr() as *const u8,
                 class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
@@ -2048,6 +2049,7 @@ pub struct FingerprintsBuilder {
     alphabet_size: usize,
     window_widths: Option<Vec<usize>>,
     dimensions: usize,
+    seed: u64,
 }
 
 impl FingerprintsBuilder {
@@ -2074,6 +2076,7 @@ impl FingerprintsBuilder {
             alphabet_size: 0,
             window_widths: None,
             dimensions: 1024, // Default dimensions
+            seed: 0,          // Default reproducibility seed
         }
     }
 
@@ -2381,6 +2384,37 @@ impl FingerprintsBuilder {
         self
     }
 
+    /// Set the per-dimension diversity seed for the rolling hashers.
+    ///
+    /// The seed controls how the per-dimension multipliers and moduli are derived. Every value - including the
+    /// default `0` - derives both the multiplier and the modulo of every dimension from an independent SplitMix64
+    /// stream, which is what makes the resulting MinHashes statistically independent across dimensions.
+    ///
+    /// # Parameters
+    ///
+    /// - `seed`: Reproducibility seed; every value yields a distinct, deterministic set of per-dimension parameters.
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .ascii()
+    ///     .dimensions(256)
+    ///     .seed(0xC0FFEE)
+    ///     .build(&device)
+    ///     .unwrap();
+    /// ```
+    pub fn seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
     /// Build the fingerprinting engine with the configured parameters.
     ///
     /// Creates an optimized fingerprinting engine based on the builder configuration
@@ -2432,6 +2466,7 @@ impl FingerprintsBuilder {
                 self.alphabet_size,
                 widths_ptr,
                 widths_len,
+                self.seed,
                 ptr::null(), // No custom allocator
                 capabilities,
                 &mut engine,
@@ -2722,12 +2757,12 @@ unsafe impl Sync for Fingerprints {}
 pub fn error_costs_classes_diagonal(match_score: i8, mismatch_score: i8) -> ([u8; 256], [[i8; 32]; 32]) {
     let mut byte_to_class = [0u8; 256];
     for i in 0..256 {
-byte_to_class[i] = (i % 32) as u8;
+        byte_to_class[i] = (i % 32) as u8;
     }
 
     let mut class_costs = [[0i8; 32]; 32];
-        for i in 0..32 {
-            for j in 0..32 {
+    for i in 0..32 {
+        for j in 0..32 {
             class_costs[i][j] = if i == j { match_score } else { mismatch_score };
         }
     }
