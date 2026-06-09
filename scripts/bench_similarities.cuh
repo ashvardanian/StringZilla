@@ -61,6 +61,25 @@ using namespace ashvardanian::stringzilla::scripts;
 
 using similarities_t = unified_vector<sz_ssize_t>;
 
+/**
+ *  @brief Reads the `status_t` out of an engine's return value through opaque memory, defeating NVCC's
+ *         host-codegen folding of the read.
+ *
+ *  @note NVCC 12.x miscompiles the 12-byte `cuda_status_t` return-by-value of the @b affine alignment
+ *        engine instantiations inside this large translation unit at @b -O2 : the `float elapsed_milliseconds`
+ *        field survives, but the two leading enum fields (`status`, `cuda_error`) come back as garbage, so a
+ *        direct `static_cast<status_t>(result)` reports a bogus `unrecognized` status. The StringZillas
+ *        library itself is correct - a direct call to the same engine returns `success_k` - this only bites
+ *        the affine instantiations folded into this benchmark. Bouncing the struct through `std::memcpy` in a
+ *        `[[gnu::noinline]]` helper forces the compiler to materialize the full object before reading it.
+ */
+template <typename status_type_>
+[[gnu::noinline]] status_t read_engine_status_(status_type_ const &engine_result) noexcept {
+    status_type_ materialized;
+    std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_type_));
+    return static_cast<status_t>(materialized);
+}
+
 #pragma region Levenshtein Distance and Alignment Scores
 
 /** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
@@ -74,7 +93,7 @@ struct similarities_callable {
     std::tuple<extra_args_...> extra_args = {};
 
     similarities_callable(environment_t const &env, similarities_t &res, engine_t eng = {}, extra_args_... args)
-        : env(env), results(res), engine(eng), extra_args(args...) {
+        : env(env), results(res), engine(std::move(eng)), extra_args(std::forward<extra_args_>(args)...) {
         if (env.tokens.size() <= results.size()) throw std::runtime_error("Batch size is too large.");
     }
 
@@ -92,9 +111,12 @@ struct similarities_callable {
         auto status = std::apply([&](auto &&...rest) { return engine(a, b, results, rest...); }, extra_args);
         do_not_optimize(status);
 
-        if (static_cast<status_t>(status) != status_t::success_k)
+        // ! Read the status through `read_engine_status_` to work around an NVCC -O2 host-codegen artifact
+        // ! that corrupts the integer fields of the affine engines' returned `cuda_status_t` in this TU.
+        status_t const status_code = read_engine_status_(status);
+        if (status_code != status_t::success_k)
             throw std::runtime_error(std::string("Failed to compute Levenshtein distance: ") +
-                                     status_name(static_cast<status_t>(status)));
+                                     status_name(status_code));
         do_not_optimize(results);
         std::size_t bytes_passed = 0, cells_passed = 0;
         for (std::size_t i = 0; i < results.size(); ++i) {
@@ -137,6 +159,7 @@ void bench_levenshtein(environment_t const &env) {
 #if SZ_DEBUG
     batch_sizes = {1, 2, 64};
 #endif
+    if (!env.batch_sizes_override.empty()) batch_sizes = env.batch_sizes_override;
     similarities_t results_linear_baseline, results_linear_accelerated;
     similarities_t results_affine_baseline, results_affine_accelerated;
     similarities_t results_utf8_baseline, results_utf8_accelerated;
@@ -283,6 +306,7 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_DEBUG
     batch_sizes = {1, 2, 64};
 #endif
+    if (!env.batch_sizes_override.empty()) batch_sizes = env.batch_sizes_override;
     similarities_t results_linear_global_baseline, results_linear_global_accelerated;
     similarities_t results_affine_global_baseline, results_affine_global_accelerated;
     similarities_t results_linear_local_baseline, results_linear_local_accelerated;
