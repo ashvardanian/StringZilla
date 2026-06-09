@@ -467,10 +467,9 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         if (hashers_.try_reserve(old_dims + new_dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t new_dim = 0; new_dim < new_dims; ++new_dim) {
             size_t const dim = old_dims + new_dim;
-            // Every dimension pulls its multiplier from a `splitmix64` stream of `seed + dim`, so neighbouring
-            // dimensions never share parameters.
-            size_t const multiplier = alphabet_size + (splitmix64(seed + dim) % 65536ull);
-            status_t status = try_append(hasher_t(window_width, multiplier));
+            // Seeding goes through the hasher's own constructor, so every backend - AoS or SoA - derives identical
+            // per-dimension parameters from `seed + dim`.
+            status_t status = try_append(hasher_t(window_width, alphabet_size, dim, seed));
             sz_assert_(status == status_t::success_k && "Couldn't fail after the reserve");
         }
         return status_t::success_k;
@@ -640,7 +639,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
                                   u64_t seed = default_seed_k) noexcept {
         if (hashers_.try_resize(aligned_dimensions_k) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t dim = 0; dim < dimensions_k; ++dim)
-            hashers_[dim] = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
+            hashers_[dim] = hasher_t(window_width, alphabet_size, first_dimension_offset + dim, seed);
         window_width_ = window_width;
         return status_t::success_k;
     }

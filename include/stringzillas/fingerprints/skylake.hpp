@@ -101,7 +101,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
     SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256, size_t first_dimension_offset = 0,
                                   u64_t seed = default_seed_k) noexcept {
         for (size_t dim = 0; dim < dimensions_k; ++dim) {
-            hasher_t hasher = make_seeded_floating_hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
+            hasher_t hasher(window_width, alphabet_size, first_dimension_offset + dim, seed);
             multipliers_[dim] = hasher.multiplier();
             modulos_[dim] = hasher.modulo();
             inverse_modulos_[dim] = hasher.inverse_modulo();
