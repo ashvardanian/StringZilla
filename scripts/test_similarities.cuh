@@ -41,7 +41,7 @@ using ashvardanian::stringzillas::ualloc_t;
 
 /**
  *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
  */
 inline std::size_t levenshtein_baseline(                                //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
@@ -49,28 +49,28 @@ inline std::size_t levenshtein_baseline(                                //
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::size_t> matrix_buffer(rows * cols);
+    std::vector<std::size_t> previous_row(cols), current_row(cols);
 
-    // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i * gap_cost;
-    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j * gap_cost;
+    // Initialize the first row's border.
+    for (std::size_t j = 0; j < cols; ++j) previous_row[j] /* [0][j] in 2D */ = j * gap_cost;
 
     for (std::size_t i = 1; i < rows; ++i) {
-        std::size_t const *last_row = &matrix_buffer[(i - 1) * cols];
-        std::size_t *row = &matrix_buffer[i * cols];
+        current_row[0] /* [i][0] in 2D */ = i * gap_cost;
         for (std::size_t j = 1; j < cols; ++j) {
             std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
-            std::size_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + gap_cost;
-            row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
+            std::size_t if_deletion_or_insertion = std::min(previous_row[j], current_row[j - 1]) + gap_cost;
+            current_row[j] = std::min(if_deletion_or_insertion, previous_row[j - 1] + substitution_cost);
         }
+previous_row.swap(current_row);
     }
 
-    return matrix_buffer.back();
+// After the last swap, the bottom-right cell sits at the end of `previous_row`.
+    return previous_row.back();
 }
 
 /**
  *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
  */
 template <typename substituter_type_>
 inline std::ptrdiff_t needleman_wunsch_baseline(                        //
@@ -79,30 +79,30 @@ inline std::ptrdiff_t needleman_wunsch_baseline(                        //
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
+    std::vector<std::ptrdiff_t> previous_row(cols), current_row(cols);
 
-    // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i * gap_cost;
-    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j * gap_cost;
+    // Initialize the first row's border.
+    for (std::size_t j = 0; j < cols; ++j) previous_row[j] /* [0][j] in 2D */ = j * gap_cost;
 
-    // Fill in the rest of the matrix.
+    // Fill in the rest of the matrix, one row at a time.
     for (std::size_t i = 1; i < rows; ++i) {
-        std::ptrdiff_t const *last_row = &matrix_buffer[(i - 1) * cols];
-        std::ptrdiff_t *row = &matrix_buffer[i * cols];
+        current_row[0] /* [i][0] in 2D */ = i * gap_cost;
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
-            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_deletion_or_insertion = std::max(last_row[j], row[j - 1]) + gap_cost;
-            row[j] = std::max(if_deletion_or_insertion, if_substitution);
+            std::ptrdiff_t if_substitution = previous_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion_or_insertion = std::max(previous_row[j], current_row[j - 1]) + gap_cost;
+            current_row[j] = std::max(if_deletion_or_insertion, if_substitution);
         }
+    previous_row.swap(current_row);
     }
 
-    return matrix_buffer.back();
+    // After the last swap, the bottom-right cell sits at the end of `previous_row`.
+    return previous_row.back();
 }
 
 /**
  *  @brief Inefficient baseline Smith-Waterman local alignment score computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
  */
 template <typename substituter_type_>
 inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
@@ -110,28 +110,27 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
                                               error_cost_t gap_cost) noexcept(false) {
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
+    std::vector<std::ptrdiff_t> previous_row(cols), current_row(cols);
 
-    // Unlike the global alignment we need to track the largest score in the matrix.
+    // Unlike the global alignment we need to track the largest score across all cells.
     std::ptrdiff_t best_score = 0;
 
-    // Initialize the borders of the matrix to 0.
-    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = 0;
-    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = 0;
+    // Initialize the first row's border to 0.
+        for (std::size_t j = 0; j < cols; ++j) previous_row[j] /* [0][j] in 2D */ = 0;
 
-    // Fill in the rest of the matrix.
+    // Fill in the rest of the matrix, one row at a time.
     for (std::size_t i = 1; i < rows; ++i) {
-        std::ptrdiff_t const *last_row = &matrix_buffer[(i - 1) * cols];
-        std::ptrdiff_t *row = &matrix_buffer[i * cols];
+        current_row[0] /* [i][0] in 2D */ = 0;
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
-            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_deletion_or_insertion = std::max(row[j - 1], last_row[j]) + gap_cost;
+            std::ptrdiff_t if_substitution = previous_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion_or_insertion = std::max(current_row[j - 1], previous_row[j]) + gap_cost;
             std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
             std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
-            row[j] = score;
+            current_row[j] = score;
             best_score = std::max(best_score, score);
         }
+previous_row.swap(current_row);
     }
 
     return best_score;
@@ -139,7 +138,7 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
 
 /**
  *  @brief Inefficient baseline Levenshtein-Gotoh distance computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
  */
 inline std::size_t levenshtein_gotoh_baseline(                          //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
@@ -148,51 +147,48 @@ inline std::size_t levenshtein_gotoh_baseline(                          //
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::size_t> matrix_scores(rows * cols);
-    std::vector<std::size_t> matrix_inserts(rows * cols);
-    std::vector<std::size_t> matrix_deletes(rows * cols);
+    std::vector<std::size_t> previous_scores(cols), current_scores(cols);
+    std::vector<std::size_t> previous_inserts(cols), current_inserts(cols);
+    std::vector<std::size_t> previous_deletes(cols), current_deletes(cols);
 
-    // Initialize the borders of the matrix.
+    // Initialize the first row's border.
     // The supplementary matrices are initialized with values of higher magnitude,
     // which is equivalent to discarding them. That's better than using `SIZE_MAX`
     // as subsequent additions won't overflow.
-    matrix_scores[0] = 0;
+    previous_scores[0] = 0;
     for (std::size_t j = 1; j < cols; ++j) {
-        matrix_scores[0 * cols + j] = gap_opening_cost + (j - 1) * gap_extension_cost;
-        matrix_deletes[0 * cols + j] = matrix_scores[0 * cols + j] + gap_opening_cost + gap_extension_cost;
-    }
-    for (std::size_t i = 1; i < rows; ++i) {
-        matrix_scores[i * cols + 0] = gap_opening_cost + (i - 1) * gap_extension_cost;
-        matrix_inserts[i * cols + 0] = matrix_scores[i * cols + 0] + gap_opening_cost + gap_extension_cost;
+        previous_scores[j] = gap_opening_cost + (j - 1) * gap_extension_cost;
+        previous_deletes[j] = previous_scores[j] + gap_opening_cost + gap_extension_cost;
     }
 
-    // Fill in the rest of the matrix.
+    // Fill in the rest of the matrix, one row at a time.
     for (std::size_t i = 1; i < rows; ++i) {
-        std::size_t const *last_row = &matrix_scores[(i - 1) * cols];
-        std::size_t *row = &matrix_scores[i * cols];
-        std::size_t *row_inserts = &matrix_inserts[i * cols];
-        std::size_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
-        std::size_t *row_deletes = &matrix_deletes[i * cols];
+        current_scores[0] /* [i][0] in 2D */ = gap_opening_cost + (i - 1) * gap_extension_cost;
+        current_inserts[0] /* [i][0] in 2D */ = current_scores[0] + gap_opening_cost + gap_extension_cost;
         for (std::size_t j = 1; j < cols; ++j) {
             std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
-            std::size_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::size_t if_insertion = std::min<std::size_t>(row[j - 1] + gap_opening_cost,
-                                                             row_inserts[j - 1] + gap_extension_cost);
-            std::size_t if_deletion = std::min<std::size_t>(last_row[j] + gap_opening_cost,
-                                                            last_deletes_row[j] + gap_extension_cost);
+            std::size_t if_substitution = previous_scores[j - 1] + substitution_cost;
+            std::size_t if_insertion = std::min<std::size_t>(current_scores[j - 1] + gap_opening_cost,
+                                                             current_inserts[j - 1] + gap_extension_cost);
+            std::size_t if_deletion = std::min<std::size_t>(previous_scores[j] + gap_opening_cost,
+                                                            previous_deletes[j] + gap_extension_cost);
             std::size_t if_deletion_or_insertion = std::min(if_deletion, if_insertion);
-            row[j] = std::min(if_deletion_or_insertion, if_substitution);
-            row_inserts[j] = if_insertion;
-            row_deletes[j] = if_deletion;
+            current_scores[j] = std::min(if_deletion_or_insertion, if_substitution);
+            current_inserts[j] = if_insertion;
+            current_deletes[j] = if_deletion;
         }
+    previous_scores.swap(current_scores);
+        previous_inserts.swap(current_inserts);
+        previous_deletes.swap(current_deletes);
     }
 
-    return matrix_scores.back();
+    // After the last swap, the bottom-right cell sits at the end of `previous_scores`.
+    return previous_scores.back();
 }
 
 /**
  *  @brief Inefficient baseline Needleman-Wunsch-Gotoh alignment score computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
  *  @see https://github.com/gata-bio/affine-gaps
  */
 template <typename substituter_type_>
@@ -203,48 +199,45 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::ptrdiff_t> matrix_scores(rows * cols);
-    std::vector<std::ptrdiff_t> matrix_inserts(rows * cols);
-    std::vector<std::ptrdiff_t> matrix_deletes(rows * cols);
+    std::vector<std::ptrdiff_t> previous_scores(cols), current_scores(cols);
+    std::vector<std::ptrdiff_t> previous_inserts(cols), current_inserts(cols);
+    std::vector<std::ptrdiff_t> previous_deletes(cols), current_deletes(cols);
 
-    // Initialize the borders of the matrix.
-    matrix_scores[0] = 0;
-    for (std::size_t i = 1; i < rows; ++i) {
-        matrix_scores[i * cols + 0] = gap_opening_cost + (i - 1) * gap_extension_cost;
-        matrix_inserts[i * cols + 0] = matrix_scores[i * cols + 0] + gap_opening_cost + gap_extension_cost;
-    }
+    // Initialize the first row's border.
+    previous_scores[0] = 0;
     for (std::size_t j = 1; j < cols; ++j) {
-        matrix_scores[0 * cols + j] = gap_opening_cost + (j - 1) * gap_extension_cost;
-        matrix_deletes[0 * cols + j] = matrix_scores[0 * cols + j] + gap_opening_cost + gap_extension_cost;
+        previous_scores[j] = gap_opening_cost + (j - 1) * gap_extension_cost;
+        previous_deletes[j] = previous_scores[j] + gap_opening_cost + gap_extension_cost;
     }
 
-    // Fill in the rest of the matrix.
+    // Fill in the rest of the matrix, one row at a time.
     for (std::size_t i = 1; i < rows; ++i) {
-        std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
-        std::ptrdiff_t *row = &matrix_scores[i * cols];
-        std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
-        std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
-        std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
+        current_scores[0] /* [i][0] in 2D */ = gap_opening_cost + (i - 1) * gap_extension_cost;
+        current_inserts[0] /* [i][0] in 2D */ = current_scores[0] + gap_opening_cost + gap_extension_cost;
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
-            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_insertion = std::max(row[j - 1] + gap_opening_cost,
-                                                   row_inserts[j - 1] + gap_extension_cost);
-            std::ptrdiff_t if_deletion = std::max(last_row[j] + gap_opening_cost,
-                                                  last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_substitution = previous_scores[j - 1] + substitution_cost;
+            std::ptrdiff_t if_insertion = std::max(current_scores[j - 1] + gap_opening_cost,
+                                                   current_inserts[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion = std::max(previous_scores[j] + gap_opening_cost,
+                                                  previous_deletes[j] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
-            row[j] = std::max(if_deletion_or_insertion, if_substitution);
-            row_inserts[j] = if_insertion;
-            row_deletes[j] = if_deletion;
+            current_scores[j] = std::max(if_deletion_or_insertion, if_substitution);
+            current_inserts[j] = if_insertion;
+            current_deletes[j] = if_deletion;
         }
+    previous_scores.swap(current_scores);
+        previous_inserts.swap(current_inserts);
+        previous_deletes.swap(current_deletes);
     }
 
-    return matrix_scores.back();
+    // After the last swap, the bottom-right cell sits at the end of `previous_scores`.
+    return previous_scores.back();
 }
 
 /**
  *  @brief Inefficient baseline Smith-Waterman-Gotoh alignment score computation, as implemented in most codebases.
- *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
  *  @see https://github.com/gata-bio/affine-gaps
  */
 template <typename substituter_type_>
@@ -255,46 +248,42 @@ inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
 
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
-    std::vector<std::ptrdiff_t> matrix_scores(rows * cols);
-    std::vector<std::ptrdiff_t> matrix_inserts(rows * cols);
-    std::vector<std::ptrdiff_t> matrix_deletes(rows * cols);
+    std::vector<std::ptrdiff_t> previous_scores(cols), current_scores(cols);
+    std::vector<std::ptrdiff_t> previous_inserts(cols), current_inserts(cols);
+    std::vector<std::ptrdiff_t> previous_deletes(cols), current_deletes(cols);
 
-    // Unlike the global alignment we need to track the largest score in the matrix.
+    // Unlike the global alignment we need to track the largest score across all cells.
     std::ptrdiff_t best_score = 0;
 
-    // Initialize the borders of the matrix.
-    matrix_scores[0] = 0;
-    for (std::size_t i = 1; i < rows; ++i) {
-        matrix_scores[i * cols + 0] = 0;
-        matrix_inserts[i * cols + 0] = gap_opening_cost + gap_extension_cost;
-    }
+    // Initialize the first row's border.
+    previous_scores[0] = 0;
     for (std::size_t j = 1; j < cols; ++j) {
-        matrix_scores[0 * cols + j] = 0;
-        matrix_deletes[0 * cols + j] = gap_opening_cost + gap_extension_cost;
+        previous_scores[j] = 0;
+        previous_deletes[j] = gap_opening_cost + gap_extension_cost;
     }
 
-    // Fill in the rest of the matrix.
+    // Fill in the rest of the matrix, one row at a time.
     for (std::size_t i = 1; i < rows; ++i) {
-        std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
-        std::ptrdiff_t *row = &matrix_scores[i * cols];
-        std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
-        std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
-        std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
+        current_scores[0] /* [i][0] in 2D */ = 0;
+        current_inserts[0] /* [i][0] in 2D */ = gap_opening_cost + gap_extension_cost;
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
-            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_insertion = std::max(row[j - 1] + gap_opening_cost,
-                                                   row_inserts[j - 1] + gap_extension_cost);
-            std::ptrdiff_t if_deletion = std::max(last_row[j] + gap_opening_cost,
-                                                  last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_substitution = previous_scores[j - 1] + substitution_cost;
+            std::ptrdiff_t if_insertion = std::max(current_scores[j - 1] + gap_opening_cost,
+                                                   current_inserts[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion = std::max(previous_scores[j] + gap_opening_cost,
+                                                  previous_deletes[j] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
             std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
             std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
-            row[j] = score;
-            row_inserts[j] = if_insertion;
-            row_deletes[j] = if_deletion;
+            current_scores[j] = score;
+            current_inserts[j] = if_insertion;
+            current_deletes[j] = if_deletion;
             best_score = std::max(best_score, score);
         }
+previous_scores.swap(current_scores);
+        previous_inserts.swap(current_inserts);
+        previous_deletes.swap(current_deletes);
     }
 
     return best_score;
