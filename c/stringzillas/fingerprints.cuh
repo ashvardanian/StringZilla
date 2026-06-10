@@ -8,6 +8,22 @@
 #define STRINGZILLAS_SZS_FINGERPRINTS_CUH_
 #include "stringzillas.cuh"
 
+/**
+ *  @brief Allocates a `fingerprints_backends_t` holding the already-built @p variant, records @p dimensions, publishes
+ *         the opaque handle, and folds the bad-alloc / success status reporting that every capability arm repeats.
+ *  @tparam variant_t The concrete backend variant alternative to emplace (e.g. `vec<hasher_t>` or a fallback variant).
+ */
+template <typename variant_type_>
+sz_status_t emplace_fingerprints_engine(szs_fingerprints_t *engine_punned, char const **error_message,
+                                        sz_size_t dimensions, variant_type_ variant) noexcept {
+    auto engine = new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<variant_type_>(), std::move(variant));
+    if (!engine)
+        return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
+    engine->dimensions = dimensions;
+    *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
+    return propagate_error(sz::status_t::success_k, error_message);
+}
+
 extern "C" {
 
 #pragma region Fingerprints
@@ -56,13 +72,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
             if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
         }
 
-        auto engine = new (std::nothrow)
-            fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
-        engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
+        return emplace_fingerprints_engine<vec<hasher_t>>(engine_punned, error_message, dimensions, std::move(hashers));
     }
 #endif // SZ_USE_HASWELL
 
@@ -82,13 +92,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
             if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
         }
 
-        auto engine = new (std::nothrow)
-            fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
-        engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
+        return emplace_fingerprints_engine<vec<hasher_t>>(engine_punned, error_message, dimensions, std::move(hashers));
     }
 #endif // SZ_USE_SKYLAKE
 
@@ -108,13 +112,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
             if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
         }
 
-        auto engine = new (std::nothrow)
-            fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
-        engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
+        return emplace_fingerprints_engine<vec<hasher_t>>(engine_punned, error_message, dimensions, std::move(hashers));
     }
     else if (can_use_cuda) {
         using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
@@ -150,13 +148,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
             if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
         }
 
-        auto engine = new (std::nothrow)
-            fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
-        if (!engine)
-            return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
-        engine->dimensions = dimensions;
-        *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-        return propagate_error(sz::status_t::success_k, error_message);
+        return emplace_fingerprints_engine<vec<hasher_t>>(engine_punned, error_message, dimensions, std::move(hashers));
     }
 
     // Build the fallback variant with interleaving width dimensions
@@ -167,14 +159,8 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
         if (extend_status != sz::status_t::success_k) return static_cast<sz_status_t>(extend_status);
     }
 
-    auto engine = new (std::nothrow)
-        fingerprints_backends_t(std::in_place_type_t<fallback_variant_cpus_t>(), std::move(variant));
-    if (!engine)
-        return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate Fingerprints engine");
-
-    engine->dimensions = dimensions;
-    *engine_punned = reinterpret_cast<szs_fingerprints_t>(engine);
-    return propagate_error(sz::status_t::success_k, error_message);
+    return emplace_fingerprints_engine<fallback_variant_cpus_t>(engine_punned, error_message, dimensions,
+                                                                std::move(variant));
 }
 
 SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(                       //
