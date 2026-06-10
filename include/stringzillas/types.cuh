@@ -197,7 +197,7 @@ class cuda_executor_t {
     }
     cuda_executor_t &operator=(cuda_executor_t &&other) noexcept {
         if (this != &other) {
-            if (stream_) cudaStreamDestroy(stream_);
+            if (stream_) cuStreamDestroy((CUstream)stream_);
             stream_ = other.stream_;
             device_id_ = other.device_id_;
             other.stream_ = 0;
@@ -206,15 +206,18 @@ class cuda_executor_t {
         return *this;
     }
     ~cuda_executor_t() noexcept {
-        if (stream_) cudaStreamDestroy(stream_);
+        if (stream_) cuStreamDestroy((CUstream)stream_);
     }
 
     cuda_status_t try_scheduling(int device_id) noexcept {
         device_id_ = -1; // ? Invalid device ID
+        // `cudaSetDevice` selects the device and makes its primary context current on this thread - the same
+        // context the runtime registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves
+        // against. The stream itself is then created through the driver so the whole launch/sync path is CU*.
         cudaError_t switching_error = cudaSetDevice(device_id);
         if (switching_error != cudaSuccess) return {status_t::unknown_k, switching_error};
-        cudaError_t creation_error = cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking);
-        if (creation_error != cudaSuccess) return {status_t::unknown_k, creation_error};
+        CUresult creation_error = cuStreamCreate((CUstream *)&stream_, CU_STREAM_NON_BLOCKING);
+        if (creation_error != CUDA_SUCCESS) return make_cuda_status(creation_error);
         device_id_ = device_id;
         return {status_t::success_k, cudaSuccess};
     }
@@ -225,33 +228,52 @@ class cuda_executor_t {
 };
 
 /**
- *  @brief RAII pair of CUDA events used to time a kernel launch and synchronize on its completion.
+ *  @brief Pair of CUDA @b driver events used to time a kernel launch and synchronize on its completion.
  *
- *  The two events are created with `cudaEventBlockingSync` so the trailing `cudaEventSynchronize` puts the host
- *  thread to sleep (freeing the CPU core) while the GPU works, instead of busy-spinning. The destructor releases
- *  both events on every path, so launch functions can `return` an error directly without manual cleanup.
+ *  The engine owns one timer for its whole lifetime: the two events are created @b once on first use (the CUDA
+ *  context must already be current, which holds inside the first `operator()` call but not at engine construction)
+ *  and reused across every subsequent call - no per-call `cuEventCreate`/`cuEventDestroy` churn. They are created
+ *  with `CU_EVENT_BLOCKING_SYNC` so the drain puts the host thread to sleep instead of busy-spinning. The
+ *  destructor releases both events. The whole path is CU* so it composes with the driver launches and stream.
  */
 struct cuda_timer_t {
-    cudaEvent_t start_event = nullptr;
-    cudaEvent_t stop_event = nullptr;
+    CUevent start_event = nullptr;
+    CUevent stop_event = nullptr;
 
-    cuda_timer_t() noexcept {
-        cudaEventCreate(&start_event, cudaEventBlockingSync);
-        cudaEventCreate(&stop_event, cudaEventBlockingSync);
-    }
+    cuda_timer_t() noexcept = default;
     ~cuda_timer_t() noexcept {
-        if (start_event) cudaEventDestroy(start_event);
-        if (stop_event) cudaEventDestroy(stop_event);
+        if (start_event) cuEventDestroy(start_event);
+        if (stop_event) cuEventDestroy(stop_event);
     }
     cuda_timer_t(cuda_timer_t const &) = delete;
     cuda_timer_t &operator=(cuda_timer_t const &) = delete;
+    cuda_timer_t(cuda_timer_t &&other) noexcept : start_event(other.start_event), stop_event(other.stop_event) {
+        other.start_event = nullptr, other.stop_event = nullptr;
+    }
+    cuda_timer_t &operator=(cuda_timer_t &&other) noexcept {
+        if (this != &other) {
+            if (start_event) cuEventDestroy(start_event);
+            if (stop_event) cuEventDestroy(stop_event);
+            start_event = other.start_event, stop_event = other.stop_event;
+            other.start_event = nullptr, other.stop_event = nullptr;
+        }
+        return *this;
+    }
 
-    inline cudaError_t record_start(cudaStream_t stream) noexcept { return cudaEventRecord(start_event, stream); }
-    inline cudaError_t record_stop(cudaStream_t stream) noexcept { return cudaEventRecord(stop_event, stream); }
-    inline cudaError_t synchronize() noexcept { return cudaEventSynchronize(stop_event); }
+    /** @brief Creates the two events on first use; a no-op on every later call. */
+    inline CUresult ensure_created() noexcept {
+        if (start_event) return CUDA_SUCCESS;
+        CUresult start_error = cuEventCreate(&start_event, CU_EVENT_BLOCKING_SYNC);
+        if (start_error != CUDA_SUCCESS) return start_error;
+        return cuEventCreate(&stop_event, CU_EVENT_BLOCKING_SYNC);
+    }
+
+    inline CUresult record_start(cudaStream_t stream) noexcept { return cuEventRecord(start_event, (CUstream)stream); }
+    inline CUresult record_stop(cudaStream_t stream) noexcept { return cuEventRecord(stop_event, (CUstream)stream); }
+    inline CUresult synchronize(cudaStream_t stream) noexcept { return cuStreamSynchronize((CUstream)stream); }
     inline float elapsed_milliseconds() noexcept {
         float milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start_event, stop_event);
+        cuEventElapsedTime(&milliseconds, start_event, stop_event);
         return milliseconds;
     }
 };

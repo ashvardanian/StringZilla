@@ -1795,9 +1795,11 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     allocator_t alloc_ {};
 
     // Host-side scratch reused across calls (single-user contract): the launch is driven by one host thread,
-    // so these are filled and consumed serially while the GPU does the parallel work.
-    mutable safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
-    mutable safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
+    // so these are filled and consumed serially while the GPU does the parallel work. The engine is move-only
+    // with a non-const `operator()`, so these are plain members - no `mutable`.
+    safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
+    safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
+    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
 
     levenshtein_distances(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
                           allocator_t const &alloc = {}) noexcept
@@ -1816,13 +1818,14 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
         results_type_ &&results,                                                              //
-        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) const noexcept {
+        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
 
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
-        // RAII pair of GPU timing events, released on every return path by the destructor.
-        cuda_timer_t timer;
+        // Create the engine-owned timing events on first use (context is current here), reused across calls.
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         using final_score_t = typename indexed_results_type<results_type_>::type;
         tasks_.clear();
@@ -1830,8 +1833,8 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         // Record the start event
-        cudaError_t start_event_error = timer.record_start(executor.stream());
-        if (start_event_error != cudaSuccess) return make_cuda_status(start_event_error);
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
         // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
@@ -2155,13 +2158,13 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             if (result.status != status_t::success_k) return result;
         }
 
-        // Calculate the duration. This single trailing sync replaces the per-group `cudaStreamSynchronize`
+        // Calculate the duration. This single trailing sync replaces the per-group `cuStreamSynchronize`
         // calls: it drains every group's kernels enqueued during the ENQUEUE phase before we read results.
-        cudaError_t stop_event_error = timer.record_stop(executor.stream());
-        if (stop_event_error != cudaSuccess) return make_cuda_status(stop_event_error);
-        cudaError_t execution_error = timer.synchronize();
-        if (execution_error != cudaSuccess) return make_cuda_status(execution_error);
-        float execution_milliseconds = timer.elapsed_milliseconds();
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        float execution_milliseconds = timer_.elapsed_milliseconds();
 
         // Now that everything went well, export the results back into the `results` array.
         for (size_t i = 0; i < tasks.size(); ++i) {
@@ -2484,11 +2487,13 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     allocator_t alloc_ {};
 
     // Host-side scratch reused across calls (single-user contract): the launch is driven by one host thread,
-    // so these are filled and consumed serially while the GPU does the parallel work.
-    mutable safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
-    mutable safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
-    mutable safe_vector<sz_u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
-    mutable safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
+    // so these are filled and consumed serially while the GPU does the parallel work. The engine is move-only
+    // with a non-const `operator()`, so these are plain members - no `mutable`.
+    safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
+    safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
+    safe_vector<sz_u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
+    safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
+    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
 
     cuda_nw_or_sw_byte_level_scores_(error_costs_32x32_t subs = {}, gap_costs_t gaps = {},
                                      allocator_t const &alloc = allocator_t {}) noexcept
@@ -2507,14 +2512,15 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
         results_type_ &&results,                                                              //
-        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) const noexcept {
+        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
-        // RAII pair of GPU timing events, released on every return path by the destructor.
-        cuda_timer_t timer;
+        // Create the engine-owned timing events on first use (context is current here), reused across calls.
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         using final_score_t = typename indexed_results_type<results_type_>::type;
         tasks_.clear();
@@ -2522,8 +2528,8 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         // Record the start event
-        cudaError_t start_event_error = timer.record_start(executor.stream());
-        if (start_event_error != cudaSuccess) return make_cuda_status(start_event_error);
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
         // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
@@ -2832,13 +2838,13 @@ struct cuda_nw_or_sw_byte_level_scores_ {
             if (result.status != status_t::success_k) return result;
         }
 
-        // Calculate the duration. This single trailing sync replaces the per-group `cudaStreamSynchronize`
+        // Calculate the duration. This single trailing sync replaces the per-group `cuStreamSynchronize`
         // calls: it drains every group's kernels enqueued during the ENQUEUE phase before we read results.
-        cudaError_t stop_event_error = timer.record_stop(executor.stream());
-        if (stop_event_error != cudaSuccess) return make_cuda_status(stop_event_error);
-        cudaError_t execution_error = timer.synchronize();
-        if (execution_error != cudaSuccess) return make_cuda_status(execution_error);
-        float execution_milliseconds = timer.elapsed_milliseconds();
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        float execution_milliseconds = timer_.elapsed_milliseconds();
 
         // Now that everything went well, export the results back into the `results` array.
         for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {

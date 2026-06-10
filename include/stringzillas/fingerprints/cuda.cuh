@@ -457,8 +457,10 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
     size_t max_window_width_;
 
     // Host-side scratch reused across calls (single-user contract): one host thread fills this task list in
-    // unified memory while the GPU does the parallel hashing.
-    mutable safe_vector<device_task_t, tasks_allocator_t> tasks_ {allocator_};
+    // unified memory while the GPU does the parallel hashing. The engine is move-only with a non-const
+    // `operator()`, so these are plain members - no `mutable`.
+    safe_vector<device_task_t, tasks_allocator_t> tasks_ {allocator_};
+    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
 
   public:
     basic_rolling_hashers(allocator_t const &allocator = {}) noexcept
@@ -535,14 +537,15 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
     SZ_NOINLINE cuda_status_t operator()(                                                                 //
         texts_type_ const &texts,                                                                         //
         min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
-        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) const noexcept {
+        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
 
         using texts_t = texts_type_;
         using text_t = typename texts_t::value_type;
         using char_t = typename text_t::value_type;
 
-        // RAII pair of GPU timing events, released on every return path by the destructor.
-        cuda_timer_t timer;
+        // Create the engine-owned timing events on first use (context is current here), reused across calls.
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         // Populate the tasks for each warp or the entire device, reusing the hoisted unified-memory buffer.
         tasks_.clear();
@@ -580,8 +583,8 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         //                [](task_t const &task) { return task.density == warps_working_together_k; });
 
         // Record the start event
-        cudaError_t start_event_error = timer.record_start(executor.stream());
-        if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         static_assert(sizeof(char_t) == sizeof(byte_t), "Characters must be byte-sized");
         auto warp_level_kernel = &basic_rolling_hashers_kernel_< //
@@ -636,14 +639,13 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
             if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
         }
 
-        // Wait until everything completes, as on the next iteration we will update the properties again.
-        cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
-        if (execution_error != cudaSuccess) return {status_t::unknown_k, execution_error};
-
-        // Calculate the duration:
-        cudaError_t stop_event_error = timer.record_stop(executor.stream());
-        if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
-        float execution_milliseconds = timer.elapsed_milliseconds();
+        // Record the stop event, then drain the stream before reading results (the next call reuses the buffers).
+        // The stop event must be recorded BEFORE the wait so the elapsed time spans the kernels, not an idle stream.
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        float execution_milliseconds = timer_.elapsed_milliseconds();
 
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, execution_milliseconds};
     }
@@ -690,8 +692,10 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     size_t window_width_;
 
     // Host-side scratch reused across calls (single-user contract): one host thread fills this task list in
-    // unified memory while the GPU does the parallel hashing.
-    mutable safe_vector<device_task_t, tasks_allocator_t> tasks_ {allocator_};
+    // unified memory while the GPU does the parallel hashing. The engine is move-only with a non-const
+    // `operator()`, so these are plain members - no `mutable`.
+    safe_vector<device_task_t, tasks_allocator_t> tasks_ {allocator_};
+    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
 
   public:
     floating_rolling_hashers(allocator_t const &allocator = {}) noexcept
@@ -730,12 +734,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
      */
     SZ_NOINLINE cuda_status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
                                               min_counts_span_t min_counts, gpu_specs_t specs = {},
-                                              cuda_executor_t const &executor = {}) const noexcept {
+                                              cuda_executor_t const &executor = {}) noexcept {
 
         sz_unused_(specs);
 
-        // RAII pair of GPU timing events, released on every return path by the destructor.
-        cuda_timer_t timer;
+        // Create the engine-owned timing events on first use (context is current here), reused across calls.
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         // Populate the tasks array with a single task for the entire device, reusing the hoisted buffer.
         tasks_.clear();
@@ -752,8 +757,8 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         };
 
         // Record the start event
-        cudaError_t start_event_error = timer.record_start(executor.stream());
-        if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         void *warp_level_kernel_args[5];
         auto const *tasks_ptr = tasks.data();
@@ -788,14 +793,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
                                     .launch(warp_level_function, warp_level_kernel_args);
         if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
 
-        // Wait until everything completes, as on the next iteration we will update the properties again.
-        cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
-        if (execution_error != cudaSuccess) return {status_t::unknown_k, execution_error};
-
-        // Calculate the duration:
-        cudaError_t stop_event_error = timer.record_stop(executor.stream());
-        if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
-        float execution_milliseconds = timer.elapsed_milliseconds();
+        // Record the stop event, then drain the stream before reading results (the next call reuses the buffers).
+        // The stop event must be recorded BEFORE the wait so the elapsed time spans the kernels, not an idle stream.
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        float execution_milliseconds = timer_.elapsed_milliseconds();
 
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, execution_milliseconds};
     }
@@ -813,14 +817,15 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_>
     SZ_NOINLINE cuda_status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text,
                                          min_counts_per_text_type_ &&min_counts_per_text,
-                                         cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) const noexcept {
+                                         cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
 
         using texts_t = texts_type_;
         using text_t = typename texts_t::value_type;
         using char_t = typename text_t::value_type;
 
-        // RAII pair of GPU timing events, released on every return path by the destructor.
-        cuda_timer_t timer;
+        // Create the engine-owned timing events on first use (context is current here), reused across calls.
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         // Populate the tasks for each warp or the entire device, reusing the hoisted unified-memory buffer.
         tasks_.clear();
@@ -843,8 +848,8 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         //                [](task_t const &task) { return task.density == warps_working_together_k; });
 
         // Record the start event
-        cudaError_t start_event_error = timer.record_start(executor.stream());
-        if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         void *warp_level_kernel_args[5];
         auto const *tasks_ptr = tasks.data();
@@ -885,14 +890,13 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
                                     .launch(warp_level_function, warp_level_kernel_args);
         if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
 
-        // Wait until everything completes, as on the next iteration we will update the properties again.
-        cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
-        if (execution_error != cudaSuccess) return {status_t::unknown_k, execution_error};
-
-        // Calculate the duration:
-        cudaError_t stop_event_error = timer.record_stop(executor.stream());
-        if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
-        float execution_milliseconds = timer.elapsed_milliseconds();
+        // Record the stop event, then drain the stream before reading results (the next call reuses the buffers).
+        // The stop event must be recorded BEFORE the wait so the elapsed time spans the kernels, not an idle stream.
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        float execution_milliseconds = timer_.elapsed_milliseconds();
 
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, execution_milliseconds};
     }
