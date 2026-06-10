@@ -2394,7 +2394,7 @@ struct levenshtein_distances {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results) noexcept {
         return _score_sequentially<size_t>(               //
             scoring_t {substituter_, gap_costs_, alloc_}, //
             first_strings, second_strings, std::forward<results_type_>(results));
@@ -2407,7 +2407,7 @@ struct levenshtein_distances {
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) const noexcept {
+                        cpu_specs_t const &specs = {}) noexcept {
         return _score_in_parallel<size_t>(                                       //
             scoring_t {substituter_, gap_costs_, alloc_},                        //
             first_strings, second_strings, std::forward<results_type_>(results), //
@@ -2445,7 +2445,7 @@ struct levenshtein_distances_utf8 {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results) noexcept {
         return _score_sequentially<size_t>(               //
             scoring_t {substituter_, gap_costs_, alloc_}, //
             first_strings, second_strings, std::forward<results_type_>(results));
@@ -2458,7 +2458,7 @@ struct levenshtein_distances_utf8 {
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) const noexcept {
+                        cpu_specs_t const &specs = {}) noexcept {
         return _score_in_parallel<size_t>(                                       //
             scoring_t {substituter_, gap_costs_, alloc_},                        //
             first_strings, second_strings, std::forward<results_type_>(results), //
@@ -2497,7 +2497,7 @@ struct needleman_wunsch_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results) noexcept {
         return _score_sequentially<ssize_t>(              //
             scoring_t {substituter_, gap_costs_, alloc_}, //
             first_strings, second_strings, std::forward<results_type_>(results));
@@ -2510,7 +2510,7 @@ struct needleman_wunsch_scores {
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) const noexcept {
+                        cpu_specs_t const &specs = {}) noexcept {
         return _score_in_parallel<ssize_t>(                                      //
             scoring_t {substituter_, gap_costs_, alloc_},                        //
             first_strings, second_strings, std::forward<results_type_>(results), //
@@ -2549,7 +2549,7 @@ struct smith_waterman_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results) noexcept {
         return _score_sequentially<ssize_t>(              //
             scoring_t {substituter_, gap_costs_, alloc_}, //
             first_strings, second_strings, std::forward<results_type_>(results));
@@ -2562,7 +2562,7 @@ struct smith_waterman_scores {
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) const noexcept {
+                        cpu_specs_t const &specs = {}) noexcept {
         return _score_in_parallel<ssize_t>(                                      //
             scoring_t {substituter_, gap_costs_, alloc_},                        //
             first_strings, second_strings, std::forward<results_type_>(results), //
