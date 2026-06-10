@@ -660,10 +660,18 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     score_t last_score_ {0};
+    bool transpose_ {false};
 
   public:
     tile_scorer() = default;
     tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Selects the operand order for the substitution lookup.
+     *  @param transpose When set, the two class operands are swapped, compensating for a walker that
+     *         exchanged the shorter and longer strings around an @b asymmetric cost matrix.
+     */
+    void prepare(bool transpose) noexcept { transpose_ = transpose; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -703,7 +711,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
             // ? Note that here we are still traversing both buffers in the same order,
             // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            error_cost_t cost_of_substitution = transpose_
+                                                    ? substituter_(second_slice[i], first_reversed_slice[i])
+                                                    : substituter_(first_reversed_slice[i], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
             score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution);
@@ -752,10 +762,18 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     score_t best_score_ {0};
+    bool transpose_ {false};
 
   public:
     tile_scorer() = default;
     tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Selects the operand order for the substitution lookup.
+     *  @param transpose When set, the two class operands are swapped, compensating for a walker that
+     *         exchanged the shorter and longer strings around an @b asymmetric cost matrix.
+     */
+    void prepare(bool transpose) noexcept { transpose_ = transpose; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -789,7 +807,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
                 // ? Note that here we are still traversing both buffers in the same order,
                 // ? because one of the strings has been reversed beforehand.
-                error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+                error_cost_t cost_of_substitution = transpose_
+                                                    ? substituter_(second_slice[i], first_reversed_slice[i])
+                                                    : substituter_(first_reversed_slice[i], second_slice[i]);
                 score_t if_substitution = pre_substitution + cost_of_substitution;
                 score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
                 // ! This is the main difference with global alignment:
@@ -843,10 +863,18 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     score_t last_score_ {0};
+    bool transpose_ {false};
 
   public:
     tile_scorer() = default;
     tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Selects the operand order for the substitution lookup.
+     *  @param transpose When set, the two class operands are swapped, compensating for a walker that
+     *         exchanged the shorter and longer strings around an @b asymmetric cost matrix.
+     */
+    void prepare(bool transpose) noexcept { transpose_ = transpose; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -902,7 +930,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
             // ? Note that here we are still traversing both buffers in the same order,
             // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            error_cost_t cost_of_substitution = transpose_
+                                                    ? substituter_(second_slice[i], first_reversed_slice[i])
+                                                    : substituter_(first_reversed_slice[i], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
                                                            pre_insertion_expansion + gap_costs_.extend);
@@ -959,10 +989,18 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     score_t best_score_ {0};
+    bool transpose_ {false};
 
   public:
     tile_scorer() = default;
     tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Selects the operand order for the substitution lookup.
+     *  @param transpose When set, the two class operands are swapped, compensating for a walker that
+     *         exchanged the shorter and longer strings around an @b asymmetric cost matrix.
+     */
+    void prepare(bool transpose) noexcept { transpose_ = transpose; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -1011,7 +1049,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
                 // ? Note that here we are still traversing both buffers in the same order,
                 // ? because one of the strings has been reversed beforehand.
-                error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+                error_cost_t cost_of_substitution = transpose_
+                                                    ? substituter_(second_slice[i], first_reversed_slice[i])
+                                                    : substituter_(first_reversed_slice[i], second_slice[i]);
                 score_t if_substitution = pre_substitution + cost_of_substitution;
                 score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
                                                               pre_deletion_expansion + gap_costs_.extend);
@@ -1147,6 +1187,9 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
         // Initialize the first two diagonals:
         tile_scorer_t scorer {substituter_, gap_costs_};
+        // The walker exchanges the strings so the shorter one is reversed into the `first` operand; an
+        // asymmetric cost matrix must then be looked up transposed when that exchange happened.
+        scorer.prepare(first.size() > second.size());
         scorer.init_score(previous_scores[0], 0);
         scorer.init_score(current_scores[0], 1);
         scorer.init_score(current_scores[1], 1);
@@ -1349,6 +1392,9 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
         // Initialize the first two diagonals:
         tile_scorer_t scorer {substituter_, gap_costs_};
+        // The walker exchanges the strings so the shorter one is reversed into the `first` operand; an
+        // asymmetric cost matrix must then be looked up transposed when that exchange happened.
+        scorer.prepare(first.size() > second.size());
         scorer.init_score(previous_scores[0], 0);
         scorer.init_score(current_scores[0], 1);
         scorer.init_score(current_scores[1], 1);
@@ -1553,6 +1599,9 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
+        // The horizontal walker broadcasts characters of the @b longer string into the `first` operand, so the
+        // transpose condition is inverted relative to the diagonal walker: compensate when no exchange happened.
+        scorer.prepare(first.size() <= second.size());
         for (size_t col_idx = 0; col_idx < shorter_dim; ++col_idx) scorer.init_score(previous_scores[col_idx], col_idx);
 
         // Progress through the matrix row-by-row:
@@ -1686,6 +1735,9 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
+        // The horizontal walker broadcasts characters of the @b longer string into the `first` operand, so the
+        // transpose condition is inverted relative to the diagonal walker: compensate when no exchange happened.
+        scorer.prepare(first.size() <= second.size());
         previous_scores[0] = 0;
         for (size_t col_idx = 1; col_idx < shorter_dim; ++col_idx) {
             scorer.init_score(previous_scores[col_idx], col_idx);
