@@ -54,10 +54,11 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
     using min_hashes_span_t = span<min_hash_t, dimensions_k>;
     using min_counts_span_t = span<min_count_t, dimensions_k>;
 
-    static constexpr unsigned hashes_per_ymm_k = sizeof(sz_u256_vec_t) / sizeof(rolling_state_t);
+    static constexpr unsigned hashes_per_ymm_k = sizeof(u256_vec_t) / sizeof(rolling_state_t);
     static constexpr bool has_incomplete_tail_group_k = (dimensions_k % hashes_per_ymm_k) != 0;
-    static constexpr size_t aligned_dimensions_k =
-        has_incomplete_tail_group_k ? (dimensions_k / hashes_per_ymm_k + 1) * hashes_per_ymm_k : (dimensions_k);
+    static constexpr size_t aligned_dimensions_k = has_incomplete_tail_group_k
+                                                       ? (dimensions_k / hashes_per_ymm_k + 1) * hashes_per_ymm_k
+                                                       : (dimensions_k);
     static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_ymm_k;
 
     static_assert(dimensions_k <= 256, "Too many dimensions to keep on stack");
@@ -224,9 +225,9 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
         unsigned const first_dim = group_index * hashes_per_ymm_k;
 
         // Register space for in-out variables
-        sz_u256_vec_t last_states_vec;
-        sz_u256_vec_t rolling_minimums_vec;
-        sz_u256_vec_t rolling_counts_vec; // ? Unlike other cases, use larger 64-bit counters simplify masking
+        u256_vec_t last_states_vec;
+        u256_vec_t rolling_minimums_vec;
+        u256_vec_t rolling_counts_vec; // ? Unlike other cases, use larger 64-bit counters simplify masking
 
         // Use scalar loads for the incomplete tail group
         if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k) {
@@ -240,12 +241,12 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
         else {
             last_states_vec.ymm_pd = _mm256_loadu_pd(&last_states[first_dim]);
             rolling_minimums_vec.ymm_pd = _mm256_loadu_pd(&rolling_minimums[first_dim]);
-            rolling_counts_vec.ymm =
-                _mm256_cvtepu32_epi64(_mm_loadu_si128(reinterpret_cast<__m128i const *>(&rolling_counts[first_dim])));
+            rolling_counts_vec.ymm = _mm256_cvtepu32_epi64(
+                _mm_loadu_si128(reinterpret_cast<__m128i const *>(&rolling_counts[first_dim])));
         }
 
         // Temporary variables for the rolling state
-        sz_u256_vec_t multipliers_vec, negative_discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
+        u256_vec_t multipliers_vec, negative_discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
         multipliers_vec.ymm_pd = _mm256_loadu_pd(&multipliers_[first_dim]);
         negative_discarding_multipliers_vec.ymm_pd = _mm256_loadu_pd(&negative_discarding_multipliers_[first_dim]);
         modulos_vec.ymm_pd = _mm256_loadu_pd(&modulos_[first_dim]);
@@ -281,8 +282,8 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
             __m256d old_term_ymm = _mm256_set1_pd(old_term);
 
             // Discard the old term
-            last_states_vec.ymm_pd =
-                _mm256_fmadd_pd(negative_discarding_multipliers_vec.ymm_pd, old_term_ymm, last_states_vec.ymm_pd);
+            last_states_vec.ymm_pd = _mm256_fmadd_pd(negative_discarding_multipliers_vec.ymm_pd, old_term_ymm,
+                                                     last_states_vec.ymm_pd);
             last_states_vec.ymm_pd = barrett_mod( //
                 last_states_vec.ymm_pd,           //
                 modulos_vec.ymm_pd,               //
@@ -298,16 +299,16 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
             // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
             __m256d found_ymm = _mm256_cmp_pd(last_states_vec.ymm_pd, rolling_minimums_vec.ymm_pd, _CMP_LE_OQ);
             __m256d discard_ymm = _mm256_cmp_pd(last_states_vec.ymm_pd, rolling_minimums_vec.ymm_pd, _CMP_GE_OQ);
-            rolling_minimums_vec.ymm_pd =
-                _mm256_blendv_pd(rolling_minimums_vec.ymm_pd, last_states_vec.ymm_pd, found_ymm);
+            rolling_minimums_vec.ymm_pd = _mm256_blendv_pd(rolling_minimums_vec.ymm_pd, last_states_vec.ymm_pd,
+                                                           found_ymm);
 
             // A branchless way to update the counts
             // 1. Discard "min counts" to 0, if a new minimum is found
             // 2. Increment the counts for new & existing minimums
             rolling_counts_vec.ymm_pd = _mm256_blendv_pd(_mm256_setzero_pd(), rolling_counts_vec.ymm_pd, discard_ymm);
-            rolling_counts_vec.ymm_pd =
-                _mm256_blendv_pd(rolling_counts_vec.ymm_pd,
-                                 _mm256_castsi256_pd(_mm256_add_epi64(rolling_counts_vec.ymm, ones_ymm)), found_ymm);
+            rolling_counts_vec.ymm_pd = _mm256_blendv_pd(
+                rolling_counts_vec.ymm_pd, _mm256_castsi256_pd(_mm256_add_epi64(rolling_counts_vec.ymm, ones_ymm)),
+                found_ymm);
         }
 
         // Dump back the results from registers into our spans

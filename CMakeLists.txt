@@ -792,8 +792,20 @@ set(STRINGZILLAS_CPU_SOURCES
     c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
 )
 set(STRINGZILLAS_CUDA_SOURCES
-    c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/needleman_wunsch.cu
-    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu
+    c/stringzillas/runtime.cu
+    c/stringzillas/levenshtein.cu
+    c/stringzillas/needleman_wunsch.cu
+    c/stringzillas/smith_waterman.cu
+    c/stringzillas/fingerprints.cu
+    # Per-capability instantiation units: each emits one tier's heavy `run()` and `__global__` kernels so the algorithm
+    # shims above only declare them (`extern template`) and compile in parallel.
+    c/stringzillas/levenshtein_cuda.cu
+    c/stringzillas/levenshtein_kepler.cu
+    c/stringzillas/levenshtein_hopper.cu
+    c/stringzillas/needleman_wunsch_cuda.cu
+    c/stringzillas/needleman_wunsch_hopper.cu
+    c/stringzillas/smith_waterman_cuda.cu
+    c/stringzillas/smith_waterman_hopper.cu
 )
 
 if (STRINGZILLAS_BUILD_SHARED)

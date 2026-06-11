@@ -28,7 +28,7 @@ namespace stringzillas {
  *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
  */
 template <typename char_type_, typename min_hash_type_ = u32_t, typename min_count_type_ = u32_t>
-struct cuda_fingerprint_task_ {
+struct cuda_fingerprint_task {
     using char_t = char_type_;
     using min_hash_t = min_hash_type_;
     using min_count_t = min_count_type_;
@@ -45,9 +45,23 @@ __device__ __forceinline__ f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t 
     f64_t q = floor(x * inverse_modulo);
     f64_t result = fma(-q, modulo, x);
 
-    if (result < 0.0) result += modulo;
-    if (result >= modulo) result -= modulo;
+    result += (result < 0.0) * modulo;     // branchless: lower to a select, not a branch
+    result -= (result >= modulo) * modulo; // branchless: lower to a select, not a branch
     return result;
+}
+
+/**
+ *  @brief Branchlessly folds @p value into a running minimum and tracks how many times that minimum recurs.
+ *
+ *  Resets @p min_count to zero on a new strict minimum, then increments it whenever @p value ties or beats the
+ *  current @p rolling_minimum. The arithmetic select lowers to predicated math instead of a data-dependent branch.
+ */
+template <typename count_type_, typename value_type_>
+__device__ __forceinline__ void update_min_count_(count_type_ &min_count, value_type_ &rolling_minimum,
+                                                  value_type_ value) noexcept {
+    min_count *= value >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
+    min_count += value <= rolling_minimum; // ? Increments by 1 for new & old minimums
+    rolling_minimum = (std::min)(rolling_minimum, value);
 }
 
 #pragma endregion - CUDA Device Helpers
@@ -59,7 +73,7 @@ __device__ __forceinline__ f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t 
  *  Each thread computes an independent rolling hash for a specific dimension, so you should have a multiple
  *  of warp-size dimensions per fingerprint.
  *
- *  @sa This kernel is much slower than `floating_rolling_hashers_on_each_cuda_warp_` and is intended as a fallback.
+ *  @sa This kernel is much slower than `floating_rolling_hashers_per_cuda_warp_` and is intended as a fallback.
  *
  *  To avoid dynamically allocated buffers for the @p `hashers`, one should provide a compile-time number of
  *  dimensions to compute per kernel launch, @p `dimensions_per_launch_`, which sizes the per-thread register
@@ -81,13 +95,13 @@ template <                                                                     /
     typename char_type_ = byte_t, warp_size_t warp_size_ = warp_size_nvidia_k, //
     warp_tasks_density_t density_ = four_warps_per_multiprocessor_k            //
     >
-__global__ void basic_rolling_hashers_kernel_(                                                                  //
-    cuda_fingerprint_task_<char_type_, min_hash_type_, min_count_type_> const *tasks, size_t const tasks_count, //
+__global__ void basic_rolling_hashers_kernel_(                                                                 //
+    cuda_fingerprint_task<char_type_, min_hash_type_, min_count_type_> const *tasks, size_t const tasks_count, //
     hasher_type_ const *hashers_global, size_t const hashers_count, size_t const max_window_width,
     size_t const output_dimension_offset) {
 
     //
-    using task_t = cuda_fingerprint_task_<char_type_, min_hash_type_, min_count_type_>;
+    using task_t = cuda_fingerprint_task<char_type_, min_hash_type_, min_count_type_>;
     using hasher_t = hasher_type_;
     using rolling_state_t = typename hasher_t::state_t;
     using rolling_hash_t = typename hasher_t::hash_t;
@@ -157,9 +171,7 @@ __global__ void basic_rolling_hashers_kernel_(                                  
                 auto const old_char = task.text_ptr[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
                 rolling_hash_t new_hash = hasher.digest(last_state);
-                min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
-                min_count += new_hash <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, new_hash);
+                update_min_count_(min_count, rolling_minimum, new_hash);
             }
         }
 
@@ -177,9 +189,7 @@ __global__ void basic_rolling_hashers_kernel_(                                  
                 auto const old_char = task.text_ptr[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
                 rolling_hash_t new_hash = hasher.digest(last_state);
-                min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
-                min_count += new_hash <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, new_hash);
+                update_min_count_(min_count, rolling_minimum, new_hash);
             }
         }
 
@@ -216,12 +226,12 @@ template <                                                                     /
     typename char_type_ = byte_t, warp_size_t warp_size_ = warp_size_nvidia_k, //
     warp_tasks_density_t density_ = four_warps_per_multiprocessor_k            //
     >
-__global__ void floating_rolling_hashers_on_each_cuda_warp_(                   //
-    cuda_fingerprint_task_<char_type_> const *tasks, size_t const tasks_count, //
+__global__ void floating_rolling_hashers_per_cuda_warp_(                      //
+    cuda_fingerprint_task<char_type_> const *tasks, size_t const tasks_count, //
     floating_rolling_hasher<f64_t> const *hashers, size_t const hashers_count, size_t const window_width) {
 
     //
-    using task_t = cuda_fingerprint_task_<char_type_>;
+    using task_t = cuda_fingerprint_task<char_type_>;
     using hasher_t = floating_rolling_hasher<f64_t>;
     constexpr warp_size_t warp_size_k = warp_size_;
     constexpr warp_tasks_density_t density_k = density_;
@@ -336,9 +346,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                   /
                     // Update the minimums and counts
                     f64_t &rolling_minimum = rolling_minimums[dim_within_thread];
                     u32_t &min_count = rolling_counts[dim_within_thread];
-                    min_count *= rolling_state >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
-                    min_count += rolling_state <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                    rolling_minimum = (std::min)(rolling_minimum, rolling_state);
+                    update_min_count_(min_count, rolling_minimum, rolling_state);
                 }
             }
         }
@@ -366,9 +374,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                   /
                 // Update the minimums and counts
                 f64_t &rolling_minimum = rolling_minimums[dim_within_thread];
                 u32_t &min_count = rolling_counts[dim_within_thread];
-                min_count *= rolling_state >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
-                min_count += rolling_state <= rolling_minimum; // ? Increments by 1 for new & old minimums
-                rolling_minimum = (std::min)(rolling_minimum, rolling_state);
+                update_min_count_(min_count, rolling_minimum, rolling_state);
             }
         }
 
@@ -387,7 +393,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                   /
 }
 
 /**
- *  Each of @p `tasks` is distributed across the entire device, unlike `floating_rolling_hashers_on_each_cuda_warp_`,
+ *  Each of @p `tasks` is distributed across the entire device, unlike `floating_rolling_hashers_per_cuda_warp_`,
  *  where individual warps take care of separate unrelated inputs. The biggest difference is in how the minimum values
  *  are later reduced across the entire device, rather than per-warp.
  */
@@ -395,7 +401,7 @@ template <                                               //
     size_t dimensions_, sz_capability_t capability_,     //
     typename char_type_ = byte_t, size_t warp_size_ = 32 //
     >
-__global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_fingerprint_task_<char_type_>> tasks,
+__global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_fingerprint_task<char_type_>> tasks,
                                                              span<floating_rolling_hasher<f64_t> const> hashers) {
     sz_unused_(tasks);
     sz_unused_(hashers);
@@ -429,7 +435,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
 
     // The device kernels read tasks as byte-level; the host builds the same layout (pointer + sizes) regardless
     // of the input character type, so a single fixed task type lets the scratch buffer live in the engine.
-    using device_task_t = cuda_fingerprint_task_<byte_t, min_hash_t, min_count_t>;
+    using device_task_t = cuda_fingerprint_task<byte_t, min_hash_t, min_count_t>;
     using tasks_allocator_t = typename allocator_t::template rebind<device_task_t>::other;
 
     static constexpr unsigned hashes_per_warp_k = static_cast<unsigned>(warp_size_nvidia_k);
@@ -688,7 +694,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
     // The device kernels read tasks as byte-level; the host builds the same layout (pointer + sizes) regardless
     // of the input character type, so a single fixed task type lets the scratch buffer live in the engine.
-    using device_task_t = cuda_fingerprint_task_<byte_t, min_hash_t, min_count_t>;
+    using device_task_t = cuda_fingerprint_task<byte_t, min_hash_t, min_count_t>;
     using tasks_allocator_t = typename allocator_t::template rebind<device_task_t>::other;
 
     static constexpr unsigned hashes_per_warp_k = static_cast<unsigned>(warp_size_nvidia_k);
@@ -727,16 +733,16 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         if (resolved) return {cuda_kernels, {}};
         cuda_status_t status = resolve_kernel_shape(
             cuda_kernels.warp_single,
-            (void const *)&floating_rolling_hashers_on_each_cuda_warp_<
-                aligned_dimensions_k, sz_cap_cuda_k, byte_t, warp_size_nvidia_k, one_warp_per_multiprocessor_k>,
+            (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
+                                                                   warp_size_nvidia_k, one_warp_per_multiprocessor_k>,
             0, 0, false);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         unsigned const batch_threads = static_cast<unsigned>(warp_size_nvidia_k) *
                                        static_cast<unsigned>(four_warps_per_multiprocessor_k);
         status = resolve_kernel_shape(
             cuda_kernels.warp_batch,
-            (void const *)&floating_rolling_hashers_on_each_cuda_warp_<
-                aligned_dimensions_k, sz_cap_cuda_k, byte_t, warp_size_nvidia_k, four_warps_per_multiprocessor_k>,
+            (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
+                                                                   warp_size_nvidia_k, four_warps_per_multiprocessor_k>,
             batch_threads, 0, true);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         resolved = true;

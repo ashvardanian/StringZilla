@@ -62,7 +62,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         u16_t const mismatch_cost = this->substituter_.mismatch;
         u16_t const gap_cost = this->gap_costs_.open_or_extend;
 
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;       // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001; // ! 2x `u16` mismatch costs
         gap_cost_vec.u32 = gap_cost * 0x00010001;           // ! 2x `u16` gap costs
@@ -71,10 +71,10 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
@@ -168,7 +168,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         u16_t const gap_open_cost = this->gap_costs_.open;
         u16_t const gap_extend_cost = this->gap_costs_.extend;
 
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;           // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001;     // ! 2x `u16` mismatch costs
         gap_open_cost_vec.u32 = gap_open_cost * 0x00010001;     // ! 2x `u16` gap costs
@@ -178,11 +178,11 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
-        sz_u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
+        u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
@@ -257,40 +257,40 @@ struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs
  *  @note Requires Hopper generation GPUs to handle 2x `i16` scores at a time.
  */
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
-                   linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t, linear_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(            //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
-        unsigned const tasks_count,              // ! Unlike CPU, uses `unsigned`
-        sz_i16_t const *scores_pre_substitution, //
-        sz_i16_t const *scores_pre_insertion,    //
-        sz_i16_t const *scores_pre_deletion,     //
-        sz_i16_t *scores_new) noexcept {
+        unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
+        i16_t const *scores_pre_substitution, //
+        i16_t const *scores_pre_insertion,    //
+        i16_t const *scores_pre_deletion,     //
+        i16_t *scores_new) noexcept {
 
         error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
-        sz_i16_t const gap_cost = this->gap_costs_.open_or_extend;
-        sz_u32_vec_t gap_cost_vec;
+        i16_t const gap_cost = this->gap_costs_.open_or_extend;
+        u32_vec_t gap_cost_vec;
         gap_cost_vec.i16s[0] = gap_cost_vec.i16s[1] = gap_cost;
 
         // The hardest part of this kernel is dealing with unaligned loads!
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_deletion_or_insertion_vec;
-        sz_u32_vec_t cell_score_vec, final_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_deletion_or_insertion_vec;
+        u32_vec_t cell_score_vec, final_score_vec;
         final_score_vec.i16s[0] = final_score_vec.i16s[1] = 0;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
@@ -347,43 +347,43 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
-                   linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t, linear_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(            //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
-        unsigned const tasks_count,              // ! Unlike CPU, uses `unsigned`
-        sz_i32_t const *scores_pre_substitution, //
-        sz_i32_t const *scores_pre_insertion,    //
-        sz_i32_t const *scores_pre_deletion,     //
-        sz_i32_t *scores_new) noexcept {
+        unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
+        i32_t const *scores_pre_substitution, //
+        i32_t const *scores_pre_insertion,    //
+        i32_t const *scores_pre_deletion,     //
+        i32_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
         sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
         error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
-        sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
-        sz_i32_t final_score = 0;
+        i32_t const gap_costs = this->gap_costs_.open_or_extend;
+        i32_t final_score = 0;
 
         for (unsigned i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
-            sz_i32_t pre_insertion = scores_pre_insertion[i];
-            sz_i32_t pre_deletion = scores_pre_deletion[i];
+            i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
+            i32_t pre_insertion = scores_pre_insertion[i];
+            i32_t pre_deletion = scores_pre_deletion[i];
             char first_char = load_immutable_(first_slice + tasks_count - i - 1);
             char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
-            sz_i32_t if_deletion_or_insertion = (std::max)(pre_deletion, pre_insertion) + gap_costs;
-            sz_i32_t cell_score;
+            i32_t if_deletion_or_insertion = (std::max)(pre_deletion, pre_insertion) + gap_costs;
+            i32_t cell_score;
 
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
@@ -417,35 +417,35 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_
  *  @note Requires Hopper generation GPUs to handle 2x `i16` scores at a time.
  */
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
-                   affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t, affine_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(            //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
-        unsigned const tasks_count,                // ! Unlike CPU, uses `unsigned`
-        sz_i16_t const *scores_pre_substitution,   //
-        sz_i16_t const *scores_pre_insertion,      //
-        sz_i16_t const *scores_pre_deletion,       //
-        sz_i16_t const *scores_running_insertions, //
-        sz_i16_t const *scores_running_deletions,  //
-        sz_i16_t *scores_new,                      //
-        sz_i16_t *scores_new_insertions,           //
-        sz_i16_t *scores_new_deletions) noexcept {
+        unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
+        i16_t const *scores_pre_substitution,   //
+        i16_t const *scores_pre_insertion,      //
+        i16_t const *scores_pre_deletion,       //
+        i16_t const *scores_running_insertions, //
+        i16_t const *scores_running_deletions,  //
+        i16_t *scores_new,                      //
+        i16_t *scores_new_insertions,           //
+        i16_t *scores_new_deletions) noexcept {
 
         error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
-        sz_i16_t const gap_open_cost = this->gap_costs_.open;
-        sz_i16_t const gap_extend_cost = this->gap_costs_.extend;
-        sz_u32_vec_t gap_open_cost_vec, gap_extend_cost_vec;
+        i16_t const gap_open_cost = this->gap_costs_.open;
+        i16_t const gap_extend_cost = this->gap_costs_.extend;
+        u32_vec_t gap_open_cost_vec, gap_extend_cost_vec;
         gap_open_cost_vec.i16s[0] = gap_open_cost_vec.i16s[1] = gap_open_cost;
         gap_extend_cost_vec.i16s[0] = gap_extend_cost_vec.i16s[1] = gap_extend_cost;
 
@@ -453,11 +453,11 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
-        sz_u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
-        sz_u32_vec_t cell_score_vec, final_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
+        u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
+        u32_vec_t cell_score_vec, final_score_vec;
         final_score_vec.i16s[0] = final_score_vec.i16s[1] = 0;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
@@ -526,54 +526,54 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_classes_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
-                   affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t, affine_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
-    using tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(            //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
-        unsigned const tasks_count,                // ! Unlike CPU, uses `unsigned`
-        sz_i32_t const *scores_pre_substitution,   //
-        sz_i32_t const *scores_pre_insertion,      //
-        sz_i32_t const *scores_pre_deletion,       //
-        sz_i32_t const *scores_running_insertions, //
-        sz_i32_t const *scores_running_deletions,  //
-        sz_i32_t *scores_new,                      //
-        sz_i32_t *scores_new_insertions,           //
-        sz_i32_t *scores_new_deletions) noexcept {
+        unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
+        i32_t const *scores_pre_substitution,   //
+        i32_t const *scores_pre_insertion,      //
+        i32_t const *scores_pre_deletion,       //
+        i32_t const *scores_running_insertions, //
+        i32_t const *scores_running_deletions,  //
+        i32_t *scores_new,                      //
+        i32_t *scores_new_insertions,           //
+        i32_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
         sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
-        sz_i32_t const gap_open_cost = this->gap_costs_.open;
-        sz_i32_t const gap_extend_cost = this->gap_costs_.extend;
+        i32_t const gap_open_cost = this->gap_costs_.open;
+        i32_t const gap_extend_cost = this->gap_costs_.extend;
         error_costs_classes_in_cuda_shared_memory_t const &substituter = this->substituter_;
-        sz_i32_t final_score = 0;
+        i32_t final_score = 0;
 
         for (unsigned i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
-            sz_i32_t pre_insertion_opening = scores_pre_insertion[i];
-            sz_i32_t pre_deletion_opening = scores_pre_deletion[i];
-            sz_i32_t pre_insertion_expansion = scores_running_insertions[i];
-            sz_i32_t pre_deletion_expansion = scores_running_deletions[i];
+            i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
+            i32_t pre_insertion_opening = scores_pre_insertion[i];
+            i32_t pre_deletion_opening = scores_pre_deletion[i];
+            i32_t pre_insertion_expansion = scores_running_insertions[i];
+            i32_t pre_deletion_expansion = scores_running_deletions[i];
             char first_char = load_immutable_(first_slice + tasks_count - i - 1);
             char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
-            sz_i32_t if_substitution = pre_substitution + cost_of_substitution;
-            sz_i32_t if_insertion = __viaddmax_s32(pre_insertion_opening, gap_open_cost,
-                                                   pre_insertion_expansion + gap_extend_cost);
-            sz_i32_t if_deletion = __viaddmax_s32(pre_deletion_opening, gap_open_cost,
-                                                  pre_deletion_expansion + gap_extend_cost);
-            sz_i32_t cell_score;
+            i32_t if_substitution = pre_substitution + cost_of_substitution;
+            i32_t if_insertion = __viaddmax_s32(pre_insertion_opening, gap_open_cost,
+                                                pre_insertion_expansion + gap_extend_cost);
+            i32_t if_deletion = __viaddmax_s32(pre_deletion_opening, gap_open_cost,
+                                               pre_deletion_expansion + gap_extend_cost);
+            i32_t cell_score;
 
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
@@ -605,23 +605,23 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_classes_in_
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
-                   linear_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t, linear_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t,
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
-    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };
 
 template <sz_similarity_locality_t locality_>
-struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
-                   affine_gap_costs_t, sz_maximize_score_k, locality_, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
+struct tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t, affine_gap_costs_t,
+                   sz_maximize_score_k, locality_, sz_caps_ckh_k>
+    : public tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t,
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
-    using tile_scorer<char const *, char const *, sz_i64_t, error_costs_classes_in_cuda_shared_memory_t,
+    using tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cuda_shared_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };

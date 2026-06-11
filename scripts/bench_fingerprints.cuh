@@ -45,6 +45,20 @@ using fingerprint_min_counts_t = std::array<u32_t, default_embedding_dims_k>;
 using fingerprints_min_hashes_t = unified_vector<fingerprint_min_hashes_t>;
 using fingerprints_min_counts_t = unified_vector<fingerprint_min_counts_t>;
 
+/**
+ *  @brief Reads the device-measured `elapsed_milliseconds` out of a fingerprinting engine's return value.
+ *
+ *  The CUDA fingerprinting backends return a `cuda_status_t` carrying CUDA-event timing of the launched
+ *  kernels plus the drain; the CPU backends return a plain `sz::status_t` with no such field. The overloads
+ *  below pick the right path at compile time and report a negative sentinel for engines that never measured
+ *  the GPU, so the harness can contrast wall-clock against the kernel time only where it exists.
+ */
+template <typename status_type_>
+float engine_gpu_milliseconds_(status_type_ const &engine_result) noexcept {
+    if constexpr (requires { engine_result.elapsed_milliseconds; }) return engine_result.elapsed_milliseconds;
+    else return -1.0f;
+}
+
 #pragma region Multi-Pattern Search
 
 /** @brief Wraps a hardware-specific fingerprinting backend into something @b `bench_nullary`-compatible. */

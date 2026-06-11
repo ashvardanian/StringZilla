@@ -278,29 +278,28 @@ STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS
 
 The benchmark harness reads these environment variables:
 
-| Variable              | Description                                                        |   Default |
-| :-------------------- | :---------------------------------------------------------------- | --------: |
-| `STRINGWARS_DATASET`  | Path to the input corpus                                          |  required |
-| `STRINGWARS_FILTER`   | Regex over benchmark names; only matching backends run            |     (all) |
-| `STRINGWARS_DURATION` | Seconds per benchmark (longer = steadier numbers)                 | 1 debug / 10 release |
-| `STRINGWARS_MAX_TOKENS` | Cap on tokens kept, for faster, smaller runs                    | unlimited |
-| `STRINGWARS_BATCH`    | Comma-separated batch-size override (skips the largest sweep)     |  backend default |
-| `STRINGWARS_STRESS`   | Run the correctness stress phase (`0` to skip while timing)       |        on |
-| `STRINGWARS_SEED`     | Non-zero shuffles tokens; `0` keeps deterministic order           |         0 |
+| Variable                | Description                                                   |              Default |
+| :---------------------- | :------------------------------------------------------------ | -------------------: |
+| `STRINGWARS_DATASET`    | Path to the input corpus                                      |             required |
+| `STRINGWARS_FILTER`     | Regex over benchmark names; only matching backends run        |                (all) |
+| `STRINGWARS_DURATION`   | Seconds per benchmark (longer = steadier numbers)             | 1 debug / 10 release |
+| `STRINGWARS_MAX_TOKENS` | Cap on tokens kept, for faster, smaller runs                  |            unlimited |
+| `STRINGWARS_BATCH`      | Comma-separated batch-size override (skips the largest sweep) |      backend default |
+| `STRINGWARS_STRESS`     | Run the correctness stress phase (`0` to skip while timing)   |                   on |
+| `STRINGWARS_SEED`       | Non-zero shuffles tokens; `0` keeps deterministic order       |                    0 |
 
 For a fast inner loop, scope to one backend on a small dataset, cap tokens, skip the stress phase, and use short runs:
 
 ```bash
 STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
-  STRINGWARS_MAX_TOKENS=65536 STRINGWARS_BATCH=1024 \
-  STRINGWARS_STRESS=0 STRINGWARS_DURATION=1 \
-  build_release/stringzilla_bench_find_cpp20
+    STRINGWARS_MAX_TOKENS=65536 STRINGWARS_BATCH=1024 \
+    STRINGWARS_STRESS=0 STRINGWARS_DURATION=1 \
+    build_release/stringzilla_bench_find_cpp20
 ```
 
-Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the
-ratio between two backends in the *same* run stays stable. Compare A/B within one run; raise
-`STRINGWARS_DURATION` and use a quiet machine when you need stable absolute numbers. The work itself is
-deterministic at seed 0.
+Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the ratio between two backends in the _same_ run stays stable.
+Compare A/B within one run; raise `STRINGWARS_DURATION` and use a quiet machine when you need stable absolute numbers.
+The work itself is deterministic at seed 0.
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
 All of them feature file-level documentation, and are designed to be self-explanatory.

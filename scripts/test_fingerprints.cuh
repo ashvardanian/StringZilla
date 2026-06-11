@@ -59,8 +59,13 @@ void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const 
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice
+        // Compute the hash of the slice. The reference recomputes each window from scratch, so the work is
+        // O(positions * window_width); bound the positions so super-wide windows (e.g. 30000) on the 100 KB
+        // inputs stay fast - a few hundred rolled positions already exercise the push/roll/digest equivalence.
         std::size_t count_hashes = str.size() - window_width + 1;
+        std::size_t const verification_budget_k = 1u << 20; // ~1M reference `push()` calls per string
+        std::size_t const max_positions = (std::max<std::size_t>)(verification_budget_k / window_width, 64);
+        if (count_hashes > max_positions) count_hashes = max_positions;
         std::vector<hash_t> hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
             state_t slice_state = 0;
@@ -74,8 +79,9 @@ void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const 
         hash_t rolling_hash = hasher.digest(rolling_state);
         sz_assert_(rolling_hash == hashes[0]);
 
-        // Now compute the rolling hash and compare it to the slice hashes
-        for (std::size_t j = window_width; j < str.size(); ++j) {
+        // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
+        std::size_t const rolling_end = window_width + count_hashes - 1;
+        for (std::size_t j = window_width; j < rolling_end; ++j) {
             rolling_state = hasher.roll(rolling_state, str[j - window_width], str[j]);
             rolling_hash = hasher.digest(rolling_state);
             sz_assert_(rolling_hash == hashes[j - window_width + 1]);
@@ -85,7 +91,7 @@ void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const 
 
 template <typename hasher_type_, typename baseline_hasher_type_>
 void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline_hasher,
-                         std::vector<std::string> const &strs) {
+                          std::vector<std::string> const &strs) {
 
     using hasher_t = typename std::decay<hasher_type_>::type;
     using state_t = typename hasher_t::state_t;
@@ -102,8 +108,13 @@ void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baselin
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice
+        // Compute the hash of the slice. The reference recomputes each window from scratch, so the work is
+        // O(positions * window_width); bound the positions so super-wide windows (e.g. 30000) on the 100 KB
+        // inputs stay fast - a few hundred rolled positions already exercise the push/roll/digest equivalence.
         std::size_t count_hashes = str.size() - window_width + 1;
+        std::size_t const verification_budget_k = 1u << 20; // ~1M reference `push()` calls per string
+        std::size_t const max_positions = (std::max<std::size_t>)(verification_budget_k / window_width, 64);
+        if (count_hashes > max_positions) count_hashes = max_positions;
         std::vector<hash_t> hashes(count_hashes);
         std::vector<baseline_hash_t> baseline_hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
@@ -129,8 +140,9 @@ void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baselin
         baseline_hash_t baseline_rolling_hash = baseline_hasher.digest(baseline_rolling_state);
         sz_assert_(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline hashes");
 
-        // Now compute the rolling hash and compare it to the slice hashes
-        for (std::size_t j = window_width; j < str.size(); ++j) {
+        // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
+        std::size_t const rolling_end = window_width + count_hashes - 1;
+        for (std::size_t j = window_width; j < rolling_end; ++j) {
             rolling_state = hasher.roll(rolling_state, str[j - window_width], str[j]);
             rolling_hash = hasher.digest(rolling_state);
 

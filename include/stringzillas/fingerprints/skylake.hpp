@@ -62,10 +62,11 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
     using min_hashes_span_t = span<min_hash_t, dimensions_k>;
     using min_counts_span_t = span<min_count_t, dimensions_k>;
 
-    static constexpr unsigned hashes_per_zmm_k = sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
+    static constexpr unsigned hashes_per_zmm_k = sizeof(u512_vec_t) / sizeof(rolling_state_t);
     static constexpr bool has_incomplete_tail_group_k = (dimensions_k % hashes_per_zmm_k) != 0;
-    static constexpr size_t aligned_dimensions_k =
-        has_incomplete_tail_group_k ? (dimensions_k / hashes_per_zmm_k + 1) * hashes_per_zmm_k : (dimensions_k);
+    static constexpr size_t aligned_dimensions_k = has_incomplete_tail_group_k
+                                                       ? (dimensions_k / hashes_per_zmm_k + 1) * hashes_per_zmm_k
+                                                       : (dimensions_k);
     static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_zmm_k;
 
     static_assert(dimensions_k <= 256, "Too many dimensions to keep on stack");
@@ -262,14 +263,14 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         unsigned const first_dim = group_index * hashes_per_zmm_k;
 
         // Register space for in-out variables
-        sz_u512_vec_t last_states_vec;
-        sz_u512_vec_t rolling_minimums_vec;
-        sz_u256_vec_t rolling_counts_vec;
+        u512_vec_t last_states_vec;
+        u512_vec_t rolling_minimums_vec;
+        u256_vec_t rolling_counts_vec;
 
         // Use masked loads for the incomplete tail group
         if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k) {
-            __mmask8 const load_mask =
-                dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim) : (__mmask8)0;
+            __mmask8 const load_mask = dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim)
+                                                                : (__mmask8)0;
             last_states_vec.zmm_pd = _mm512_maskz_loadu_pd(load_mask, &last_states[first_dim]);
             rolling_minimums_vec.zmm_pd = _mm512_maskz_loadu_pd(load_mask, &rolling_minimums[first_dim]);
             rolling_counts_vec.ymm = _mm256_maskz_loadu_epi32(load_mask, &rolling_counts[first_dim]);
@@ -282,7 +283,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         }
 
         // Temporary variables for the rolling state
-        sz_u512_vec_t multipliers_vec, discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
+        u512_vec_t multipliers_vec, discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
         multipliers_vec.zmm_pd = _mm512_loadu_pd(&multipliers_[first_dim]);
         discarding_multipliers_vec.zmm_pd = _mm512_loadu_pd(&discarding_multipliers_[first_dim]);
         modulos_vec.zmm_pd = _mm512_loadu_pd(&modulos_[first_dim]);
@@ -321,8 +322,8 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
             // `discarding_multipliers_` folds in the `multipliers_` and is non-negative, so the fused
             // intermediate stays within `[0, 2⁵²)` without underflowing zero before the reduction.
             last_states_vec.zmm_pd = _mm512_fmadd_pd(last_states_vec.zmm_pd, multipliers_vec.zmm_pd, new_term_zmm);
-            last_states_vec.zmm_pd =
-                _mm512_fmadd_pd(discarding_multipliers_vec.zmm_pd, old_term_zmm, last_states_vec.zmm_pd);
+            last_states_vec.zmm_pd = _mm512_fmadd_pd(discarding_multipliers_vec.zmm_pd, old_term_zmm,
+                                                     last_states_vec.zmm_pd);
             last_states_vec.zmm_pd = barrett_mod( //
                 last_states_vec.zmm_pd,           //
                 modulos_vec.zmm_pd,               //
@@ -331,21 +332,21 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
             // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
             __mmask8 found_mask = _mm512_cmp_pd_mask(last_states_vec.zmm_pd, rolling_minimums_vec.zmm_pd, _CMP_LE_OQ);
             __mmask8 discard_mask = _mm512_cmp_pd_mask(last_states_vec.zmm_pd, rolling_minimums_vec.zmm_pd, _CMP_GE_OQ);
-            rolling_minimums_vec.zmm_pd =
-                _mm512_mask_mov_pd(rolling_minimums_vec.zmm_pd, found_mask, last_states_vec.zmm_pd);
+            rolling_minimums_vec.zmm_pd = _mm512_mask_mov_pd(rolling_minimums_vec.zmm_pd, found_mask,
+                                                             last_states_vec.zmm_pd);
 
             // A branchless way to update the counts
             // 1. Discard "min counts" to 0, if a new minimum is found
             // 2. Increment the counts for new & existing minimums
             rolling_counts_vec.ymm = _mm256_maskz_mov_epi32(discard_mask, rolling_counts_vec.ymm);
-            rolling_counts_vec.ymm =
-                _mm256_mask_add_epi32(rolling_counts_vec.ymm, found_mask, rolling_counts_vec.ymm, ones_ymm);
+            rolling_counts_vec.ymm = _mm256_mask_add_epi32(rolling_counts_vec.ymm, found_mask, rolling_counts_vec.ymm,
+                                                           ones_ymm);
         }
 
         // Dump back the results from registers into our spans
         if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k) {
-            __mmask8 const store_mask =
-                dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim) : (__mmask8)0;
+            __mmask8 const store_mask = dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim)
+                                                                 : (__mmask8)0;
             _mm512_mask_storeu_pd(&last_states[first_dim], store_mask, last_states_vec.zmm_pd);
             _mm512_mask_storeu_pd(&rolling_minimums[first_dim], store_mask, rolling_minimums_vec.zmm_pd);
             _mm256_mask_storeu_epi32(&rolling_counts[first_dim], store_mask, rolling_counts_vec.ymm);
