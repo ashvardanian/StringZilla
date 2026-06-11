@@ -33,8 +33,8 @@ template <typename value_type_>
 struct unified_alloc {
     using value_type = value_type_;
     using pointer = value_type *;
-    using size_type = sz_size_t;
-    using difference_type = sz_ssize_t;
+    using size_type = size_t;
+    using difference_type = ssize_t;
 
     /*  Those are needed for compatibility with our custom containers.
      *  @see https://en.cppreference.com/w/cpp/memory/allocator_traits
@@ -397,10 +397,10 @@ struct cuda_launch_t {
  *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
  *  @see https://stackoverflow.com/a/40198552/2766161
  */
-__forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
+__forceinline__ __device__ u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
     // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
     // four consecutive bytes into a 32-bit register.
-    sz_u32_vec_t result;
+    u32_vec_t result;
     asm("{\n\t"                                                    //
         "   .reg .b64    aligned_ptr;\n\t"                         //
         "   .reg .b32    low, high, alignment;\n\t"                //

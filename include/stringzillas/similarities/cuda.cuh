@@ -765,7 +765,7 @@ template <                                                       //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void affine_score_across_cuda_device(               //
+__global__ void affine_score_across_cuda_device_(              //
     char_type_ const *shorter_ptr, index_type_ shorter_length, //
     char_type_ const *longer_ptr, index_type_ longer_length,   //
     final_score_type_ *result_ptr, score_type_ *diagonals_ptr, //
@@ -972,7 +972,7 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void linear_score_on_each_cuda_warp_(                             //
+__global__ void linear_score_per_cuda_warp_(                                 //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
     unsigned const shared_memory_size) {
@@ -1167,7 +1167,7 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void affine_score_on_each_cuda_warp_(                             //
+__global__ void affine_score_per_cuda_warp_(                                 //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, affine_gap_costs_t const gap_costs, //
     unsigned const shared_memory_size) {
@@ -1377,10 +1377,10 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
  *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
  */
 /** @brief Max string length (chars) for which Levenshtein runs as a register-only thread-per-pair kernel. */
-inline static constexpr unsigned levenshtein_on_each_cuda_thread_default_text_limit_k = 128;
+inline static constexpr unsigned register_text_limit_k = 128;
 
 template <typename char_type_>
-struct cuda_similarity_task_ {
+struct cuda_similarity_task {
     using char_t = char_type_;
 
     char_t const *shorter_ptr = nullptr;
@@ -1393,8 +1393,8 @@ struct cuda_similarity_task_ {
     bytes_per_cell_t bytes_per_cell = eight_bytes_per_cell_k; // ? Worst case, need the most memory per scalar.
     warp_tasks_density_t density = warps_working_together_k;  // ? Worst case, we are not using shared memory.
 
-    constexpr cuda_similarity_task_() = default;
-    constexpr cuda_similarity_task_(                  //
+    constexpr cuda_similarity_task() = default;
+    constexpr cuda_similarity_task(                   //
         char_t const *first_ptr, size_t first_length, //
         char_t const *second_ptr, size_t second_length) noexcept {
         if (first_length < second_length)
@@ -1410,362 +1410,389 @@ struct cuda_similarity_task_ {
     /** @brief Whether this task is small enough for the register-only thread-per-pair Levenshtein kernels. */
     constexpr bool fits_in_registers() const noexcept {
         return (bytes_per_cell == one_byte_per_cell_k || bytes_per_cell == two_bytes_per_cell_k) &&
-               shorter_length <= levenshtein_on_each_cuda_thread_default_text_limit_k &&
-               longer_length <= levenshtein_on_each_cuda_thread_default_text_limit_k;
+               shorter_length <= register_text_limit_k && longer_length <= register_text_limit_k;
     }
 };
 
 /**
- *  @brief Byte-wise SIMD helpers (4× `sz_u8_t` packed in a `sz_u32_t`) for the register-only Levenshtein kernel.
+ *  @brief Byte-wise SIMD helpers (4× `u8_t` packed in a `u32_t`) for the register-only Levenshtein kernel.
  *         On the device they map to the `__vcmpeq4`/`__vminu4`/`__vaddus4`/`__byte_perm` video instructions; the
  *         host fallbacks keep the kernel unit-testable on the CPU.
  */
-__forceinline__ __device__ __host__ sz_u32_t sz_u32_vcmpeq4_(sz_u32_t a, sz_u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t sz_u32_vcmpeq4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vcmpeq4(a, b);
 #else
-    sz_u32_t result = 0;
+    u32_t result = 0;
     for (int i = 0; i < 4; ++i) {
-        sz_u8_t byte_a = (a >> (i * 8)) & 0xFF, byte_b = (b >> (i * 8)) & 0xFF;
+        u8_t byte_a = (a >> (i * 8)) & 0xFF, byte_b = (b >> (i * 8)) & 0xFF;
         if (byte_a == byte_b) result |= 0xFFu << (i * 8);
     }
     return result;
 #endif
 }
 
-__forceinline__ __device__ __host__ sz_u32_t sz_u32_vminu4_(sz_u32_t a, sz_u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t sz_u32_vminu4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vminu4(a, b);
 #else
-    sz_u32_t result = 0;
+    u32_t result = 0;
     for (int i = 0; i < 4; ++i) {
-        sz_u8_t byte_a = (a >> (i * 8)) & 0xFF, byte_b = (b >> (i * 8)) & 0xFF;
-        result |= (sz_u32_t)(byte_a < byte_b ? byte_a : byte_b) << (i * 8);
+        u8_t byte_a = (a >> (i * 8)) & 0xFF, byte_b = (b >> (i * 8)) & 0xFF;
+        result |= (u32_t)(byte_a < byte_b ? byte_a : byte_b) << (i * 8);
     }
     return result;
 #endif
 }
 
-__forceinline__ __device__ __host__ sz_u32_t sz_u32_vaddus4_(sz_u32_t a, sz_u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t sz_u32_vaddus4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vaddus4(a, b);
 #else
-    sz_u32_t result = 0;
+    u32_t result = 0;
     for (int i = 0; i < 4; ++i) {
-        sz_u32_t sum = ((a >> (i * 8)) & 0xFF) + ((b >> (i * 8)) & 0xFF);
-        result |= (sz_u32_t)(sum > 0xFF ? 0xFF : sum) << (i * 8);
+        u32_t sum = ((a >> (i * 8)) & 0xFF) + ((b >> (i * 8)) & 0xFF);
+        result |= (u32_t)(sum > 0xFF ? 0xFF : sum) << (i * 8);
     }
     return result;
 #endif
 }
 
-__forceinline__ __device__ __host__ sz_u32_t sz_u32_byte_perm_(sz_u32_t x, sz_u32_t y, sz_u32_t selector) noexcept {
+__forceinline__ __device__ __host__ u32_t sz_u32_byte_perm_(u32_t x, u32_t y, u32_t selector) noexcept {
 #ifdef __CUDA_ARCH__
     return __byte_perm(x, y, selector);
 #else
-    sz_u8_t source[8];
+    u8_t source[8];
     for (int i = 0; i < 4; ++i) source[i] = (x >> (i * 8)) & 0xFF, source[i + 4] = (y >> (i * 8)) & 0xFF;
-    sz_u32_t result = 0;
-    for (int i = 0; i < 4; ++i) result |= (sz_u32_t)source[(selector >> (i * 4)) & 0x7] << (i * 8);
+    u32_t result = 0;
+    for (int i = 0; i < 4; ++i) result |= (u32_t)source[(selector >> (i * 4)) & 0x7] << (i * 8);
     return result;
 #endif
+}
+
+/** @brief Broadcasts a byte-wide cost into all four lanes of a packed `u32_t`. */
+__forceinline__ __device__ __host__ u32_t broadcast_cost_u8x4_(u8_t value) noexcept {
+    return (u32_t)value * 0x01010101u;
+}
+
+/** @brief Broadcasts a 16-bit cost into both lanes of a packed `u32_t`. */
+__forceinline__ __device__ __host__ u32_t broadcast_cost_u16x2_(u16_t value) noexcept {
+    return (u32_t)value | ((u32_t)value << 16);
+}
+
+/**
+ *  @brief Fills a packed DP row with the leading `(column index + 1) * gap` ladder, shared by the register kernels.
+ *  @param[out] packed_row The row of packed cells, @p lanes_per_pack cells of @p bits_per_lane bits per `u32_t`.
+ */
+__forceinline__ __device__ __host__ void fill_gap_ladder_(u32_t *packed_row, unsigned pack_count,
+                                                          unsigned lanes_per_pack, unsigned bits_per_lane,
+                                                          error_cost_t gap_cost) noexcept {
+    unsigned gap_ladder = gap_cost;
+    for (unsigned pack = 0; pack < pack_count; ++pack) {
+        u32_t value = 0;
+        for (unsigned lane = 0; lane < lanes_per_pack; ++lane) {
+            value |= (u32_t)gap_ladder << (lane * bits_per_lane);
+            gap_ladder += gap_cost;
+        }
+        packed_row[pack] = value;
+    }
 }
 
 /**
  *  @brief Register-only Levenshtein distance for strings up to @p max_text_length_ bytes, one thread per pair.
  *
  *  Wagner-Fischer with a single DP row kept entirely in registers, the (longer) string cached in registers, and
- *  cells stored as `sz_u8_t` packed 4-per-`sz_u32_t` so each video instruction advances four columns at once.
+ *  cells stored as `u8_t` packed 4-per-`u32_t` so each video instruction advances four columns at once.
  *  No shared memory and no `__syncwarp` - ideal for short inputs where the anti-diagonal warp kernel starves the
  *  warp. Saturates at 255, so callers must gate on @b `fits_in_registers` (≤1-byte cells, lengths ≤ the limit).
  */
 template <unsigned max_text_length_>
-struct register_optimal_levenshtein {
+struct register_levenshtein {
     static constexpr unsigned max_text_length_k = max_text_length_;
-    static constexpr unsigned vec_count_k = max_text_length_k / sizeof(sz_u32_vec_t);
+    static constexpr unsigned pack_count_k = max_text_length_k / sizeof(u32_vec_t);
 
-    sz_u32_vec_t row_vec_[vec_count_k];
-    sz_u32_vec_t longer_string_vec_[vec_count_k];
+    // `__byte_perm` lane selectors (one nibble per result byte; sources 0..3 are the first operand's bytes,
+    // 4..7 the second operand's). Used to build the diagonal and to run the packed left-dependency prefix scan.
+    static constexpr unsigned diagonal_selector_k = 0x6543;    // diag = {previous_row[3], top[0], top[1], top[2]}
+    static constexpr unsigned left_carry_selector_k = 0x6540;  // {left_cell, cell[0], cell[1], cell[2]}
+    static constexpr unsigned left_scan_selector_1_k = 0x2100; // {cell[0], cell[0], cell[1], cell[2]}
+    static constexpr unsigned left_scan_selector_2_k = 0x2110; // {cell[0], cell[1], cell[1], cell[2]}
+    static constexpr unsigned left_scan_selector_3_k = 0x2221; // {cell[1], cell[2], cell[2], cell[2]}
 
-    __forceinline__ __device__ __host__ sz_u8_t operator()(     //
-        sz_u8_t const *longer_string, unsigned longer_length,   //
-        sz_u8_t const *shorter_string, unsigned shorter_length, //
+    u32_vec_t row_cells_[pack_count_k];
+    u32_vec_t longer_chars_[pack_count_k];
+
+    __forceinline__ __device__ __host__ u8_t operator()(     //
+        u8_t const *longer_string, unsigned longer_length,   //
+        u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
 
-        // Initialize the first row with the column-index * gap-cost ladder, four cells at a time.
-        for (unsigned i = 0, running_gap = gap_costs.open_or_extend; i < vec_count_k; ++i) {
-            row_vec_[i].u32 = running_gap, running_gap += gap_costs.open_or_extend;
-            row_vec_[i].u32 |= running_gap << 8, running_gap += gap_costs.open_or_extend;
-            row_vec_[i].u32 |= running_gap << 16, running_gap += gap_costs.open_or_extend;
-            row_vec_[i].u32 |= running_gap << 24, running_gap += gap_costs.open_or_extend;
-        }
+        error_cost_t const gap_cost = gap_costs.open_or_extend;
+
+        // Initialize the first row with the (column index + 1) * gap ladder, four cells per pack.
+        fill_gap_ladder_(reinterpret_cast<u32_t *>(row_cells_), pack_count_k, 4, 8, gap_cost);
 
         // Cache the longer string in registers (packed), accessed in the inner loop.
-        for (unsigned i = 0; i < longer_length; ++i) longer_string_vec_[0].u8s[i] = longer_string[i];
+        for (unsigned i = 0; i < longer_length; ++i) longer_chars_[0].u8s[i] = longer_string[i];
 
-        error_cost_t const gap_cost = gap_costs.open_or_extend;
-        error_cost_t const match_cost = substituter.match, mismatch_cost = substituter.mismatch;
-        sz_u32_vec_t gap_vec, match_vec, mismatch_vec;
-        gap_vec.u32 = gap_cost | (gap_cost << 8) | (gap_cost << 16) | (gap_cost << 24);
-        match_vec.u32 = match_cost | (match_cost << 8) | (match_cost << 16) | (match_cost << 24);
-        mismatch_vec.u32 = mismatch_cost | (mismatch_cost << 8) | (mismatch_cost << 16) | (mismatch_cost << 24);
+        u32_t const gap_cost_vec = broadcast_cost_u8x4_(gap_cost);
+        u32_t const match_cost_vec = broadcast_cost_u8x4_(substituter.match);
+        u32_t const mismatch_cost_vec = broadcast_cost_u8x4_(substituter.mismatch);
 
         // Outer loop over the shorter string (fewer iterations).
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
-            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_u32_t const shorter_char_vec = shorter_char | (shorter_char << 8) | (shorter_char << 16) |
-                                              (shorter_char << 24);
-            sz_u8_t const col0_curr = row_idx * gap_cost;
-            sz_u8_t const col0_prev = (row_idx - 1) * gap_cost;
-            sz_u32_t prev_u32vec = col0_prev | (col0_prev << 8) | (col0_prev << 16) | (col0_prev << 24);
+            u8_t const shorter_char = shorter_string[row_idx - 1];
+            u32_t const shorter_char_vec = broadcast_cost_u8x4_(shorter_char);
+            u8_t const first_col_current = row_idx * gap_cost;
+            u8_t const first_col_previous = (row_idx - 1) * gap_cost;
+            u32_t previous_row_vec = broadcast_cost_u8x4_(first_col_previous);
 
-            // Inner loop over the longer string, four columns at a time.
-            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-                sz_u32_t const top_u32vec = row_vec_[vec_idx].u32;
-                sz_u32_t const diag_u32vec = sz_u32_byte_perm_(prev_u32vec, top_u32vec, 0x6543);
-                sz_u32_t const match_u32vec = sz_u32_vcmpeq4_(shorter_char_vec, longer_string_vec_[vec_idx].u32);
-                sz_u32_t const subst_u32vec = (match_vec.u32 & match_u32vec) | (mismatch_vec.u32 & ~match_u32vec);
-                sz_u32_t const from_diag = sz_u32_vaddus4_(diag_u32vec, subst_u32vec);
-                sz_u32_t const from_top = sz_u32_vaddus4_(top_u32vec, gap_vec.u32);
-                sz_u32_t result_u32vec = sz_u32_vminu4_(from_diag, from_top);
+            // Inner loop over the longer string, four columns per pack.
+            for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+                u32_t const top_vec = row_cells_[pack_idx].u32;
+                u32_t const diagonal_vec = sz_u32_byte_perm_(previous_row_vec, top_vec, diagonal_selector_k);
+                u32_t const match_mask_vec = sz_u32_vcmpeq4_(shorter_char_vec, longer_chars_[pack_idx].u32);
+                u32_t const cost_of_substitution_vec = (match_cost_vec & match_mask_vec) |
+                                                       (mismatch_cost_vec & ~match_mask_vec);
+                u32_t const cost_if_substitution_vec = sz_u32_vaddus4_(diagonal_vec, cost_of_substitution_vec);
+                u32_t const cost_if_top_gap_vec = sz_u32_vaddus4_(top_vec, gap_cost_vec);
+                u32_t cell_score_vec = sz_u32_vminu4_(cost_if_substitution_vec, cost_if_top_gap_vec);
 
-                // Propagate the left dependency across the four packed cells (sequential scan).
-                sz_u32_t const left_source = (vec_idx == 0) ? col0_curr : (row_vec_[vec_idx - 1].u32 >> 24);
-                sz_u32_t left_u32vec = left_source | (left_source << 8) | (left_source << 16) | (left_source << 24);
-                sz_u32_t shifted = sz_u32_byte_perm_(left_u32vec, result_u32vec, 0x6540);
-                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted, gap_vec.u32));
-                shifted = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2100);
-                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted, gap_vec.u32));
-                shifted = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2110);
-                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted, gap_vec.u32));
-                shifted = sz_u32_byte_perm_(result_u32vec, result_u32vec, 0x2221);
-                result_u32vec = sz_u32_vminu4_(result_u32vec, sz_u32_vaddus4_(shifted, gap_vec.u32));
+                // Propagate the left dependency across the four packed cells (sequential prefix scan).
+                u8_t const left_cell = (pack_idx == 0) ? first_col_current : (row_cells_[pack_idx - 1].u32 >> 24);
+                u32_t cost_if_left_gap_vec = sz_u32_byte_perm_(broadcast_cost_u8x4_(left_cell), cell_score_vec,
+                                                               left_carry_selector_k);
+                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_1_k);
+                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_2_k);
+                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_3_k);
+                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
 
-                prev_u32vec = top_u32vec;
-                row_vec_[vec_idx].u32 = result_u32vec;
+                previous_row_vec = top_vec;
+                row_cells_[pack_idx].u32 = cell_score_vec;
             }
         }
 
-        unsigned const result_vec_idx = (longer_length - 1) / 4, result_byte_idx = (longer_length - 1) % 4;
-        return (row_vec_[result_vec_idx].u32 >> (result_byte_idx * 8)) & 0xFF;
+        unsigned const result_pack_idx = (longer_length - 1) / 4, result_lane_idx = (longer_length - 1) % 4;
+        return (row_cells_[result_pack_idx].u32 >> (result_lane_idx * 8)) & 0xFF;
     }
 };
 
 /**
  *  @brief Levenshtein distances with @b one-thread-per-pair using only register memory, for short inputs.
  *
- *  Each thread runs a full register-resident DP (@ref register_optimal_levenshtein). Inputs are conceptually
+ *  Each thread runs a full register-resident DP (@ref register_levenshtein). Inputs are conceptually
  *  padded to a fixed @p max_text_length_ so the inner loop is branch-free; the divergent dimension is the outer
  *  (row) loop, so callers minimize divergence by keeping per-warp row counts similar (or putting a shared query
  *  on the outer axis when there are more targets than queries).
  */
-template <                                                                           //
-    typename task_type_,                                                             //
-    typename char_type_ = char,                                                      //
-    typename score_type_ = sz_u8_t,                                                  //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
-    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+template <                                            //
+    typename task_type_,                              //
+    typename char_type_ = char,                       //
+    typename score_type_ = u8_t,                      //
+    sz_capability_t capability_ = sz_cap_cuda_k,      //
+    unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 4) void levenshtein_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                  //
+__global__ __launch_bounds__(256, 4) void levenshtein_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                              //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_optimal_levenshtein<max_text_length_> levenshtein_computer;
+    register_levenshtein<max_text_length_> levenshtein_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                                  //
-            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
-            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+        task.result = levenshtein_computer(                                                               //
+            reinterpret_cast<u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
     }
 }
 
 /**
  *  @brief Register-only Levenshtein for strings up to @p max_text_length_ bytes with @b 2-byte cells, one thread
- *         per pair. Like @ref register_optimal_levenshtein but packs @b two `sz_u16_t` cells per `sz_u32_t` (via the
+ *         per pair. Like @ref register_levenshtein but packs @b two `u16_t` cells per `u32_t` (via the
  *         16-bit video instructions), so it covers non-unit costs / distances that overflow the 1-byte variant.
  */
 template <unsigned max_text_length_>
-struct register_optimal_levenshtein_u16 {
+struct register_levenshtein_u16 {
     static constexpr unsigned max_text_length_k = max_text_length_;
-    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two `sz_u16_t` cells per `sz_u32_t`
+    static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two `u16_t` cells per `u32_t`
 
-    sz_u32_t row_vec_[vec_count_k];
-    sz_u8_t longer_chars_[max_text_length_k];
+    u32_t row_cells_[pack_count_k];
+    u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ sz_u16_t operator()(             //
-        sz_u8_t const *longer_string, unsigned longer_length,   //
-        sz_u8_t const *shorter_string, unsigned shorter_length, //
+    __forceinline__ __device__ u16_t operator()(             //
+        u8_t const *longer_string, unsigned longer_length,   //
+        u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
 
-        sz_u16_t const gap_cost = gap_costs.open_or_extend;
-        sz_u32_t const gap_vec = (sz_u32_t)gap_cost | ((sz_u32_t)gap_cost << 16);
-        sz_u32_t const match_vec = (sz_u32_t)substituter.match | ((sz_u32_t)substituter.match << 16);
-        sz_u32_t const mismatch_vec = (sz_u32_t)substituter.mismatch | ((sz_u32_t)substituter.mismatch << 16);
+        u16_t const gap_cost = gap_costs.open_or_extend;
+        u32_t const gap_cost_vec = broadcast_cost_u16x2_(gap_cost);
+        u32_t const match_cost_vec = broadcast_cost_u16x2_(substituter.match);
+        u32_t const mismatch_cost_vec = broadcast_cost_u16x2_(substituter.mismatch);
 
-        for (unsigned i = 0, running_gap = gap_cost; i < vec_count_k; ++i) {
-            sz_u16_t const low = running_gap;
-            running_gap += gap_cost;
-            sz_u16_t const high = running_gap;
-            running_gap += gap_cost;
-            row_vec_[i] = (sz_u32_t)low | ((sz_u32_t)high << 16);
-        }
+        // Initialize the first row with the (column index + 1) * gap ladder, two cells per pack.
+        fill_gap_ladder_(row_cells_, pack_count_k, 2, 16, gap_cost);
         for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
 
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
-            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_u32_t const shorter_char_vec = (sz_u32_t)shorter_char | ((sz_u32_t)shorter_char << 16);
-            sz_u16_t left_carry = row_idx * gap_cost;       // cell[j-1] for the first pair = column 0 of this row
-            sz_u16_t diag_carry = (row_idx - 1) * gap_cost; // top[j-1] for the first pair = column 0 of previous row
-            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-                sz_u32_t const top = row_vec_[vec_idx];
-                sz_u16_t const top0 = top & 0xFFFF, top1 = top >> 16;
-                sz_u32_t const diag = (sz_u32_t)diag_carry | ((sz_u32_t)top0 << 16);
-                sz_u32_t const chars = (sz_u32_t)longer_chars_[2 * vec_idx] |
-                                       ((sz_u32_t)longer_chars_[2 * vec_idx + 1] << 16);
-                sz_u32_t const equal = __vcmpeq2(shorter_char_vec, chars);
-                sz_u32_t const subst = (match_vec & equal) | (mismatch_vec & ~equal);
-                sz_u32_t const r = __vminu2(__vaddus2(diag, subst), __vaddus2(top, gap_vec));
-                sz_u16_t r0 = r & 0xFFFF, r1 = r >> 16;
-                unsigned const from_left0 = (unsigned)left_carry + gap_cost;
-                if (from_left0 < r0) r0 = (sz_u16_t)from_left0;
-                unsigned const from_left1 = (unsigned)r0 + gap_cost;
-                if (from_left1 < r1) r1 = (sz_u16_t)from_left1;
-                row_vec_[vec_idx] = (sz_u32_t)r0 | ((sz_u32_t)r1 << 16);
-                left_carry = r1;
-                diag_carry = top1;
+            u8_t const shorter_char = shorter_string[row_idx - 1];
+            u32_t const shorter_char_vec = broadcast_cost_u16x2_(shorter_char);
+            u16_t left_cell = row_idx * gap_cost;            // west neighbor: column 0 of this row
+            u16_t diagonal_carry = (row_idx - 1) * gap_cost; // NW neighbor: column 0 of the previous row
+            for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+                u32_t const top_vec = row_cells_[pack_idx];
+                u16_t const top_low = top_vec & 0xFFFF, top_high = top_vec >> 16;
+                u32_t const diagonal_vec = (u32_t)diagonal_carry | ((u32_t)top_low << 16);
+                u32_t const longer_pair_vec = (u32_t)longer_chars_[2 * pack_idx] |
+                                              ((u32_t)longer_chars_[2 * pack_idx + 1] << 16);
+                u32_t const match_mask = __vcmpeq2(shorter_char_vec, longer_pair_vec);
+                u32_t const cost_of_substitution_vec = (match_cost_vec & match_mask) |
+                                                       (mismatch_cost_vec & ~match_mask);
+                u32_t const cell_score_vec = __vminu2(__vaddus2(diagonal_vec, cost_of_substitution_vec),
+                                                      __vaddus2(top_vec, gap_cost_vec));
+                u16_t cell_low = cell_score_vec & 0xFFFF, cell_high = cell_score_vec >> 16;
+                cell_low = (u16_t)std::min<unsigned>((unsigned)left_cell + gap_cost, cell_low);
+                cell_high = (u16_t)std::min<unsigned>((unsigned)cell_low + gap_cost, cell_high);
+                row_cells_[pack_idx] = (u32_t)cell_low | ((u32_t)cell_high << 16);
+                left_cell = cell_high;
+                diagonal_carry = top_high;
             }
         }
-        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
-        return (row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF;
+        unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
+        return (row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF;
     }
 };
 
-/** @brief One-thread-per-pair Levenshtein with @b 2-byte register cells; see @ref levenshtein_on_each_cuda_thread_. */
-template <                                                                           //
-    typename task_type_,                                                             //
-    typename char_type_ = char,                                                      //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
-    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+/** @brief One-thread-per-pair Levenshtein with @b 2-byte register cells; see @ref levenshtein_per_cuda_thread_. */
+template <                                            //
+    typename task_type_,                              //
+    typename char_type_ = char,                       //
+    sz_capability_t capability_ = sz_cap_cuda_k,      //
+    unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 2) void levenshtein_u16_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                      //
+__global__ __launch_bounds__(256, 2) void levenshtein_u16_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                  //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_optimal_levenshtein_u16<max_text_length_> levenshtein_computer;
+    register_levenshtein_u16<max_text_length_> levenshtein_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                                  //
-            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
-            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+        task.result = levenshtein_computer(                                                               //
+            reinterpret_cast<u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
     }
 }
 
 /**
  *  @brief Register-only @b affine-gap Levenshtein for strings up to @p max_text_length_ bytes with @b 2-byte cells,
- *         one thread per pair. Like @ref register_optimal_levenshtein_u16 but runs the Gotoh recurrence: it keeps a
+ *         one thread per pair. Like @ref register_levenshtein_u16 but runs the Gotoh recurrence: it keeps a
  *         second register row for the insertion matrix @b I (`ins_vec_`) and carries the deletion matrix @b D as a
  *         scalar across the row, so gap opening and extension are priced separately.
  */
 template <unsigned max_text_length_>
-struct register_optimal_levenshtein_u16_affine {
+struct register_levenshtein_u16_affine {
     static constexpr unsigned max_text_length_k = max_text_length_;
-    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two `sz_u16_t` cells per `sz_u32_t`
+    static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two `u16_t` cells per `u32_t`
 
-    sz_u32_t row_vec_[vec_count_k]; // ? the score matrix M
-    sz_u32_t ins_vec_[vec_count_k]; // ? the insertion matrix I (gap from the row above)
-    sz_u8_t longer_chars_[max_text_length_k];
+    u32_t row_cells_[pack_count_k];       // ? the score matrix M
+    u32_t insertion_cells_[pack_count_k]; // ? the insertion matrix I (gap from the row above)
+    u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ sz_u16_t operator()(             //
-        sz_u8_t const *longer_string, unsigned longer_length,   //
-        sz_u8_t const *shorter_string, unsigned shorter_length, //
+    __forceinline__ __device__ u16_t operator()(             //
+        u8_t const *longer_string, unsigned longer_length,   //
+        u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
 
-        sz_u16_t const open = gap_costs.open, extend = gap_costs.extend;
-        sz_u32_t const open_vec = (sz_u32_t)open | ((sz_u32_t)open << 16);
-        sz_u32_t const extend_vec = (sz_u32_t)extend | ((sz_u32_t)extend << 16);
-        sz_u32_t const match_vec = (sz_u32_t)substituter.match | ((sz_u32_t)substituter.match << 16);
-        sz_u32_t const mismatch_vec = (sz_u32_t)substituter.mismatch | ((sz_u32_t)substituter.mismatch << 16);
+        u16_t const open = gap_costs.open, extend = gap_costs.extend;
+        u32_t const open_cost_vec = broadcast_cost_u16x2_(open);
+        u32_t const extend_cost_vec = broadcast_cost_u16x2_(extend);
+        u32_t const match_cost_vec = broadcast_cost_u16x2_(substituter.match);
+        u32_t const mismatch_cost_vec = broadcast_cost_u16x2_(substituter.mismatch);
 
         // Row 0: M[0][j] = open + extend*(j-1); the gap matrix gets the higher-magnitude "discard" boundary so it
         // never wins, but stays bounded (no overflow on later additions) - matching the serial/warp affine scorer.
-        for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-            unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
-            sz_u16_t const m0 = open + extend * (col0 - 1), m1 = open + extend * (col1 - 1);
-            row_vec_[vec_idx] = (sz_u32_t)m0 | ((sz_u32_t)m1 << 16);
-            sz_u16_t const g0 = (open + extend) + (open + extend * (col0 - 1));
-            sz_u16_t const g1 = (open + extend) + (open + extend * (col1 - 1));
-            ins_vec_[vec_idx] = (sz_u32_t)g0 | ((sz_u32_t)g1 << 16);
+        for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+            unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
+            u16_t const cell_low = open + extend * (column_low - 1);
+            u16_t const cell_high = open + extend * (column_high - 1);
+            row_cells_[pack_idx] = (u32_t)cell_low | ((u32_t)cell_high << 16);
+            u16_t const insertion_low = (open + extend) + (open + extend * (column_low - 1));
+            u16_t const insertion_high = (open + extend) + (open + extend * (column_high - 1));
+            insertion_cells_[pack_idx] = (u32_t)insertion_low | ((u32_t)insertion_high << 16);
         }
         for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
 
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
-            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_u32_t const shorter_char_vec = (sz_u32_t)shorter_char | ((sz_u32_t)shorter_char << 16);
-            sz_u16_t left_M = open + extend * (row_idx - 1);                      // M[row][0]
-            sz_u16_t diag_M = row_idx == 1 ? 0 : (open + extend * (row_idx - 2)); // M[row-1][0]
-            sz_u16_t left_D = (open + extend) + (open + extend * (row_idx - 1));  // D[row][0] (discard boundary)
-            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-                sz_u32_t const top = row_vec_[vec_idx];
-                sz_u16_t const top0 = top & 0xFFFF, top1 = top >> 16;
-                sz_u32_t const prev_ins = ins_vec_[vec_idx];
+            u8_t const shorter_char = shorter_string[row_idx - 1];
+            u32_t const shorter_char_vec = broadcast_cost_u16x2_(shorter_char);
+            u16_t left_cell = open + extend * (row_idx - 1);                           // M[row][0]
+            u16_t diagonal_carry = row_idx == 1 ? 0 : (open + extend * (row_idx - 2)); // M[row-1][0]
+            u16_t left_deletion = (open + extend) + (open + extend * (row_idx - 1));   // D[row][0] (discard boundary)
+            for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+                u32_t const top_vec = row_cells_[pack_idx];
+                u16_t const top_low = top_vec & 0xFFFF, top_high = top_vec >> 16;
+                u32_t const previous_insertion_vec = insertion_cells_[pack_idx];
                 // I[row][j] = min(M[row-1][j] + open, I[row-1][j] + extend) - independent per cell, so packed.
-                sz_u32_t const ins = __vminu2(__vaddus2(top, open_vec), __vaddus2(prev_ins, extend_vec));
-                // diag = (M[row-1][2v], M[row-1][2v+1]); subst cost per cell; the substitution candidate, packed.
-                sz_u32_t const diag = (sz_u32_t)diag_M | ((sz_u32_t)top0 << 16);
-                sz_u32_t const chars = (sz_u32_t)longer_chars_[2 * vec_idx] |
-                                       ((sz_u32_t)longer_chars_[2 * vec_idx + 1] << 16);
-                sz_u32_t const equal = __vcmpeq2(shorter_char_vec, chars);
-                sz_u32_t const subst = (match_vec & equal) | (mismatch_vec & ~equal);
-                // min(diag + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
-                sz_u32_t const partial = __vminu2(__vaddus2(diag, subst), ins);
-                sz_u16_t const partial0 = partial & 0xFFFF, partial1 = partial >> 16;
+                u32_t const insertion_vec = __vminu2(__vaddus2(top_vec, open_cost_vec),
+                                                     __vaddus2(previous_insertion_vec, extend_cost_vec));
+                // diagonal = (M[row-1][2v], M[row-1][2v+1]); per-cell substitution cost; the substitution candidate.
+                u32_t const diagonal_vec = (u32_t)diagonal_carry | ((u32_t)top_low << 16);
+                u32_t const longer_pair_vec = (u32_t)longer_chars_[2 * pack_idx] |
+                                              ((u32_t)longer_chars_[2 * pack_idx + 1] << 16);
+                u32_t const match_mask = __vcmpeq2(shorter_char_vec, longer_pair_vec);
+                u32_t const cost_of_substitution_vec = (match_cost_vec & match_mask) |
+                                                       (mismatch_cost_vec & ~match_mask);
+                // min(diagonal + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
+                u32_t const match_or_insert_vec = __vminu2(__vaddus2(diagonal_vec, cost_of_substitution_vec),
+                                                           insertion_vec);
+                u16_t const match_or_insert_low = match_or_insert_vec & 0xFFFF;
+                u16_t const match_or_insert_high = match_or_insert_vec >> 16;
                 // Deletion D carries left across the row (sequential): cell 0 then cell 1.
-                sz_u16_t const d0_open = left_M + open, d0_ext = left_D + extend;
-                sz_u16_t const d0 = sz_min_of_two(d0_open, d0_ext);
-                sz_u16_t const m0 = sz_min_of_two(partial0, d0);
-                sz_u16_t const d1_open = m0 + open, d1_ext = d0 + extend;
-                sz_u16_t const d1 = sz_min_of_two(d1_open, d1_ext);
-                sz_u16_t const m1 = sz_min_of_two(partial1, d1);
-                row_vec_[vec_idx] = (sz_u32_t)m0 | ((sz_u32_t)m1 << 16);
-                ins_vec_[vec_idx] = ins;
-                left_M = m1;
-                left_D = d1;
-                diag_M = top1;
+                u16_t const deletion_low = std::min<u16_t>(left_cell + open, left_deletion + extend);
+                u16_t const cell_low = std::min(match_or_insert_low, deletion_low);
+                u16_t const deletion_high = std::min<u16_t>(cell_low + open, deletion_low + extend);
+                u16_t const cell_high = std::min(match_or_insert_high, deletion_high);
+                row_cells_[pack_idx] = (u32_t)cell_low | ((u32_t)cell_high << 16);
+                insertion_cells_[pack_idx] = insertion_vec;
+                left_cell = cell_high;
+                left_deletion = deletion_high;
+                diagonal_carry = top_high;
             }
         }
-        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
-        return (row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF;
+        unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
+        return (row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF;
     }
 };
 
-/** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref levenshtein_u16_on_each_cuda_thread_. */
-template <                                                                           //
-    typename task_type_,                                                             //
-    typename char_type_ = char,                                                      //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
-    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+/** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref levenshtein_u16_per_cuda_thread_. */
+template <                                            //
+    typename task_type_,                              //
+    typename char_type_ = char,                       //
+    sz_capability_t capability_ = sz_cap_cuda_k,      //
+    unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                             //
+__global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                         //
     uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_optimal_levenshtein_u16_affine<max_text_length_> levenshtein_computer;
+    register_levenshtein_u16_affine<max_text_length_> levenshtein_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                                  //
-            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
-            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+        task.result = levenshtein_computer(                                                               //
+            reinterpret_cast<u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
     }
 }
@@ -1785,7 +1812,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using task_t = cuda_similarity_task_<char_t>;
+    using task_t = cuda_similarity_task<char_t>;
     using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -1822,7 +1849,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         static cuda_kernels_t cuda_kernels;
         static bool resolved = false;
         if (resolved) return {cuda_kernels, {}};
-        constexpr unsigned text_limit_k = levenshtein_on_each_cuda_thread_default_text_limit_k;
+        constexpr unsigned text_limit_k = register_text_limit_k;
         constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
         constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
         constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
@@ -1835,17 +1862,17 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         if constexpr (affine_k)
             status = resolve_kernel_shape(
                 cuda_kernels.register_u16,
-                (void const *)&levenshtein_u16_affine_on_each_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
-                256, 0, true);
+                (void const *)&levenshtein_u16_affine_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256,
+                0, true);
         else {
             status = resolve_kernel_shape(
                 cuda_kernels.register_u8,
-                (void const *)&levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>, 256,
-                0, true);
+                (void const *)&levenshtein_per_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>, 256, 0,
+                true);
             if (status.status != status_t::success_k) return {cuda_kernels, status};
             status = resolve_kernel_shape(
                 cuda_kernels.register_u16,
-                (void const *)&levenshtein_u16_on_each_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256, 0,
+                (void const *)&levenshtein_u16_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256, 0,
                 true);
         }
         if (status.status != status_t::success_k) return {cuda_kernels, status};
@@ -1854,29 +1881,28 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         status = resolve_kernel_shape(
             cuda_kernels.warp_u8,
             affine_k
-                ? (void const *)&affine_score_on_each_cuda_warp_<
-                      task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>
-                : (void const *)&linear_score_on_each_cuda_warp_<
-                      task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>,
+                ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
+                                                             objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
+                                                             objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         status = resolve_kernel_shape(
             cuda_kernels.warp_u16,
             affine_k
-                ? (void const *)&affine_score_on_each_cuda_warp_<
-                      task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>
-                : (void const
-                       *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
-                                                          objective_k, locality_k, capability_k>,
+                ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
+                                                             objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
+                                                             objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
 
         // Device-wide cooperative tier (templated on the pinned result type, fixed 128-thread shape).
         status = resolve_kernel_shape(
             cuda_kernels.device_u16,
-            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u16_t, u16_t, final_score_t,
-                                                                      uniform_substitution_costs_t, objective_k,
-                                                                      locality_k, capability_k>
+            affine_k ? (void const *)&affine_score_across_cuda_device_<char_t, u16_t, u16_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>
                      : (void const *)&linear_score_across_cuda_device_<char_t, u16_t, u16_t, final_score_t,
                                                                        uniform_substitution_costs_t, objective_k,
                                                                        locality_k, capability_k>,
@@ -1884,9 +1910,9 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         status = resolve_kernel_shape(
             cuda_kernels.device_u32,
-            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u32_t, u32_t, final_score_t,
-                                                                      uniform_substitution_costs_t, objective_k,
-                                                                      locality_k, capability_k>
+            affine_k ? (void const *)&affine_score_across_cuda_device_<char_t, u32_t, u32_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>
                      : (void const *)&linear_score_across_cuda_device_<char_t, u32_t, u32_t, final_score_t,
                                                                        uniform_substitution_costs_t, objective_k,
                                                                        locality_k, capability_k>,
@@ -1894,9 +1920,9 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         status = resolve_kernel_shape(
             cuda_kernels.device_u64,
-            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u64_t, u64_t, final_score_t,
-                                                                      uniform_substitution_costs_t, objective_k,
-                                                                      locality_k, capability_k>
+            affine_k ? (void const *)&affine_score_across_cuda_device_<char_t, u64_t, u64_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>
                      : (void const *)&linear_score_across_cuda_device_<char_t, u64_t, u64_t, final_score_t,
                                                                        uniform_substitution_costs_t, objective_k,
                                                                        locality_k, capability_k>,
@@ -2178,7 +2204,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
 struct error_costs_classes_in_cuda_shared_memory_t {
     static constexpr unsigned classes_count_k = static_cast<unsigned>(error_costs_classes_count_k);
 
-    sz_u8_t const *byte_to_class = nullptr;
+    u8_t const *byte_to_class = nullptr;
     error_cost_t const *class_substitution_costs = nullptr;
 
     __host__ error_cost_t magnitude() const noexcept { return 0; }
@@ -2191,8 +2217,8 @@ struct error_costs_classes_in_cuda_shared_memory_t {
     __forceinline__ __host__ __device__ error_cost_t operator()(first_byte_type_ a,
                                                                 second_byte_type_ b) const noexcept {
 #if defined(__CUDA_ARCH__)
-        unsigned const class_a = byte_to_class[static_cast<sz_u8_t>(a)];
-        unsigned const class_b = byte_to_class[static_cast<sz_u8_t>(b)];
+        unsigned const class_a = byte_to_class[static_cast<u8_t>(a)];
+        unsigned const class_b = byte_to_class[static_cast<u8_t>(b)];
         return class_substitution_costs[class_a * classes_count_k + class_b];
 #else
         sz_unused_(a && b);
@@ -2219,7 +2245,7 @@ __forceinline__ __device__ error_costs_classes_in_cuda_shared_memory_t
 load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const substituter) noexcept {
 
     constexpr unsigned classes_count_k = error_costs_classes_in_cuda_shared_memory_t::classes_count_k;
-    __shared__ sz_u8_t shared_byte_to_class[256];
+    __shared__ u8_t shared_byte_to_class[256];
     __shared__ error_cost_t shared_class_substitution_costs[classes_count_k * classes_count_k];
 
     for (unsigned i = threadIdx.x; i < 256; i += blockDim.x) shared_byte_to_class[i] = substituter.byte_to_class[i];
@@ -2235,207 +2261,211 @@ load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const 
 
 /**
  *  @brief Register-only NW/SW scoring for strings up to @p max_text_length_ bytes with @b signed 2-byte cells, one
- *         thread per pair. Like @ref register_optimal_levenshtein_u16 but @b maximizes (`__vmaxs2`/`__vaddss2`),
+ *         thread per pair. Like @ref register_levenshtein_u16 but @b maximizes (`__vmaxs2`/`__vaddss2`),
  *         gathers the per-cell substitution cost via the class substituter, and - for local scoring - clamps cells
  *         to zero and tracks a column-guarded running maximum (padded columns >ll are excluded).
  */
 template <unsigned max_text_length_, sz_similarity_locality_t locality_>
-struct register_optimal_nw_sw {
+struct register_weighted {
     static constexpr unsigned max_text_length_k = max_text_length_;
-    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two signed `sz_i16_t` cells per `sz_u32_t`
+    static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
-    sz_u32_t row_vec_[vec_count_k];
-    sz_u8_t longer_chars_[max_text_length_k];
+    u32_t row_cells_[pack_count_k];
+    u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ sz_i16_t operator()(             //
-        sz_u8_t const *longer_string, unsigned longer_length,   //
-        sz_u8_t const *shorter_string, unsigned shorter_length, //
+    __forceinline__ __device__ i16_t operator()(             //
+        u8_t const *longer_string, unsigned longer_length,   //
+        u8_t const *shorter_string, unsigned shorter_length, //
         error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
 
-        sz_i16_t const gap_cost = gap_costs.open_or_extend; // ? stored as a (negative) penalty, added to scores
-        sz_u32_t const gap_vec = (sz_u16_t)gap_cost | ((sz_u32_t)(sz_u16_t)gap_cost << 16);
+        i16_t const gap_cost = gap_costs.open_or_extend; // ? stored as a (negative) penalty, added to scores
+        u32_t const gap_cost_vec = broadcast_cost_u16x2_((u16_t)gap_cost);
 
-        for (unsigned i = 0; i < vec_count_k; ++i) {
-            if constexpr (is_local_k) { row_vec_[i] = 0; }
+        // Initialize the first row: local alignment starts at zero, global with the signed `column * gap` ladder.
+        for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+            if constexpr (is_local_k) { row_cells_[pack_idx] = 0; }
             else {
-                sz_i16_t const low = (sz_i16_t)((2 * i + 1) * gap_cost), high = (sz_i16_t)((2 * i + 2) * gap_cost);
-                row_vec_[i] = (sz_u16_t)low | ((sz_u32_t)(sz_u16_t)high << 16);
+                i16_t const cell_low = (i16_t)((2 * pack_idx + 1) * gap_cost);
+                i16_t const cell_high = (i16_t)((2 * pack_idx + 2) * gap_cost);
+                row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
             }
         }
         for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
 
-        sz_i16_t global_max = 0;
+        i16_t best_score = 0;
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
-            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_i16_t left_carry = is_local_k ? 0 : (sz_i16_t)(row_idx * gap_cost);
-            sz_i16_t diag_carry = is_local_k ? 0 : (sz_i16_t)((row_idx - 1) * gap_cost);
-            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-                sz_u32_t const top = row_vec_[vec_idx];
-                sz_i16_t const top0 = (sz_i16_t)(top & 0xFFFF), top1 = (sz_i16_t)(top >> 16);
-                sz_u32_t const diag = (sz_u16_t)diag_carry | ((sz_u32_t)(sz_u16_t)top0 << 16);
-                sz_i16_t const sub0 = substituter(shorter_char, longer_chars_[2 * vec_idx]);
-                sz_i16_t const sub1 = substituter(shorter_char, longer_chars_[2 * vec_idx + 1]);
-                sz_u32_t const subst = (sz_u16_t)sub0 | ((sz_u32_t)(sz_u16_t)sub1 << 16);
-                sz_u32_t const r = __vmaxs2(__vaddss2(diag, subst), __vaddss2(top, gap_vec));
-                sz_i16_t r0 = (sz_i16_t)(r & 0xFFFF), r1 = (sz_i16_t)(r >> 16);
-                sz_i16_t const from_left0 = (sz_i16_t)(left_carry + gap_cost);
-                if (from_left0 > r0) r0 = from_left0;
-                sz_i16_t const from_left1 = (sz_i16_t)(r0 + gap_cost);
-                if (from_left1 > r1) r1 = from_left1;
+            u8_t const shorter_char = shorter_string[row_idx - 1];
+            i16_t left_cell = is_local_k ? 0 : (i16_t)(row_idx * gap_cost);
+            i16_t diagonal_carry = is_local_k ? 0 : (i16_t)((row_idx - 1) * gap_cost);
+            for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+                u32_t const top_vec = row_cells_[pack_idx];
+                i16_t const top_low = (i16_t)(top_vec & 0xFFFF), top_high = (i16_t)(top_vec >> 16);
+                u32_t const diagonal_vec = (u16_t)diagonal_carry | ((u32_t)(u16_t)top_low << 16);
+                i16_t const substitution_cost_low = substituter(shorter_char, longer_chars_[2 * pack_idx]);
+                i16_t const substitution_cost_high = substituter(shorter_char, longer_chars_[2 * pack_idx + 1]);
+                u32_t const cost_of_substitution_vec = (u16_t)substitution_cost_low |
+                                                       ((u32_t)(u16_t)substitution_cost_high << 16);
+                u32_t const cell_score_vec = __vmaxs2(__vaddss2(diagonal_vec, cost_of_substitution_vec),
+                                                      __vaddss2(top_vec, gap_cost_vec));
+                i16_t cell_low = (i16_t)(cell_score_vec & 0xFFFF), cell_high = (i16_t)(cell_score_vec >> 16);
+                cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
+                cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
                 if constexpr (is_local_k) {
-                    if (r0 < 0) r0 = 0;
-                    if (r1 < 0) r1 = 0;
-                    unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
-                    if (col0 <= longer_length && r0 > global_max) global_max = r0;
-                    if (col1 <= longer_length && r1 > global_max) global_max = r1;
+                    cell_low = std::max<i16_t>(cell_low, 0);
+                    cell_high = std::max<i16_t>(cell_high, 0);
+                    unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
+                    if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
+                    if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
                 }
-                row_vec_[vec_idx] = (sz_u16_t)r0 | ((sz_u32_t)(sz_u16_t)r1 << 16);
-                left_carry = r1;
-                diag_carry = top1;
+                row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
+                left_cell = cell_high;
+                diagonal_carry = top_high;
             }
         }
-        if constexpr (is_local_k) return global_max;
-        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
-        return (sz_i16_t)((row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF);
+        if constexpr (is_local_k) return best_score;
+        unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
+        return (i16_t)((row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF);
     }
 };
 
-/** @brief One-thread-per-pair NW/SW scoring with signed 2-byte register cells; see @ref register_optimal_nw_sw. */
-template <                                                                           //
-    typename task_type_,                                                             //
-    typename char_type_ = char,                                                      //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,                     //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
-    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+/** @brief One-thread-per-pair NW/SW scoring with signed 2-byte register cells; see @ref register_weighted. */
+template <                                                       //
+    typename task_type_,                                         //
+    typename char_type_ = char,                                  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k,                 //
+    unsigned max_text_length_ = register_text_limit_k            //
     >
-__global__ __launch_bounds__(256, 2) void nw_sw_score_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                  //
+__global__ __launch_bounds__(256, 2) void weighted_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                           //
     error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_optimal_nw_sw<max_text_length_, locality_> nw_sw_computer;
+    register_weighted<max_text_length_, locality_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = nw_sw_computer(                                                                        //
-            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
-            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+        task.result = nw_sw_computer(                                                                     //
+            reinterpret_cast<u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
     }
 }
 
 /**
  *  @brief Register-only @b affine-gap NW/SW scoring for strings up to @p max_text_length_ bytes with @b signed
- *         2-byte cells, one thread per pair. Like @ref register_optimal_nw_sw but runs the Gotoh recurrence: a
+ *         2-byte cells, one thread per pair. Like @ref register_weighted but runs the Gotoh recurrence: a
  *         second register row holds the insertion matrix @b I (`ins_vec_`) and the deletion matrix @b D is carried
  *         as a scalar across the row, so gap opening and extension are priced separately.
  */
 template <unsigned max_text_length_, sz_similarity_locality_t locality_>
-struct register_optimal_nw_sw_affine {
+struct register_weighted_affine {
     static constexpr unsigned max_text_length_k = max_text_length_;
-    static constexpr unsigned vec_count_k = max_text_length_k / 2; // ? two signed `sz_i16_t` cells per `sz_u32_t`
+    static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
-    sz_u32_t row_vec_[vec_count_k]; // ? the score matrix M
-    sz_u32_t ins_vec_[vec_count_k]; // ? the insertion matrix I (gap from the row above)
-    sz_u8_t longer_chars_[max_text_length_k];
+    u32_t row_cells_[pack_count_k];       // ? the score matrix M
+    u32_t insertion_cells_[pack_count_k]; // ? the insertion matrix I (gap from the row above)
+    u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ sz_i16_t operator()(             //
-        sz_u8_t const *longer_string, unsigned longer_length,   //
-        sz_u8_t const *shorter_string, unsigned shorter_length, //
+    __forceinline__ __device__ i16_t operator()(             //
+        u8_t const *longer_string, unsigned longer_length,   //
+        u8_t const *shorter_string, unsigned shorter_length, //
         error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
 
-        sz_i16_t const open = gap_costs.open, extend = gap_costs.extend; // ? stored as (negative) penalties
-        sz_u32_t const open_vec = (sz_u16_t)open | ((sz_u32_t)(sz_u16_t)open << 16);
-        sz_u32_t const extend_vec = (sz_u16_t)extend | ((sz_u32_t)(sz_u16_t)extend << 16);
+        i16_t const open = gap_costs.open, extend = gap_costs.extend; // ? stored as (negative) penalties
+        u32_t const open_cost_vec = broadcast_cost_u16x2_((u16_t)open);
+        u32_t const extend_cost_vec = broadcast_cost_u16x2_((u16_t)extend);
 
         // Row 0: global M[0][j] = open + extend*(j-1) (local resets to 0); the gap matrix gets the higher-magnitude
         // "discard" boundary so it never wins, but stays bounded - matching the serial/warp affine scorer.
-        for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-            unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
-            if constexpr (is_local_k) { row_vec_[vec_idx] = 0; }
+        for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+            unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
+            if constexpr (is_local_k) { row_cells_[pack_idx] = 0; }
             else {
-                sz_i16_t const m0 = open + extend * (sz_i16_t)(col0 - 1), m1 = open + extend * (sz_i16_t)(col1 - 1);
-                row_vec_[vec_idx] = (sz_u16_t)m0 | ((sz_u32_t)(sz_u16_t)m1 << 16);
+                i16_t const cell_low = open + extend * (i16_t)(column_low - 1);
+                i16_t const cell_high = open + extend * (i16_t)(column_high - 1);
+                row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
             }
-            sz_i16_t const g0 = (open + extend) + (open + extend * (sz_i16_t)(col0 - 1));
-            sz_i16_t const g1 = (open + extend) + (open + extend * (sz_i16_t)(col1 - 1));
-            ins_vec_[vec_idx] = (sz_u16_t)g0 | ((sz_u32_t)(sz_u16_t)g1 << 16);
+            i16_t const insertion_low = (open + extend) + (open + extend * (i16_t)(column_low - 1));
+            i16_t const insertion_high = (open + extend) + (open + extend * (i16_t)(column_high - 1));
+            insertion_cells_[pack_idx] = (u16_t)insertion_low | ((u32_t)(u16_t)insertion_high << 16);
         }
         for (unsigned i = 0; i < longer_length; ++i) longer_chars_[i] = longer_string[i];
 
-        sz_i16_t global_max = 0;
+        i16_t best_score = 0;
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
-            sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_i16_t left_M = is_local_k ? (sz_i16_t)0
-                                         : (sz_i16_t)(open + extend * (sz_i16_t)(row_idx - 1)); // M[row][0]
-            sz_i16_t diag_M = is_local_k ? (sz_i16_t)0
-                                         : (sz_i16_t)(row_idx == 1 ? 0 : (open + extend * (sz_i16_t)(row_idx - 2)));
-            sz_i16_t left_D = (open + extend) + (open + extend * (sz_i16_t)(row_idx - 1)); // D[row][0] (discard)
-            for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
-                sz_u32_t const top = row_vec_[vec_idx];
-                sz_i16_t const top0 = (sz_i16_t)(top & 0xFFFF), top1 = (sz_i16_t)(top >> 16);
-                sz_u32_t const prev_ins = ins_vec_[vec_idx];
+            u8_t const shorter_char = shorter_string[row_idx - 1];
+            i16_t left_cell = is_local_k ? (i16_t)0 : (i16_t)(open + extend * (i16_t)(row_idx - 1)); // M[row][0]
+            i16_t diagonal_carry = is_local_k ? (i16_t)0
+                                              : (i16_t)(row_idx == 1 ? 0 : (open + extend * (i16_t)(row_idx - 2)));
+            i16_t left_deletion = (open + extend) + (open + extend * (i16_t)(row_idx - 1)); // D[row][0] (discard)
+            for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
+                u32_t const top_vec = row_cells_[pack_idx];
+                i16_t const top_low = (i16_t)(top_vec & 0xFFFF), top_high = (i16_t)(top_vec >> 16);
+                u32_t const previous_insertion_vec = insertion_cells_[pack_idx];
                 // I[row][j] = max(M[row-1][j] + open, I[row-1][j] + extend) - independent per cell, so packed.
-                sz_u32_t const ins = __vmaxs2(__vaddss2(top, open_vec), __vaddss2(prev_ins, extend_vec));
-                // diag = (M[row-1][2v], M[row-1][2v+1]); per-cell substitution cost; the substitution candidate.
-                sz_u32_t const diag = (sz_u16_t)diag_M | ((sz_u32_t)(sz_u16_t)top0 << 16);
-                sz_i16_t const sub0 = substituter(shorter_char, longer_chars_[2 * vec_idx]);
-                sz_i16_t const sub1 = substituter(shorter_char, longer_chars_[2 * vec_idx + 1]);
-                sz_u32_t const subst = (sz_u16_t)sub0 | ((sz_u32_t)(sz_u16_t)sub1 << 16);
-                // max(diag + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
-                sz_u32_t const partial = __vmaxs2(__vaddss2(diag, subst), ins);
-                sz_i16_t const partial0 = (sz_i16_t)(partial & 0xFFFF), partial1 = (sz_i16_t)(partial >> 16);
+                u32_t const insertion_vec = __vmaxs2(__vaddss2(top_vec, open_cost_vec),
+                                                     __vaddss2(previous_insertion_vec, extend_cost_vec));
+                // diagonal = (M[row-1][2v], M[row-1][2v+1]); per-cell substitution cost; the substitution candidate.
+                u32_t const diagonal_vec = (u16_t)diagonal_carry | ((u32_t)(u16_t)top_low << 16);
+                i16_t const substitution_cost_low = substituter(shorter_char, longer_chars_[2 * pack_idx]);
+                i16_t const substitution_cost_high = substituter(shorter_char, longer_chars_[2 * pack_idx + 1]);
+                u32_t const cost_of_substitution_vec = (u16_t)substitution_cost_low |
+                                                       ((u32_t)(u16_t)substitution_cost_high << 16);
+                // max(diagonal + subst, I) is independent per cell, so packed; only the deletion fold below is sequential.
+                u32_t const match_or_insert_vec = __vmaxs2(__vaddss2(diagonal_vec, cost_of_substitution_vec),
+                                                           insertion_vec);
+                i16_t const match_or_insert_low = (i16_t)(match_or_insert_vec & 0xFFFF);
+                i16_t const match_or_insert_high = (i16_t)(match_or_insert_vec >> 16);
                 // Deletion D carries left across the row (sequential): cell 0 then cell 1.
-                sz_i16_t const d0_open = left_M + open, d0_ext = left_D + extend;
-                sz_i16_t const d0 = sz_max_of_two(d0_open, d0_ext);
-                sz_i16_t m0 = sz_max_of_two(partial0, d0);
-                sz_i16_t const d1_open = m0 + open, d1_ext = d0 + extend;
-                sz_i16_t const d1 = sz_max_of_two(d1_open, d1_ext);
-                sz_i16_t m1 = sz_max_of_two(partial1, d1);
+                i16_t const deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
+                i16_t cell_low = std::max(match_or_insert_low, deletion_low);
+                i16_t const deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
+                i16_t cell_high = std::max(match_or_insert_high, deletion_high);
                 if constexpr (is_local_k) {
-                    if (m0 < 0) m0 = 0;
-                    if (m1 < 0) m1 = 0;
-                    unsigned const col0 = 2 * vec_idx + 1, col1 = 2 * vec_idx + 2;
-                    if (col0 <= longer_length && m0 > global_max) global_max = m0;
-                    if (col1 <= longer_length && m1 > global_max) global_max = m1;
+                    cell_low = std::max<i16_t>(cell_low, 0);
+                    cell_high = std::max<i16_t>(cell_high, 0);
+                    unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
+                    if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
+                    if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
                 }
-                row_vec_[vec_idx] = (sz_u16_t)m0 | ((sz_u32_t)(sz_u16_t)m1 << 16);
-                ins_vec_[vec_idx] = ins;
-                left_M = m1;
-                left_D = d1;
-                diag_M = top1;
+                row_cells_[pack_idx] = (u16_t)cell_low | ((u32_t)(u16_t)cell_high << 16);
+                insertion_cells_[pack_idx] = insertion_vec;
+                left_cell = cell_high;
+                left_deletion = deletion_high;
+                diagonal_carry = top_high;
             }
         }
-        if constexpr (is_local_k) return global_max;
-        unsigned const result_vec_idx = (longer_length - 1) / 2, result_byte_idx = (longer_length - 1) % 2;
-        return (sz_i16_t)((row_vec_[result_vec_idx] >> (result_byte_idx * 16)) & 0xFFFF);
+        if constexpr (is_local_k) return best_score;
+        unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
+        return (i16_t)((row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF);
     }
 };
 
-/** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref nw_sw_score_on_each_cuda_thread_. */
-template <                                                                           //
-    typename task_type_,                                                             //
-    typename char_type_ = char,                                                      //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,                     //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
-    unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
+/** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref weighted_per_cuda_thread_. */
+template <                                                       //
+    typename task_type_,                                         //
+    typename char_type_ = char,                                  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k,                 //
+    unsigned max_text_length_ = register_text_limit_k            //
     >
-__global__ __launch_bounds__(256, 2) void nw_sw_score_affine_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                         //
+__global__ __launch_bounds__(256, 2) void weighted_affine_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                  //
     error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_optimal_nw_sw_affine<max_text_length_, locality_> nw_sw_computer;
+    register_weighted_affine<max_text_length_, locality_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = nw_sw_computer(                                                                        //
-            reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
-            reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
+        task.result = nw_sw_computer(                                                                     //
+            reinterpret_cast<u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
+            reinterpret_cast<u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
     }
 }
@@ -2451,7 +2481,7 @@ __global__ __launch_bounds__(256, 2) void nw_sw_score_affine_on_each_cuda_thread
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_similarity_locality_t locality_,
           sz_capability_t capability_>
-struct cuda_nw_or_sw_byte_level_scores_ {
+struct cuda_weighted_scores {
 
     using char_t = char;
     using substituter_t = error_costs_32x32_t;
@@ -2459,12 +2489,12 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
     using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
-    using byte_to_class_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<sz_u8_t>;
+    using byte_to_class_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u8_t>;
     using class_costs_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<error_cost_t>;
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using task_t = cuda_similarity_task_<char_t>;
+    using task_t = cuda_similarity_task<char_t>;
     using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
 
     error_costs_32x32_t substituter_ {};
@@ -2473,20 +2503,20 @@ struct cuda_nw_or_sw_byte_level_scores_ {
 
     safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
-    safe_vector<sz_u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
+    safe_vector<u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
     safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
     cuda_timer_t timer_ {};
 
-    cuda_nw_or_sw_byte_level_scores_(error_costs_32x32_t subs = {}, gap_costs_t gaps = {},
-                                     allocator_t const &alloc = allocator_t {}) noexcept
+    cuda_weighted_scores(error_costs_32x32_t subs = {}, gap_costs_t gaps = {},
+                         allocator_t const &alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    cuda_nw_or_sw_byte_level_scores_(cuda_nw_or_sw_byte_level_scores_ const &) = delete;
-    cuda_nw_or_sw_byte_level_scores_ &operator=(cuda_nw_or_sw_byte_level_scores_ const &) = delete;
-    cuda_nw_or_sw_byte_level_scores_(cuda_nw_or_sw_byte_level_scores_ &&) noexcept = default;
-    cuda_nw_or_sw_byte_level_scores_ &operator=(cuda_nw_or_sw_byte_level_scores_ &&) noexcept = default;
+    cuda_weighted_scores(cuda_weighted_scores const &) = delete;
+    cuda_weighted_scores &operator=(cuda_weighted_scores const &) = delete;
+    cuda_weighted_scores(cuda_weighted_scores &&) noexcept = default;
+    cuda_weighted_scores &operator=(cuda_weighted_scores &&) noexcept = default;
 
-    using final_score_t = sz_ssize_t;
+    using final_score_t = ssize_t;
 
     struct cuda_kernels_t {
         kernel_shape_t register_score;
@@ -2502,7 +2532,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         static bool resolved = false;
         if (resolved) return {cuda_kernels, {}};
         using substituter_t = error_costs_classes_in_cuda_shared_memory_t;
-        constexpr unsigned text_limit_k = levenshtein_on_each_cuda_thread_default_text_limit_k;
+        constexpr unsigned text_limit_k = register_text_limit_k;
         constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
         constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         int device = 0, warp_ceiling = 0;
@@ -2513,28 +2543,27 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         // Register tier (single signed i16 thread-per-pair kernel, fixed 256-thread / no-shared shape).
         status = resolve_kernel_shape(
             cuda_kernels.register_score,
-            affine_k ? (void const *)&nw_sw_score_affine_on_each_cuda_thread_<task_t, char_t, locality_k, capability_k,
-                                                                              text_limit_k>
-                     : (void const
-                            *)&nw_sw_score_on_each_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
+            affine_k ? (void const
+                            *)&weighted_affine_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>
+                     : (void const *)&weighted_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
             256, 0, true);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
 
         // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
         status = resolve_kernel_shape(
             cuda_kernels.warp_i16,
-            affine_k ? (void const *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t, substituter_t,
-                                                                      objective_k, locality_k, capability_k>
-                     : (void const *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t, substituter_t,
-                                                                      objective_k, locality_k, capability_k>,
+            affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>
+                     : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         status = resolve_kernel_shape(
             cuda_kernels.warp_i32,
-            affine_k ? (void const *)&affine_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t, substituter_t,
-                                                                      objective_k, locality_k, capability_k>
-                     : (void const *)&linear_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t, substituter_t,
-                                                                      objective_k, locality_k, capability_k>,
+            affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>
+                     : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
 
@@ -2542,18 +2571,18 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         status = resolve_kernel_shape(
             cuda_kernels.device_i32,
             affine_k
-                ? (void const *)&affine_score_across_cuda_device<char_t, u32_t, sz_i32_t, final_score_t, substituter_t,
-                                                                 objective_k, locality_k, capability_k>
-                : (void const *)&linear_score_across_cuda_device_<char_t, u32_t, sz_i32_t, final_score_t, substituter_t,
+                ? (void const *)&affine_score_across_cuda_device_<char_t, u32_t, i32_t, final_score_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_across_cuda_device_<char_t, u32_t, i32_t, final_score_t, substituter_t,
                                                                   objective_k, locality_k, capability_k>,
             128, 0, true);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
         status = resolve_kernel_shape(
             cuda_kernels.device_i64,
             affine_k
-                ? (void const *)&affine_score_across_cuda_device<char_t, u64_t, sz_i64_t, final_score_t, substituter_t,
-                                                                 objective_k, locality_k, capability_k>
-                : (void const *)&linear_score_across_cuda_device_<char_t, u64_t, sz_i64_t, final_score_t, substituter_t,
+                ? (void const *)&affine_score_across_cuda_device_<char_t, u64_t, i64_t, final_score_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_across_cuda_device_<char_t, u64_t, i64_t, final_score_t, substituter_t,
                                                                   objective_k, locality_k, capability_k>,
             128, 0, true);
         if (status.status != status_t::success_k) return {cuda_kernels, status};
@@ -2628,8 +2657,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
 
 template <typename gap_costs_type_, typename allocator_type_, sz_similarity_locality_t locality_,
           sz_capability_t capability_>
-cuda_status_t
-cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, locality_, capability_>::run_trampoline_( //
+cuda_status_t cuda_weighted_scores<gap_costs_type_, allocator_type_, locality_, capability_>::run_trampoline_( //
     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
@@ -2716,8 +2744,8 @@ cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, locality_, ca
                 device_level_kernel_args[7] = (void *)(&gap_costs_);
 
                 // Pick the smallest fitting signed diagonal type from the resolved table (i32, then i64).
-                kernel_shape_t const &shape = task.bytes_per_cell >= sizeof(sz_i64_t) ? kernel_table.device_i64
-                                                                                      : kernel_table.device_i32;
+                kernel_shape_t const &shape = task.bytes_per_cell >= sizeof(i64_t) ? kernel_table.device_i64
+                                                                                   : kernel_table.device_i32;
 
                 // A cooperative launch REQUIRES the whole grid to be co-resident, so the grid must not exceed
                 // `co_resident_blocks_per_multiprocessor * streaming_multiprocessors` - the precomputed occupancy.
@@ -2750,9 +2778,8 @@ cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, locality_, ca
                     tasks_begin, tasks_end, [](task_t const &lhs, task_t const &rhs) {
                         return lhs.memory_requirement < rhs.memory_requirement;
                     });
-                kernel_shape_t const &shape = indicative_task.bytes_per_cell >= sizeof(sz_i32_t)
-                                                  ? kernel_table.warp_i32
-                                                  : kernel_table.warp_i16;
+                kernel_shape_t const &shape = indicative_task.bytes_per_cell >= sizeof(i32_t) ? kernel_table.warp_i32
+                                                                                              : kernel_table.warp_i16;
                 return std::make_pair(&shape, &indicative_task);
             };
 
@@ -2819,20 +2846,20 @@ cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, locality_, ca
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                                std::enable_if_t<capability_ & sz_cap_cuda_k>>
-    : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
+    : public cuda_weighted_scores<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
 
-    using cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k,
-                                           capability_>::cuda_nw_or_sw_byte_level_scores_;
+    using cuda_weighted_scores<gap_costs_type_, allocator_type_, sz_similarity_global_k,
+                               capability_>::cuda_weighted_scores;
 };
 
 /** @brief Dispatches baseline Smith Waterman algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>>
-    : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
+    : public cuda_weighted_scores<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
 
-    using cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k,
-                                           capability_>::cuda_nw_or_sw_byte_level_scores_;
+    using cuda_weighted_scores<gap_costs_type_, allocator_type_, sz_similarity_local_k,
+                               capability_>::cuda_weighted_scores;
 };
 
 #pragma endregion

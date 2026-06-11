@@ -188,13 +188,13 @@ static constexpr size_t error_costs_classes_count_k = 32;
 struct error_costs_32x32_t {
     static constexpr size_t classes_count_k = error_costs_classes_count_k;
 
-    sz_u8_t byte_to_class[256] = {0};
+    u8_t byte_to_class[256] = {0};
     error_cost_t class_substitution_costs[classes_count_k][classes_count_k] = {{0}};
 
     constexpr error_cost_t operator()(char a, char b) const noexcept {
-        return class_substitution_costs[byte_to_class[(sz_u8_t)a]][byte_to_class[(sz_u8_t)b]];
+        return class_substitution_costs[byte_to_class[(u8_t)a]][byte_to_class[(u8_t)b]];
     }
-    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept {
+    constexpr error_cost_t operator()(u8_t a, u8_t b) const noexcept {
         return class_substitution_costs[byte_to_class[a]][byte_to_class[b]];
     }
 
@@ -292,9 +292,9 @@ struct error_costs_32x32_t {
         error_costs_32x32_t result;
 
         // Assign a fresh class to every residue whose diagonal cost is not a placeholder.
-        sz_u8_t residue_to_class[26] = {0};
-        sz_u8_t next_class = 1;
-        for (sz_size_t i = 0; i != 26u; ++i)
+        u8_t residue_to_class[26] = {0};
+        u8_t next_class = 1;
+        for (size_t i = 0; i != 26u; ++i)
             if (cells[i][i] != na) {
                 residue_to_class[i] = next_class;
                 result.byte_to_class[i + 65u] = next_class;
@@ -302,8 +302,8 @@ struct error_costs_32x32_t {
             }
 
         // Populate the cost between every pair of used residues.
-        for (sz_size_t i = 0; i != 26u; ++i)
-            for (sz_size_t j = 0; j != 26u; ++j)
+        for (size_t i = 0; i != 26u; ++i)
+            for (size_t j = 0; j != 26u; ++j)
                 if (residue_to_class[i] != 0 && residue_to_class[j] != 0)
                     result.class_substitution_costs[residue_to_class[i]][residue_to_class[j]] = cells[i][j];
         return result;
@@ -436,7 +436,7 @@ concept gap_costs_like = requires(gap_costs_type_ costs) {
  *
  *  @tparam first_iterator_type_ Typically `char*`, `rune_t*`, or a `constant_iterator`.
  *  @tparam second_iterator_type_ Typically `char*` or `rune_t*`.
- *  @tparam score_type_ The type of the score, typically `size_t` or `sz_ssize_t`.
+ *  @tparam score_type_ The type of the score, typically `size_t` or `ssize_t`.
  *  @tparam substituter_type_ Typically `uniform_substitution_costs_t` or a lookup table.
  *  @tparam gap_costs_type_ Either `linear_gap_costs_t` or `sz_gaps_affine_k`.
  *  @tparam objective_ Either `sz_minimize_distance_k` or `sz_maximize_score_k`.
@@ -473,7 +473,7 @@ struct tile_scorer;
  *  ? This algorithm provides a more flexible baseline implementation for future SIMD and GPGPU optimizations.
  *
  *  @tparam char_or_rune_type_ The type of the characters in the strings, generally `char` or @b `rune_t` for UTF-8.
- *  @tparam score_type_ The smallest type that can hold the distance, ideally `sz_i8_t` or `sz_u8_t`.
+ *  @tparam score_type_ The smallest type that can hold the distance, ideally `i8_t` or `u8_t`.
  *  @tparam substituter_type_ A callable type that takes two characters and returns the substitution cost.
  *  @tparam gap_costs_type_ Whether to use linear or affine gap penalties.
  *  @tparam objective_ Whether to minimize the distance or maximize the score.
@@ -504,7 +504,7 @@ struct diagonal_walker;
  *  Can be used for both linear and affine gap penalties.
  *
  *  @tparam char_or_rune_type_ The type of the characters in the strings, generally `char` or @b `rune_t` for UTF-8.
- *  @tparam score_type_ The smallest type that can hold the distance, ideally `sz_i8_t` or `sz_u8_t`.
+ *  @tparam score_type_ The smallest type that can hold the distance, ideally `i8_t` or `u8_t`.
  *  @tparam substituter_type_ A callable type that takes two characters and returns the substitution cost.
  *  @tparam gap_costs_type_ Whether to use linear or affine gap penalties.
  *  @tparam allocator_type_ A default-constructible allocator type for the internal buffers.
@@ -1320,7 +1320,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, linea
             rotate_three(previous_scores, current_scores, next_scores);
 
             // ! Drop the first entry among the current scores.
-            sz_move_serial((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+            sz_move_serial((ptr_t)(previous_scores), (ptr_t)(previous_scores + 1),
                            (max_diagonal_length - 1) * sizeof(score_t));
         }
 
@@ -1536,7 +1536,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, affin
             trivial_swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
-            sz_move_serial((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+            sz_move_serial((ptr_t)(previous_scores), (ptr_t)(previous_scores + 1),
                            (max_diagonal_length - 1) * sizeof(score_t));
         }
 
@@ -1892,12 +1892,12 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         using match_masks_t = u64_t[256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[(sz_u8_t)shorter[j]] |= (u64_t)1 << j;
+        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] |= (u64_t)1 << j;
 
         u64_t positives = ~(u64_t)0, negatives = 0; // Myers' VP / VN
         size_t distance = shorter_length;
         for (size_t longer_char_index = 0; longer_char_index != longer_length; ++longer_char_index) {
-            u64_t const pattern_matches = match_masks[(sz_u8_t)longer[longer_char_index]];
+            u64_t const pattern_matches = match_masks[(u8_t)longer[longer_char_index]];
             u64_t const vertical_carry = pattern_matches | negatives;
             u64_t const diagonal_zero = (((pattern_matches & positives) + positives) ^ positives) | pattern_matches;
             u64_t horizontal_positive = negatives | ~(diagonal_zero | positives);
@@ -1910,7 +1910,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
             negatives = horizontal_positive & vertical_carry;
         }
 
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[(sz_u8_t)shorter[j]] = 0;
+        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] = 0;
         result_ref = distance;
         return status_t::success_k;
     }
@@ -1928,13 +1928,13 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         using match_masks_t = u64_t[2][256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(sz_u8_t)shorter[j]] |= (u64_t)1 << (j & 63);
+        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(u8_t)shorter[j]] |= (u64_t)1 << (j & 63);
 
         u64_t positives[2] {~(u64_t)0, ~(u64_t)0}, negatives[2] {0, 0}; // Myers' VP / VN, per block
         size_t const last_word = (shorter_length - 1) >> 6, last_bit = (shorter_length - 1) & 63;
         size_t distance = shorter_length;
         for (size_t longer_char_index = 0; longer_char_index != longer_length; ++longer_char_index) {
-            sz_u8_t const symbol = (sz_u8_t)longer[longer_char_index];
+            u8_t const symbol = (u8_t)longer[longer_char_index];
             u64_t carry_positive = 1, carry_negative = 0; // Top-row boundary into block 0 is +1.
             for (size_t w = 0; w != 2; ++w) {
                 u64_t const pattern_matches = match_masks[w][symbol];
@@ -1958,7 +1958,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
             }
         }
 
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(sz_u8_t)shorter[j]] = 0;
+        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(u8_t)shorter[j]] = 0;
         result_ref = distance;
         return status_t::success_k;
     }
@@ -2000,17 +2000,17 @@ struct levenshtein_distance {
     static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using myers_t = levenshtein_distance_myers<char_t, capability_serialized_k>;
-    using horizontal_u8_t =                                                           //
-        horizontal_walker<char_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, //
+    using horizontal_u8_t =                                                        //
+        horizontal_walker<char_t, u8_t, uniform_substitution_costs_t, gap_costs_t, //
                           sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_u8_t =                                                           //
-        diagonal_walker<char_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u8_t =                                                        //
+        diagonal_walker<char_t, u8_t, uniform_substitution_costs_t, gap_costs_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_u16_t =                                                           //
-        diagonal_walker<char_t, sz_u16_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u16_t =                                                        //
+        diagonal_walker<char_t, u16_t, uniform_substitution_costs_t, gap_costs_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
-    using diagonal_u32_t =                                                           //
-        diagonal_walker<char_t, sz_u32_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u32_t =                                                        //
+        diagonal_walker<char_t, u32_t, uniform_substitution_costs_t, gap_costs_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
     using diagonal_u64_t =                                                        //
         diagonal_walker<char_t, u64_t, uniform_substitution_costs_t, gap_costs_t, //
@@ -2091,7 +2091,7 @@ struct levenshtein_distance {
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16) {
-            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            u8_t result_u8 = std::numeric_limits<u8_t>::max();
             status_t status = horizontal_u8_t {substituter_, gap_costs_}(first, second, result_u8, scratch_space,
                                                                          executor, specs);
             if (status != status_t::success_k) return status;
@@ -2101,21 +2101,21 @@ struct levenshtein_distance {
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 1) {
-            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            u8_t result_u8 = std::numeric_limits<u8_t>::max();
             status_t status = diagonal_u8_t {substituter_, gap_costs_}(first, second, result_u8, scratch_space,
                                                                        executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
-            sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
+            u16_t result_u16 = std::numeric_limits<u16_t>::max();
             status_t status = diagonal_u16_t {substituter_, gap_costs_}(first, second, result_u16, scratch_space,
                                                                         executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
-            sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
+            u32_t result_u32 = std::numeric_limits<u32_t>::max();
             status_t status = diagonal_u32_t {substituter_, gap_costs_}(first, second, result_u32, scratch_space,
                                                                         executor, specs);
             if (status != status_t::success_k) return status;
@@ -2152,13 +2152,13 @@ struct levenshtein_distance_utf8 {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
-    using horizontal_u8_t = horizontal_walker<rune_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, //
+    using horizontal_u8_t = horizontal_walker<rune_t, u8_t, uniform_substitution_costs_t, gap_costs_t, //
                                               sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_u8_t = diagonal_walker<rune_t, sz_u8_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u8_t = diagonal_walker<rune_t, u8_t, uniform_substitution_costs_t, gap_costs_t, //
                                           sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_u16_t = diagonal_walker<rune_t, sz_u16_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u16_t = diagonal_walker<rune_t, u16_t, uniform_substitution_costs_t, gap_costs_t, //
                                            sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
-    using diagonal_u32_t = diagonal_walker<rune_t, sz_u32_t, uniform_substitution_costs_t, gap_costs_t, //
+    using diagonal_u32_t = diagonal_walker<rune_t, u32_t, uniform_substitution_costs_t, gap_costs_t, //
                                            sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
     using diagonal_u64_t = diagonal_walker<rune_t, u64_t, uniform_substitution_costs_t, gap_costs_t, //
                                            sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
@@ -2224,7 +2224,7 @@ struct levenshtein_distance_utf8 {
                                                                      scratch_space.size() - transcode_bytes);
 
         // Export into UTF-32 buffer.
-        sz_rune_length_t rune_length;
+        rune_length_t rune_length;
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++first_length_utf32) {
@@ -2249,7 +2249,7 @@ struct levenshtein_distance_utf8 {
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16) {
-            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            u8_t result_u8 = std::numeric_limits<u8_t>::max();
             status_t status = horizontal_u8_t {substituter_, gap_costs_}(first_utf32, second_utf32, result_u8,
                                                                          walker_scratch, executor, specs);
             if (status != status_t::success_k) return status;
@@ -2259,21 +2259,21 @@ struct levenshtein_distance_utf8 {
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 1) {
-            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            u8_t result_u8 = std::numeric_limits<u8_t>::max();
             status_t status = diagonal_u8_t {substituter_, gap_costs_}(first_utf32, second_utf32, result_u8,
                                                                        walker_scratch, executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
-            sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
+            u16_t result_u16 = std::numeric_limits<u16_t>::max();
             status_t status = diagonal_u16_t {substituter_, gap_costs_}(first_utf32, second_utf32, result_u16,
                                                                         walker_scratch, executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
-            sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
+            u32_t result_u32 = std::numeric_limits<u32_t>::max();
             status_t status = diagonal_u32_t {substituter_, gap_costs_}(first_utf32, second_utf32, result_u32,
                                                                         walker_scratch, executor, specs);
             if (status != status_t::success_k) return status;
@@ -2314,17 +2314,17 @@ struct needleman_wunsch_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
-    using horizontal_i16_t =                                            //
-        horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, //
+    using horizontal_i16_t =                                         //
+        horizontal_walker<char_t, i16_t, substituter_t, gap_costs_t, //
                           sz_maximize_score_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_i16_t =                                            //
-        diagonal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, //
+    using diagonal_i16_t =                                         //
+        diagonal_walker<char_t, i16_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_global_k, capability_serialized_k>;
-    using diagonal_i32_t =                                            //
-        diagonal_walker<char_t, sz_i32_t, substituter_t, gap_costs_t, //
+    using diagonal_i32_t =                                         //
+        diagonal_walker<char_t, i32_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_global_k, capability_k>;
-    using diagonal_i64_t =                                            //
-        diagonal_walker<char_t, sz_i64_t, substituter_t, gap_costs_t, //
+    using diagonal_i64_t =                                         //
+        diagonal_walker<char_t, i64_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_global_k, capability_k>;
 
     substituter_t substituter_ {};
@@ -2352,7 +2352,7 @@ struct needleman_wunsch_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
+    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2366,7 +2366,7 @@ struct needleman_wunsch_score {
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         status_t status = status_t::success_k;
         if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16) {
-            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            i16_t result_i16 = std::numeric_limits<i16_t>::min();
             status = horizontal_i16_t {substituter_, gap_costs_}(first, second, result_i16, scratch_space, executor,
                                                                  specs);
             if (status == status_t::success_k) result_ref = result_i16;
@@ -2375,19 +2375,19 @@ struct needleman_wunsch_score {
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 2) {
-            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            i16_t result_i16 = std::numeric_limits<i16_t>::min();
             status = diagonal_i16_t {substituter_, gap_costs_}(first, second, result_i16, scratch_space, executor,
                                                                specs);
             if (status == status_t::success_k) result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
-            sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
+            i32_t result_i32 = std::numeric_limits<i32_t>::min();
             status = diagonal_i32_t {substituter_, gap_costs_}(first, second, result_i32, scratch_space, executor,
                                                                specs);
             if (status == status_t::success_k) result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
-            sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
+            i64_t result_i64 = std::numeric_limits<i64_t>::min();
             status = diagonal_i64_t {substituter_, gap_costs_}(first, second, result_i64, scratch_space, executor,
                                                                specs);
             if (status == status_t::success_k) result_ref = result_i64;
@@ -2420,17 +2420,17 @@ struct smith_waterman_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
-    using horizontal_i16_t =                                            //
-        horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, //
+    using horizontal_i16_t =                                         //
+        horizontal_walker<char_t, i16_t, substituter_t, gap_costs_t, //
                           sz_maximize_score_k, sz_similarity_local_k, capability_serialized_k>;
-    using diagonal_i16_t =                                            //
-        diagonal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, //
+    using diagonal_i16_t =                                         //
+        diagonal_walker<char_t, i16_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_local_k, capability_serialized_k>;
-    using diagonal_i32_t =                                            //
-        diagonal_walker<char_t, sz_i32_t, substituter_t, gap_costs_t, //
+    using diagonal_i32_t =                                         //
+        diagonal_walker<char_t, i32_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_local_k, capability_k>;
-    using diagonal_i64_t =                                            //
-        diagonal_walker<char_t, sz_i64_t, substituter_t, gap_costs_t, //
+    using diagonal_i64_t =                                         //
+        diagonal_walker<char_t, i64_t, substituter_t, gap_costs_t, //
                         sz_maximize_score_k, sz_similarity_local_k, capability_k>;
 
     substituter_t substituter_ {};
@@ -2458,7 +2458,7 @@ struct smith_waterman_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
+    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2476,7 +2476,7 @@ struct smith_waterman_score {
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16) {
-            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            i16_t result_i16 = std::numeric_limits<i16_t>::min();
             status_t status = horizontal_i16_t {substituter_, gap_costs_}(first, second, result_i16, scratch_space,
                                                                           executor, specs);
             if (status != status_t::success_k) return status;
@@ -2486,21 +2486,21 @@ struct smith_waterman_score {
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell <= 2) {
-            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            i16_t result_i16 = std::numeric_limits<i16_t>::min();
             status_t status = diagonal_i16_t {substituter_, gap_costs_}(first, second, result_i16, scratch_space,
                                                                         executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
-            sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
+            i32_t result_i32 = std::numeric_limits<i32_t>::min();
             status_t status = diagonal_i32_t {substituter_, gap_costs_}(first, second, result_i32, scratch_space,
                                                                         executor, specs);
             if (status != status_t::success_k) return status;
             result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
-            sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
+            i64_t result_i64 = std::numeric_limits<i64_t>::min();
             status_t status = diagonal_i64_t {substituter_, gap_costs_}(first, second, result_i64, scratch_space,
                                                                         executor, specs);
             if (status != status_t::success_k) return status;

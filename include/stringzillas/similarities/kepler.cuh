@@ -59,7 +59,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         u8_t const mismatch_cost = this->substituter_.mismatch;
         u8_t const gap_cost = this->gap_costs_.open_or_extend;
 
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x01010101u;       // ! 4x `u8` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x01010101u; // ! 4x `u8` mismatch costs
         gap_cost_vec.u32 = gap_cost * 0x01010101u;           // ! 4x `u8` gap costs
@@ -68,10 +68,10 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         // We want to minimize single-byte processing in favor of 4-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 4 bytes per loop, and have at least 32 threads per block (32 * 4 = 128),
         // ! and deal with strings only under 256 bytes, this loop will fire at most twice per input.
@@ -89,8 +89,8 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
                 (equality_vec.u32 & match_cost_vec.u32) + //
                 (~equality_vec.u32 & mismatch_cost_vec.u32);
             if_substitution_vec.u32 = __vaddus4(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
-            if_deletion_or_insertion_vec.u32 =
-                __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32), gap_cost_vec.u32);
+            if_deletion_or_insertion_vec.u32 = __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32),
+                                                         gap_cost_vec.u32);
             cell_score_vec.u32 = __vminu4(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -137,7 +137,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         u16_t const mismatch_cost = this->substituter_.mismatch;
         u16_t const gap_cost = this->gap_costs_.open_or_extend;
 
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;       // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001; // ! 2x `u16` mismatch costs
         gap_cost_vec.u32 = gap_cost * 0x00010001;           // ! 2x `u16` gap costs
@@ -146,10 +146,10 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
@@ -171,8 +171,8 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
                 (equality_vec.u32 & match_cost_vec.u32) + //
                 (~equality_vec.u32 & mismatch_cost_vec.u32);
             if_substitution_vec.u32 = __vaddus2(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
-            if_deletion_or_insertion_vec.u32 =
-                __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32), gap_cost_vec.u32);
+            if_deletion_or_insertion_vec.u32 = __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32),
+                                                         gap_cost_vec.u32);
             cell_score_vec.u32 = __vminu2(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -245,7 +245,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         u8_t const mismatch_cost = this->substituter_.mismatch;
         u8_t const gap_open_cost = this->gap_costs_.open;
         u8_t const gap_extend_cost = this->gap_costs_.extend;
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x01010101u;           // ! 4x `u8` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x01010101u;     // ! 4x `u8` mismatch costs
         gap_open_cost_vec.u32 = gap_open_cost * 0x01010101u;     // ! 4x `u8` gap costs
@@ -255,11 +255,11 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         // We want to minimize single-byte processing in favor of 4-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
-        sz_u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
+        u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 4 bytes per loop, and have at least 32 threads per block (32 * 4 = 128),
         // ! and deal with strings only under 256 bytes, this loop will fire at most twice per input.
@@ -342,7 +342,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         u16_t const gap_open_cost = this->gap_costs_.open;
         u16_t const gap_extend_cost = this->gap_costs_.extend;
 
-        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
+        u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;           // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001;     // ! 2x `u16` mismatch costs
         gap_open_cost_vec.u32 = gap_open_cost * 0x00010001;     // ! 2x `u16` gap costs
@@ -352,11 +352,11 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
-        sz_u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
-        sz_u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
-        sz_u32_vec_t first_vec, second_vec;
-        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
-        sz_u32_vec_t cell_score_vec;
+        u32_vec_t pre_substitution_vec, pre_insertion_opening_vec, pre_deletion_opening_vec;
+        u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
+        u32_vec_t first_vec, second_vec;
+        u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
+        u32_vec_t cell_score_vec;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input

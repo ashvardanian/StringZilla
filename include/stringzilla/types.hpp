@@ -150,6 +150,13 @@ using ordering_t = sz_ordering_t;
 using rune_length_t = sz_rune_length_t;
 using sorted_idx_t = sz_sorted_idx_t;
 
+using u16_vec_t = sz_u16_vec_t;
+using u32_vec_t = sz_u32_vec_t;
+using u64_vec_t = sz_u64_vec_t;
+using u128_vec_t = sz_u128_vec_t;
+using u256_vec_t = sz_u256_vec_t;
+using u512_vec_t = sz_u512_vec_t;
+
 /** @sa sz_status_t */
 enum class status_t : int {
     success_k = sz_success_k,
@@ -162,6 +169,12 @@ enum class status_t : int {
     device_code_mismatch_k = sz_device_code_mismatch_k,
     device_memory_mismatch_k = sz_device_memory_mismatch_k,
     unknown_k = sz_status_unknown_k,
+};
+
+template <typename value_type_, typename status_type_>
+struct expected {
+    value_type_ value;
+    status_type_ status;
 };
 
 /**
