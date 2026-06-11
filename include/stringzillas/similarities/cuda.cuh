@@ -27,34 +27,32 @@ using ualloc_t = unified_alloc_t;
  *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
  *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
  */
-using levenshtein_cuda_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-using affine_levenshtein_cuda_t = levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using levenshtein_cuda_t = levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using affine_levenshtein_cuda_t = levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
-using levenshtein_kepler_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
-using affine_levenshtein_kepler_t = levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+using levenshtein_kepler_t = levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+using affine_levenshtein_kepler_t = levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ck_k>;
 
-using levenshtein_hopper_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
-using affine_levenshtein_hopper_t = levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using levenshtein_hopper_t = levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using affine_levenshtein_hopper_t = levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 using needleman_wunsch_cuda_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-using smith_waterman_cuda_t =
-    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using smith_waterman_cuda_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
 using affine_needleman_wunsch_cuda_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 using affine_smith_waterman_cuda_t =
-    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
 using needleman_wunsch_hopper_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
-using smith_waterman_hopper_t =
-    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using smith_waterman_hopper_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 using affine_needleman_wunsch_hopper_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 using affine_smith_waterman_hopper_t =
-    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
 #pragma endregion - Common Aliases
 
@@ -1561,15 +1559,15 @@ struct register_optimal_levenshtein {
  *  (row) loop, so callers minimize divergence by keeping per-warp row counts similar (or putting a shared query
  *  on the outer axis when there are more targets than queries).
  */
-template <                                                                          //
-    typename task_type_,                                                            //
-    typename char_type_ = char,                                                     //
-    typename score_type_ = sz_u8_t,                                                 //
-    sz_capability_t capability_ = sz_cap_cuda_k,                                    //
+template <                                                                           //
+    typename task_type_,                                                             //
+    typename char_type_ = char,                                                      //
+    typename score_type_ = sz_u8_t,                                                  //
+    sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ __launch_bounds__(256, 4) void levenshtein_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                 //
+    task_type_ *tasks, size_t tasks_count,                                  //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -1578,7 +1576,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_on_each_cuda_thread_( //
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                    //
+        task.result = levenshtein_computer(                                                                  //
             reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
             reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
@@ -1654,7 +1652,7 @@ template <                                                                      
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ __launch_bounds__(256, 2) void levenshtein_u16_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                     //
+    task_type_ *tasks, size_t tasks_count,                                      //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -1663,7 +1661,7 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_on_each_cuda_thread_( 
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                                 //
+        task.result = levenshtein_computer(                                                                  //
             reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
             reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
@@ -1711,7 +1709,7 @@ struct register_optimal_levenshtein_u16_affine {
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
             sz_u8_t const shorter_char = shorter_string[row_idx - 1];
             sz_u32_t const shorter_char_vec = (sz_u32_t)shorter_char | ((sz_u32_t)shorter_char << 16);
-            sz_u16_t left_M = open + extend * (row_idx - 1);                  // M[row][0]
+            sz_u16_t left_M = open + extend * (row_idx - 1);                      // M[row][0]
             sz_u16_t diag_M = row_idx == 1 ? 0 : (open + extend * (row_idx - 2)); // M[row-1][0]
             sz_u16_t left_D = (open + extend) + (open + extend * (row_idx - 1));  // D[row][0] (discard boundary)
             for (unsigned vec_idx = 0; vec_idx < vec_count_k; ++vec_idx) {
@@ -1750,13 +1748,13 @@ struct register_optimal_levenshtein_u16_affine {
 
 /** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref levenshtein_u16_on_each_cuda_thread_. */
 template <                                                                           //
-    typename task_type_,                                                            //
+    typename task_type_,                                                             //
     typename char_type_ = char,                                                      //
     sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                            //
+    task_type_ *tasks, size_t tasks_count,                                             //
     uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -1765,7 +1763,7 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_on_each_cuda_th
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = levenshtein_computer(                                                                 //
+        task.result = levenshtein_computer(                                                                  //
             reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
             reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
@@ -1777,11 +1775,11 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_on_each_cuda_th
  *         Before starting the kernels, bins them by size to maximize the number of blocks
  *         per grid that can run simultaneously, while fitting into the shared memory.
  */
-template <typename char_type_, typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
-struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capability_,
+template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
-    using char_t = char_type_;
+    using char_t = char;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
     using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
@@ -1794,22 +1792,122 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    // Host-side scratch reused across calls (single-user contract): the launch is driven by one host thread,
-    // so these are filled and consumed serially while the GPU does the parallel work. The engine is move-only
-    // with a non-const `operator()`, so these are plain members - no `mutable`.
     safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
-    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
+    cuda_timer_t timer_ {};
 
     levenshtein_distances(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
                           allocator_t const &alloc = {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // The engine owns its scratch buffers, so it is move-only and tied to a single user.
     levenshtein_distances(levenshtein_distances const &) = delete;
     levenshtein_distances &operator=(levenshtein_distances const &) = delete;
     levenshtein_distances(levenshtein_distances &&) noexcept = default;
     levenshtein_distances &operator=(levenshtein_distances &&) noexcept = default;
+
+    using final_score_t = size_t;
+
+    struct cuda_kernels_t {
+        kernel_shape_t register_u8;
+        kernel_shape_t register_u16;
+        kernel_shape_t warp_u8;
+        kernel_shape_t warp_u16;
+        kernel_shape_t device_u16;
+        kernel_shape_t device_u32;
+        kernel_shape_t device_u64;
+    };
+
+    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
+    static expected<cuda_kernels_t const &, cuda_status_t> kernels() noexcept {
+        static cuda_kernels_t cuda_kernels;
+        static bool resolved = false;
+        if (resolved) return {cuda_kernels, {}};
+        constexpr unsigned text_limit_k = levenshtein_on_each_cuda_thread_default_text_limit_k;
+        constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+        constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+        constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        int device = 0, warp_ceiling = 0;
+        cudaGetDevice(&device);
+        cudaDeviceGetAttribute(&warp_ceiling, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+        cuda_status_t status {status_t::success_k, cudaSuccess};
+
+        // Register tier (thread-per-pair, fixed 256-thread / no-shared shape).
+        if constexpr (affine_k)
+            status = resolve_kernel_shape(
+                cuda_kernels.register_u16,
+                (void const *)&levenshtein_u16_affine_on_each_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
+                256, 0, true);
+        else {
+            status = resolve_kernel_shape(
+                cuda_kernels.register_u8,
+                (void const *)&levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>, 256,
+                0, true);
+            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            status = resolve_kernel_shape(
+                cuda_kernels.register_u16,
+                (void const *)&levenshtein_u16_on_each_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256, 0,
+                true);
+        }
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+
+        // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
+        status = resolve_kernel_shape(
+            cuda_kernels.warp_u8,
+            affine_k
+                ? (void const *)&affine_score_on_each_cuda_warp_<
+                      task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_on_each_cuda_warp_<
+                      task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>,
+            0, (unsigned)warp_ceiling, false);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(
+            cuda_kernels.warp_u16,
+            affine_k
+                ? (void const *)&affine_score_on_each_cuda_warp_<
+                      task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t, objective_k, locality_k, capability_k>
+                : (void const
+                       *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
+                                                          objective_k, locality_k, capability_k>,
+            0, (unsigned)warp_ceiling, false);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+
+        // Device-wide cooperative tier (templated on the pinned result type, fixed 128-thread shape).
+        status = resolve_kernel_shape(
+            cuda_kernels.device_u16,
+            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u16_t, u16_t, final_score_t,
+                                                                      uniform_substitution_costs_t, objective_k,
+                                                                      locality_k, capability_k>
+                     : (void const *)&linear_score_across_cuda_device_<char_t, u16_t, u16_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>,
+            128, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(
+            cuda_kernels.device_u32,
+            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u32_t, u32_t, final_score_t,
+                                                                      uniform_substitution_costs_t, objective_k,
+                                                                      locality_k, capability_k>
+                     : (void const *)&linear_score_across_cuda_device_<char_t, u32_t, u32_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>,
+            128, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(
+            cuda_kernels.device_u64,
+            affine_k ? (void const *)&affine_score_across_cuda_device<char_t, u64_t, u64_t, final_score_t,
+                                                                      uniform_substitution_costs_t, objective_k,
+                                                                      locality_k, capability_k>
+                     : (void const *)&linear_score_across_cuda_device_<char_t, u64_t, u64_t, final_score_t,
+                                                                       uniform_substitution_costs_t, objective_k,
+                                                                       locality_k, capability_k>,
+            128, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        resolved = true;
+        return {cuda_kernels, {}};
+    }
+
+    /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
+    cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept;
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
 #if SZ_HAS_CONCEPTS_
@@ -1821,20 +1919,12 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
 
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
-        constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
-        // Create the engine-owned timing events on first use (context is current here), reused across calls.
-        CUresult timer_error = timer_.ensure_created();
-        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
-
-        using final_score_t = typename indexed_results_type<results_type_>::type;
+        // Pack the container pairs into the engine-owned task list (the only container-dependent step), run the
+        // container-independent GPU pipeline, then scatter the per-task results back into the caller's array.
         tasks_.clear();
         auto &tasks = tasks_;
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
-
-        // Record the start event
-        CUresult start_event_error = timer_.record_start(executor.stream());
-        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
         // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
@@ -1847,13 +1937,12 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         }
 
         // Export all the tasks and sort them by decreasing memory requirement.
-        size_t count_empty_tasks = 0;
-        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
+        using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
         for (size_t i = 0; i < first_strings.size(); ++i) {
             task_t task(                                            //
                 first_strings[i].data(), first_strings[i].length(), //
                 second_strings[i].data(), second_strings[i].length());
-            similarity_memory_requirements_t requirement(                                  //
+            diagonal_memory_requirements_t requirement(                                    //
                 task.shorter_length, task.longer_length,                                   //
                 gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
                 sizeof(char_t), 4);
@@ -1868,11 +1957,38 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
                 else if (!task.longer_length) { task.result = 0; }
                 else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
-                count_empty_tasks++;
             }
             tasks[i] = task;
         }
 
+        cuda_status_t status = run_trampoline_(executor, specs);
+        if (status.status != status_t::success_k) return status;
+
+        for (size_t i = 0; i < tasks.size(); ++i) results[tasks[i].original_index] = tasks[i].result;
+        return status;
+    }
+};
+
+template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
+cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
+                                    std::enable_if_t<capability_ & sz_cap_cuda_k>>::run_trampoline_( //
+    cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
+
+    constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+    constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
+
+    // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
+    CUresult timer_error = timer_.ensure_created();
+    if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
+    auto [kernel_table, kernels_status] = kernels();
+    if (kernels_status.status != status_t::success_k) return kernels_status;
+    auto &tasks = tasks_;
+
+    // Record the start event
+    CUresult start_event_error = timer_.record_start(executor.stream());
+    if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
+
+    {
         // Tiny tasks (both strings within the register limit) run as a register-only thread-per-pair kernel - far
         // faster than the warp anti-diagonal wavefront for short inputs. Partition them to the front, launch the
         // register kernel, and let the warp/device tiers handle only the rest.
@@ -1880,27 +1996,21 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
         if (count_register_level_tasks) {
             std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
-
-            // Launches a register thread-per-pair kernel over `tasks[first, first + count)`.
             cuda_status_t register_status {status_t::success_k, cudaSuccess};
-            auto const launch_register_kernel = [&](void *kernel, size_t first, size_t count) noexcept {
+
+            // Launches a resolved register thread-per-pair kernel over `tasks[first, first + count)`.
+            auto const launch_register_kernel = [&](kernel_shape_t const &shape, size_t first, size_t count) noexcept {
                 if (!count || register_status.status != status_t::success_k) return;
-                cudaFunction_t function = nullptr;
-                cudaError_t function_error = cudaGetFuncBySymbol(&function, kernel);
-                if (function_error != cudaSuccess) return (void)(register_status = make_cuda_status(function_error));
                 task_t *tasks_ptr = tasks.data() + first;
                 void *kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count), (void *)(&substituter_),
                                         (void *)(&gap_costs_)};
-                unsigned const threads_per_block = 256;
-                unsigned blocks_per_grid = 0;
-                cuda_status_t occupancy_status = occupancy_grid(blocks_per_grid, kernel, threads_per_block, 0, specs);
-                if (occupancy_status.status != status_t::success_k) return (void)(register_status = occupancy_status);
+                unsigned const blocks_per_grid = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
                 CUresult launch_error = cuda_launch_t {}
                                             .grid(blocks_per_grid)
-                                            .block(threads_per_block)
+                                            .block(256)
                                             .shared(0)
                                             .stream(executor.stream())
-                                            .launch(function, kernel_args);
+                                            .launch(shape.function, kernel_args);
                 if (launch_error != CUDA_SUCCESS) register_status = make_cuda_status(launch_error);
             };
             if constexpr (!is_affine_k) {
@@ -1909,22 +2019,14 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     std::partition(tasks.begin(), tasks.begin() + count_register_level_tasks,
                                    [](task_t const &task) { return task.bytes_per_cell == one_byte_per_cell_k; }) -
                     tasks.begin();
-                launch_register_kernel(
-                    (void *)&levenshtein_on_each_cuda_thread_<task_t, char_t, u8_t, capability_k,
-                                                             levenshtein_on_each_cuda_thread_default_text_limit_k>,
-                    0, count_u8_register_tasks);
-                launch_register_kernel(
-                    (void *)&levenshtein_u16_on_each_cuda_thread_<task_t, char_t, capability_k,
-                                                                 levenshtein_on_each_cuda_thread_default_text_limit_k>,
-                    count_u8_register_tasks, count_register_level_tasks - count_u8_register_tasks);
+                launch_register_kernel(kernel_table.register_u8, 0, count_u8_register_tasks);
+                launch_register_kernel(kernel_table.register_u16, count_u8_register_tasks,
+                                       count_register_level_tasks - count_u8_register_tasks);
             }
             else {
                 // Affine gaps need 2-byte cells (gap opening overflows the 1-byte variant), so the whole register
                 // tier runs the u16 affine kernel.
-                launch_register_kernel(
-                    (void *)&levenshtein_u16_affine_on_each_cuda_thread_<
-                        task_t, char_t, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>,
-                    0, count_register_level_tasks);
+                launch_register_kernel(kernel_table.register_u16, 0, count_register_level_tasks);
             }
             if (register_status.status != status_t::success_k) return register_status;
         }
@@ -1933,30 +2035,6 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             {tasks.data() + count_register_level_tasks, tasks.size() - count_register_level_tasks}, specs);
 
         if (device_level_tasks.size()) {
-            auto device_level_u16_kernel =
-                is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, u16_t, u16_t, final_score_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, u16_t, u16_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>;
-            auto device_level_u32_kernel =
-                is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, u32_t, u32_t, final_score_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, u32_t, u32_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>;
-            auto device_level_u64_kernel =
-                is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, u64_t, u64_t, final_score_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, u64_t, u64_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>;
             void *device_level_kernel_args[8];
 
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
@@ -1970,6 +2048,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
 
             // Individually submit each task to the GPU.
             void *const diagonals_buffer_ptr = (void *)diagonals_u64_buffer.data();
+            unsigned const device_level_block_size = 128;
             for (size_t i = 0; i < device_level_tasks.size(); ++i) {
                 task_t const &task = device_level_tasks[i];
                 device_level_kernel_args[0] = (void *)(&task.shorter_ptr);
@@ -1981,138 +2060,58 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 device_level_kernel_args[6] = (void *)(&substituter_);
                 device_level_kernel_args[7] = (void *)(&gap_costs_);
 
-                // Pick the smallest fitting type for the diagonals.
-                void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
-                if (task.bytes_per_cell >= sizeof(u32_t))
-                    device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
-                if (task.bytes_per_cell >= sizeof(u64_t))
-                    device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
-
-                // Bridge the runtime kernel symbol to a driver `CUfunction`. Calling `cudaGetFuncBySymbol` also
-                // guarantees the primary CUDA context is current on this thread, which `cuLaunchKernelEx` requires.
-                cudaFunction_t device_level_function = nullptr;
-                cudaError_t function_error = cudaGetFuncBySymbol(&device_level_function, device_level_kernel);
-                if (function_error != cudaSuccess) return make_cuda_status(function_error);
+                // Pick the smallest fitting diagonal type from the resolved table (u16, u32, then u64).
+                kernel_shape_t const &shape = task.bytes_per_cell >= sizeof(u64_t)   ? kernel_table.device_u64
+                                              : task.bytes_per_cell >= sizeof(u32_t) ? kernel_table.device_u32
+                                                                                     : kernel_table.device_u16;
 
                 // A cooperative launch REQUIRES the whole grid to be co-resident, so the grid must not exceed
-                // `co_resident_blocks_per_multiprocessor * streaming_multiprocessors`. The previous hardcoded
-                // 32-blocks-per-multiprocessor grid silently violated this on GPUs with lower occupancy.
-                unsigned const device_level_block_size = 128;
-                unsigned blocks_per_grid = 0;
-                cuda_status_t occupancy_status =
-                    occupancy_grid(blocks_per_grid, device_level_kernel, device_level_block_size, 0, specs);
-                if (occupancy_status.status != status_t::success_k) return occupancy_status;
-
+                // `co_resident_blocks_per_multiprocessor * streaming_multiprocessors` - the precomputed occupancy.
                 // This kernel calls `cg::this_grid().sync()`, so it MUST be launched cooperatively.
+                unsigned const blocks_per_grid = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
                 CUresult launch_error = cuda_launch_t {}
                                             .grid(blocks_per_grid)
                                             .block(device_level_block_size)
                                             .shared(0)
                                             .stream(executor.stream())
                                             .cooperative()
-                                            .launch(device_level_function, device_level_kernel_args);
+                                            .launch(shape.function, device_level_kernel_args);
                 if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
             }
         }
 
-        // Now process remaining warp-level tasks, checking warp densities in reverse order.
-        // From the highest possible number of warps per multiprocessor to the lowest.
-        // TODO(v5+): This per-call template selection (u8 vs u16, linear vs affine) is resolved eagerly on the host
-        // TODO(v5+): for a single compiled SASS. A future redesign should ship a fatbin with multiple per-SM SASS
-        // TODO(v5+): variants and select among them at runtime through a dispatch table, mirroring the pure
-        // TODO(v5+): `stringzilla/` foundation's `sz_dispatch_table_*` machinery.
+        // Now process the remaining warp-level tasks, grouping equal-shape tasks for one launch each.
         if (warp_level_tasks.size()) {
-            auto warp_level_u8_kernel =
-                is_affine_k
-                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
-                                                               sz_minimize_distance_k, sz_similarity_global_k,
-                                                               capability_k>
-                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
-                                                               sz_minimize_distance_k, sz_similarity_global_k,
-                                                               capability_k>;
-            auto warp_level_u16_kernel =
-                is_affine_k
-                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>;
+            cuda_status_t result {status_t::success_k, cudaSuccess};
             void *warp_level_kernel_args[5];
 
-            cuda_status_t result;
             auto const task_size_equality = [](task_t const &lhs, task_t const &rhs) {
                 return lhs.bytes_per_cell == rhs.bytes_per_cell && lhs.density == rhs.density;
             };
 
-            // Selects the warp-kernel template for a group and the indicative (most memory-hungry) task within it.
-            auto const pick_kernel_for_group = [&](task_t const *tasks_begin, task_t const *tasks_end) {
+            // Selects the resolved warp kernel for a group and the indicative (most memory-hungry) task within it.
+            auto const pick_shape_for_group = [&](task_t const *tasks_begin, task_t const *tasks_end) {
                 task_t const &indicative_task = *std::max_element(
                     tasks_begin, tasks_end, [](task_t const &lhs, task_t const &rhs) {
                         return lhs.memory_requirement < rhs.memory_requirement;
                     });
-                void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
-                if (indicative_task.bytes_per_cell >= sizeof(u16_t))
-                    warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
-                return std::make_pair(warp_level_kernel, &indicative_task);
+                kernel_shape_t const &shape = indicative_task.bytes_per_cell >= sizeof(u16_t) ? kernel_table.warp_u16
+                                                                                              : kernel_table.warp_u8;
+                return std::make_pair(&shape, &indicative_task);
             };
 
-            // ! CONFIGURE phase: `cuFuncSetAttribute` is a synchronous, function-global operation, so calling it
-            // ! once per group between launches would serialize the whole stream. Instead we precompute the MAX
-            // ! dynamic shared memory each distinct kernel template will ever request and raise its ceiling a single
-            // ! time. The attribute is a monotone-safe upper bound; the actual per-launch dynamic-smem argument stays
-            // ! per-group, so a smaller group still only reserves what it needs.
-            unsigned shared_memory_ceiling_per_kernel[2] = {0, 0};
-            auto const configure_callback = [&](task_t const *tasks_begin, task_t const *tasks_end) {
-                auto const [warp_level_kernel, indicative_task] = pick_kernel_for_group(tasks_begin, tasks_end);
-                unsigned const kernel_index = warp_level_kernel == warp_level_u16_kernel ? 1u : 0u;
-                auto const [optimal_density,
-                            speculative_factor] = speculation_friendly_density(indicative_task->density);
-                unsigned const shared_memory_per_block = static_cast<unsigned>(indicative_task->memory_requirement *
-                                                                               optimal_density);
-                sz_assert_(shared_memory_per_block > 0);
-                sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
-                if (shared_memory_per_block > shared_memory_ceiling_per_kernel[kernel_index])
-                    shared_memory_ceiling_per_kernel[kernel_index] = shared_memory_per_block;
-            };
-            group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, configure_callback);
-
-            // Bridge both warp kernel symbols to driver `CUfunction` handles. Calling `cudaGetFuncBySymbol` also
-            // guarantees the primary CUDA context is current on this thread, which the driver launches require.
-            void *const warp_level_kernels[2] = {warp_level_u8_kernel, warp_level_u16_kernel};
-            cudaFunction_t warp_level_functions[2] = {nullptr, nullptr};
-            for (unsigned kernel_index = 0; kernel_index < 2 && result.status == status_t::success_k; ++kernel_index) {
-                cudaError_t function_error = cudaGetFuncBySymbol(&warp_level_functions[kernel_index],
-                                                                 warp_level_kernels[kernel_index]);
-                if (function_error != cudaSuccess) result = make_cuda_status(function_error);
-            }
-            for (unsigned kernel_index = 0; kernel_index < 2 && result.status == status_t::success_k; ++kernel_index) {
-                if (!shared_memory_ceiling_per_kernel[kernel_index]) continue;
-                CUresult attribute_error = cuFuncSetAttribute(warp_level_functions[kernel_index],
-                                                              CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                                                              shared_memory_ceiling_per_kernel[kernel_index]);
-                if (attribute_error != CUDA_SUCCESS) result = make_cuda_status(attribute_error);
-            }
-
-            // ! ENQUEUE phase: now that every template's shared-memory ceiling is fixed, launch all groups onto the
-            // ! stream back-to-back with NO per-group synchronization. The single trailing event sync below drains
-            // ! the whole stream, so the host never round-trips between consecutive launches.
+            // Launch every group onto the stream back-to-back with NO per-group synchronization (the handles and
+            // the dynamic-shared ceiling were resolved once up front). The trailing drain reads the results.
             auto const enqueue_callback = [&](task_t const *tasks_begin, task_t const *tasks_end) {
-                // Check if we need to stop processing.
                 if (result.status != status_t::success_k) return;
-
-                // Make sure all tasks can be handled by the same kernel template.
                 task_t const &first_task = *tasks_begin;
                 sz_assert_(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
                     return task.bytes_per_cell == first_task.bytes_per_cell && task.density == first_task.density;
                 }));
 
-                auto const [warp_level_kernel, indicative_task] = pick_kernel_for_group(tasks_begin, tasks_end);
-
-                // Even if we can fit more warps per block we sometimes should not.
+                auto const [shape, indicative_task] = pick_shape_for_group(tasks_begin, tasks_end);
                 auto const [optimal_density,
                             speculative_factor] = speculation_friendly_density(indicative_task->density);
-
                 unsigned const shared_memory_per_block = static_cast<unsigned>(indicative_task->memory_requirement *
                                                                                optimal_density);
                 size_t const count_tasks = tasks_end - tasks_begin;
@@ -2121,18 +2120,14 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 warp_level_kernel_args[2] = (void *)(&substituter_);
                 warp_level_kernel_args[3] = (void *)(&gap_costs_);
                 warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
-
-                // Warp-level algorithm clearly aligns with the warp size.
                 unsigned const threads_per_block = static_cast<unsigned>(specs.warp_size * optimal_density);
 
-                // Size the grid from the actual device occupancy: extra blocks beyond the supplied tasks simply
-                // exit through the grid-stride `task_idx < tasks_count` loop guard, so filling the device once is
-                // never harmful, while the previous `streaming_multiprocessors * speculative_factor` grid could be
-                // smaller than the co-resident block limit and leave warp slots idle.
+                // The grid is sized per group from the actual shared memory (which varies with the data); extra
+                // blocks beyond the supplied tasks exit through the grid-stride loop guard, so filling the device
+                // once is never harmful. The handle is already resolved, so the query goes through the driver.
                 unsigned occupancy_blocks_per_grid = 0;
-                cuda_status_t occupancy_status = occupancy_grid(occupancy_blocks_per_grid,
-                                                               reinterpret_cast<void *>(warp_level_kernel),
-                                                               threads_per_block, shared_memory_per_block, specs);
+                cuda_status_t occupancy_status = occupancy_grid_for(occupancy_blocks_per_grid, shape->function,
+                                                                    threads_per_block, shared_memory_per_block, specs);
                 if (occupancy_status.status != status_t::success_k) {
                     result = occupancy_status;
                     return;
@@ -2140,21 +2135,16 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 unsigned blocks_per_grid = static_cast<unsigned>(specs.streaming_multiprocessors) * speculative_factor;
                 if (occupancy_blocks_per_grid > blocks_per_grid) blocks_per_grid = occupancy_blocks_per_grid;
 
-                // Map the selected runtime kernel symbol to its already-bridged driver `CUfunction`. These
-                // warp-level kernels do NOT use `grid.sync`, so they launch non-cooperatively via `cuLaunchKernelEx`.
-                cudaFunction_t warp_level_function = warp_level_kernel == warp_level_u16_kernel
-                                                         ? warp_level_functions[1]
-                                                         : warp_level_functions[0];
+                // Warp-level kernels do NOT use `grid.sync`, so they launch non-cooperatively via `cuLaunchKernelEx`.
                 CUresult launch_error = cuda_launch_t {}
                                             .grid(blocks_per_grid)
                                             .block(threads_per_block)
                                             .shared(shared_memory_per_block)
                                             .stream(executor.stream())
-                                            .launch(warp_level_function, warp_level_kernel_args);
+                                            .launch(shape->function, warp_level_kernel_args);
                 if (launch_error != CUDA_SUCCESS) result = make_cuda_status(launch_error);
             };
-            if (result.status == status_t::success_k)
-                group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, enqueue_callback);
+            group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, enqueue_callback);
             if (result.status != status_t::success_k) return result;
         }
 
@@ -2165,15 +2155,9 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         CUresult execution_error = timer_.synchronize(executor.stream());
         if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
         float execution_milliseconds = timer_.elapsed_milliseconds();
-
-        // Now that everything went well, export the results back into the `results` array.
-        for (size_t i = 0; i < tasks.size(); ++i) {
-            task_t const &task = tasks[i];
-            results[task.original_index] = task.result;
-        }
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, execution_milliseconds};
     }
-};
+}
 
 #pragma endregion
 
@@ -2321,12 +2305,12 @@ struct register_optimal_nw_sw {
 template <                                                                           //
     typename task_type_,                                                             //
     typename char_type_ = char,                                                      //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,                      //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,                     //
     sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ __launch_bounds__(256, 2) void nw_sw_score_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                 //
+    task_type_ *tasks, size_t tasks_count,                                  //
     error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -2335,7 +2319,7 @@ __global__ __launch_bounds__(256, 2) void nw_sw_score_on_each_cuda_thread_( //
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = nw_sw_computer(                                                                       //
+        task.result = nw_sw_computer(                                                                        //
             reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
             reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
@@ -2385,7 +2369,8 @@ struct register_optimal_nw_sw_affine {
         sz_i16_t global_max = 0;
         for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
             sz_u8_t const shorter_char = shorter_string[row_idx - 1];
-            sz_i16_t left_M = is_local_k ? (sz_i16_t)0 : (sz_i16_t)(open + extend * (sz_i16_t)(row_idx - 1)); // M[row][0]
+            sz_i16_t left_M = is_local_k ? (sz_i16_t)0
+                                         : (sz_i16_t)(open + extend * (sz_i16_t)(row_idx - 1)); // M[row][0]
             sz_i16_t diag_M = is_local_k ? (sz_i16_t)0
                                          : (sz_i16_t)(row_idx == 1 ? 0 : (open + extend * (sz_i16_t)(row_idx - 2)));
             sz_i16_t left_D = (open + extend) + (open + extend * (sz_i16_t)(row_idx - 1)); // D[row][0] (discard)
@@ -2432,14 +2417,14 @@ struct register_optimal_nw_sw_affine {
 
 /** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref nw_sw_score_on_each_cuda_thread_. */
 template <                                                                           //
-    typename task_type_,                                                            //
+    typename task_type_,                                                             //
     typename char_type_ = char,                                                      //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,                      //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,                     //
     sz_capability_t capability_ = sz_cap_cuda_k,                                     //
     unsigned max_text_length_ = levenshtein_on_each_cuda_thread_default_text_limit_k //
     >
 __global__ __launch_bounds__(256, 2) void nw_sw_score_affine_on_each_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                        //
+    task_type_ *tasks, size_t tasks_count,                                         //
     error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -2448,7 +2433,7 @@ __global__ __launch_bounds__(256, 2) void nw_sw_score_affine_on_each_cuda_thread
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
         task_t &task = tasks[task_idx];
-        task.result = nw_sw_computer(                                                                       //
+        task.result = nw_sw_computer(                                                                        //
             reinterpret_cast<sz_u8_t const *>(task.longer_ptr), static_cast<unsigned>(task.longer_length),   //
             reinterpret_cast<sz_u8_t const *>(task.shorter_ptr), static_cast<unsigned>(task.shorter_length), //
             substituter, gap_costs);
@@ -2486,24 +2471,98 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    // Host-side scratch reused across calls (single-user contract): the launch is driven by one host thread,
-    // so these are filled and consumed serially while the GPU does the parallel work. The engine is move-only
-    // with a non-const `operator()`, so these are plain members - no `mutable`.
     safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
     safe_vector<sz_u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
     safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
-    cuda_timer_t timer_ {}; // ? Owned GPU-timing events, created once on first launch, reused across calls
+    cuda_timer_t timer_ {};
 
     cuda_nw_or_sw_byte_level_scores_(error_costs_32x32_t subs = {}, gap_costs_t gaps = {},
                                      allocator_t const &alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // The engine owns its scratch buffers, so it is move-only and tied to a single user.
     cuda_nw_or_sw_byte_level_scores_(cuda_nw_or_sw_byte_level_scores_ const &) = delete;
     cuda_nw_or_sw_byte_level_scores_ &operator=(cuda_nw_or_sw_byte_level_scores_ const &) = delete;
     cuda_nw_or_sw_byte_level_scores_(cuda_nw_or_sw_byte_level_scores_ &&) noexcept = default;
     cuda_nw_or_sw_byte_level_scores_ &operator=(cuda_nw_or_sw_byte_level_scores_ &&) noexcept = default;
+
+    using final_score_t = sz_ssize_t;
+
+    struct cuda_kernels_t {
+        kernel_shape_t register_score;
+        kernel_shape_t warp_i16;
+        kernel_shape_t warp_i32;
+        kernel_shape_t device_i32;
+        kernel_shape_t device_i64;
+    };
+
+    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
+    static expected<cuda_kernels_t const &, cuda_status_t> kernels() noexcept {
+        static cuda_kernels_t cuda_kernels;
+        static bool resolved = false;
+        if (resolved) return {cuda_kernels, {}};
+        using substituter_t = error_costs_classes_in_cuda_shared_memory_t;
+        constexpr unsigned text_limit_k = levenshtein_on_each_cuda_thread_default_text_limit_k;
+        constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+        constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        int device = 0, warp_ceiling = 0;
+        cudaGetDevice(&device);
+        cudaDeviceGetAttribute(&warp_ceiling, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+        cuda_status_t status {status_t::success_k, cudaSuccess};
+
+        // Register tier (single signed i16 thread-per-pair kernel, fixed 256-thread / no-shared shape).
+        status = resolve_kernel_shape(
+            cuda_kernels.register_score,
+            affine_k ? (void const *)&nw_sw_score_affine_on_each_cuda_thread_<task_t, char_t, locality_k, capability_k,
+                                                                              text_limit_k>
+                     : (void const
+                            *)&nw_sw_score_on_each_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
+            256, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+
+        // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
+        status = resolve_kernel_shape(
+            cuda_kernels.warp_i16,
+            affine_k ? (void const *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t, substituter_t,
+                                                                      objective_k, locality_k, capability_k>
+                     : (void const *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t, substituter_t,
+                                                                      objective_k, locality_k, capability_k>,
+            0, (unsigned)warp_ceiling, false);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(
+            cuda_kernels.warp_i32,
+            affine_k ? (void const *)&affine_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t, substituter_t,
+                                                                      objective_k, locality_k, capability_k>
+                     : (void const *)&linear_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t, substituter_t,
+                                                                      objective_k, locality_k, capability_k>,
+            0, (unsigned)warp_ceiling, false);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+
+        // Device-wide cooperative tier (templated on the pinned result type, fixed 128-thread shape).
+        status = resolve_kernel_shape(
+            cuda_kernels.device_i32,
+            affine_k
+                ? (void const *)&affine_score_across_cuda_device<char_t, u32_t, sz_i32_t, final_score_t, substituter_t,
+                                                                 objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_across_cuda_device_<char_t, u32_t, sz_i32_t, final_score_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>,
+            128, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(
+            cuda_kernels.device_i64,
+            affine_k
+                ? (void const *)&affine_score_across_cuda_device<char_t, u64_t, sz_i64_t, final_score_t, substituter_t,
+                                                                 objective_k, locality_k, capability_k>
+                : (void const *)&linear_score_across_cuda_device_<char_t, u64_t, sz_i64_t, final_score_t, substituter_t,
+                                                                  objective_k, locality_k, capability_k>,
+            128, 0, true);
+        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        resolved = true;
+        return {cuda_kernels, {}};
+    }
+
+    /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
+    cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept;
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
 #if SZ_HAS_CONCEPTS_
@@ -2516,20 +2575,12 @@ struct cuda_nw_or_sw_byte_level_scores_ {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
-        constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
-        // Create the engine-owned timing events on first use (context is current here), reused across calls.
-        CUresult timer_error = timer_.ensure_created();
-        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
-
-        using final_score_t = typename indexed_results_type<results_type_>::type;
+        // Pack the container pairs into the engine-owned task list (the only container-dependent step), run the
+        // container-independent GPU pipeline, then scatter the per-task results back into the caller's array.
         tasks_.clear();
         auto &tasks = tasks_;
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
-
-        // Record the start event
-        CUresult start_event_error = timer_.record_start(executor.stream());
-        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
         // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
         // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
@@ -2541,6 +2592,61 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                 return {status_t::device_memory_mismatch_k, cudaSuccess};
         }
 
+        // Export all the tasks and sort them by decreasing memory requirement.
+        using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
+        for (size_t i = 0; i < first_strings.size(); ++i) {
+            task_t task(                                            //
+                first_strings[i].data(), first_strings[i].length(), //
+                second_strings[i].data(), second_strings[i].length());
+            diagonal_memory_requirements_t requirement(                                    //
+                task.shorter_length, task.longer_length,                                   //
+                gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
+                sizeof(char_t), 4, two_bytes_per_cell_k);
+
+            task.original_index = i;
+            // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they only
+            // need shared memory for the DP diagonals - not the input strings.
+            task.memory_requirement = requirement.bytes_for_diagonals;
+            task.bytes_per_cell = requirement.bytes_per_cell;
+            task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
+            if (task.density == infinite_warps_per_multiprocessor_k) {
+                if constexpr (is_local_k) { task.result = 0; }
+                else if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
+                else if (!task.longer_length) { task.result = 0; }
+                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+            }
+            tasks[i] = task;
+        }
+
+        cuda_status_t status = run_trampoline_(executor, specs);
+        if (status.status != status_t::success_k) return status;
+
+        for (size_t i = 0; i < tasks.size(); ++i) results[tasks[i].original_index] = tasks[i].result;
+        return status;
+    }
+};
+
+template <typename gap_costs_type_, typename allocator_type_, sz_similarity_locality_t locality_,
+          sz_capability_t capability_>
+cuda_status_t
+cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, locality_, capability_>::run_trampoline_( //
+    cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
+
+    constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+    constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
+
+    // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
+    CUresult timer_error = timer_.ensure_created();
+    if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
+    auto [kernel_table, kernels_status] = kernels();
+    if (kernels_status.status != status_t::success_k) return kernels_status;
+    auto &tasks = tasks_;
+
+    // Record the start event
+    CUresult start_event_error = timer_.record_start(executor.stream());
+    if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
+
+    {
         // Upload the compact substituter into device-accessible memory. Every block will later mirror
         // these tiny buffers into its own static shared memory for the inner-loop lookups.
         constexpr size_t classes_count_k = error_costs_32x32_t::classes_count_k;
@@ -2560,34 +2666,6 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         device_substituter.byte_to_class = byte_to_class_buffer.data();
         device_substituter.class_substitution_costs = class_substitution_costs_buffer.data();
 
-        // Export all the tasks and sort them by decreasing memory requirement.
-        size_t count_empty_tasks = 0;
-        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
-        for (size_t i = 0; i < first_strings.size(); ++i) {
-            task_t task(                                            //
-                first_strings[i].data(), first_strings[i].length(), //
-                second_strings[i].data(), second_strings[i].length());
-            similarity_memory_requirements_t requirement(                                  //
-                task.shorter_length, task.longer_length,                                   //
-                gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
-                sizeof(char_t), 4, two_bytes_per_cell_k);
-
-            task.original_index = i;
-            // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they only
-            // need shared memory for the DP diagonals - not the input strings.
-            task.memory_requirement = requirement.bytes_for_diagonals;
-            task.bytes_per_cell = requirement.bytes_per_cell;
-            task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
-            if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (is_local_k) { task.result = 0; }
-                else if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
-                else if (!task.longer_length) { task.result = 0; }
-                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
-                count_empty_tasks++;
-            }
-            tasks[i] = task;
-        }
-
         // Tiny tasks (within the register length limit) run as a register-only thread-per-pair NW/SW kernel - far
         // faster than the warp anti-diagonal wavefront for short inputs. Partition them to the front, launch the
         // register kernel, and let the warp/device tiers handle only the rest.
@@ -2595,29 +2673,17 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         for (size_t i = 0; i < tasks.size(); ++i) count_register_level_tasks += tasks[i].fits_in_registers();
         if (count_register_level_tasks) {
             std::partition(tasks.begin(), tasks.end(), [](task_t const &task) { return task.fits_in_registers(); });
-            void *thread_level_kernel =
-                is_affine_k //
-                    ? (void *)&nw_sw_score_affine_on_each_cuda_thread_<
-                          task_t, char_t, locality_k, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>
-                    : (void *)&nw_sw_score_on_each_cuda_thread_<
-                          task_t, char_t, locality_k, capability_k, levenshtein_on_each_cuda_thread_default_text_limit_k>;
-            cudaFunction_t thread_level_function = nullptr;
-            cudaError_t function_error = cudaGetFuncBySymbol(&thread_level_function, thread_level_kernel);
-            if (function_error != cudaSuccess) return make_cuda_status(function_error);
+            kernel_shape_t const &shape = kernel_table.register_score;
             task_t *tasks_ptr = tasks.data();
             void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_register_level_tasks),
                                                  (void *)(&device_substituter), (void *)(&gap_costs_)};
-            unsigned const threads_per_block = 256;
-            unsigned blocks_per_grid = 0;
-            cuda_status_t occupancy_status =
-                occupancy_grid(blocks_per_grid, thread_level_kernel, threads_per_block, 0, specs);
-            if (occupancy_status.status != status_t::success_k) return occupancy_status;
+            unsigned const blocks_per_grid = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
             CUresult launch_error = cuda_launch_t {}
                                         .grid(blocks_per_grid)
-                                        .block(threads_per_block)
+                                        .block(256)
                                         .shared(0)
                                         .stream(executor.stream())
-                                        .launch(thread_level_function, thread_level_kernel_args);
+                                        .launch(shape.function, thread_level_kernel_args);
             if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
         }
 
@@ -2625,22 +2691,6 @@ struct cuda_nw_or_sw_byte_level_scores_ {
             {tasks.data() + count_register_level_tasks, tasks.size() - count_register_level_tasks}, specs);
 
         if (device_level_tasks.size()) {
-            auto device_level_i32_kernel =
-                is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, u32_t, sz_i32_t, final_score_t,
-                                                               error_costs_classes_in_cuda_shared_memory_t,
-                                                               sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, u32_t, sz_i32_t, final_score_t,
-                                                                error_costs_classes_in_cuda_shared_memory_t,
-                                                                sz_maximize_score_k, locality_k, capability_k>;
-            auto device_level_i64_kernel =
-                is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, u64_t, sz_i64_t, final_score_t,
-                                                               error_costs_classes_in_cuda_shared_memory_t,
-                                                               sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, u64_t, sz_i64_t, final_score_t,
-                                                                error_costs_classes_in_cuda_shared_memory_t,
-                                                                sz_maximize_score_k, locality_k, capability_k>;
             void *device_level_kernel_args[8];
 
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
@@ -2665,134 +2715,59 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                 device_level_kernel_args[6] = (void *)(&device_substituter);
                 device_level_kernel_args[7] = (void *)(&gap_costs_);
 
-                // Pick the smallest fitting type for the diagonals.
-                void *device_level_kernel = reinterpret_cast<void *>(device_level_i32_kernel);
-                if (task.bytes_per_cell >= sizeof(sz_i64_t))
-                    device_level_kernel = reinterpret_cast<void *>(device_level_i64_kernel);
-
-                // Bridge the runtime kernel symbol to a driver `CUfunction`. Calling `cudaGetFuncBySymbol` also
-                // guarantees the primary CUDA context is current on this thread, which `cuLaunchKernelEx` requires.
-                cudaFunction_t device_level_function = nullptr;
-                cudaError_t function_error = cudaGetFuncBySymbol(&device_level_function, device_level_kernel);
-                if (function_error != cudaSuccess) return make_cuda_status(function_error);
+                // Pick the smallest fitting signed diagonal type from the resolved table (i32, then i64).
+                kernel_shape_t const &shape = task.bytes_per_cell >= sizeof(sz_i64_t) ? kernel_table.device_i64
+                                                                                      : kernel_table.device_i32;
 
                 // A cooperative launch REQUIRES the whole grid to be co-resident, so the grid must not exceed
-                // `co_resident_blocks_per_multiprocessor * streaming_multiprocessors`. The previous hardcoded
-                // 32-blocks-per-multiprocessor grid silently violated this on GPUs with lower occupancy.
-                unsigned const device_level_block_size = 128;
-                unsigned blocks_per_grid = 0;
-                cuda_status_t occupancy_status =
-                    occupancy_grid(blocks_per_grid, device_level_kernel, device_level_block_size, 0, specs);
-                if (occupancy_status.status != status_t::success_k) return occupancy_status;
-
+                // `co_resident_blocks_per_multiprocessor * streaming_multiprocessors` - the precomputed occupancy.
                 // This kernel calls `cg::this_grid().sync()`, so it MUST be launched cooperatively.
+                unsigned const blocks_per_grid = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
                 CUresult launch_error = cuda_launch_t {}
                                             .grid(blocks_per_grid)
-                                            .block(device_level_block_size)
+                                            .block(128)
                                             .shared(0)
                                             .stream(executor.stream())
                                             .cooperative()
-                                            .launch(device_level_function, device_level_kernel_args);
+                                            .launch(shape.function, device_level_kernel_args);
                 if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
             }
         }
 
         // Now process remaining warp-level tasks, checking warp densities in reverse order.
         // From the highest possible number of warps per multiprocessor to the lowest.
-        // TODO(v5+): This per-call template selection (i16 vs i32, linear vs affine) is resolved eagerly on the host
-        // TODO(v5+): for a single compiled SASS. A future redesign should ship a fatbin with multiple per-SM SASS
-        // TODO(v5+): variants and select among them at runtime through a dispatch table, mirroring the pure
-        // TODO(v5+): `stringzilla/` foundation's `sz_dispatch_table_*` machinery.
         if (warp_level_tasks.size()) {
-            auto warp_level_i16_kernel =
-                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t,
-                                                                       error_costs_classes_in_cuda_shared_memory_t,
-                                                                       sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t,
-                                                                       error_costs_classes_in_cuda_shared_memory_t,
-                                                                       sz_maximize_score_k, locality_k, capability_k>;
-            auto warp_level_i32_kernel =
-                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t,
-                                                                       error_costs_classes_in_cuda_shared_memory_t,
-                                                                       sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t,
-                                                                       error_costs_classes_in_cuda_shared_memory_t,
-                                                                       sz_maximize_score_k, locality_k, capability_k>;
+            cuda_status_t result {status_t::success_k, cudaSuccess};
             void *warp_level_kernel_args[5];
 
-            cuda_status_t result;
             auto const task_size_equality = [](task_t const &lhs, task_t const &rhs) {
                 return lhs.bytes_per_cell == rhs.bytes_per_cell && lhs.density == rhs.density;
             };
 
-            // Selects the warp-kernel template for a group and the indicative (most memory-hungry) task within it.
-            auto const pick_kernel_for_group = [&](task_t const *tasks_begin, task_t const *tasks_end) {
+            // Selects the resolved warp kernel for a group and the indicative (most memory-hungry) task within it.
+            auto const pick_shape_for_group = [&](task_t const *tasks_begin, task_t const *tasks_end) {
                 task_t const &indicative_task = *std::max_element(
                     tasks_begin, tasks_end, [](task_t const &lhs, task_t const &rhs) {
                         return lhs.memory_requirement < rhs.memory_requirement;
                     });
-                void *warp_level_kernel = reinterpret_cast<void *>(warp_level_i16_kernel);
-                if (indicative_task.bytes_per_cell >= sizeof(sz_i32_t))
-                    warp_level_kernel = reinterpret_cast<void *>(warp_level_i32_kernel);
-                return std::make_pair(warp_level_kernel, &indicative_task);
+                kernel_shape_t const &shape = indicative_task.bytes_per_cell >= sizeof(sz_i32_t)
+                                                  ? kernel_table.warp_i32
+                                                  : kernel_table.warp_i16;
+                return std::make_pair(&shape, &indicative_task);
             };
 
-            // ! CONFIGURE phase: `cuFuncSetAttribute` is a synchronous, function-global operation, so calling it
-            // ! once per group between launches would serialize the whole stream. Instead we precompute the MAX
-            // ! dynamic shared memory each distinct kernel template will ever request and raise its ceiling a single
-            // ! time. The attribute is a monotone-safe upper bound; the actual per-launch dynamic-smem argument stays
-            // ! per-group, so a smaller group still only reserves what it needs.
-            unsigned shared_memory_ceiling_per_kernel[2] = {0, 0};
-            auto const configure_callback = [&](task_t const *tasks_begin, task_t const *tasks_end) {
-                auto const [warp_level_kernel, indicative_task] = pick_kernel_for_group(tasks_begin, tasks_end);
-                unsigned const kernel_index = warp_level_kernel == warp_level_i32_kernel ? 1u : 0u;
-                auto const [optimal_density,
-                            speculative_factor] = speculation_friendly_density(indicative_task->density);
-                unsigned const shared_memory_per_block = static_cast<unsigned>(indicative_task->memory_requirement *
-                                                                               optimal_density);
-                sz_assert_(shared_memory_per_block > 0);
-                sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
-                if (shared_memory_per_block > shared_memory_ceiling_per_kernel[kernel_index])
-                    shared_memory_ceiling_per_kernel[kernel_index] = shared_memory_per_block;
-            };
-            group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, configure_callback);
-
-            // Bridge both warp kernel symbols to driver `CUfunction` handles. Calling `cudaGetFuncBySymbol` also
-            // guarantees the primary CUDA context is current on this thread, which the driver launches require.
-            void *const warp_level_kernels[2] = {warp_level_i16_kernel, warp_level_i32_kernel};
-            cudaFunction_t warp_level_functions[2] = {nullptr, nullptr};
-            for (unsigned kernel_index = 0; kernel_index < 2 && result.status == status_t::success_k; ++kernel_index) {
-                cudaError_t function_error = cudaGetFuncBySymbol(&warp_level_functions[kernel_index],
-                                                                 warp_level_kernels[kernel_index]);
-                if (function_error != cudaSuccess) result = make_cuda_status(function_error);
-            }
-            for (unsigned kernel_index = 0; kernel_index < 2 && result.status == status_t::success_k; ++kernel_index) {
-                if (!shared_memory_ceiling_per_kernel[kernel_index]) continue;
-                CUresult attribute_error = cuFuncSetAttribute(warp_level_functions[kernel_index],
-                                                              CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                                                              shared_memory_ceiling_per_kernel[kernel_index]);
-                if (attribute_error != CUDA_SUCCESS) result = make_cuda_status(attribute_error);
-            }
-
-            // ! ENQUEUE phase: now that every template's shared-memory ceiling is fixed, launch all groups onto the
-            // ! stream back-to-back with NO per-group synchronization. The single trailing event sync below drains
-            // ! the whole stream, so the host never round-trips between consecutive launches.
+            // Launch every group onto the stream back-to-back with NO per-group synchronization (the handles and
+            // the dynamic-shared ceiling were resolved once up front). The trailing drain reads the results.
             auto const enqueue_callback = [&](task_t const *tasks_begin, task_t const *tasks_end) {
-                // Check if we need to stop processing.
                 if (result.status != status_t::success_k) return;
-
-                // Make sure all tasks can be handled by the same kernel template.
                 task_t const &first_task = *tasks_begin;
                 sz_assert_(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
                     return task.bytes_per_cell == first_task.bytes_per_cell && task.density == first_task.density;
                 }));
 
-                auto const [warp_level_kernel, indicative_task] = pick_kernel_for_group(tasks_begin, tasks_end);
-
-                // Even if we can fit more warps per block we sometimes should not.
+                auto const [shape, indicative_task] = pick_shape_for_group(tasks_begin, tasks_end);
                 auto const [optimal_density,
                             speculative_factor] = speculation_friendly_density(indicative_task->density);
-
                 unsigned const shared_memory_per_block = static_cast<unsigned>(indicative_task->memory_requirement *
                                                                                optimal_density);
                 size_t const count_tasks = tasks_end - tasks_begin;
@@ -2801,18 +2776,14 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                 warp_level_kernel_args[2] = (void *)(&device_substituter);
                 warp_level_kernel_args[3] = (void *)(&gap_costs_);
                 warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
-
-                // Warp-level algorithm clearly aligns with the warp size.
                 unsigned const threads_per_block = static_cast<unsigned>(specs.warp_size * optimal_density);
 
-                // Size the grid from the actual device occupancy: extra blocks beyond the supplied tasks simply
-                // exit through the grid-stride `task_idx < tasks_count` loop guard, so filling the device once is
-                // never harmful, while the previous `streaming_multiprocessors * speculative_factor` grid could be
-                // smaller than the co-resident block limit and leave warp slots idle.
+                // The grid is sized per group from the actual shared memory (which varies with the data); extra
+                // blocks beyond the supplied tasks exit through the grid-stride loop guard, so filling the device
+                // once is never harmful. The handle is already resolved, so the query goes through the driver.
                 unsigned occupancy_blocks_per_grid = 0;
-                cuda_status_t occupancy_status = occupancy_grid(occupancy_blocks_per_grid,
-                                                               reinterpret_cast<void *>(warp_level_kernel),
-                                                               threads_per_block, shared_memory_per_block, specs);
+                cuda_status_t occupancy_status = occupancy_grid_for(occupancy_blocks_per_grid, shape->function,
+                                                                    threads_per_block, shared_memory_per_block, specs);
                 if (occupancy_status.status != status_t::success_k) {
                     result = occupancy_status;
                     return;
@@ -2820,21 +2791,16 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                 unsigned blocks_per_grid = static_cast<unsigned>(specs.streaming_multiprocessors) * speculative_factor;
                 if (occupancy_blocks_per_grid > blocks_per_grid) blocks_per_grid = occupancy_blocks_per_grid;
 
-                // Map the selected runtime kernel symbol to its already-bridged driver `CUfunction`. These
-                // warp-level kernels do NOT use `grid.sync`, so they launch non-cooperatively via `cuLaunchKernelEx`.
-                cudaFunction_t warp_level_function = warp_level_kernel == warp_level_i32_kernel
-                                                         ? warp_level_functions[1]
-                                                         : warp_level_functions[0];
+                // Warp-level kernels do NOT use `grid.sync`, so they launch non-cooperatively via `cuLaunchKernelEx`.
                 CUresult launch_error = cuda_launch_t {}
                                             .grid(blocks_per_grid)
                                             .block(threads_per_block)
                                             .shared(shared_memory_per_block)
                                             .stream(executor.stream())
-                                            .launch(warp_level_function, warp_level_kernel_args);
+                                            .launch(shape->function, warp_level_kernel_args);
                 if (launch_error != CUDA_SUCCESS) result = make_cuda_status(launch_error);
             };
-            if (result.status == status_t::success_k)
-                group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, enqueue_callback);
+            group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, enqueue_callback);
             if (result.status != status_t::success_k) return result;
         }
 
@@ -2845,19 +2811,13 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         CUresult execution_error = timer_.synchronize(executor.stream());
         if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
         float execution_milliseconds = timer_.elapsed_milliseconds();
-
-        // Now that everything went well, export the results back into the `results` array.
-        for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
-            task_t const &task = tasks[task_index];
-            results[task.original_index] = task.result;
-        }
         return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, execution_milliseconds};
     }
-};
+}
 
 /** @brief Dispatches baseline Needleman Wunsch algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
-struct needleman_wunsch_scores<char, error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
+struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                                std::enable_if_t<capability_ & sz_cap_cuda_k>>
     : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
 
@@ -2867,7 +2827,7 @@ struct needleman_wunsch_scores<char, error_costs_32x32_t, gap_costs_type_, alloc
 
 /** @brief Dispatches baseline Smith Waterman algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
-struct smith_waterman_scores<char, error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
+struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>>
     : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
 

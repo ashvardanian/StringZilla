@@ -225,7 +225,7 @@ void bench_fingerprints(environment_t const &env) {
     scramble_accelerated_results();
 
 #if SZ_USE_CUDA
-    bench_nullary(                                               //
+    bench_nullary(                                                //
         env, "basic_rabin_u64_cuda", basic_rabin_u64_serial_call, //
         fingerprint_callable<basic_rabin_u64_cuda_t, cuda_executor_t, gpu_specs_t>(
             tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_cuda, cuda_executor_t {}, specs), //

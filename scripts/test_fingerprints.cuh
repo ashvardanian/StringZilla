@@ -27,6 +27,7 @@
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
+
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::basic_rolling_hashers;
 using ashvardanian::stringzillas::buz_rolling_hasher;
@@ -34,8 +35,9 @@ using ashvardanian::stringzillas::floating_rolling_hasher;
 using ashvardanian::stringzillas::floating_rolling_hashers;
 using ashvardanian::stringzillas::multiplying_rolling_hasher;
 using ashvardanian::stringzillas::rabin_karp_rolling_hasher;
-#if SZ_USE_CUDA
+
 // StringZillas library symbols provided only by the CUDA backend:
+#if SZ_USE_CUDA
 using ashvardanian::stringzillas::unified_alloc;
 #endif
 
@@ -177,9 +179,9 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     strings.emplace_back("€100"), strings.emplace_back("EUR 100");                  // currency symbol vs abbreviation
 
     // Try longer strings that will trigger some loop-unrolled optimizations
-    strings.emplace_back( //
-        "This is a longer string that will be used to test the rolling hasher. "
-        "It should be long enough to cover multiple windows and provide a good test case for the "
+    strings.emplace_back(                                                                          //
+        "This is a longer string that will be used to test the rolling hasher. "                   //
+        "It should be long enough to cover multiple windows and provide a good test case for the " //
         "rolling hasher implementation. Let's see how it performs with this longer input string.");
 
     return strings;
@@ -356,9 +358,9 @@ void test_rolling_hasher() {
 }
 
 template <std::size_t dims_, typename texts_type_, typename baseline_hasher_type_, typename accelerated_hasher_type_>
-void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
-                                                       baseline_hasher_type_ const &baseline_hasher,
-                                                       accelerated_hasher_type_ const &accelerated_hasher) {
+void test_rolling_hashers_equivalence_against_baseline( //
+    texts_type_ const &texts, baseline_hasher_type_ &baseline_hasher, accelerated_hasher_type_ &accelerated_hasher) {
+
     constexpr std::size_t dims_k = dims_;
     using min_hashes_t = safe_array<u32_t, dims_k>;
     using min_counts_t = safe_array<u32_t, dims_k>;
@@ -436,9 +438,9 @@ void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
  *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<f64_t>, ..., u32_t>`.
  */
 template <std::size_t window_width_, std::size_t dims_>
-void test_rolling_hashers_equivalence_for_width(            //
-    std::vector<std::string> const &unit_strings,          //
-    std::vector<std::string> const &dna_like_strings,      //
+void test_rolling_hashers_equivalence_for_width(      //
+    std::vector<std::string> const &unit_strings,     //
+    std::vector<std::string> const &dna_like_strings, //
     std::vector<std::string> const &inconvenient_strings) {
 
     constexpr std::size_t window_width_k = window_width_;

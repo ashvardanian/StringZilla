@@ -6,8 +6,9 @@
 #ifndef STRINGZILLAS_TYPES_HPP_
 #define STRINGZILLAS_TYPES_HPP_
 
-#include <thread> // `std::thread::hardware_concurrency`
-#include <atomic> // `std::atomic`, `std::memory_order`
+#include <thread>  // `std::thread::hardware_concurrency`
+#include <atomic>  // `std::atomic`, `std::memory_order`
+#include <cstdlib> // `std::malloc`, `std::free`
 
 #include "stringzilla/types.hpp"
 
@@ -31,7 +32,7 @@ struct dummy_mutex_t {
 
 /**
  *  @brief Simple RAII lock guard analog to `std::lock_guard` for C++11 compatibility.
- *         Automatically locks the mutex on construction and unlocks on destruction.
+ *      Automatically locks the mutex on construction and unlocks on destruction.
  */
 template <typename mutex_type_>
 class lock_guard {
@@ -56,7 +57,7 @@ struct dummy_prong_t {
 
 /**
  *  @brief C++17-compatible equivalent of std::remove_cvref (which was added in C++20).
- *         Removes const, volatile, and reference qualifiers from a type.
+ *      Removes const, volatile, and reference qualifiers from a type.
  */
 template <typename type_>
 using remove_cvref = typename std::remove_cv<typename std::remove_reference<type_>::type>::type;
@@ -69,8 +70,8 @@ struct dummy_executor_t {
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
-     *         a way that consecutive elements are likely to be processed by
-     *         the same thread.
+     *      a way that consecutive elements are likely to be processed by
+     *      the same thread.
      */
     template <typename function_type_>
     inline void for_n(size_t n, function_type_ &&function) const noexcept {
@@ -79,9 +80,9 @@ struct dummy_executor_t {
 
     /**
      *  @brief Calls the @p function on each thread propagating a 2 indices
-     *         to the function. The first index is the start of the range
-     *         and the second index is the exclusive end of the range to be
-     *         handled by a particular thread.
+     *      to the function. The first index is the start of the range
+     *      and the second index is the exclusive end of the range to be
+     *      handled by a particular thread.
      */
     template <typename function_type_>
     inline void for_slices(size_t n, function_type_ &&function) const noexcept {
@@ -90,8 +91,8 @@ struct dummy_executor_t {
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) expecting
-     *         that individual invocations can have drastically different duration,
-     *         so each thread eagerly processes the next index in the range.
+     *      that individual invocations can have drastically different duration,
+     *      so each thread eagerly processes the next index in the range.
      */
     template <typename function_type_>
     inline void for_n_dynamic(size_t n, function_type_ &&function) const noexcept {
@@ -153,8 +154,8 @@ struct openmp_executor_t {
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
-     *         a way that consecutive elements are likely to be processed by
-     *         the same thread.
+     *      a way that consecutive elements are likely to be processed by
+     *      the same thread.
      */
     template <typename function_type_>
     inline void for_n(size_t n, function_type_ &&function) const noexcept {
@@ -164,9 +165,9 @@ struct openmp_executor_t {
 
     /**
      *  @brief Calls the @p function on each thread propagating a 2 indices
-     *         to the function. The first index is the start of the range
-     *         and the second index is the exclusive end of the range to be
-     *         handled by a particular thread.
+     *      to the function. The first index is the start of the range
+     *      and the second index is the exclusive end of the range to be
+     *      handled by a particular thread.
      */
     template <typename function_type_>
     inline void for_slices(size_t n, function_type_ &&function) const noexcept {
@@ -185,8 +186,8 @@ struct openmp_executor_t {
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) expecting
-     *         that individual invocations can have drastically different duration,
-     *         so each thread eagerly processes the next index in the range.
+     *      that individual invocations can have drastically different duration,
+     *      so each thread eagerly processes the next index in the range.
      */
     template <typename function_type_>
     inline void for_n_dynamic(size_t n, function_type_ &&function) const noexcept {
@@ -237,7 +238,7 @@ static_assert(!continuous_like<int>);
 
 /**
  *  @brief A function that takes a range of elements and a @p callback function and groups the elements
- *         that @p equality function considers equal. Analogous to `std::ranges::group_by`.
+ *      that @p equality function considers equal. Analogous to `std::ranges::group_by`.
  *  @return The number of groups formed.
  */
 template <typename begin_iterator_type_, typename end_iterator_type_, typename equality_type_,
@@ -263,7 +264,7 @@ size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, 
 
 /**
  *  @brief Safer alternative to `std::vector`, that avoids exceptions, copy constructors,
- *         and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
+ *      and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
  */
 template <typename value_type_, typename allocator_type_>
 class safe_vector {

@@ -40,13 +40,12 @@ namespace stringzillas {
  *         emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends.
  */
 using needleman_wunsch_haswell_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
-using smith_waterman_haswell_t =
-    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using smith_waterman_haswell_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_needleman_wunsch_haswell_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_smith_waterman_haswell_t =
-    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_NEON
@@ -55,13 +54,12 @@ using affine_smith_waterman_haswell_t =
  *         feeding the anti-diagonal scorers.
  */
 using needleman_wunsch_neon_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
-using smith_waterman_neon_t =
-    smith_waterman_scores<char, error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using smith_waterman_neon_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
 using affine_needleman_wunsch_neon_t =
-    needleman_wunsch_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
 using affine_smith_waterman_neon_t =
-    smith_waterman_scores<char, error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
 #endif // SZ_USE_NEON
 
 } // namespace stringzillas
