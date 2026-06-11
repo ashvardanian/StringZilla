@@ -580,10 +580,11 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
 
-typedef unsigned char sz_byte_t; // A byte is an 8-bit unsigned integer
-typedef char *sz_ptr_t;          // A type alias for `char *`
-typedef char const *sz_cptr_t;   // A type alias for `char const *`
-typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
+typedef unsigned char sz_byte_t;            // A byte is an 8-bit unsigned integer
+typedef char *sz_ptr_t;                     // A type alias for `char *`
+typedef char const *sz_cptr_t;              // A type alias for `char const *`
+typedef sz_i8_t sz_error_cost_t;            // Character mismatch cost for fuzzy matching functions
+typedef sz_u16_t sz_error_cost_magnitude_t; // The smallest type that can hold unsigned `abs(sz_error_cost_t {})`
 
 struct sz_hash_state_t;            // Forward declaration of a hash state structure
 struct sz_sha256_state_t;          // Forward declaration of a SHA256 hash state structure

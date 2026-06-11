@@ -73,9 +73,9 @@ namespace scripts {
 
 using accurate_clock_t = stdc::high_resolution_clock;
 
-template <std::size_t multiple>
+template <std::size_t multiple_>
 std::size_t round_up_to_multiple(std::size_t n) {
-    return n == 0 ? multiple : ((n + multiple - 1) / multiple) * multiple;
+    return n == 0 ? multiple_ : ((n + multiple_ - 1) / multiple_) * multiple_;
 }
 
 using check_value_t = std::uint64_t;

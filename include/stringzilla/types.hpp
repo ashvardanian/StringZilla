@@ -24,7 +24,7 @@
 
 /**
  *  @brief When set to 1, the library will include the C++ STL headers and implement
- *         automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
+ *      automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
  */
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
@@ -66,7 +66,7 @@
 
 /**
  *  @brief Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
- *         Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
+ *      Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
  *
  *  The `constexpr` keyword has different applicability scope in different C++ versions.
  *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
@@ -124,14 +124,18 @@ namespace stringzilla {
 
 using i8_t = sz_i8_t;
 using u8_t = sz_u8_t;
+using i16_t = sz_i16_t;
 using u16_t = sz_u16_t;
 using i32_t = sz_i32_t;
 using u32_t = sz_u32_t;
 using u64_t = sz_u64_t;
 using i64_t = sz_i64_t;
+
+using byte_t = sz_byte_t;
+using rune_t = sz_rune_t;
+
 using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
-using byte_t = sz_byte_t;
 
 using f32_t = float;
 using f64_t = double;
@@ -139,11 +143,11 @@ using f64_t = double;
 using ptr_t = sz_ptr_t;
 using cptr_t = sz_cptr_t;
 using error_cost_t = sz_error_cost_t;
+using error_cost_magnitude_t = sz_error_cost_magnitude_t;
 
 using bool_t = sz_bool_t;
 using ordering_t = sz_ordering_t;
 using rune_length_t = sz_rune_length_t;
-using rune_t = sz_rune_t;
 using sorted_idx_t = sz_sorted_idx_t;
 
 /** @sa sz_status_t */
@@ -167,7 +171,7 @@ enum class status_t : int {
 struct error_costs_unary_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? 0 : 1; }
-    constexpr sz_size_t magnitude() const noexcept { return 1; }
+    constexpr error_cost_magnitude_t magnitude() const noexcept { return 1; }
 };
 
 template <typename value_type_, sz_size_t extent_ = SZ_SIZE_MAX>
@@ -263,7 +267,15 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return span(data_ + offset, count);
     }
 
-    /// @brief  Lexicographic equality comparison for STL compatibility.
+    /** @brief Returns the i-th equal slice when this span is divided into n parts. Last part absorbs remainder. */
+    sz_constexpr_if_cpp14 span part_i_of_n(size_type i, size_type n) const noexcept {
+        size_type const slice = size_ / n;
+        size_type const offset = i * slice;
+        size_type const count = (i + 1 == n) ? size_ - offset : slice;
+        return span(data_ + offset, count);
+    }
+
+    /** @brief Lexicographic equality comparison for STL compatibility. */
     sz_constexpr_if_cpp14 bool operator==(span const &other) const noexcept {
         if (size_ != other.size_) return false;
         for (size_type i = 0; i < size_; ++i)
@@ -271,10 +283,10 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return true;
     }
 
-    /// @brief  Lexicographic inequality comparison for STL compatibility.
+    /** @brief Lexicographic inequality comparison for STL compatibility. */
     sz_constexpr_if_cpp14 bool operator!=(span const &other) const noexcept { return !(*this == other); }
 
-    /// @brief  Lexicographic less-than comparison for STL compatibility.
+    /** @brief Lexicographic less-than comparison for STL compatibility. */
     sz_constexpr_if_cpp14 bool operator<(span const &other) const noexcept {
         size_type const min_size = size_ < other.size_ ? size_ : other.size_;
         for (size_type i = 0; i < min_size; ++i) {
@@ -455,7 +467,7 @@ struct indexed_container_iterator {
 
 /**
  *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *         Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
+ *      Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
  *  @sa arrow_strings_tape
  */
 template <typename char_type_, typename offset_type_>
@@ -489,8 +501,8 @@ struct arrow_strings_view {
 
 /**
  *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *         Each string is appended to a contiguous memory block, delimited by the NULL character.
- *         Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
+ *      Each string is appended to a contiguous memory block, delimited by the NULL character.
+ *      Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
  */
 template <typename char_type_, typename offset_type_, typename allocator_type_>
 struct arrow_strings_tape {
@@ -912,7 +924,7 @@ sz_constexpr_if_cpp14 void trivial_swap(value_type_ &x, value_type_ &y) noexcept
 
 /**
  *  @brief Helper structure for dividing a range of data into three parts: head, body, and tail,
- *         generally used to minimize misaligned (split) stores and operate on aligned pages.
+ *      generally used to minimize misaligned (split) stores and operate on aligned pages.
  */
 struct head_body_tail_t {
     size_t head = 0;
