@@ -4733,6 +4733,72 @@ void test_sorting_algorithms() {
             for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
+
+    // Stability, reverse, top-K, and case-insensitive coverage against `std::stable_sort` references.
+    auto compare_bytes = [](std::string const &a, std::string const &b) -> int {
+        std::size_t const min_length = a.size() < b.size() ? a.size() : b.size();
+        for (std::size_t i = 0; i < min_length; ++i) {
+            unsigned char const ca = (unsigned char)a[i], cb = (unsigned char)b[i];
+            if (ca != cb) return ca < cb ? -1 : 1;
+        }
+        return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
+    };
+    auto fold_string = [](std::string const &s) -> std::string {
+        std::vector<char> destination(s.size() * 3 + 4);
+        std::size_t const folded_length = sz_utf8_case_fold(s.data(), s.size(), destination.data());
+        return std::string(destination.data(), folded_length);
+    };
+
+    // A duplicate-heavy, mixed-case, multi-script dataset exercising every new knob.
+    strs_t mixed;
+    {
+        char const *seed_words[] = {"apple", "Apple", "APPLE", "banana", "BANANA", "ab", "AB", "Ab", "aB",
+                                    "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "", "a", "A"};
+        for (std::size_t repeat = 0; repeat < 200; ++repeat)
+            for (char const *word : seed_words) mixed.push_back(word);
+        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::scripts::random_string(i % 6, "abc", 3));
+        std::shuffle(mixed.begin(), mixed.end(), global_random_generator());
+    }
+    std::size_t const mixed_count = mixed.size();
+    auto is_permutation = [&](order_t const &order) {
+        std::vector<char> seen(mixed_count, 0);
+        for (auto idx : order) {
+            if (idx >= mixed_count || seen[idx]) return false;
+            seen[idx] = 1;
+        }
+        return order.size() == mixed_count;
+    };
+    auto reference_order = [&](std::vector<std::string> const &keys, bool reverse) {
+        order_t reference(mixed_count);
+        std::iota(reference.begin(), reference.end(), 0u);
+        std::stable_sort(reference.begin(), reference.end(), [&](sz::sorted_idx_t a, sz::sorted_idx_t b) {
+            int const ordering = compare_bytes(keys[a], keys[b]);
+            if (ordering != 0) return reverse ? ordering > 0 : ordering < 0;
+            return a < b; // Equal keys stay ascending by original index in both directions.
+        });
+        return reference;
+    };
+
+    // Ascending and descending must match a byte-key stable sort exactly.
+    assert(is_permutation(sz::argsort(mixed)) && sz::argsort(mixed) == reference_order(mixed, false));
+    assert(sz::argsort(mixed, 0, true) == reference_order(mixed, true));
+
+    // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
+    for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
+        for (bool reverse : {false, true}) {
+            order_t const got = sz::argsort(mixed, top_count, reverse);
+            order_t const reference = reference_order(mixed, reverse);
+            assert(is_permutation(got));
+            std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
+            for (std::size_t i = 0; i < head; ++i) assert(mixed[got[i]] == mixed[reference[i]]);
+        }
+    }
+
+    // Case-insensitive sort must match folding every string then byte-stable-sorting.
+    std::vector<std::string> folded(mixed_count);
+    for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
+    assert(sz::argsort_utf8_case_insensitive(mixed) == reference_order(folded, false));
+    assert(sz::argsort_utf8_case_insensitive(mixed, 0, true) == reference_order(folded, true));
 }
 
 /**

@@ -71,8 +71,8 @@ typedef struct sz_implementations_t {
     sz_utf8_case_insensitive_order_t utf8_case_insensitive_order;
 
     sz_sequence_argsort_t sequence_argsort;
+    sz_sequence_argsort_t sequence_argsort_utf8_case_insensitive;
     sz_sequence_intersect_t sequence_intersect;
-    sz_pgrams_sort_t pgrams_sort;
 
 } sz_implementations_t;
 

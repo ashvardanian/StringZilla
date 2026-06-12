@@ -377,16 +377,6 @@ static sz_size_t Strs_get_length_(void const *handle, sz_size_t i) {
     return 0;
 }
 
-void reverse_offsets(sz_sorted_idx_t *array, sz_size_t length) {
-    sz_size_t i, j;
-    // Swap array[i] and array[j]
-    for (i = 0, j = length - 1; i < j; i++, j--) {
-        sz_sorted_idx_t temp = array[i];
-        array[i] = array[j];
-        array[j] = temp;
-    }
-}
-
 void reverse_haystacks(sz_string_view_t *array, sz_size_t length) {
     sz_size_t i, j;
     // Swap array[i] and array[j]
@@ -6212,36 +6202,84 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
  *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
  *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts sorted.
  */
-static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                             PyObject *args_names_tuple) {
-    PyObject *reverse_obj = NULL; // Default is not reversed
+/**
+ *  @brief Parses the shared keyword-only options of `Strs.sorted` and `Strs.argsort`.
+ *
+ *  Recognizes `reverse` (bool), `case_insensitive` (bool), and `top` (non-negative int or `None`).
+ *  All three are keyword-only, mirroring the builtin `sorted(..., *, reverse=...)`.
+ *
+ *  @return 0 on success with the outputs populated; -1 on error with a Python exception set.
+ */
+static int Strs_parse_sort_options_(char const *method_name, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple, sz_bool_t *reverse_out, sz_bool_t *case_insensitive_out,
+                                    sz_size_t *top_out) {
+    *reverse_out = sz_false_k, *case_insensitive_out = sz_false_k, *top_out = 0;
 
-    // Check for positional arguments
-    if (positional_args_count > 1) {
-        PyErr_SetString(PyExc_TypeError, "sort() takes at most 1 positional argument");
-        return NULL;
+    if (positional_args_count != 0) {
+        PyErr_Format(PyExc_TypeError, "%s() takes no positional arguments", method_name);
+        return -1;
     }
-    else if (positional_args_count == 1) { reverse_obj = args[0]; }
 
-    // Check for keyword arguments
+    PyObject *reverse_obj = NULL, *case_insensitive_obj = NULL, *top_obj = NULL;
     if (args_names_tuple) {
         Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
         for (Py_ssize_t i = 0; i < args_names_count; ++i) {
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
-            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "case_insensitive") == 0) { case_insensitive_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
+            else {
+                PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%U'", method_name, key);
+                return -1;
+            }
         }
     }
 
-    sz_bool_t reverse = 0; // Default is False
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
-            PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
-            return NULL;
+            PyErr_Format(PyExc_TypeError, "%s(): reverse must be a bool", method_name);
+            return -1;
         }
-        reverse = PyObject_IsTrue(reverse_obj);
+        *reverse_out = (sz_bool_t)(PyObject_IsTrue(reverse_obj) != 0);
     }
+    if (case_insensitive_obj) {
+        if (!PyBool_Check(case_insensitive_obj)) {
+            PyErr_Format(PyExc_TypeError, "%s(): case_insensitive must be a bool", method_name);
+            return -1;
+        }
+        *case_insensitive_out = (sz_bool_t)(PyObject_IsTrue(case_insensitive_obj) != 0);
+    }
+    if (top_obj && top_obj != Py_None) {
+        if (!PyLong_Check(top_obj)) {
+            PyErr_Format(PyExc_TypeError, "%s(): top must be an int or None", method_name);
+            return -1;
+        }
+        Py_ssize_t top_value = PyLong_AsSsize_t(top_obj);
+        if (top_value == -1 && PyErr_Occurred()) return -1;
+        if (top_value < 0) {
+            PyErr_Format(PyExc_ValueError, "%s(): top must be non-negative", method_name);
+            return -1;
+        }
+        *top_out = (sz_size_t)top_value;
+    }
+    return 0;
+}
+
+/** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
+static sz_status_t Strs_run_argsort_(sz_bool_t case_insensitive, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
+                                     sz_size_t top, sz_bool_t reverse) {
+    return case_insensitive ? sz_sequence_argsort_utf8_case_insensitive(sequence, NULL, order, top, reverse)
+                            : sz_sequence_argsort(sequence, NULL, order, top, reverse);
+}
+
+static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    sz_bool_t reverse, case_insensitive;
+    sz_size_t top;
+    if (Strs_parse_sort_options_("sorted", args, positional_args_count, args_names_tuple, &reverse, &case_insensitive,
+                                 &top) != 0)
+        return NULL;
 
     // Determine the amount of memory needed
     sz_size_t substrings_count = 0;
@@ -6306,23 +6344,23 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         return NULL;
     }
 
-    // Call our sorting algorithm
+    // Call our sorting algorithm (`reverse` and `case_insensitive` are handled natively).
     sz_sequence_t sequence;
     sz_fill(&sequence, sizeof(sequence), 0);
     sequence.count = substrings_count;
     sequence.handle = (void *)self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+    sz_status_t status = Strs_run_argsort_(case_insensitive, &sequence, order, top, reverse);
     sz_unused_(status);
 
-    // Apply the sorting algorithm here, considering the `reverse` value
-    if (reverse) reverse_offsets(order, substrings_count);
+    // With `top` set, only the leading `top` elements are ordered, so the result keeps just those.
+    sz_size_t const result_count = (top != 0 && top < substrings_count) ? top : substrings_count;
 
     // Apply the new order to create sorted spans
     sz_string_view_t *sorted_spans =
-        (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
-    if (sorted_spans == NULL) {
+        (sz_string_view_t *)allocator.allocate(result_count * sizeof(sz_string_view_t), allocator.handle);
+    if (sorted_spans == NULL && result_count) {
         free(order);
         allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for sorted slices");
@@ -6330,7 +6368,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Apply the permutation
-    for (sz_size_t i = 0; i < substrings_count; ++i) sorted_spans[i] = new_spans[order[i]];
+    for (sz_size_t i = 0; i < result_count; ++i) sorted_spans[i] = new_spans[order[i]];
     free(order);
 
     // Free the temporary spans array
@@ -6339,14 +6377,14 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     // Create a new Strs object for the sorted layout
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) {
-        allocator.free(sorted_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(sorted_spans, result_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_NoMemory();
         return NULL;
     }
 
     // Set up the new sorted object
     result->layout = STRS_FRAGMENTED;
-    result->data.fragmented.count = substrings_count;
+    result->data.fragmented.count = result_count;
     result->data.fragmented.spans = sorted_spans;
     result->data.fragmented.parent = parent_to_increment;
     result->data.fragmented.allocator = allocator;
@@ -6356,85 +6394,45 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 }
 
 /**
- *  @brief Returns the tuple permuting a `Strs` object into a sorted order.
+ *  @brief Returns the tuple of indices permuting a `Strs` object into sorted order.
+ *         With `top=k`, returns just the `k` leading indices (top-K).
  */
 static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
-    PyObject *reverse_obj = NULL; // Default is not reversed
-
-    // Check for positional arguments
-    if (positional_args_count > 1) {
-        PyErr_SetString(PyExc_TypeError, "order() takes at most 1 positional argument");
+    sz_bool_t reverse, case_insensitive;
+    sz_size_t top;
+    if (Strs_parse_sort_options_("argsort", args, positional_args_count, args_names_tuple, &reverse, &case_insensitive,
+                                 &top) != 0)
         return NULL;
-    }
-    else if (positional_args_count == 1) { reverse_obj = args[0]; }
-
-    // Check for keyword arguments
-    if (args_names_tuple) {
-        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
-        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
-            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
-            PyObject *value = args[positional_args_count + i];
-            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
-        }
-    }
-
-    sz_bool_t reverse = 0; // Default is False
-    if (reverse_obj) {
-        if (!PyBool_Check(reverse_obj)) {
-            PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
-            return NULL;
-        }
-        reverse = PyObject_IsTrue(reverse_obj);
-    }
 
     sz_size_t const count = Strs_len(self);
     sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * count);
-    if (!order) {
+    if (!order && count) {
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
         return NULL;
     }
 
-    // Call our sorting algorithm
+    // Call our sorting algorithm (`reverse` and `case_insensitive` are handled natively).
     sz_sequence_t sequence;
     sz_fill(&sequence, sizeof(sequence), 0);
     sequence.count = count;
     sequence.handle = self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+    sz_status_t status = Strs_run_argsort_(case_insensitive, &sequence, order, top, reverse);
     sz_unused_(status);
 
-    // Apply the sorting algorithm here, considering the `reverse` value
-    if (reverse) reverse_offsets(order, count);
-
-    // Here, instead of applying the order, we want to return the copy of the
-    // order as a NumPy array of 64-bit unsigned integers.
-    //
-    //      npy_intp numpy_size = count;
-    //      PyObject *array = PyArray_SimpleNew(1, &numpy_size, NPY_UINT64);
-    //      if (!array) {
-    //          PyErr_SetString(PyExc_RuntimeError, "Failed to create a NumPy array");
-    //          return NULL;
-    //      }
-    //      sz_sorted_idx_t *numpy_data_ptr = (sz_sorted_idx_t *)PyArray_DATA((PyArrayObject *)array);
-    //      sz_copy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
-    //
-    // There are compilation issues with NumPy.
-    // Here is an example for `cp312-musllinux_s390x`: https://x.com/ashvardanian/status/1757880762278531447?s=20
-    // So instead of NumPy, let's produce a tuple of integers.
-    PyObject *tuple = PyTuple_New(count);
+    // With `top` set, only the leading `top` indices are ordered, so we expose just those.
+    sz_size_t const result_count = (top != 0 && top < count) ? top : count;
+    PyObject *tuple = PyTuple_New(result_count);
     if (!tuple) {
         free(order);
-        PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple");
         return NULL;
     }
-    for (sz_size_t i = 0; i < count; ++i) {
-        PyObject *index = PyLong_FromUnsignedLong(order[i]);
+    for (sz_size_t i = 0; i < result_count; ++i) {
+        PyObject *index = PyLong_FromSize_t(order[i]);
         if (!index) {
             free(order);
-            PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple element");
             Py_DECREF(tuple);
             return NULL;
         }
@@ -6597,7 +6595,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     while (scan_ptr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(scan_ptr, &rune, &rune_length);
+        sz_rune_parse(scan_ptr, cstr_end, &rune, &rune_length);
 
         if (rune_length == 1 && *scan_ptr == '\'') { required_bytes += 2; } // Escaped quote: \'
         else { required_bytes += rune_length; }                             // Normal rune
@@ -6616,7 +6614,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     while (cstr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(cstr, &rune, &rune_length);
+        sz_rune_parse(cstr, cstr_end, &rune, &rune_length);
 
         if (rune_length == 1 && *cstr == '\'') {
             *(buffer_ptr++) = '\\';
@@ -7594,8 +7592,14 @@ static void Strs_dealloc(Strs *self) {
 
 static PyMethodDef Strs_methods[] = {
     {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},        //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},    //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."}, //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS,
+     "sorted(*, reverse=False, case_insensitive=False, top=None) -> Strs\n"
+     "Return a new, stably sorted Strs. `case_insensitive` orders by Unicode case-folding; "
+     "`top=k` returns only the k smallest (or largest, if reversed) elements."}, //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS,
+     "argsort(*, reverse=False, case_insensitive=False, top=None) -> tuple[int, ...]\n"
+     "Return the stable permutation of indices that sorts the Strs. `case_insensitive` orders by Unicode "
+     "case-folding; `top=k` returns only the k leading indices."}, //
     {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},           //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel

@@ -195,7 +195,7 @@ struct argsort_strings_via_sz {
         array.get_start = get_start;
         array.get_length = get_length;
         sz::_with_alloc<std::allocator<char>>(
-            [&](sz_memory_allocator_t &alloc) { return func_(&array, &alloc, output.data()); });
+            [&](sz_memory_allocator_t &alloc) { return func_(&array, &alloc, output.data(), 0, sz_false_k); });
 
         // Prepare stats and hash the permutation to compare with the reference.
         std::size_t ops_performed = input.size() * std::log2(input.size());

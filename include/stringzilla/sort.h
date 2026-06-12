@@ -11,17 +11,22 @@
  *  respectively. In reality we may not use the full pointer size, but only a few bytes from it, and keep the
  *  rest for some metadata.
  *
- *  That, however, means, that unsigned integer sorting & matching is a constituent part of our sequence
- *  algorithms and we can expose them as an additional APIs for the users:
+ *  That, however, means, that unsigned integer sorting is a constituent part of our sequence algorithms.
+ *  The per-backend `sz_pgrams_sort_serial`/`_skylake`/`_sve` helpers expose that integer-sort core for
+ *  direct benchmarking, but it is an internal building block - not a runtime-dispatched public API.
  *
- *  - `sz_pgrams_sort` - to inplace sort continuous pointer-sized integers.
- *  - `sz_pgrams_join` - to compute the intersection of two arbitrary integer collections.
+ *  Beyond plain byte-lexicographic ordering, `sz_sequence_argsort_utf8_case_insensitive` sorts UTF-8
+ *  strings under Unicode case-folding, progressively folding small chunks of each string on the fly so
+ *  callers don't have to materialize a pre-folded copy of the whole collection.
+ *
+ *  All `sz_sequence_argsort*` entry points are @b stable (equal elements keep their input order), support
+ *  descending order via the `reverse` flag, and accept a `top_count` to only fully order the leading
+ *  `top_count` elements - a partial-sort / top-K mode that prunes work on the unwanted tail.
  *
  *  Other helpers include:
  *
  *  - `sz_pgrams_sort_with_insertion` - for quadratic-complexity sorting of small continuous integer arrays.
  *  - `sz_sequence_argsort_with_insertion` - for quadratic-complexity sorting of small string collections.
- *  - `sz_sequence_argsort_stabilize` - updates the sorting permutation to be stable.
  */
 #ifndef STRINGZILLA_SORT_H_
 #define STRINGZILLA_SORT_H_
@@ -38,17 +43,21 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Faster @b arg-sort for an arbitrary @b string sequence, using QuickSort.
+ *  @brief Faster @b stable arg-sort for an arbitrary @b string sequence, using QuickSort.
  *         Outputs the @p order of elements in the immutable @p sequence, that would sort it.
  *
  *  @param sequence Immutable sequence of strings to sort.
  *  @param alloc Optional memory allocator for temporary storage.
  *  @param order Output permutation that sorts the elements.
+ *  @param top_count Number of leading elements to fully order, or 0 to sort the whole sequence.
+ *  @param reverse Whether to sort in descending order.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
  *  @pre The @p order array must fit at least `sequence->count` integers.
  *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
+ *  @post If `top_count` is non-zero and smaller than the count, only `order[0, top_count)` are sorted;
+ *        the remaining entries are an arbitrary permutation of the leftover indices.
  *
  *  Example usage:
  *
@@ -59,7 +68,7 @@ extern "C" {
  *          sz_sequence_t sequence;
  *          sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
  *          sz_sorted_idx_t order[3];
- *          sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+ *          sz_status_t status = sz_sequence_argsort(&sequence, NULL, order, 0, sz_false_k);
  *          return status == sz_success_k && order[0] == 1 && order[1] == 0 && order[2] == 2 ? 0 : 1;
  *      }
  *  @endcode
@@ -67,18 +76,54 @@ extern "C" {
  *  @note The algorithm has linear memory complexity, quadratic worst-case and log-linear average time complexity.
  *  @see https://en.wikipedia.org/wiki/Quicksort
  *
- *  @note This algorithm is @b unstable: equal elements may change relative order.
- *  @sa sz_sequence_argsort_stabilize
+ *  @note This algorithm is @b stable: equal elements keep their relative order, ascending by original index.
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_sequence_argsort_serial, sz_sequence_argsort_skylake, sz_sequence_argsort_sve
+ *  @sa sz_sequence_argsort_utf8_case_insensitive
  */
 SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                           sz_sorted_idx_t *order);
+                                           sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /**
- *  @brief Faster @b inplace `std::sort` for a continuous @b unsigned-integer sequence, using QuickSort.
- *         Overwrites the input @p pgrams with the sorted sequence and exports the @p order permutation.
+ *  @brief Faster @b stable @b case-insensitive arg-sort for a UTF-8 @b string sequence, using QuickSort.
+ *         Orders strings under Unicode case-folding, equivalent to folding every string and sorting the
+ *         folded bytes lexicographically - but folding only small chunks on the fly, never materializing
+ *         a fully pre-folded copy of the collection.
+ *
+ *  @param sequence Immutable sequence of UTF-8 strings to sort.
+ *  @param alloc Optional memory allocator for temporary storage.
+ *  @param order Output permutation that sorts the elements.
+ *  @param top_count Number of leading elements to fully order, or 0 to sort the whole sequence.
+ *  @param reverse Whether to sort in descending order.
+ *
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @pre The @p order array must fit at least `sequence->count` integers.
+ *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
+ *
+ *  @note This algorithm is @b stable: equal (case-folded-equal) elements keep their input order.
+ *  @sa sz_utf8_case_fold, sz_utf8_case_insensitive_order
+ *  @sa sz_sequence_argsort_utf8_case_insensitive_serial
+ */
+SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,  //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_sequence_argsort */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                 sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,        //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/**
+ *  @brief Internal @b inplace QuickSort for a continuous @b unsigned-integer sequence, backing the string
+ *         arg-sorts. Overwrites the input @p pgrams with the sorted sequence and exports the @p order
+ *         permutation. Not part of the stable, public ordering contract and not runtime-dispatched - the
+ *         per-backend variants exist for direct benchmarking of the integer-sort core.
  *
  *  @param pgrams Continuous buffer of unsigned integers to sort in place.
  *  @param count Number of elements in the sequence.
@@ -87,35 +132,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
- *  @pre The @p order array must fit at least `count` integers.
- *  @post The @p order array will contain a valid permutation of `[0, count - 1]`.
- *
- *  Example usage:
- *
- *  @code{.c}
- *      #include <stringzilla/sort.h>
- *      int main() {
- *          sz_pgram_t pgrams[] = {42, 17, 99, 8};
- *          sz_sorted_idx_t order[4];
- *          sz_status_t status = sz_pgrams_sort(pgrams, 4, NULL, order);
- *          return status == sz_success_k && order[0] == 3 && order[1] == 1 && order[2] == 0 && order[3] == 2 ? 0 : 1;
- *      }
- *  @endcode
- *
- *  @note The algorithm has linear memory complexity, quadratic worst-case and log-linear average time complexity.
- *  @see https://en.wikipedia.org/wiki/Quicksort
- *
- *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_pgrams_sort_serial, sz_pgrams_sort_skylake, sz_pgrams_sort_sve
  */
-SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                      sz_sorted_idx_t *order);
-
-/** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                 sz_sorted_idx_t *order);
-
-/** @copydoc sz_pgrams_sort */
 SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                             sz_sorted_idx_t *order);
 
@@ -123,9 +140,14 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
 
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order);
+                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_pgrams_sort */
+/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_skylake( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_pgrams_sort_serial */
 SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                              sz_sorted_idx_t *order);
 
@@ -135,9 +157,14 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
 
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                              sz_sorted_idx_t *order);
+                                              sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_pgrams_sort */
+/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_sve( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_pgrams_sort_serial */
 SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                          sz_sorted_idx_t *order);
 
@@ -344,6 +371,69 @@ SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_i
 
 #undef sz_sequence_sorting_network_conditional_swap_
 
+/**
+ *  @brief Stable in-place ascending sort of an @p order slice by original index. Restores stable order
+ *      within a terminal run of byte-identical (or fold-identical) strings, whose pgrams are all equal
+ *      and carry no further ordering information.
+ *
+ *  Uses an iterative QuickSort with a median-of-three pivot and an insertion-sort base case. A plain
+ *  insertion sort would be quadratic on large runs of one repeated string (e.g. a very common word),
+ *  so the indices - which are distinct integers - get the same log-linear treatment as the pgrams.
+ */
+SZ_INTERNAL void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
+    // A small explicit stack of deferred half-open ranges; always recursing into the smaller side and
+    // looping on the larger keeps the depth below `log2(count)`, so 2*64 slots cover any 64-bit count.
+    sz_size_t stack[2 * 64];
+    sz_size_t stack_size = 0;
+    sz_size_t range_start = 0, range_end = count;
+    for (;;) {
+        // Insertion sort the small base case, then pop the next deferred range (if any).
+        if (range_end - range_start < 32) {
+            for (sz_size_t element_index = range_start + 1; element_index < range_end; ++element_index) {
+                sz_sorted_idx_t const current_idx = order[element_index];
+                sz_size_t position_index = element_index;
+                while (position_index > range_start && order[position_index - 1] > current_idx) {
+                    order[position_index] = order[position_index - 1];
+                    --position_index;
+                }
+                order[position_index] = current_idx;
+            }
+            if (!stack_size) break;
+            range_end = stack[--stack_size], range_start = stack[--stack_size];
+            continue;
+        }
+
+        // Median-of-three pivot, parked at the end of the range for a Lomuto partition.
+        sz_size_t const middle = range_start + (range_end - range_start) / 2;
+        sz_size_t const last = range_end - 1;
+        if (order[middle] < order[range_start]) sz_swap_(sz_sorted_idx_t, order[middle], order[range_start]);
+        if (order[last] < order[range_start]) sz_swap_(sz_sorted_idx_t, order[last], order[range_start]);
+        if (order[last] < order[middle]) sz_swap_(sz_sorted_idx_t, order[last], order[middle]);
+        sz_swap_(sz_sorted_idx_t, order[middle], order[last]);
+        sz_sorted_idx_t const pivot = order[last];
+
+        sz_size_t store = range_start;
+        for (sz_size_t scan = range_start; scan < last; ++scan)
+            if (order[scan] < pivot) {
+                sz_swap_(sz_sorted_idx_t, order[scan], order[store]);
+                ++store;
+            }
+        sz_swap_(sz_sorted_idx_t, order[store], order[last]);
+
+        // Defer the larger partition, continue on the smaller one to bound the stack depth.
+        sz_size_t const left_start = range_start, left_end = store;
+        sz_size_t const right_start = store + 1, right_end = range_end;
+        if (left_end - left_start > right_end - right_start) {
+            stack[stack_size++] = left_start, stack[stack_size++] = left_end;
+            range_start = right_start, range_end = right_end;
+        }
+        else {
+            stack[stack_size++] = right_start, stack[stack_size++] = right_end;
+            range_start = left_start, range_end = left_end;
+        }
+    }
+}
+
 #pragma endregion // Generic Internal Helpers
 
 #include "stringzilla/sort/serial.h"
@@ -357,24 +447,25 @@ SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_i
 #if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                           sz_sorted_idx_t *order) {
+                                           sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
-    return sz_sequence_argsort_skylake(sequence, alloc, order);
+    return sz_sequence_argsort_skylake(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_SVE
-    return sz_sequence_argsort_sve(sequence, alloc, order);
+    return sz_sequence_argsort_sve(sequence, alloc, order, top_count, reverse);
 #else
-    return sz_sequence_argsort_serial(sequence, alloc, order);
+    return sz_sequence_argsort_serial(sequence, alloc, order, top_count, reverse);
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                      sz_sorted_idx_t *order) {
+SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,  //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
-    return sz_pgrams_sort_skylake(pgrams, count, alloc, order);
+    return sz_sequence_argsort_utf8_case_insensitive_skylake(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_SVE
-    return sz_pgrams_sort_sve(pgrams, count, alloc, order);
+    return sz_sequence_argsort_utf8_case_insensitive_sve(sequence, alloc, order, top_count, reverse);
 #else
-    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+    return sz_sequence_argsort_utf8_case_insensitive_serial(sequence, alloc, order, top_count, reverse);
 #endif
 }
 

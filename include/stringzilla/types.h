@@ -995,10 +995,11 @@ typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const 
 /** @brief Signature of `sz_utf8_find_newline`, `sz_utf8_find_whitespace`. */
 typedef sz_cptr_t (*sz_utf8_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
-/** @brief Signature of `sz_sequence_argsort`. */
-typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
+/** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_case_insensitive`. */
+typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
+                                             sz_size_t, sz_bool_t);
 
-/** @brief Signature of `sz_pgrams_sort`. */
+/** @brief Signature of the internal `sz_pgrams_sort_serial`/`_skylake`/`_sve` integer-sort helpers. */
 typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
 /** @brief Signature of `sz_sequence_intersect`. */
