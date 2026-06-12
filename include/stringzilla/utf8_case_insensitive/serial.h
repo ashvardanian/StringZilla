@@ -83,8 +83,14 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_invariant_(sz_rune_t rune) {
     if (rune >= 0x13A0 && rune <= 0x13FD) return sz_false_k; // Cherokee (folds to uppercase!)
     if (rune >= 0x1C80 && rune <= 0x1C8F) return sz_false_k; // Cyrillic Extended-C
     if (rune >= 0x1C90 && rune <= 0x1CBF) return sz_false_k; // Georgian Extended (Mtavruli)
+    if (rune == 0x1D79 || rune == 0x1D7D || rune == 0x1D8E)
+        return sz_false_k; // Phonetic Extensions ᵹ ᵽ ᶎ (fold targets of Ᵹ U+A77D, Ᵽ U+2C63, Ᶎ U+A7C6)
     if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_false_k; // Latin Extended Additional
     if (rune >= 0x1F00 && rune <= 0x1FFF) return sz_false_k; // Greek Extended
+    if (rune == 0x214E) return sz_false_k;                   // ⅎ (fold target of Ⅎ U+2132)
+    if (rune >= 0x2170 && rune <= 0x217F) return sz_false_k; // small Roman numerals (fold targets of U+2160-216F)
+    if (rune == 0x2184) return sz_false_k;                   // ↄ (fold target of Ↄ U+2183)
+    if (rune >= 0x24D0 && rune <= 0x24E9) return sz_false_k; // circled small Latin (fold targets of U+24B6-24CF)
     if (rune >= 0x2C00 && rune <= 0x2C5F) return sz_false_k; // Glagolitic
     if (rune >= 0x2C60 && rune <= 0x2C7F) return sz_false_k; // Latin Extended-C
     if (rune >= 0x2C80 && rune <= 0x2CFF) return sz_false_k; // Coptic
@@ -104,8 +110,10 @@ SZ_INTERNAL sz_bool_t sz_rune_is_case_invariant_(sz_rune_t rune) {
     if (rune >= 0x10570 && rune <= 0x105BF) return sz_false_k; // Vithkuqi
     if (rune >= 0x10780 && rune <= 0x107BF) return sz_false_k; // Latin Extended-F
     if (rune >= 0x10C80 && rune <= 0x10CFF) return sz_false_k; // Old Hungarian
+    if (rune >= 0x10D70 && rune <= 0x10D85) return sz_false_k; // Garay small letters (fold targets of U+10D50-10D65)
     if (rune >= 0x118A0 && rune <= 0x118FF) return sz_false_k; // Warang Citi
     if (rune >= 0x16E40 && rune <= 0x16E9F) return sz_false_k; // Medefaidrin
+    if (rune >= 0x16EBB && rune <= 0x16ED3) return sz_false_k; // Beria Erfe small letters (Unicode 17 fold targets)
     if (rune >= 0x1DF00 && rune <= 0x1DFFF) return sz_false_k; // Latin Extended-G
     if (rune >= 0x1E000 && rune <= 0x1E02F) return sz_false_k; // Glagolitic Supplement
     if (rune >= 0x1E030 && rune <= 0x1E08F) return sz_false_k; // Cyrillic Extended-D

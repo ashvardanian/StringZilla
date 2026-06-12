@@ -1517,6 +1517,9 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
 
             for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
                 target += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target);
+            // Invalid leads (F8-FF) parse to lengths past the buffer; clamping keeps the
+            // unsigned `source_length` from underflowing into a gigabyte-scale over-read.
+            if ((sz_size_t)rune_length > source_length) rune_length = (sz_rune_length_t)source_length;
             source += rune_length;
             source_length -= rune_length;
         }
