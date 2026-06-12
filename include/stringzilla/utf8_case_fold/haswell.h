@@ -390,13 +390,15 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_greek_chunk_( //
     __m256i is_after_ce_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCE));
     __m256i is_after_cf_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCF));
 
-    // Irregular folds truncate the chunk: CE 80-90 tonos/accents, CE B0 'ΰ' expansion, CF 8C+
-    // accented lowercase and archaic symbols. The flagged lane is a continuation, mapping back
-    // to its lead one lane before via `>> 1`; foreign leads are already at a sequence start.
+    // Irregular folds truncate the chunk: CE 80-90 tonos/accents, CE B0 'ΰ' expansion, CF 8F+
+    // accented lowercase and archaic symbols. CF 8C/8D/8E ('ό'/'ύ'/'ώ' U+03CC-03CE) are common
+    // identity-folding lowercase vowels, so the exclusion starts at CF 8F ('Ϗ' U+03CF, which
+    // folds onto 'ϗ'). The flagged lane is a continuation, mapping back to its lead one lane
+    // before via `>> 1`; foreign leads are already at a sequence start.
     __m256i ce_irregular_ymm = _mm256_and_si256(
         is_after_ce_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0x80, 0x11),
                                          _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB0))));
-    __m256i cf_irregular_ymm = _mm256_and_si256(is_after_cf_ymm, sz_haswell_in_byte_range_(source_ymm, 0x8C, 0x34));
+    __m256i cf_irregular_ymm = _mm256_and_si256(is_after_cf_ymm, sz_haswell_in_byte_range_(source_ymm, 0x8F, 0x31));
     sz_u32_t is_irregular_second_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_or_si256(ce_irregular_ymm, cf_irregular_ymm));
     sz_u32_t stop_mask = is_foreign_lead_mask | (is_irregular_second_mask >> 1);
@@ -431,6 +433,95 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_greek_chunk_( //
     __m256i is_final_sigma_ymm = _mm256_and_si256(is_after_cf_ymm,
                                                   _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x82)));
     folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_final_sigma_ymm, _mm256_set1_epi8(0x01)));
+
+    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk of Georgian (E1 82/83 leads, U+10A0-10FF) mixed with ASCII -
+ *      the working set of Georgian text.
+ *
+ *  Georgian uppercase (Mtavruli/Asomtavruli) lives in two E1 82/83 ranges that fold by
+ *  rewriting all three bytes; the lowercase Mkhedruli letters under E1 82/83 are identity-folding
+ *  and copy through unchanged:
+ *
+ *  Input Range  | Codepoints           | Output             | Transform
+ *  E1 82 A0-BF  | Ⴀ-Ⴟ (U+10A0-10BF)    | E2 B4 80-9F (ⴀ-ⴟ)  | lead E1 → E2, second 82 → B4, third −0x20
+ *  E1 83 80-85  | Ⴠ-Ⴥ (U+10C0-10C5)    | E2 B4 A0-A5 (ⴠ-ⴥ)  | lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 83 87     | Ⴧ (U+10C7)           | E2 B4 A7 (ⴧ)       | lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 83 8D     | Ⴭ (U+10CD)           | E2 B4 AD (ⴭ)       | lead E1 → E2, second 83 → B4, third +0x20
+ *  E1 82/83 …   | Mkhedruli lowercase  | unchanged          | —
+ *
+ *  Every fold is a 3-byte → 3-byte rewrite, so it stays in place. The uppercase classification
+ *  lives at the third byte, so the masked deltas are derived there and propagated one and two
+ *  lanes back (via `next_bytes`) to the second and lead bytes - mirroring the Armenian finder's
+ *  `next_bytes` flag propagation. The lead rewrite E1 → E2 is a masked +1; the second rewrites
+ *  82 → B4 (+0x32) and 83 → B4 (+0x31) are masked adds, keeping the no-`VPBLENDVB` discipline.
+ *
+ *  This handler runs AFTER the Latin handler, which already consumes E1 B8-BB (Latin Extended
+ *  Additional). Non-Georgian E1 sub-families - Greek Extended (E1 BC-BF) and any other E1
+ *  second byte - and foreign-family leads truncate the chunk before the offending lead, so a
+ *  mixed chunk still folds its longest pure Georgian prefix vectorized. A full 32-byte store is
+ *  issued; lanes at or beyond the consumed length are overwritten by the next chunk's store
+ *  (the destination is ≥ 3× the source).
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another handler.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_georgian_chunk_( //
+    __m256i source_ymm, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+
+    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
+    __m256i second_previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 2);
+    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+
+    // A Georgian sequence is an E1 lead whose second byte is 82 or 83. Non-Georgian E1 leads
+    // (Greek Extended E1 BC-BF and the caseless Georgian-adjacent blocks) are stops: their lead
+    // lane truncates the chunk so the serial fallback - or, for E1 B8-BB, the earlier Latin
+    // handler - takes them one rune at a time.
+    __m256i is_e1_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE1));
+    __m256i is_georgian_second_ymm = _mm256_or_si256(_mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0x82)),
+                                                     _mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0x83)));
+    __m256i foreign_e1_lead_ymm = _mm256_andnot_si256(is_georgian_second_ymm, is_e1_ymm);
+
+    sz_u32_t stop_mask = is_foreign_lead_mask | (sz_u32_t)_mm256_movemask_epi8(foreign_e1_lead_ymm);
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split a trailing E1 three-byte sequence across chunks - this family's only lead
+    sz_u32_t incomplete_mask = is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0);
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    // The uppercase classification lives at the third byte: E1 (two back) + 82/83 (one back) +
+    // an uppercase third byte. E1 82 A0-BF folds with −0x20; E1 83 {80-85, 87, 8D} folds with +0x20.
+    __m256i is_e1_two_back_ymm = _mm256_cmpeq_epi8(second_previous_bytes_ymm, _mm256_set1_epi8((char)0xE1));
+    __m256i is_82_one_back_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0x82));
+    __m256i is_83_one_back_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0x83));
+    __m256i is_82_upper_third_ymm = _mm256_and_si256(
+        _mm256_and_si256(is_e1_two_back_ymm, is_82_one_back_ymm), sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x20));
+    __m256i is_83_upper_range_ymm = _mm256_or_si256(
+        sz_haswell_in_byte_range_(source_ymm, 0x80, 0x06),
+        _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x87)),
+                        _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x8D))));
+    __m256i is_83_upper_third_ymm =
+        _mm256_and_si256(_mm256_and_si256(is_e1_two_back_ymm, is_83_one_back_ymm), is_83_upper_range_ymm);
+
+    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+
+    // Third byte: −0x20 for the 82 range, +0x20 for the 83 range
+    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_82_upper_third_ymm, _mm256_set1_epi8(0x20)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_83_upper_third_ymm, _mm256_set1_epi8(0x20)));
+
+    // Second byte (one lane before the third): 82 → B4 is +0x32, 83 → B4 is +0x31
+    __m256i is_82_upper_second_ymm = sz_haswell_next_bytes_(is_82_upper_third_ymm);
+    __m256i is_83_upper_second_ymm = sz_haswell_next_bytes_(is_83_upper_third_ymm);
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_82_upper_second_ymm, _mm256_set1_epi8(0x32)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_83_upper_second_ymm, _mm256_set1_epi8(0x31)));
+
+    // Lead byte (two lanes before the third): E1 → E2 is a masked +1 for either range
+    __m256i is_upper_lead_ymm = sz_haswell_next_bytes_(_mm256_or_si256(is_82_upper_second_ymm, is_83_upper_second_ymm));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_upper_lead_ymm, _mm256_set1_epi8(0x01)));
 
     _mm256_storeu_si256((__m256i *)target, folded_ymm);
     return fold_length;
@@ -482,6 +573,87 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_guarded_chunk_( //
     if (fold_length == 0) return 0;
 
     _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk of Armenian (D4-D6 leads) mixed with ASCII, plus the Cyrillic
+ *      Supplement (D4 80-AF, U+0500-052F) that shares the D4 lead.
+ *
+ *  Armenian uppercase spans two lead bytes and folds into three target blocks, and the D4 lead
+ *  additionally carries the Cyrillic Supplement, whose uppercase folds by +1 parity:
+ *
+ *  Input Range  | Codepoints           | Output             | Transform
+ *  D4 80-AF     | Ԁ-ԯ (U+0500-052F)    | even +1 (Ԁ→ԁ …)    | even second byte +1 (Cyrillic Supplement)
+ *  D4 B1-BF     | Ա-Ձ (U+0531-0541)    | D5 A1-AF (ա-ձ)     | second −0x10, lead D4 → D5
+ *  D5 80-8F     | Ղ-Տ (U+0542-054F)    | D5 B0-BF (ղ-տ)     | second +0x30, lead unchanged
+ *  D5 90-96     | Ր-Ֆ (U+0550-0556)    | D6 80-86 (ր-ֆ)     | second −0x10, lead D5 → D6
+ *  D6 87        | և (U+0587)           | → serial           | folds to "եւ" (4 bytes) - expands
+ *
+ *  Both −0x10 classes also bump their lead by one block (D4 → D5, D5 → D6), realized as a masked
+ *  +1; the +0x30 class leaves its lead unchanged. The Armenian classification lives at the second
+ *  byte, so the lead +1 flag propagates one lane back via `next_bytes`, mirroring the case-
+ *  insensitive Armenian finder's `..._armenian_fold_ymm_`. The Ech-Yiwn ligature 'և' (D6 87) is
+ *  the only D4-D6 codepoint whose fold changes byte length, so its lead truncates the chunk and
+ *  routes one rune to the serial fallback. Non-Armenian complex leads (Cyrillic Extension D2-D3,
+ *  IPA/Ext-B C7-CD, 4-byte F0+) and foreign-family leads truncate before their lead, so a mixed
+ *  chunk still folds its longest pure prefix vectorized. A full 32-byte store is issued; lanes at
+ *  or beyond the consumed length are overwritten by the next chunk's store (destination ≥ 3× source).
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_armenian_chunk_( //
+    __m256i source_ymm, sz_u32_t is_lead_mask, sz_ptr_t target) {
+
+    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
+    __m256i is_after_d4_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD4));
+    __m256i is_after_d5_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD5));
+    __m256i is_after_d6_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD6));
+
+    // The Ech-Yiwn ligature 'և' (D6 87) folds to "եւ" (4 bytes), so it must truncate the chunk;
+    // its flagged lane is the continuation, mapping back to its D6 lead one lane before via `>> 1`.
+    sz_u32_t expansion_second_mask = (sz_u32_t)_mm256_movemask_epi8(
+        _mm256_and_si256(is_after_d6_ymm, _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x87))));
+    // Non-Armenian leads (D2-D3 Cyrillic Extension, C7-CD, 4-byte F0+) and foreign-family leads
+    // truncate before their lead; the Armenian family owns only D4-D6
+    sz_u32_t is_armenian_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xD4, 0x03));
+    sz_u32_t stop_mask = (is_lead_mask & ~is_armenian_lead_mask) | (expansion_second_mask >> 1);
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split a trailing D4-D6 lead across chunks - this family's only multi-byte leads
+    sz_u32_t incomplete_mask = is_armenian_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    // The codepoint's low bit lives in the second byte's low bit, deciding the +1 parity fold
+    __m256i is_odd_byte_ymm = _mm256_cmpeq_epi8(_mm256_and_si256(source_ymm, _mm256_set1_epi8(0x01)),
+                                                _mm256_set1_epi8(0x01));
+
+    // Cyrillic Supplement under D4 (80-AF): even second bytes are uppercase and fold +1 in place;
+    // the [B1, FF] range realizes the unbounded `≥ B1` Armenian check, matching the finder
+    __m256i is_d4_cyrillic_even_ymm = _mm256_andnot_si256(
+        is_odd_byte_ymm, _mm256_and_si256(is_after_d4_ymm, sz_haswell_in_byte_range_(source_ymm, 0x80, 0x30)));
+    __m256i is_d4_armenian_ymm = _mm256_and_si256(is_after_d4_ymm, sz_haswell_in_byte_range_(source_ymm, 0xB1, 0x4F));
+    __m256i is_d5_low_ymm = _mm256_and_si256(is_after_d5_ymm, sz_haswell_in_byte_range_(source_ymm, 0x80, 0x10));
+    __m256i is_d5_high_ymm = _mm256_and_si256(is_after_d5_ymm, sz_haswell_in_byte_range_(source_ymm, 0x90, 0x07));
+
+    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+
+    // Cyrillic Supplement parity fold: even D4 second bytes get +1
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_d4_cyrillic_even_ymm, _mm256_set1_epi8(0x01)));
+
+    // Armenian second-byte deltas: D4 B1-BF and D5 90-96 take −0x10, D5 80-8F takes +0x30
+    __m256i is_minus_10_ymm = _mm256_or_si256(is_d4_armenian_ymm, is_d5_high_ymm);
+    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_minus_10_ymm, _mm256_set1_epi8(0x10)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_d5_low_ymm, _mm256_set1_epi8(0x30)));
+
+    // Both −0x10 classes bump their lead by one block (D4 → D5, D5 → D6); the second-byte flag
+    // propagates one lane back to the lead via `next_bytes`, then a masked +1 rewrites it
+    __m256i lead_plus_one_ymm = sz_haswell_next_bytes_(is_minus_10_ymm);
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(lead_plus_one_ymm, _mm256_set1_epi8(0x01)));
+
+    _mm256_storeu_si256((__m256i *)target, folded_ymm);
     return fold_length;
 }
 
@@ -607,6 +779,11 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
             handled = sz_utf8_case_fold_haswell_latin_chunk_(
                 source_ymm, is_continuation_mask, is_three_byte_lead_mask,
                 is_lead_mask & ~(is_latin_lead_mask | is_latin_extended_lead_mask | is_e1_lead_mask), target);
+        // Georgian (E1 82/83) - runs after Latin, which already took E1 B8-BB; this handler folds
+        // Georgian uppercase and truncates at E1 BC-BF Greek Extended and other E1 sub-families
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_e1_flag_))
+            handled = sz_utf8_case_fold_haswell_georgian_chunk_(source_ymm, is_three_byte_lead_mask,
+                                                                is_lead_mask & ~is_e1_lead_mask, target);
         // Basic Cyrillic + ASCII - the common case for Russian, Ukrainian, and Bulgarian
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_cyrillic_flag_))
             handled = sz_utf8_case_fold_haswell_cyrillic_chunk_(source_ymm, is_lead_mask & ~is_cyrillic_lead_mask,
@@ -620,6 +797,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
             handled = sz_utf8_case_fold_haswell_guarded_chunk_(
                 source_ymm, is_two_byte_lead_mask, is_three_byte_lead_mask,
                 is_lead_mask & ~(is_caseless_lead_mask | is_guarded_lead_mask), target);
+        // Armenian (D4-D6) + the Cyrillic Supplement that shares the D4 lead - both fall in the
+        // complex family; this handler folds them and truncates at any non-Armenian complex lead
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
+            handled = sz_utf8_case_fold_haswell_armenian_chunk_(source_ymm, is_lead_mask, target);
         // Complex chunks are usually emoji runs: 4-byte sequences with caseless second bytes
         // copy through; anything else in the family truncates to the serial path
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
@@ -634,7 +815,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
         // source bytes left, a complete (≤ 4-byte) sequence is always available
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(source, &rune, &rune_length);
+        sz_rune_parse_unchecked(source, &rune, &rune_length);
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)

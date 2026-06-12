@@ -77,7 +77,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_rvv(   //
         // Now `*text_cursor` is a multi-byte lead (or a stray continuation). Decode exactly like serial.
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse((sz_cptr_t)text_cursor, &rune, &rune_length);
+        sz_rune_parse_unchecked((sz_cptr_t)text_cursor, &rune, &rune_length);
         if (text_cursor + rune_length > text_end) break; // Incomplete sequence at buffer boundary.
         runes[runes_written++] = rune;
         text_cursor += rune_length;

@@ -196,7 +196,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     while (text_cursor < text_end && runes_written < runes_capacity) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(text_cursor, &rune, &rune_length);
+        sz_rune_parse_unchecked(text_cursor, &rune, &rune_length);
         if (text_cursor + rune_length > text_end) break; // Incomplete sequence at buffer boundary
         runes[runes_written++] = rune;
         text_cursor += rune_length;

@@ -57,7 +57,7 @@ SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
         // Multi-byte UTF-8 sequence
         sz_rune_t source_rune;
         sz_rune_length_t source_rune_length;
-        sz_rune_parse((sz_cptr_t)source_ptr, &source_rune, &source_rune_length);
+        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_limit, &source_rune, &source_rune_length);
 
         // Perform Unicode folding
         sz_rune_t target_runes[3];
@@ -101,7 +101,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
         // Multi-byte UTF-8 sequence: use full decode/fold/encode path
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse((sz_cptr_t)source_ptr, &rune, &rune_length);
+        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune, &rune_length);
         source_ptr += rune_length;
 
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
