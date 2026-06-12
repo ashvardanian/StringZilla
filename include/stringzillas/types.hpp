@@ -425,14 +425,32 @@ class safe_vector {
     value_type const *begin() const noexcept { return data_; }
     value_type *end() noexcept { return data_ + size_; }
     value_type const *end() const noexcept { return data_ + size_; }
-    value_type &operator[](size_type i) noexcept { return data_[i]; }
-    value_type const &operator[](size_type i) const noexcept { return data_[i]; }
+    value_type &operator[](size_type i) noexcept {
+        sz_assert_(i < size_);
+        return data_[i];
+    }
+    value_type const &operator[](size_type i) const noexcept {
+        sz_assert_(i < size_);
+        return data_[i];
+    }
     value_type *data() noexcept { return data_; }
     value_type const *data() const noexcept { return data_; }
-    value_type &front() noexcept { return data_[0]; }
-    value_type const &front() const noexcept { return data_[0]; }
-    value_type &back() noexcept { return data_[size_ - 1]; }
-    value_type const &back() const noexcept { return data_[size_ - 1]; }
+    value_type &front() noexcept {
+        sz_assert_(size_ != 0);
+        return data_[0];
+    }
+    value_type const &front() const noexcept {
+        sz_assert_(size_ != 0);
+        return data_[0];
+    }
+    value_type &back() noexcept {
+        sz_assert_(size_ != 0);
+        return data_[size_ - 1];
+    }
+    value_type const &back() const noexcept {
+        sz_assert_(size_ != 0);
+        return data_[size_ - 1];
+    }
     size_type size() const noexcept { return size_; }
     size_type capacity() const noexcept { return capacity_; }
     operator span<value_type>() noexcept { return {data_, size_}; }
