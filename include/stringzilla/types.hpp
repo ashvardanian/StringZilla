@@ -628,9 +628,10 @@ struct arrow_strings_tape {
             buffer_.size_ = new_capacity;
         }
 
-        // Reallocate the offsets array if needed.
-        if (count_ + 1 >= offsets_.size_) { // need one extra slot for the new offset
-            size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 1);
+        // Reallocate the offsets array if needed. Appending writes both `offsets_[count_]` (the new string's start)
+        // and `offsets_[count_ + 1]` (its end), so the array must hold `count_ + 2` entries before we touch it.
+        if (count_ + 2 > offsets_.size_) {
+            size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 2);
             offset_t *new_offsets = offset_alloc_.allocate(new_offsets_capacity);
             if (!new_offsets) return status_t::bad_alloc_k;
             if (offsets_.data_) {
