@@ -8,8 +8,9 @@
 #define STRINGZILLA_SORT_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_compare`
-#include "stringzilla/memory.h"  // `sz_copy`
+#include "stringzilla/compare.h"    // `sz_compare`
+#include "stringzilla/memory.h"     // `sz_copy`
+#include "stringzilla/utf8_runes.h" // `sz_unicode_fold_codepoint_`, `sz_rune_export`
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,16 +26,23 @@ extern "C" {
  *  @param start_in_sequence First index (inclusive) in the sequence range to process.
  *  @param end_in_sequence One-past-the-last index in the sequence range to process.
  *  @param start_character Byte offset into each string from which to begin exporting.
+ *  @param reverse If set, exports the bitwise-complement of each pgram, so that an ascending integer
+ *      sort of the complemented keys yields a descending lexicographic order of the strings.
  */
 SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
-    sz_size_t const start_character) {
+    sz_size_t const start_character, sz_bool_t const reverse) {
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
+
+    // For descending order we sort the bitwise-complement of the keys: ascending over `~key` equals
+    // descending over `key`, and the packed length byte flips with it, so prefixes still order correctly
+    // ("abc" before "ab" under reverse). XOR-ing with a precomputed mask keeps the hot loop branchless.
+    sz_pgram_t const reverse_mask = reverse ? ~(sz_pgram_t)0 : (sz_pgram_t)0;
 
     // Perform the same operation for every string.
     for (sz_size_t sequence_index = start_in_sequence; sequence_index < end_in_sequence; ++sequence_index) {
@@ -67,11 +75,13 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
         sz_assert_(                                                //
             (length <= start_character) == (*target_pgram == 0) && //
             "We can have a zero value if only the string is shorter than other strings at this position.");
+
+        *target_pgram ^= reverse_mask;
     }
 
     // As our goal is to sort the strings using the exported integer "pgrams",
     // this is a good place to validate the correctness of the exported data.
-    if (SZ_DEBUG && start_character == 0)
+    if (SZ_DEBUG && start_character == 0 && !reverse)
         for (sz_size_t sequence_index = start_in_sequence + 1; sequence_index < end_in_sequence; ++sequence_index) {
             sz_pgram_t const previous_pgram = global_pgrams[sequence_index - 1];
             sz_pgram_t const current_pgram = global_pgrams[sequence_index];
@@ -184,10 +194,13 @@ SZ_INTERNAL void sz_sequence_argsort_serial_3way_partition_(              //
  *  @param global_order Corresponding order array, permuted in sync with `global_pgrams`.
  *  @param start_in_sequence First index (inclusive) of the range to sort.
  *  @param end_in_sequence One-past-the-last index of the range to sort.
+ *  @param top_count Global cut-off: partitions starting at or beyond this index are left unsorted.
+ *      Pass 0 to fully sort the range. With the complement trick the wanted elements (smallest, or
+ *      largest under reverse) always fall in `[0, top_count)`, so one cut-off serves both directions.
  */
 SZ_PUBLIC void sz_sequence_argsort_serial_recursively_(                   //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence) {
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
 
     // Partition the collection around some pivot or 2 pivots in a 3-way partitioning
     sz_size_t first_pivot_index, last_pivot_index;
@@ -198,11 +211,13 @@ SZ_PUBLIC void sz_sequence_argsort_serial_recursively_(                   //
 
     // Recursively sort the left partition
     if (start_in_sequence < first_pivot_index)
-        sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, start_in_sequence, first_pivot_index);
+        sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, start_in_sequence, first_pivot_index,
+                                                top_count);
 
-    // Recursively sort the right partition
-    if (last_pivot_index + 1 < end_in_sequence)
-        sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, last_pivot_index + 1, end_in_sequence);
+    // Recursively sort the right partition, unless it lies entirely past the `top_count` cut-off.
+    if (last_pivot_index + 1 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
+        sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, last_pivot_index + 1, end_in_sequence,
+                                                top_count);
 }
 
 /**
@@ -216,19 +231,21 @@ SZ_PUBLIC void sz_sequence_argsort_serial_recursively_(                   //
  *  @param start_in_sequence First index (inclusive) of the range to process.
  *  @param end_in_sequence One-past-the-last index of the range to process.
  *  @param start_character Byte offset into each string for the current pgram window.
+ *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
+ *  @param reverse Whether to export complemented keys for descending order.
  */
 SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
-    sz_size_t const start_character) {
+    sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
 
     // Prepare the new range of pgrams
     sz_sequence_argsort_serial_export_next_pgrams_(sequence, global_pgrams, global_order, start_in_sequence,
-                                                   end_in_sequence, start_character);
+                                                   end_in_sequence, start_character, reverse);
 
     // Sort current pgrams with a quicksort
-    sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, start_in_sequence, end_in_sequence);
+    sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, start_in_sequence, end_in_sequence, top_count);
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
@@ -238,22 +255,32 @@ SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
     sz_size_t nested_start = start_in_sequence;
     sz_size_t nested_end = start_in_sequence;
     while (nested_end != end_in_sequence) {
+        // Everything from `top_count` onwards needs no ordering - the wanted elements are already in front.
+        if (top_count != 0 && nested_start >= top_count) break;
+
         // Find the end of the identical pgrams
         sz_pgram_t current_pgram = global_pgrams[nested_start];
         while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
-        // If the identical pgrams are not trivial and each string has more characters, sort them recursively
-        sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+        // The packed length byte lives in the low byte after the byte-reversal; under `reverse` the
+        // whole key was complemented, so we complement back before reading it.
+        sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
+        sz_cptr_t const length_str = (sz_cptr_t)&length_source;
 #if !SZ_IS_BIG_ENDIAN_
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0]; //! The byte order was swapped
 #else
-        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swaps on big-endian
+        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity]; //! No swaps on big-endian
 #endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each) {
             sz_sequence_argsort_serial_next_pgrams_(sequence, global_pgrams, global_order, nested_start, nested_end,
-                                                    start_character + pgram_capacity);
+                                                    start_character + pgram_capacity, top_count, reverse);
+        }
+        else if (has_multiple_strings) {
+            // Terminal run of byte-identical strings: their pgrams are equal and exhausted, so restore
+            // stable order by sorting this slice ascending by original index.
+            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
         }
         // Move to the next
         nested_start = nested_end;
@@ -261,15 +288,16 @@ SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
 }
 
 SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                 sz_sorted_idx_t *order) {
+                                                 sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
         order[sequence_index] = sequence_index;
 
-    // On very small collections - just use the quadratic-complexity insertion sort
-    // without any smart optimizations or memory allocations.
-    if (sequence->count <= 32) {
+    // On very small ascending collections - just use the quadratic-complexity @b stable insertion sort
+    // without any smart optimizations or memory allocations. Fully ordering up to 32 elements trivially
+    // satisfies any `top_count`. Descending small inputs fall through to the complementing pgram path.
+    if (sequence->count <= 32 && !reverse) {
         sz_sequence_argsort_with_insertion(sequence, order);
         return sz_success_k;
     }
@@ -297,7 +325,7 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, 
     if (!pgrams) return sz_bad_alloc_k;
 
     // Recursively sort the whole sequence.
-    sz_sequence_argsort_serial_next_pgrams_(sequence, pgrams, order, 0, sequence->count, 0);
+    sz_sequence_argsort_serial_next_pgrams_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
 
     // Free temporary storage.
     alloc->free(pgrams, memory_usage, alloc);
@@ -309,10 +337,190 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
     sz_unused_(alloc);
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
-    // Reuse the string sorting algorithm for sorting the "pgrams".
-    sz_sequence_argsort_serial_recursively_((sz_pgram_t *)pgrams, order, 0, count);
+    // Reuse the string sorting algorithm for sorting the "pgrams" - a plain full ascending sort.
+    sz_sequence_argsort_serial_recursively_((sz_pgram_t *)pgrams, order, 0, count, 0);
     return sz_success_k;
 }
+
+#pragma region Case Insensitive
+
+/**
+ *  @brief Per-string folding cursor for case-insensitive sorting.
+ *      Folding is not length-preserving, so a single shared byte offset can no longer keep strings in an
+ *      equal-prefix group aligned; instead each @b string (indexed by original index) tracks where to
+ *      resume folding for the next pgram window.
+ */
+typedef struct sz_argsort_folded_cursor_t_ {
+    sz_size_t raw_offset;   //!< Raw byte offset, at a source code-point boundary, to resume folding from.
+    sz_size_t folded_skip;  //!< Folded bytes of the code-point at `raw_offset` already emitted in prior windows.
+} sz_argsort_folded_cursor_t_;
+
+/**
+ *  @brief Case-insensitive counterpart of `sz_sequence_argsort_serial_export_next_pgrams_`.
+ *      Builds each pgram from the @b case-folded byte stream of a string, folding only enough source
+ *      code-points on the fly to fill one pgram window, and remembering where to resume in @p global_cursors.
+ *
+ *  @param global_cursors Per-string (original-index) folding cursors, advanced by one window each call.
+ *  @param first_window Whether this is the first window (used only for the debug identity-permutation check).
+ *  @param reverse Whether to export complemented keys for descending order.
+ */
+SZ_INTERNAL void sz_sequence_argsort_serial_export_next_folded_pgrams_(         //
+    sz_sequence_t const *const sequence,                                        //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
+    sz_argsort_folded_cursor_t_ *const global_cursors,                          //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
+    sz_bool_t const first_window, sz_bool_t const reverse) {
+
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
+    sz_pgram_t const reverse_mask = reverse ? ~(sz_pgram_t)0 : (sz_pgram_t)0;
+
+    for (sz_size_t sequence_index = start_in_sequence; sequence_index < end_in_sequence; ++sequence_index) {
+
+        sz_sorted_idx_t const original_index = global_order[sequence_index];
+        if (SZ_DEBUG && first_window)
+            sz_assert_(original_index == sequence_index && "At start this must be an identity permutation.");
+
+        sz_cptr_t const source_str = sequence->get_start(sequence->handle, original_index);
+        sz_size_t const source_length = sequence->get_length(sequence->handle, original_index);
+        sz_argsort_folded_cursor_t_ cursor = global_cursors[original_index];
+
+        sz_pgram_t *target_pgram = &global_pgrams[sequence_index];
+        sz_ptr_t target_str = (sz_ptr_t)target_pgram;
+        *target_pgram = 0;
+        sz_size_t produced = 0;
+
+        sz_size_t raw_position = cursor.raw_offset;
+        sz_size_t skip_in_first = cursor.folded_skip; // Folded bytes of the first code-point to drop.
+
+        while (produced < pgram_capacity && raw_position < source_length) {
+
+            // Decode one source code-point and case-fold it into up to 3 runes, mirroring `sz_utf8_case_fold`.
+            sz_rune_t source_rune;
+            sz_rune_length_t source_rune_length;
+            sz_rune_parse(source_str + raw_position, source_str + source_length, &source_rune, &source_rune_length);
+            sz_size_t const source_advance = source_rune_length ? (sz_size_t)source_rune_length : 1;
+
+            sz_rune_t folded_runes[3];
+            folded_runes[0] = 0xFFFFFFFFu, folded_runes[1] = 0xFFFFFFFEu, folded_runes[2] = 0xFFFFFFFDu;
+            sz_size_t const folded_runes_count = sz_unicode_fold_codepoint_(source_rune, folded_runes);
+
+            // UTF-8-encode the folded runes; worst case 3 runes x 4 bytes.
+            sz_u8_t folded_bytes[12];
+            sz_size_t folded_bytes_count = 0;
+            for (sz_size_t rune_index = 0; rune_index < folded_runes_count; ++rune_index)
+                folded_bytes_count += sz_rune_export(folded_runes[rune_index], folded_bytes + folded_bytes_count);
+
+            // Drop the bytes of this code-point that earlier windows already emitted.
+            sz_size_t byte_cursor = skip_in_first;
+            skip_in_first = 0;
+
+            while (produced < pgram_capacity && byte_cursor < folded_bytes_count)
+                target_str[produced++] = (char)folded_bytes[byte_cursor++];
+
+            if (byte_cursor < folded_bytes_count) {
+                // Window filled mid-code-point: resume from this very code-point next time.
+                cursor.raw_offset = raw_position;
+                cursor.folded_skip = byte_cursor;
+                break;
+            }
+
+            // Code-point fully emitted: advance to the next one.
+            raw_position += source_advance;
+            cursor.raw_offset = raw_position;
+            cursor.folded_skip = 0;
+        }
+
+        target_str[pgram_capacity] = (char)produced;
+#if !SZ_IS_BIG_ENDIAN_
+#if SZ_IS_64BIT_
+        *target_pgram = sz_u64_bytes_reverse(*target_pgram);
+#else
+        *target_pgram = sz_u32_bytes_reverse(*target_pgram);
+#endif
+#endif
+        *target_pgram ^= reverse_mask;
+        global_cursors[original_index] = cursor;
+    }
+}
+
+/**
+ *  @brief Case-insensitive counterpart of `sz_sequence_argsort_serial_next_pgrams_`: sorts a range by its
+ *      next folded pgram window, then recurses into fold-equal groups (which advance via @p global_cursors).
+ */
+SZ_PUBLIC void sz_sequence_argsort_serial_next_folded_pgrams_(            //
+    sz_sequence_t const *const sequence,                                  //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
+    sz_argsort_folded_cursor_t_ *const global_cursors,                    //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
+    sz_bool_t const first_window, sz_size_t const top_count, sz_bool_t const reverse) {
+
+    sz_sequence_argsort_serial_export_next_folded_pgrams_(sequence, global_pgrams, global_order, global_cursors,
+                                                          start_in_sequence, end_in_sequence, first_window, reverse);
+    sz_sequence_argsort_serial_recursively_(global_pgrams, global_order, start_in_sequence, end_in_sequence, top_count);
+
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
+    sz_size_t nested_start = start_in_sequence;
+    sz_size_t nested_end = start_in_sequence;
+    while (nested_end != end_in_sequence) {
+        if (top_count != 0 && nested_start >= top_count) break;
+
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+        sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
+        sz_cptr_t const length_str = (sz_cptr_t)&length_source;
+#if !SZ_IS_BIG_ENDIAN_
+        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0];
+#else
+        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity];
+#endif
+        int has_multiple_strings = nested_end - nested_start > 1;
+        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
+        if (has_multiple_strings && has_more_characters_in_each) {
+            sz_sequence_argsort_serial_next_folded_pgrams_(sequence, global_pgrams, global_order, global_cursors,
+                                                           nested_start, nested_end, sz_false_k, top_count, reverse);
+        }
+        else if (has_multiple_strings) {
+            // Terminal run of fold-identical strings: restore stable order by original index.
+            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+        }
+        nested_start = nested_end;
+    }
+}
+
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,        //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+
+    sz_size_t const count = sequence->count;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index) order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
+
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    // We need a pgram buffer plus a per-string folding cursor (keyed by original index, so it survives
+    // the permutations of `order`).
+    sz_size_t const pgrams_usage = count * sizeof(sz_pgram_t);
+    sz_size_t const cursors_usage = count * sizeof(sz_argsort_folded_cursor_t_);
+    sz_size_t const memory_usage = pgrams_usage + cursors_usage;
+    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    if (!pgrams) return sz_bad_alloc_k;
+    sz_argsort_folded_cursor_t_ *cursors = (sz_argsort_folded_cursor_t_ *)(pgrams + count);
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        cursors[sequence_index].raw_offset = 0, cursors[sequence_index].folded_skip = 0;
+
+    sz_sequence_argsort_serial_next_folded_pgrams_(sequence, pgrams, order, cursors, 0, count, sz_true_k, top_count,
+                                                   reverse);
+
+    alloc->free(pgrams, memory_usage, alloc);
+    return sz_success_k;
+}
+
+#pragma endregion // Case Insensitive
 
 /**
  *  @brief Helper function similar to `std::set_union` over pairs of integers and their original indices.

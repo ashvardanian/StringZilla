@@ -4691,8 +4691,8 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
  *  @param order The pointer to the output array of indices, that will be populated with the permutation.
  */
 template <typename container_type_, typename string_extractor_>
-status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor,
-                     sorted_idx_t *order) noexcept {
+status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor, sorted_idx_t *order,
+                     std::size_t top_count = 0, bool reverse = false) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
     using args_t = sequence_args_<container_type_, string_extractor_>;
@@ -4704,8 +4704,34 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>(
-        [&](sz_alloc_type &alloc) { return sz_sequence_argsort(&sequence, &alloc, order); });
+    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+        return sz_sequence_argsort(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
+                                   static_cast<sz_bool_t>(reverse));
+    });
+}
+
+/**
+ *  @brief Case-insensitive (Unicode case-folded) counterpart of `try_argsort`.
+ *  @sa sz_sequence_argsort_utf8_case_insensitive
+ */
+template <typename container_type_, typename string_extractor_>
+status_t try_argsort_utf8_case_insensitive(container_type_ const &container, string_extractor_ const &extractor,
+                                           sorted_idx_t *order, std::size_t top_count = 0,
+                                           bool reverse = false) noexcept {
+
+    using args_t = sequence_args_<container_type_, string_extractor_>;
+    args_t args {container, extractor};
+    sz_sequence_t sequence;
+    sequence.handle = &args;
+    sequence.count = container.size();
+    sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
+    sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
+
+    using sz_alloc_type = sz_memory_allocator_t;
+    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+        return sz_sequence_argsort_utf8_case_insensitive(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
+                                                         static_cast<sz_bool_t>(reverse));
+    });
 }
 
 /**
@@ -4792,11 +4818,13 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @return The array of indices, that will be populated with the permutation.
  *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename container_type_, typename string_extractor_>
+template <typename container_type_, typename string_extractor_,
+          typename std::enable_if<!std::is_arithmetic<string_extractor_>::value, int>::type = 0>
 std::vector<sorted_idx_t> argsort( //
-    container_type_ const &container, string_extractor_ const &extractor) noexcept(false) {
+    container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
+    bool reverse = false) noexcept(false) {
     std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort(container, extractor, order.data());
+    status_t status = try_argsort(container, extractor, order.data(), top_count, reverse);
     raise(status);
     return order;
 }
@@ -4807,11 +4835,39 @@ std::vector<sorted_idx_t> argsort( //
  *  @throw `std::bad_alloc` if the allocation fails.
  */
 template <typename container_type_>
-std::vector<sorted_idx_t> argsort(container_type_ const &container) noexcept(false) {
+std::vector<sorted_idx_t> argsort(container_type_ const &container, std::size_t top_count = 0,
+                                  bool reverse = false) noexcept(false) {
     using string_like_type = typename container_type_::value_type;
     static_assert( //
         std::is_convertible<string_like_type, string_view>::value, "The type must be convertible to string_view.");
-    return argsort(container, [](string_like_type const &s) -> string_view { return s; });
+    return argsort(
+        container, [](string_like_type const &s) -> string_view { return s; }, top_count, reverse);
+}
+
+/**
+ *  @brief Case-insensitive (Unicode case-folded) permutation that would lead to sorted order.
+ *  @throw `std::bad_alloc` if the allocation fails.
+ */
+template <typename container_type_, typename string_extractor_,
+          typename std::enable_if<!std::is_arithmetic<string_extractor_>::value, int>::type = 0>
+std::vector<sorted_idx_t> argsort_utf8_case_insensitive( //
+    container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
+    bool reverse = false) noexcept(false) {
+    std::vector<sorted_idx_t> order(container.size());
+    status_t status = try_argsort_utf8_case_insensitive(container, extractor, order.data(), top_count, reverse);
+    raise(status);
+    return order;
+}
+
+/** @overload */
+template <typename container_type_>
+std::vector<sorted_idx_t> argsort_utf8_case_insensitive(container_type_ const &container, std::size_t top_count = 0,
+                                                        bool reverse = false) noexcept(false) {
+    using string_like_type = typename container_type_::value_type;
+    static_assert( //
+        std::is_convertible<string_like_type, string_view>::value, "The type must be convertible to string_view.");
+    return argsort_utf8_case_insensitive(
+        container, [](string_like_type const &s) -> string_view { return s; }, top_count, reverse);
 }
 
 struct intersect_result_t {

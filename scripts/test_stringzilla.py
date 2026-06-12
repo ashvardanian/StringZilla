@@ -563,6 +563,24 @@ def test_unit_strs_sequence():
     lines_sorted_reverse = lines.sorted(reverse=True)
     assert ["p3", "p2", "p1"] == list(lines_sorted_reverse)
 
+    # Top-K partial sort: only the leading `top` elements are returned.
+    assert ["p1", "p2"] == list(lines.sorted(top=2))
+    assert [0, 1] == list(lines.argsort(top=2, reverse=True))  # two largest: p3, p2
+    assert list(lines.sorted()) == list(lines.sorted(top=999))  # `top` beyond the count sorts everything
+
+    # Case-insensitive, stable ordering (fold-equal strings keep input order).
+    mixed = Str("Banana\napple\nBANANA\nApple").splitlines()
+    assert ["apple", "Apple", "Banana", "BANANA"] == list(mixed.sorted(case_insensitive=True))
+    assert [1, 3, 0, 2] == list(mixed.argsort(case_insensitive=True))
+    assert ["Banana", "BANANA", "apple", "Apple"] == list(mixed.sorted(case_insensitive=True, reverse=True))
+
+    # Keyword-only: positional arguments are rejected.
+    try:
+        lines.sorted(True)
+        assert False, "sorted() should reject positional arguments"
+    except TypeError:
+        pass
+
     # Sampling an array
     sampled = lines.sample(100, seed=42)
     assert "p3" in sampled

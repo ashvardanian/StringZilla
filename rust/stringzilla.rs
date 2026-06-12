@@ -484,6 +484,17 @@ extern "C" {
         sequence: *const _SzSequence,
         alloc: *const c_void,
         order: *mut SortedIdx,
+        top_count: usize,
+        reverse: i32,
+    ) -> Status;
+
+    pub(crate) fn sz_sequence_argsort_utf8_case_insensitive(
+        //
+        sequence: *const _SzSequence,
+        alloc: *const c_void,
+        order: *mut SortedIdx,
+        top_count: usize,
+        reverse: i32,
     ) -> Status;
 
     pub(crate) fn sz_sequence_intersect(
@@ -2167,11 +2178,52 @@ where
     get_slice_impl::<F>
 }
 
-/// Sorts a sequence of items by comparing their byte-slice representations.
+/// Knobs for [`argsort`] and [`argsort_by`].
 ///
-/// The caller must supply an output buffer `order` whose length is at least
-/// equal to the length of `data`. On success, the function writes the sorted
-/// permutation indices into `order`.
+/// The default is a full, ascending, byte-lexicographic, **stable** sort (equal elements keep their
+/// input order). Tweak the public fields directly or chain the builder methods:
+///
+/// ```rust
+/// use stringzilla::stringzilla as sz;
+///
+/// let descending = sz::ArgsortOptions::default().reversed();
+/// let top_10_folded = sz::ArgsortOptions { case_insensitive: true, top: Some(10), ..Default::default() };
+/// # let _ = (descending, top_10_folded);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArgsortOptions {
+    /// Sort in descending order; equal elements still keep their input order (stable).
+    pub reverse: bool,
+    /// Order under Unicode case-folding instead of raw bytes.
+    pub case_insensitive: bool,
+    /// Only fully order the leading `Some(k)` elements (top-K / partial sort); `None` sorts everything.
+    /// The remaining entries of `order` stay a valid - but arbitrary - permutation of the leftover indices.
+    pub top: Option<usize>,
+}
+
+impl ArgsortOptions {
+    /// Sort in descending order.
+    pub fn reversed(mut self) -> Self {
+        self.reverse = true;
+        self
+    }
+    /// Order under Unicode case-folding instead of raw bytes.
+    pub fn case_insensitive(mut self) -> Self {
+        self.case_insensitive = true;
+        self
+    }
+    /// Only fully order the leading `count` elements (top-K / partial sort).
+    pub fn top(mut self, count: usize) -> Self {
+        self.top = Some(count);
+        self
+    }
+}
+
+/// Computes the permutation that sorts `data` by its byte-slice representations.
+///
+/// The caller supplies an output buffer `order` of length at least `data.len()`; on success the sorted
+/// permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`] for
+/// descending, case-insensitive, and top-K variants.
 ///
 /// # Example
 ///
@@ -2180,37 +2232,41 @@ where
 ///
 /// let fruits = ["banana", "apple", "cherry"];
 /// let mut order = [0; 3];
-/// sz::argsort_permutation(&fruits, &mut order).expect("sort failed");
+/// sz::argsort(&fruits, &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 0, 2]); // "apple", "banana", "cherry"
+///
+/// // Descending, case-insensitive:
+/// let labels = ["beta", "Alpha", "BETA"];
+/// let mut order = [0; 3];
+/// sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed().case_insensitive()).unwrap();
+/// assert_eq!(labels[order[0]], "beta"); // "beta"/"BETA" (fold-equal) before "Alpha", stable on ties
 /// ```
-pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<(), Status> {
+pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status> {
     if data.len() > order.len() {
         return Err(Status::BadAlloc);
     }
-    argsort_permutation_by(|i| data[i].as_ref(), order[..data.len()].as_mut())
+    argsort_by(|i| data[i].as_ref(), &mut order[..data.len()], options)
 }
 
-/// Sorts a sequence of items by comparing their corresponding byte-slice representations.
-/// The size of the permutation is inferred from the length of the `order` slice.
+/// Computes the permutation that sorts items by a caller-provided byte-slice key.
+/// The number of items is inferred from the length of the `order` slice.
 ///
 /// # Example
 ///
 /// ```rust
 /// use stringzilla::stringzilla as sz;
 ///
-/// #[derive(Debug)]
 /// struct Person { name: &'static str, age: u32 }
-///
 /// let people = [
 ///     Person { name: "Charlie", age: 20 },
 ///     Person { name: "Alice", age: 25 },
 ///     Person { name: "Bob", age: 30 },
 /// ];
 /// let mut order = [0; 3];
-/// sz::argsort_permutation_by(|i| people[i].name.as_bytes(), &mut order).expect("sort failed");
+/// sz::argsort_by(|i| people[i].name.as_bytes(), &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
 /// ```
-pub fn argsort_permutation_by<F, A>(mapper: F, order: &mut [SortedIdx]) -> Result<(), Status>
+pub fn argsort_by<F, A>(mapper: F, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
     F: Fn(usize) -> A,
     A: AsRef<[u8]>,
@@ -2224,11 +2280,11 @@ where
         unsafe { core::mem::transmute(slice) }
     };
 
-    _argsort_permutation_impl(adapter, order)
+    _argsort_impl(adapter, order, options)
 }
 
 /// Helper that takes an adapter (with a concrete type) and performs the FFI call.
-fn _argsort_permutation_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx]) -> Result<(), Status>
+fn _argsort_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
     FAdapter: Fn(usize) -> &'static [u8],
 {
@@ -2242,7 +2298,15 @@ where
         get_start: Some(_slice_get_start_punned),
         get_length: Some(_slice_get_length_punned),
     };
-    let status = unsafe { sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr()) };
+    let top_count = options.top.unwrap_or(0);
+    let reverse = options.reverse as i32;
+    let status = unsafe {
+        if options.case_insensitive {
+            sz_sequence_argsort_utf8_case_insensitive(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+        } else {
+            sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+        }
+    };
     if status == Status::Success {
         Ok(())
     } else {
@@ -3692,11 +3756,11 @@ mod tests {
     }
 
     #[test]
-    fn argsort_permutation_default() {
+    fn argsort_default() {
         // Test with a slice of string literals.
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3]; // output buffer must be at least fruits.len()
-        sz::argsort_permutation(&fruits, &mut order).expect("argsort_permutation failed");
+        sz::argsort(&fruits, &mut order, Default::default()).expect("argsort failed");
 
         // Reconstruct sorted order using the returned indices.
         let sorted_from_api: Vec<_> = order.iter().map(|&i| fruits[i]).collect();
@@ -3709,7 +3773,7 @@ mod tests {
     }
 
     #[test]
-    fn argsort_permutation_by_custom() {
+    fn argsort_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -3727,8 +3791,7 @@ mod tests {
             Person { name: "Bob", age: 40 },
         ];
         let mut order = [0; 3];
-        sz::argsort_permutation_by(|i: usize| people[i].name.as_bytes(), &mut order)
-            .expect("argsort_permutation_by failed");
+        sz::argsort_by(|i: usize| people[i].name.as_bytes(), &mut order, Default::default()).expect("argsort_by failed");
 
         let sorted_from_api: Vec<_> = order.iter().map(|&i| people[i].name).collect();
 
@@ -3737,6 +3800,43 @@ mod tests {
         expected.sort();
 
         assert_eq!(sorted_from_api, expected);
+    }
+
+    #[test]
+    fn argsort_reverse_is_stable() {
+        // Two equal "beta"s must keep their input order even when sorting descending.
+        let labels = ["beta", "alpha", "beta", "gamma"];
+        let mut order = [0; 4];
+        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed()).expect("argsort failed");
+        let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
+        assert_eq!(sorted, vec!["gamma", "beta", "beta", "alpha"]);
+        // Stability: the first "beta" (index 0) precedes the second (index 2).
+        let beta_positions: Vec<_> = order.iter().filter(|&&i| labels[i] == "beta").copied().collect();
+        assert_eq!(beta_positions, vec![0, 2]);
+    }
+
+    #[test]
+    fn argsort_top_k_prefix() {
+        let words = ["delta", "alpha", "echo", "bravo", "charlie"];
+        let mut order = [0; 5];
+        sz::argsort(&words, &mut order, sz::ArgsortOptions::default().top(2)).expect("argsort failed");
+        // Only the first two entries are guaranteed sorted (the two smallest).
+        assert_eq!(words[order[0]], "alpha");
+        assert_eq!(words[order[1]], "bravo");
+        // `order` is still a full permutation.
+        let mut seen = order.to_vec();
+        seen.sort();
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn argsort_case_insensitive() {
+        let labels = ["Banana", "apple", "BANANA", "Apple"];
+        let mut order = [0; 4];
+        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().case_insensitive()).expect("argsort failed");
+        let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
+        // Fold-equal strings group together and stay in input order: "apple","Apple" then "Banana","BANANA".
+        assert_eq!(sorted, vec!["apple", "Apple", "Banana", "BANANA"]);
     }
 
     #[test]
