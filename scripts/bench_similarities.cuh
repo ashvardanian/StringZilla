@@ -180,54 +180,64 @@ void bench_levenshtein(environment_t const &env) {
     };
     sz_unused_(scramble_accelerated_results);
 
-    // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
-    constexpr linear_gap_costs_t weird_linear {3};
-    constexpr affine_gap_costs_t weird_affine {4, 2};
-    constexpr uniform_substitution_costs_t weird_uniform {1, 3};
+    // Two cost paths: "unit" costs (match 0, mismatch 1, gap 1) take the bit-parallel Myers fast path on
+    // linear byte inputs, while the "weird" non-unit costs force the general anti-diagonal scorers. Both
+    // are benchmarked, with the scheme tag spliced into each benchmark name (e.g. `levenshtein_neon_unit`).
+    struct cost_scheme_t {
+        uniform_substitution_costs_t uniform;
+        linear_gap_costs_t linear;
+        affine_gap_costs_t affine;
+        char const *tag;
+    };
+    cost_scheme_t const cost_schemes[] = {
+        {{0, 1}, {1}, {1, 1}, "unit"},
+        {{1, 3}, {3}, {4, 2}, "weird"},
+    };
 
-    for (std::size_t batch_size : batch_sizes) {
+    for (auto const &scheme : cost_schemes)
+        for (std::size_t batch_size : batch_sizes) {
         results_linear_baseline.resize(batch_size), results_linear_accelerated.resize(batch_size);
         results_affine_baseline.resize(batch_size), results_affine_accelerated.resize(batch_size);
         results_utf8_baseline.resize(batch_size), results_utf8_accelerated.resize(batch_size);
 
         auto call_linear_baseline = similarities_callable<levenshtein_serial_t, fu::basic_pool_t &>(
-            env, results_linear_baseline, levenshtein_serial_t {weird_uniform, weird_linear}, pool);
-        auto name_linear_baseline = "levenshtein_serial:batch"s + std::to_string(batch_size);
+            env, results_linear_baseline, levenshtein_serial_t {scheme.uniform, scheme.linear}, pool);
+        auto name_linear_baseline = "levenshtein_serial_"s + scheme.tag + ":batch" + std::to_string(batch_size);
         bench_result_t linear_baseline = bench_unary(env, name_linear_baseline, call_linear_baseline).log();
 
         auto call_utf8_baseline = similarities_callable<levenshtein_utf8_serial_t>(
-            env, results_utf8_baseline, levenshtein_utf8_serial_t {weird_uniform, weird_linear});
-        auto name_utf8_baseline = "levenshtein_utf8_serial:batch"s + std::to_string(batch_size);
+            env, results_utf8_baseline, levenshtein_utf8_serial_t {scheme.uniform, scheme.linear});
+        auto name_utf8_baseline = "levenshtein_utf8_serial_"s + scheme.tag + ":batch" + std::to_string(batch_size);
         bench_result_t utf8_baseline = bench_unary(env, name_utf8_baseline, call_utf8_baseline).log();
 
         auto call_affine_baseline = similarities_callable<affine_levenshtein_serial_t, fu::basic_pool_t &>(
-            env, results_affine_baseline, affine_levenshtein_serial_t {weird_uniform, weird_affine}, pool);
-        auto name_affine_baseline = "affine_levenshtein_serial:batch"s + std::to_string(batch_size);
+            env, results_affine_baseline, affine_levenshtein_serial_t {scheme.uniform, scheme.affine}, pool);
+        auto name_affine_baseline = "affine_levenshtein_serial_"s + scheme.tag + ":batch" + std::to_string(batch_size);
         bench_result_t affine_baseline =
             bench_unary(env, name_affine_baseline, call_affine_baseline).log(linear_baseline);
         sz_unused_(affine_baseline);
 
 #if SZ_USE_ICELAKE
-        bench_unary(env, "levenshtein_icelake:batch"s + std::to_string(batch_size), call_linear_baseline,
+        bench_unary(env, "levenshtein_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
                     similarities_callable<levenshtein_icelake_t, fu::basic_pool_t &>(
-                        env, results_linear_accelerated, levenshtein_icelake_t {weird_uniform, weird_linear}, pool),
+                        env, results_linear_accelerated, levenshtein_icelake_t {scheme.uniform, scheme.linear}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
         bench_unary(
-            env, "affine_levenshtein_icelake:batch"s + std::to_string(batch_size), call_affine_baseline,
+            env, "affine_levenshtein_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_affine_baseline,
             similarities_callable<affine_levenshtein_icelake_t, fu::basic_pool_t &>(
-                env, results_affine_accelerated, affine_levenshtein_icelake_t {weird_uniform, weird_affine}, pool),
+                env, results_affine_accelerated, affine_levenshtein_icelake_t {scheme.uniform, scheme.affine}, pool),
             callable_no_op_t {},        // preprocessing
             similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 
-        bench_unary(env, "levenshtein_utf8_icelake:batch"s + std::to_string(batch_size), call_utf8_baseline,
+        bench_unary(env, "levenshtein_utf8_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_utf8_baseline,
                     similarities_callable<levenshtein_utf8_icelake_t>(
-                        env, results_utf8_accelerated, levenshtein_utf8_icelake_t {weird_uniform, weird_linear}),
+                        env, results_utf8_accelerated, levenshtein_utf8_icelake_t {scheme.uniform, scheme.linear}),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(utf8_baseline);
@@ -235,26 +245,26 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_NEON
-        bench_unary(env, "levenshtein_neon:batch"s + std::to_string(batch_size), call_linear_baseline,
+        bench_unary(env, "levenshtein_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
                     similarities_callable<levenshtein_neon_t, fu::basic_pool_t &>(
-                        env, results_linear_accelerated, levenshtein_neon_t {weird_uniform, weird_linear}, pool),
+                        env, results_linear_accelerated, levenshtein_neon_t {scheme.uniform, scheme.linear}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
         bench_unary(
-            env, "affine_levenshtein_neon:batch"s + std::to_string(batch_size), call_affine_baseline,
+            env, "affine_levenshtein_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_affine_baseline,
             similarities_callable<affine_levenshtein_neon_t, fu::basic_pool_t &>(
-                env, results_affine_accelerated, affine_levenshtein_neon_t {weird_uniform, weird_affine}, pool),
+                env, results_affine_accelerated, affine_levenshtein_neon_t {scheme.uniform, scheme.affine}, pool),
             callable_no_op_t {},        // preprocessing
             similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 
-        bench_unary(env, "levenshtein_utf8_neon:batch"s + std::to_string(batch_size), call_utf8_baseline,
+        bench_unary(env, "levenshtein_utf8_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_utf8_baseline,
                     similarities_callable<levenshtein_utf8_neon_t>(
-                        env, results_utf8_accelerated, levenshtein_utf8_neon_t {weird_uniform, weird_linear}),
+                        env, results_utf8_accelerated, levenshtein_utf8_neon_t {scheme.uniform, scheme.linear}),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(utf8_baseline);
@@ -262,18 +272,18 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_CUDA
-        bench_unary(env, "levenshtein_cuda:batch"s + std::to_string(batch_size), call_linear_baseline,
+        bench_unary(env, "levenshtein_cuda_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
                     similarities_callable<levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_cuda_t {weird_uniform, weird_linear},
+                        env, results_linear_accelerated, levenshtein_cuda_t {scheme.uniform, scheme.linear},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(env, "affine_levenshtein_cuda:batch"s + std::to_string(batch_size), call_affine_baseline,
+        bench_unary(env, "affine_levenshtein_cuda_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_affine_baseline,
                     similarities_callable<affine_levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_accelerated, affine_levenshtein_cuda_t {weird_uniform, weird_affine},
+                        env, results_affine_accelerated, affine_levenshtein_cuda_t {scheme.uniform, scheme.affine},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
@@ -282,18 +292,18 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_KEPLER
-        bench_unary(env, "levenshtein_kepler:batch"s + std::to_string(batch_size), call_linear_baseline,
+        bench_unary(env, "levenshtein_kepler_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
                     similarities_callable<levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_kepler_t {weird_uniform, weird_linear},
+                        env, results_linear_accelerated, levenshtein_kepler_t {scheme.uniform, scheme.linear},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(env, "affine_levenshtein_kepler:batch"s + std::to_string(batch_size), call_affine_baseline,
+        bench_unary(env, "affine_levenshtein_kepler_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_affine_baseline,
                     similarities_callable<affine_levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_accelerated, affine_levenshtein_kepler_t {weird_uniform, weird_affine},
+                        env, results_affine_accelerated, affine_levenshtein_kepler_t {scheme.uniform, scheme.affine},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
@@ -302,18 +312,18 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_HOPPER
-        bench_unary(env, "levenshtein_hopper:batch"s + std::to_string(batch_size), call_linear_baseline,
+        bench_unary(env, "levenshtein_hopper_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
                     similarities_callable<levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_hopper_t {weird_uniform, weird_linear},
+                        env, results_linear_accelerated, levenshtein_hopper_t {scheme.uniform, scheme.linear},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(env, "affine_levenshtein_hopper:batch"s + std::to_string(batch_size), call_affine_baseline,
+        bench_unary(env, "affine_levenshtein_hopper_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_affine_baseline,
                     similarities_callable<affine_levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_accelerated, affine_levenshtein_hopper_t {weird_uniform, weird_affine},
+                        env, results_affine_accelerated, affine_levenshtein_hopper_t {scheme.uniform, scheme.affine},
                         cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
