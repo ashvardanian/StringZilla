@@ -65,6 +65,16 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
                                                                              substitution_costs, affine_costs);
 #endif // SZ_USE_ICELAKE
 
+#if SZ_USE_NEON
+    bool const can_use_neon = (capabilities & sz_cap_neon_k) == sz_cap_neon_k;
+    if (can_use_neon && can_use_linear_costs)
+        return emplace_levenshtein_engine<szs::levenshtein_neon_t>(engine_punned, error_message, substitution_costs,
+                                                                   linear_costs);
+    else if (can_use_neon)
+        return emplace_levenshtein_engine<szs::affine_levenshtein_neon_t>(engine_punned, error_message,
+                                                                          substitution_costs, affine_costs);
+#endif // SZ_USE_NEON
+
     // GPU tiers are tested most-specific-first: a Hopper device reports the Kepler & base-CUDA bits too, so checking
     // base CUDA first would shadow the Hopper/Kepler engines. Hopper → Kepler → CUDA keeps each device on its best tier.
 #if SZ_USE_HOPPER
@@ -174,6 +184,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
         return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_icelake_t>(engine_punned, error_message,
                                                                                 substitution_costs, linear_costs);
 #endif // SZ_USE_ICELAKE
+
+#if SZ_USE_NEON
+    bool const can_use_neon = (capabilities & sz_cap_neon_k) != 0;
+    if (can_use_neon && can_use_linear_costs)
+        return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_neon_t>(engine_punned, error_message,
+                                                                             substitution_costs, linear_costs);
+#endif // SZ_USE_NEON
 
     bool const can_use_serial = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
     if (can_use_serial && can_use_linear_costs)

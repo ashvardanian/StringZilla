@@ -51,8 +51,12 @@ using affine_smith_waterman_haswell_t =
 #if SZ_USE_NEON
 /**
  *  @brief In @b ARM NEON (AArch64) the per-character class lookups use the native `vqtbl4q_u8` byte-gather,
- *         feeding the anti-diagonal scorers.
+ *         feeding the anti-diagonal scorers. Uniform-cost Levenshtein swaps that lookup for a `vceqq`/`vbslq`
+ *         match-vs-mismatch select and minimizes with `vminq`.
  */
+using levenshtein_neon_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using levenshtein_utf8_neon_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using affine_levenshtein_neon_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
 using needleman_wunsch_neon_t =
     needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
 using smith_waterman_neon_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
@@ -186,6 +190,18 @@ smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_NEON
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
 extern template status_t
 needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
     span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
