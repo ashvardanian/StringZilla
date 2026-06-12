@@ -130,6 +130,15 @@ SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_icelake( //
 SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_icelake(sz_cptr_t str, sz_size_t length);
 #endif
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_case_insensitive_order */
+SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_haswell( //
+    sz_cptr_t a, sz_size_t a_length,                            //
+    sz_cptr_t b, sz_size_t b_length);
+/** @copydoc sz_utf8_case_invariant */
+SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_haswell(sz_cptr_t str, sz_size_t length);
+#endif
+
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_case_insensitive_order */
 SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
@@ -239,6 +248,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_icelake( //
     sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_case_insensitive_find */
+SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_haswell( //
+    sz_cptr_t haystack, sz_size_t haystack_length,         //
+    sz_cptr_t needle, sz_size_t needle_length,             //
+    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_case_insensitive_find */
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
@@ -254,6 +271,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
  *  and needle-metadata builder), then layers its own kernels (or delegates back to serial). */
 #include "stringzilla/utf8_case_insensitive/serial.h"
 #include "stringzilla/utf8_case_insensitive/icelake.h"
+#include "stringzilla/utf8_case_insensitive/haswell.h"
 #include "stringzilla/utf8_case_insensitive/neon.h"
 #include "stringzilla/utf8_case_insensitive/v128.h"
 #include "stringzilla/utf8_case_insensitive/v128relaxed.h"
@@ -289,6 +307,12 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find(sz_cptr_t haystack, sz_size_t
 #elif SZ_USE_ICELAKE
     return sz_utf8_case_insensitive_find_icelake(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                  matched_length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_insensitive_find_haswell(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                                 matched_length);
+#elif SZ_USE_NEON
+    return sz_utf8_case_insensitive_find_neon(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                              matched_length);
 #else
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                 matched_length);
@@ -313,6 +337,10 @@ SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
     return sz_utf8_case_invariant_powervsx(str, length);
 #elif SZ_USE_ICELAKE
     return sz_utf8_case_invariant_icelake(str, length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_case_invariant_haswell(str, length);
+#elif SZ_USE_NEON
+    return sz_utf8_case_invariant_neon(str, length);
 #else
     return sz_utf8_case_invariant_serial(str, length);
 #endif

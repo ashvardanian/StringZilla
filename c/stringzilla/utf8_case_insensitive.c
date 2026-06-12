@@ -18,6 +18,13 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_insensitive_update_(sz_capabilit
     impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_serial;
     impl->utf8_case_insensitive_order = sz_utf8_case_insensitive_order_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) {
+        impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_haswell;
+        impl->utf8_case_insensitive_order = sz_utf8_case_insensitive_order_haswell;
+    }
+#endif
+
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_icelake; }
 #endif

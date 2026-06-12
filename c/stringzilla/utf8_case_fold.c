@@ -16,6 +16,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_fold_update_(sz_capability_t cap
 
     impl->utf8_case_fold = sz_utf8_case_fold_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) { impl->utf8_case_fold = sz_utf8_case_fold_haswell; }
+#endif
+
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_case_fold = sz_utf8_case_fold_icelake; }
 #endif
