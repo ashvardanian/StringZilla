@@ -589,6 +589,31 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_western_europe_( //
 #pragma region Central European Case-Insensitive Find
 
 /**
+ *  Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
+ *  byte's low 6 bits (`text & 0x3F`). Entry value is the in-place add: 0 = identity, 1 = fold by
+ *  +1. The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF,
+ *  'Ÿ' C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so
+ *  the fold leaves them untouched. Same parity that the explicit range checks used to compute, but
+ *  resolved in one `vqtbl4q_u8` per lead family. Verified against the serial reference in tests.
+ */
+static sz_u8_t const sz_utf8_ci_neon_central_c4_deltas_lut_[64] = {
+    // clang-format off
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 80-8F: 'Ā'-'ď' even-parity pairs
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 90-9F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 A0-AF
+    0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C4 B0-BF: 'İ'/'ĸ'/'Ŀ' caseless or cross-block
+    // clang-format on
+};
+static sz_u8_t const sz_utf8_ci_neon_central_c5_deltas_lut_[64] = {
+    // clang-format off
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, // C5 80-8F: odd head, 'ŉ' (C5 89) irregular -> 0
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 90-9F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 A0-AF
+    1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C5 B0-BF: 'Ÿ'/'ſ' cross-block -> 0
+    // clang-format on
+};
+
+/**
  *  @brief Fold a 32-byte chunk using Central European case-folding rules.
  *  @sa sz_utf8_case_rune_safe_central_europe_k
  *
@@ -604,6 +629,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_western_europe_( //
 SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_central_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_case_insensitive_find_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_ci_neon_central_c4_deltas_lut_);
+    uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_ci_neon_central_c5_deltas_lut_);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
@@ -612,6 +639,7 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_central_europe_fold_
         uint8x16_t is_after_c3_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xC3));
         uint8x16_t is_after_c4_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xC4));
         uint8x16_t is_after_c5_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xC5));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(text_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
 
         // 1. Latin-1 Supplement: C3 80-9E → +0x20, except '×' (C3 97)
         uint8x16_t is_latin1_upper_u8x16 = vandq_u8(
@@ -619,19 +647,15 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_central_europe_fold_
                                         vceqq_u8(text_u8x16, vdupq_n_u8(0x97))));
         result_u8x16 = vaddq_u8(result_u8x16, vandq_u8(is_latin1_upper_u8x16, vdupq_n_u8(0x20)));
 
-        // 2. Latin Extended-A: +1 on the parity sub-ranges; the codepoint's low bit equals the
-        //    continuation byte's low bit, so byte parity stands in for codepoint parity
-        uint8x16_t is_odd_u8x16 = vceqq_u8(vandq_u8(text_u8x16, vdupq_n_u8(0x01)), vdupq_n_u8(0x01));
-        uint8x16_t c4_ranges_u8x16 = vorrq_u8(
-            vbicq_u8(sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x80, 0x38), is_odd_u8x16), // C4 80-B7 even
-            vandq_u8(sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0xB9, 0x05), is_odd_u8x16)); // C4 B9-BD odd
-        uint8x16_t c5_ranges_u8x16 = vorrq_u8(
-            vandq_u8(is_odd_u8x16, vorrq_u8(sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x81, 0x07),   // 81-87
-                                           sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0xB9, 0x05))),  // B9-BD
-            vbicq_u8(sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x8A, 0x2D), is_odd_u8x16)); // C5 8A-B6 even
-        uint8x16_t fold_extended_u8x16 = vorrq_u8(vandq_u8(is_after_c4_u8x16, c4_ranges_u8x16),
-                                                  vandq_u8(is_after_c5_u8x16, c5_ranges_u8x16));
-        result_u8x16 = vaddq_u8(result_u8x16, vandq_u8(fold_extended_u8x16, vdupq_n_u8(0x01)));
+        // 2. Latin Extended-A: one `vqtbl4q_u8` per lead family resolves the +1 parity that the
+        //    range/odd-parity checks used to assemble. The `is_continuation` mask drops bytes
+        //    outside [0x80, 0xBF] that `text & 0x3F` would otherwise alias onto a folding index.
+        uint8x16_t delta_indices_u8x16 = vandq_u8(text_u8x16, vdupq_n_u8(0x3F));
+        uint8x16_t fold_extended_u8x16 =
+            vorrq_u8(vandq_u8(vqtbl4q_u8(c4_deltas_lut_u8x16x4, delta_indices_u8x16), is_after_c4_u8x16),
+                     vandq_u8(vqtbl4q_u8(c5_deltas_lut_u8x16x4, delta_indices_u8x16), is_after_c5_u8x16));
+        fold_extended_u8x16 = vandq_u8(fold_extended_u8x16, is_continuation_u8x16);
+        result_u8x16 = vaddq_u8(result_u8x16, fold_extended_u8x16);
         result_u8x16x2.val[register_index] = result_u8x16;
     }
     return result_u8x16x2;
@@ -896,6 +920,35 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_armenian_( //
 #pragma region Greek Case-Insensitive Find
 
 /**
+ *  Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`. The deltas
+ *  the per-rule range checks used to assemble, resolved in one `vqtbl4q_u8`:
+ *  'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
+ *  'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό' (8C) keeps its byte (lead-only change).
+ */
+static sz_u8_t const sz_utf8_ci_neon_greek_ce_deltas_lut_[64] = {
+    // clang-format off
+    0, 0, 0, 0, 0, 0, 0x26, 0, 0x25, 0x25, 0x25, 0, 0, 0, 0xFF, 0xFF, // CE 80-8F
+    0, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, // CE 90-9F
+    0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0, 0, 0, 0, // CE A0-AF
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE B0-BF (already lowercase)
+    // clang-format on
+};
+
+/**
+ *  Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
+ *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay
+ *  under CE, so they do not promote. Propagated one lane back through `next_bytes` onto the lead.
+ */
+static sz_u8_t const sz_utf8_ci_neon_greek_ce_promotes_lut_[64] = {
+    // clang-format off
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, // CE 80-8F: 8C, 8E, 8F promote
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F: stay under CE
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // CE A0-AB: promote to CF
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE B0-BF
+    // clang-format on
+};
+
+/**
  *  @brief Fold a 32-byte chunk using Greek case-folding rules.
  *  @sa sz_utf8_case_rune_safe_greek_k
  *
@@ -921,6 +974,9 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_greek_fold_u8x16x2_(
     uint8x16x2_t result_u8x16x2 = sz_utf8_case_insensitive_find_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
+    uint8x16x4_t const ce_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_ci_neon_greek_ce_deltas_lut_);
+    uint8x16x4_t const ce_promotes_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_ci_neon_greek_ce_promotes_lut_);
+
     uint8x16x2_t promote_seconds_u8x16x2; // CE → CF (+1) second-byte flags, pre-shift
     uint8x16x2_t micro_seconds_u8x16x2;   // C2 → CE (+0x0C) micro-sign second flags, pre-shift
     uint8x16x2_t partial_offsets_u8x16x2; // every delta that does NOT need a cross-boundary shift
@@ -931,37 +987,22 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_greek_fold_u8x16x2_(
         uint8x16_t is_after_ce_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xCE));
         uint8x16_t is_after_cf_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xCF));
         uint8x16_t is_after_c2_u8x16 = vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xC2));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(text_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t after_ce_cont_u8x16 = vandq_u8(is_after_ce_u8x16, is_continuation_u8x16);
+        uint8x16_t delta_indices_u8x16 = vandq_u8(text_u8x16, vdupq_n_u8(0x3F));
 
-        // Second-byte classes after a CE lead
-        uint8x16_t is_basic1_u8x16 = vandq_u8(is_after_ce_u8x16, //
-                                              sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x91, 0x0F));
-        uint8x16_t is_basic2_u8x16 = vandq_u8(is_after_ce_u8x16, //
-                                              sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0xA0, 0x0A));
-        uint8x16_t is_86_u8x16 = vandq_u8(is_after_ce_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0x86)));
-        uint8x16_t is_88_8a_u8x16 = vandq_u8(is_after_ce_u8x16, //
-                                             sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x88, 0x03));
-        uint8x16_t is_8c_u8x16 = vandq_u8(is_after_ce_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0x8C)));
-        uint8x16_t is_8e_8f_u8x16 = vandq_u8(is_after_ce_u8x16, //
-                                             sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0x8E, 0x02));
-        uint8x16_t is_dialytika_u8x16 = vandq_u8(is_after_ce_u8x16, //
-                                                 sz_utf8_ci_neon_in_byte_range_u8x16_(text_u8x16, 0xAA, 0x02));
+        // Second-byte deltas after CE and the matching CE → CF promotion flags come from two table
+        // lookups; the `is_continuation` mask keeps `text & 0x3F` from aliasing onto a folding index
+        uint8x16_t ce_delta_u8x16 = vandq_u8(vqtbl4q_u8(ce_deltas_lut_u8x16x4, delta_indices_u8x16), after_ce_cont_u8x16);
+        promote_seconds_u8x16x2.val[register_index] =
+            vandq_u8(vqtbl4q_u8(ce_promotes_lut_u8x16x4, delta_indices_u8x16), after_ce_cont_u8x16);
 
         // Final sigma 'ς' (CF 82) and the micro sign's second byte (C2 B5)
         uint8x16_t is_final_sigma_u8x16 = vandq_u8(is_after_cf_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0x82)));
         uint8x16_t is_micro_second_u8x16 = vandq_u8(is_after_c2_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xB5)));
-
-        // CE → CF is +1 for four second-byte classes; record both the pre-shift second flags (for
-        // the lead promotion) and the in-place second deltas
-        promote_seconds_u8x16x2.val[register_index] =
-            vorrq_u8(vorrq_u8(is_basic2_u8x16, is_dialytika_u8x16), vorrq_u8(is_8c_u8x16, is_8e_8f_u8x16));
         micro_seconds_u8x16x2.val[register_index] = is_micro_second_u8x16;
 
-        uint8x16_t is_minus_20_u8x16 = vorrq_u8(is_basic2_u8x16, is_dialytika_u8x16);
-        uint8x16_t offsets_u8x16 = vandq_u8(is_basic1_u8x16, vdupq_n_u8(0x20));
-        offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_minus_20_u8x16, vdupq_n_u8(0xE0)));
-        offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_86_u8x16, vdupq_n_u8(0x26)));
-        offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_88_8a_u8x16, vdupq_n_u8(0x25)));
-        offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_8e_8f_u8x16, vdupq_n_u8(0xFF)));
+        uint8x16_t offsets_u8x16 = ce_delta_u8x16;
         offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_final_sigma_u8x16, vdupq_n_u8(0x01)));
         offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_micro_second_u8x16, vdupq_n_u8(0x07)));
         partial_offsets_u8x16x2.val[register_index] = offsets_u8x16;
