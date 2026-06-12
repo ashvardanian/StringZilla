@@ -1888,10 +1888,19 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         size_t const shorter_length = shorter.size(), longer_length = longer.size();
         if (shorter_length > 64) return status_t::unexpected_dimensions_k;
+        // Empty pattern: the distance is the text length, and the loop's `>> (shorter_length - 1)` would underflow.
+        if (shorter_length == 0) {
+            result_ref = longer_length;
+            return status_t::success_k;
+        }
         if (scratch_space.size() < sizeof(u64_t) * 256) return status_t::bad_alloc_k;
 
         using match_masks_t = u64_t[256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
+        // Zero every entry this pair builds or reads first: the scratch is uninitialized (and may hold a previous
+        // walker's bytes), so entries for characters outside `shorter` are not guaranteed zero.
+        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] = 0;
+        for (size_t i = 0; i != longer_length; ++i) match_masks[(u8_t)longer[i]] = 0;
         for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] |= (u64_t)1 << j;
 
         u64_t positives = ~(u64_t)0, negatives = 0; // Myers' VP / VN
@@ -1928,6 +1937,11 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         using match_masks_t = u64_t[2][256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
+        // Both blocks of every touched character are read, so zero both before building (see the one-word variant).
+        for (size_t j = 0; j != shorter_length; ++j)
+            match_masks[0][(u8_t)shorter[j]] = 0, match_masks[1][(u8_t)shorter[j]] = 0;
+        for (size_t i = 0; i != longer_length; ++i)
+            match_masks[0][(u8_t)longer[i]] = 0, match_masks[1][(u8_t)longer[i]] = 0;
         for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(u8_t)shorter[j]] |= (u64_t)1 << (j & 63);
 
         u64_t positives[2] {~(u64_t)0, ~(u64_t)0}, negatives[2] {0, 0}; // Myers' VP / VN, per block
@@ -2036,9 +2050,10 @@ struct levenshtein_distance {
                 return linear_backend.scratch_space_needed(first, second, specs);
             }
 
-        // Bit-parallel Myers fast path
+        // Myers fast path, only when the shorter side fits its 128-rune limit (matches the guard in `operator()`).
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1) {
+            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
+                (std::min)(first.size(), second.size()) <= 128) {
                 return myers_t {}.scratch_space_needed(first, second, specs);
             }
 
@@ -2065,7 +2080,7 @@ struct levenshtein_distance {
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
@@ -2077,9 +2092,11 @@ struct levenshtein_distance {
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
             }
 
-        // Bit-parallel Myers fast path: exact, allocation-free, and ~5x the DP on short unit-cost pairs.
+        // Bit-parallel Myers fast path (~5x DP on short unit-cost pairs); only when the shorter side fits Myers'
+        // 128-rune limit, otherwise fall through to the anti-diagonal DP below.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1)
+            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
+                (std::min)(first.size(), second.size()) <= 128)
                 return myers_t {}(first, second, result_ref, scratch_space);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
@@ -2193,7 +2210,7 @@ struct levenshtein_distance_utf8 {
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
@@ -2353,7 +2370,7 @@ struct needleman_wunsch_score {
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
@@ -2459,7 +2476,7 @@ struct smith_waterman_score {
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         if (first.empty() || second.empty()) {
@@ -2559,8 +2576,10 @@ status_t score_sequentially_( //
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
+        // Pass the dummy by lvalue so the single-pair `operator()` instantiates on the bare executor type.
+        dummy_executor_t dummy_executor;
         status_t status = scoring(to_view(first), to_view(second), result, scratch_space_t(scratch_buffer),
-                                  dummy_executor_t {}, specs);
+                                  dummy_executor, specs);
         if (status == status_t::success_k) results[i] = result;
         else return status;
     }
@@ -2635,7 +2654,8 @@ status_t score_in_parallel_(                           //
 
         if (!is_small(first.size(), second.size())) return;
         scratch_space_t worker_scratch = scratch_space_t(scratch_buffer).part_i_of_n(prong.thread, threads_count);
-        status_t status = scoring(to_view(first), to_view(second), result, worker_scratch, dummy_executor_t {}, specs);
+        dummy_executor_t dummy_executor; // Lvalue, so the scorer pins the bare executor type.
+        status_t status = scoring(to_view(first), to_view(second), result, worker_scratch, dummy_executor, specs);
         if (status == status_t::success_k) results[i] = result;
         else error.store(status);
     });

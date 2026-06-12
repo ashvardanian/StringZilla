@@ -132,6 +132,12 @@ class CudaBuildExtension(NumpyBuildExt):
                 "-DSZ_USE_CUDA=1",
             ]
 
+            # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
+            # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
+            host_cxx = os.environ.get("CUDAHOSTCXX")
+            if host_cxx:
+                nvcc_cmd.extend(["-ccbin", host_cxx])
+
             # Add include directories
             for inc_dir in ext.include_dirs:
                 nvcc_cmd.extend(["-I", inc_dir])
@@ -381,8 +387,36 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/utf8_case_insensitive.c",
 ]
 STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
-STRINGZILLAS_CPU_SOURCES = [f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS]
-STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
+# Per-capability instantiation units: each emits one ISA's (CPU) or tier's (CUDA) heavy engine code exactly once, so
+# the algorithm entry TUs above only declare them `extern` and link against them. Off-platform files compile to empty
+# objects via their internal SZ_USE_* guards. These lists mirror the CMake STRINGZILLAS_*_SOURCES.
+STRINGZILLAS_CPU_PROVIDER_STEMS = [
+    "levenshtein_serial",
+    "levenshtein_icelake",
+    "needleman_wunsch_serial",
+    "needleman_wunsch_icelake",
+    "needleman_wunsch_haswell",
+    "needleman_wunsch_neon",
+    "smith_waterman_serial",
+    "smith_waterman_icelake",
+    "smith_waterman_haswell",
+    "smith_waterman_neon",
+]
+STRINGZILLAS_CUDA_PROVIDER_STEMS = [
+    "levenshtein_cuda",
+    "levenshtein_kepler",
+    "levenshtein_hopper",
+    "needleman_wunsch_cuda",
+    "needleman_wunsch_hopper",
+    "smith_waterman_cuda",
+    "smith_waterman_hopper",
+]
+STRINGZILLAS_CPU_SOURCES = [
+    f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
+]
+STRINGZILLAS_CUDA_SOURCES = [
+    f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS
+] + [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS]
 
 ext_modules = []
 entry_points = {}
@@ -415,7 +449,7 @@ elif sz_target == "stringzillas-cpus":
             include_dirs=["include", "c/stringzillas", "fork_union/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_ENABLE_NUMA", "0")] + macros_args,
         ),
     ]
     command_class = {"build_ext": NumpyBuildExt}
@@ -428,7 +462,7 @@ elif sz_target == "stringzillas-cuda":
             include_dirs=["include", "c/stringzillas", "fork_union/include", "/usr/local/cuda/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lstdc++"],
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),
     ]

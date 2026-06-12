@@ -5,9 +5,13 @@
 # * stringzilla_header: A header-only library with the StringZilla C and C++ headers.
 # * stringzilla_shared: A shared library with the StringZilla C and C++ headers and dynamic SIMD dispatch.
 # * stringzilla_bare: A shared library with the StringZilla headers, but without linking the standard C library.
-# * stringzillas_cpus_shared: A shared library with the StringZillas parallel algorithms for multi-threaded CPUs.
-# * stringzillas_cuda_shared: A shared library with the StringZillas parallel algorithms for CUDA-capable GPUs.
-# * stringzillas_rocm_shared: A shared library with the StringZillas parallel algorithms for ROCm-capable GPUs.
+# * stringzillas_cpus_shared / stringzillas_cpus_static: Shared and static libraries with the StringZillas parallel
+#   algorithms for multi-threaded CPUs. Both reuse one stringzillas_cpus_objects OBJECT compilation; their ISA coverage
+#   is identical because each per-ISA backend is selected at runtime via per-function target attributes.
+# * stringzillas_cuda_shared / stringzillas_cuda_static: Shared and static libraries with the StringZillas parallel
+#   algorithms for CUDA-capable GPUs. The static library (for local testing and benchmarking) ships real SASS for the
+#   current and older compatible GPUs; the shared library (for distribution) also packages forward-compatible PTX.
+# * stringzillas_rocm_shared: A shared library with the StringZillas parallel algorithms for ROCm-capable GPUs (TODO).
 #
 # Tests for different C++ standards:
 #
@@ -25,6 +29,13 @@
 # * stringzilla_test_cpp20_icelake: A test executable for AVX-512.
 # * stringzilla_test_cpp20_neon: A test executable for ARM Neon.
 # * stringzilla_test_cpp20_sve: A test executable for ARM Scalable Vector Extension.
+#
+# StringZillas parallel tests, organized along two orthogonal axes that are never mixed:
+#
+# * stringzillas_test_cpp17 / stringzillas_test_cpp20: Parallel-algorithm tests for the host's best CPU backend.
+# * stringzillas_test_cpp20_{serial,westmere,goldmont,haswell,icelake}: Per-ISA parallel CPU tests (x86; ARM builds
+#   serial, neon, and sve instead).
+# * stringzillas_test_cu20_{cuda,kepler,hopper}: Per-GPU-tier parallel CUDA tests (base SIMT, Kepler, Hopper).
 #
 # Serial Benchmarks:
 #
@@ -494,62 +505,6 @@ if (STRINGZILLA_BUILD_TEST)
         define_gpu_launcher(stringzillas_test_cu20 scripts/test_stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
 
-    # Check system architecture to avoid complex cross-compilation workflows, but compile multiple backends: disabling
-    # all SIMD, enabling only AVX2, only AVX-512, only Arm Neon.
-    if (SZ_IS_64BIT_X86_)
-        # x86 specific backends
-        if (MSVC)
-            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
-            define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "SSE4.2")
-            define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
-            define_launcher(stringzilla_test_cpp20_icelake scripts/test_stringzilla.cpp 20 "AVX512")
-            if (STRINGZILLA_BUILD_CUDA)
-                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "AVX")
-                define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "SSE4.2")
-                define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "AVX2")
-                define_gpu_launcher(stringzillas_test_cu20_icelake scripts/test_stringzillas.cu 20 "AVX512")
-            endif ()
-        else ()
-            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
-            define_launcher(stringzilla_test_cpp20_westmere scripts/test_stringzilla.cpp 20 "westmere")
-            define_launcher(stringzilla_test_cpp20_goldmont scripts/test_stringzilla.cpp 20 "goldmont")
-            define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
-            define_launcher(stringzilla_test_cpp20_icelake scripts/test_stringzilla.cpp 20 "sapphirerapids")
-            if (STRINGZILLA_BUILD_CUDA)
-                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "ivybridge")
-                define_gpu_launcher(stringzillas_test_cu20_westmere scripts/test_stringzillas.cu 20 "westmere")
-                define_gpu_launcher(stringzillas_test_cu20_goldmont scripts/test_stringzillas.cu 20 "goldmont")
-                define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "haswell")
-                define_gpu_launcher(stringzillas_test_cu20_icelake scripts/test_stringzillas.cu 20 "sapphirerapids")
-            endif ()
-        endif ()
-    elseif (SZ_IS_64BIT_ARM_)
-        # ARM specific backends
-        if (MSVC)
-            # SVE is not supported with MSVC
-            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8.0")
-            define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8.0")
-            if (STRINGZILLA_BUILD_CUDA)
-                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8.0")
-                define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8.0")
-            endif ()
-        else ()
-            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
-            define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
-            # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
-            if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-                define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
-            endif ()
-            if (STRINGZILLA_BUILD_CUDA)
-                define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
-                define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
-                # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
-                if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-                    define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
-                endif ()
-            endif ()
-        endif ()
-    endif ()
 endif ()
 
 # Helper function to set architecture-specific SIMD compile definitions for dynamic dispatch. This is shared between
@@ -738,139 +693,232 @@ endif ()
 # Helper function used for `stringzillas_cpus_shared`, `stringzillas_cuda_shared`, and `stringzillas_rocm_shared`
 # targets
 function (define_stringzillas_shared target source_file backend_flags)
-    add_library(${target} SHARED ${source_file})
+    # Compile the translation units once into an OBJECT library, then expose a SHARED and a STATIC variant that reuse
+    # those objects. Tests and benchmarks link the STATIC variant and inherit `SZ_DYNAMIC_DISPATCH=1` (set INTERFACE
+    # below), so the heavy precompiled engine instantiations are linked rather than recompiled. The objects are linked
+    # PRIVATE into each variant (baked into the `.so`/`.a`) to avoid the OBJECT-library transitive duplicate-symbol
+    # gotcha; consumer-facing usage requirements are declared explicitly on the variants' INTERFACE.
+    string(REPLACE "_shared" "" base "${target}")
+    set(objects "${base}_objects")
+    set(static "${base}_static")
+
+    add_library(${objects} OBJECT ${source_file})
+    add_library(${target} SHARED)
+    add_library(${static} STATIC)
     add_library(${PROJECT_NAME}::${target} ALIAS ${target})
+    target_link_libraries(${target} PRIVATE ${objects})
+    target_link_libraries(${static} PRIVATE ${objects})
 
-    set_target_properties(
-        ${target}
-        PROPERTIES VERSION ${PROJECT_VERSION}
-                   SOVERSION 1
-                   POSITION_INDEPENDENT_CODE ON
-    )
+    set_target_properties(${objects} ${target} ${static} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(${objects} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+    set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
 
-    target_include_directories(${target} PUBLIC include)
-    target_include_directories(${target} PRIVATE fork_union/include)
-    target_compile_definitions(${target} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
-    target_compile_definitions(${target} PRIVATE "SZ_AVOID_LIBC=0")
-    # Only define SZ_DEBUG=0 in Release builds; Debug builds inherit from types.h
+    # Compile settings for the library's own translation units (the OBJECT compilation).
+    target_include_directories(${objects} PRIVATE include fork_union/include)
+    target_compile_definitions(${objects} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
+    target_compile_definitions(${objects} PRIVATE "SZ_AVOID_LIBC=0")
+    # The precompiled per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so
+    # libnuma-free cross-builds (e.g. aarch64) compile (matches the `stringzillas.cuh` default).
+    target_compile_definitions(${objects} PRIVATE "FU_ENABLE_NUMA=0")
     if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${target} PRIVATE "SZ_DEBUG=0")
+        target_compile_definitions(${objects} PRIVATE "SZ_DEBUG=0")
     endif ()
-
-    # Set backend-specific compilation flags
     foreach (flag ${backend_flags})
-        target_compile_definitions(${target} PRIVATE ${flag})
+        target_compile_definitions(${objects} PRIVATE ${flag})
+    endforeach ()
+    target_compile_options(
+        ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O3;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
+    )
+    set_architecture_simd_definitions(${objects})
+
+    # Usage requirements seen by consumers (tests and benchmarks linking the library). Defining `SZ_DYNAMIC_DISPATCH=1`
+    # makes a consumer extern, rather than re-instantiate, the engines, and fork_union is needed by the extern block in
+    # `similarities.hpp`. The consumer still picks its own ISA via `set_compiler_flags`.
+    foreach (variant ${target} ${static})
+        target_include_directories(${variant} PUBLIC include)
+        target_include_directories(${variant} INTERFACE fork_union/include)
+        target_compile_definitions(${variant} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
     endforeach ()
 
-    # Use C++20 for StringZillas
-    set_target_properties(${target} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-
-    # Architecture-specific optimizations
-    target_compile_options(
-        ${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O3;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
-    )
-
-    # Set architecture-specific SIMD flags using shared helper function
-    set_architecture_simd_definitions(${target})
-
-    # Link threading libraries for CPU backend
     find_package(Threads REQUIRED)
-    target_link_libraries(${target} PRIVATE Threads::Threads)
-
-    # Platform-specific runtime libraries (similar to define_stringzilla_shared)
+    target_link_libraries(${target} PUBLIC Threads::Threads)
+    target_link_libraries(${static} PUBLIC Threads::Threads)
     if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
+        target_link_libraries(${static} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
     endif ()
+endfunction ()
 
+# Compiles a group of StringZillas CUDA translation units into an OBJECT library for one set of GPU architectures. Each
+# tier gets its own architecture floor (base SIMT and Kepler from sm_70, Hopper DPX from sm_90), and the static library
+# (local testing) and shared library (distribution) request different architecture sets, so this helper is invoked once
+# per (tier, variant) combination.
+function (define_stringzillas_cuda_objects name sources gpu_archs)
+    add_library(${name} OBJECT ${sources})
+    set_source_files_properties(${sources} TARGET_DIRECTORY ${name} PROPERTIES LANGUAGE CUDA)
+    set_target_properties(
+        ${name}
+        PROPERTIES POSITION_INDEPENDENT_CODE ON
+                   CXX_STANDARD 20
+                   CXX_STANDARD_REQUIRED ON
+                   CUDA_STANDARD 20
+                   CUDA_STANDARD_REQUIRED ON
+                   CUDA_SEPARABLE_COMPILATION OFF
+                   CUDA_ARCHITECTURES "${gpu_archs}"
+    )
+    target_include_directories(${name} PRIVATE include fork_union/include)
+    target_compile_definitions(
+        ${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0" "FU_ENABLE_NUMA=0"
+    )
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
+    endif ()
+    target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr")
+    set_architecture_simd_definitions(${name})
+    if (SZ_IS_64BIT_X86_)
+        if (MSVC)
+            set_compiler_flags(${name} "" "SSE2" "${CMAKE_CUDA_COMPILER_ID}")
+        else ()
+            set_compiler_flags(${name} "" "ivybridge" "${CMAKE_CUDA_COMPILER_ID}")
+        endif ()
+    elseif (SZ_IS_64BIT_ARM_)
+        if (MSVC)
+            set_compiler_flags(${name} "" "armv8.0" "${CMAKE_CUDA_COMPILER_ID}")
+        else ()
+            set_compiler_flags(${name} "" "armv8-a" "${CMAKE_CUDA_COMPILER_ID}")
+        endif ()
+    else ()
+        set_compiler_flags(${name} "" "" "${CMAKE_CUDA_COMPILER_ID}")
+    endif ()
 endfunction ()
 
 # The parallel shim is split into one translation unit per algorithm, so each engine (and its CUDA kernels) compiles
 # independently and in parallel. Each `.cpp`/`.cu` is a thin wrapper around the matching `c/szs_<algorithm>.cuh`, which
 # includes the shared `c/stringzillas/stringzillas.cuh` scaffolding.
 set(STRINGZILLAS_CPU_SOURCES
-    c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/needleman_wunsch.cpp
-    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
+    c/stringzillas/runtime.cpp
+    c/stringzillas/levenshtein.cpp
+    c/stringzillas/needleman_wunsch.cpp
+    c/stringzillas/smith_waterman.cpp
+    c/stringzillas/fingerprints.cpp
+    # Per-capability instantiation units: each emits one ISA's heavy single-pair anti-diagonal SIMD core so the
+    # algorithm entry TUs above only declare them (`extern template`) and compile in parallel. Each file is internally
+    # guarded by its `SZ_USE_*` macro, so the off-platform ones compile to empty objects.
+    c/stringzillas/levenshtein_serial.cpp
+    c/stringzillas/levenshtein_icelake.cpp
+    c/stringzillas/needleman_wunsch_serial.cpp
+    c/stringzillas/needleman_wunsch_icelake.cpp
+    c/stringzillas/needleman_wunsch_haswell.cpp
+    c/stringzillas/needleman_wunsch_neon.cpp
+    c/stringzillas/smith_waterman_serial.cpp
+    c/stringzillas/smith_waterman_icelake.cpp
+    c/stringzillas/smith_waterman_haswell.cpp
+    c/stringzillas/smith_waterman_neon.cpp
 )
-set(STRINGZILLAS_CUDA_SOURCES
+# CUDA translation units are grouped by their architecture floor. The C-API entry units, the base SIMT providers and the
+# Kepler video-SIMD providers run from sm_70, so they live in the "base" group. The Hopper DPX providers
+# (`__viaddmax_s16x2`, `__vimax3`, `__reduce_max_sync`) need sm_90, so they form a separate group with its own floor.
+set(STRINGZILLAS_CUDA_BASE_SOURCES
     c/stringzillas/runtime.cu
     c/stringzillas/levenshtein.cu
     c/stringzillas/needleman_wunsch.cu
     c/stringzillas/smith_waterman.cu
     c/stringzillas/fingerprints.cu
-    # Per-capability instantiation units: each emits one tier's heavy `run()` and `__global__` kernels so the algorithm
-    # shims above only declare them (`extern template`) and compile in parallel.
     c/stringzillas/levenshtein_cuda.cu
     c/stringzillas/levenshtein_kepler.cu
-    c/stringzillas/levenshtein_hopper.cu
     c/stringzillas/needleman_wunsch_cuda.cu
-    c/stringzillas/needleman_wunsch_hopper.cu
     c/stringzillas/smith_waterman_cuda.cu
-    c/stringzillas/smith_waterman_hopper.cu
+)
+set(STRINGZILLAS_CUDA_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzillas/needleman_wunsch_hopper.cu
+                                     c/stringzillas/smith_waterman_hopper.cu
 )
 
 if (STRINGZILLAS_BUILD_SHARED)
 
-    # Define StringZillas CPU shared library
+    # Define StringZillas CPU shared + static libraries (sharing one OBJECT compilation)
     define_stringzillas_shared(stringzillas_cpus_shared "${STRINGZILLAS_CPU_SOURCES}" "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
 
-    # Set compiler flags for C++ target
+    # Set compiler flags on the OBJECT compilation (the per-ISA SIMD cores rely on per-function target attributes, so a
+    # conservative baseline `-march` here is enough for all tiers).
     if (SZ_IS_64BIT_X86_)
         if (MSVC)
-            set_compiler_flags(stringzillas_cpus_shared "" "SSE2" "${CMAKE_CXX_COMPILER_ID}")
+            set_compiler_flags(stringzillas_cpus_objects "" "SSE2" "${CMAKE_CXX_COMPILER_ID}")
         else ()
-            set_compiler_flags(stringzillas_cpus_shared "" "ivybridge" "${CMAKE_CXX_COMPILER_ID}")
+            set_compiler_flags(stringzillas_cpus_objects "" "ivybridge" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     elseif (SZ_IS_64BIT_ARM_)
         if (MSVC)
-            set_compiler_flags(stringzillas_cpus_shared "" "armv8.0" "${CMAKE_CXX_COMPILER_ID}")
+            set_compiler_flags(stringzillas_cpus_objects "" "armv8.0" "${CMAKE_CXX_COMPILER_ID}")
         else ()
-            set_compiler_flags(stringzillas_cpus_shared "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
+            set_compiler_flags(stringzillas_cpus_objects "" "armv8-a" "${CMAKE_CXX_COMPILER_ID}")
         endif ()
     else ()
-        set_compiler_flags(stringzillas_cpus_shared "" "" "${CMAKE_CXX_COMPILER_ID}")
+        set_compiler_flags(stringzillas_cpus_objects "" "" "${CMAKE_CXX_COMPILER_ID}")
     endif ()
 endif ()
 
-# Define StringZillas CUDA shared library (only if CUDA is available)
+# Define StringZillas CUDA shared + static libraries (only if CUDA is available)
 if (STRINGZILLA_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
-    define_stringzillas_shared(stringzillas_cuda_shared "${STRINGZILLAS_CUDA_SOURCES}" "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
+    find_package(Threads REQUIRED)
 
-    # Link CUDA libraries
-    target_link_libraries(stringzillas_cuda_shared PRIVATE CUDA::cudart)
-
-    # Set CUDA-specific properties
-    set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
-    set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "90a") # We dispatch manually
-
-    # Whole-program (non-separable) CUDA compilation: each per-algorithm translation unit is self-contained, so it
-    # carries its own internal (`static`) copy of header `__constant__` globals and its own kernels.
-    # Separable/relocatable device linking would otherwise either reject the duplicate `__constant__` symbols or sum
-    # their sizes past the 64 KB constant-memory limit.
-    set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
-
-    # Add CUDA-specific compiler flags
-    target_compile_options(stringzillas_cuda_shared PRIVATE "--expt-relaxed-constexpr")
-
-    # Set the source files as CUDA
-    set_source_files_properties(
-        ${STRINGZILLAS_CUDA_SOURCES} TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA
+    # The static library is for local testing and benchmarking, so it ships real SASS for the current and older
+    # compatible datacenter GPUs (Ampere sm_80 and Hopper sm_90) and runs without any load-time JIT. The shared library
+    # is for distribution, so on top of that real SASS it also packages forward-compatible PTX (the `-virtual` entries)
+    # that the driver JITs on newer GPUs. The Hopper DPX tier exists only from sm_90, so it never carries an sm_80
+    # entry.
+    define_stringzillas_cuda_objects(
+        stringzillas_cuda_base_static "${STRINGZILLAS_CUDA_BASE_SOURCES}" "80-real;90-real"
+    )
+    define_stringzillas_cuda_objects(stringzillas_cuda_hopper_static "${STRINGZILLAS_CUDA_HOPPER_SOURCES}" "90-real")
+    define_stringzillas_cuda_objects(
+        stringzillas_cuda_base_shared "${STRINGZILLAS_CUDA_BASE_SOURCES}" "80-real;90-real;90-virtual"
+    )
+    define_stringzillas_cuda_objects(
+        stringzillas_cuda_hopper_shared "${STRINGZILLAS_CUDA_HOPPER_SOURCES}" "90-real;90-virtual"
     )
 
-    # Set compiler flags for CUDA target (must be done AFTER file language is set to CUDA)
-    if (SZ_IS_64BIT_X86_)
-        if (MSVC)
-            set_compiler_flags(stringzillas_cuda_shared "" "SSE2" "${CMAKE_CUDA_COMPILER_ID}")
-        else ()
-            set_compiler_flags(stringzillas_cuda_shared "" "ivybridge" "${CMAKE_CUDA_COMPILER_ID}")
+    add_library(stringzillas_cuda_static STATIC)
+    add_library(stringzillas_cuda_shared SHARED)
+    add_library(${PROJECT_NAME}::stringzillas_cuda_shared ALIAS stringzillas_cuda_shared)
+    set_target_properties(stringzillas_cuda_shared PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
+
+    target_link_libraries(
+        stringzillas_cuda_static PRIVATE stringzillas_cuda_base_static stringzillas_cuda_hopper_static
+    )
+    target_link_libraries(
+        stringzillas_cuda_shared PRIVATE stringzillas_cuda_base_shared stringzillas_cuda_hopper_shared
+    )
+
+    # Consumers (tests/benches) extern the engines and link cudart themselves; the static archive does not resolve
+    # cudart, so expose it on the variants' link interface.
+    foreach (variant stringzillas_cuda_shared stringzillas_cuda_static)
+        set_target_properties(${variant} PROPERTIES POSITION_INDEPENDENT_CODE ON LINKER_LANGUAGE CUDA)
+        target_include_directories(${variant} PUBLIC include)
+        target_include_directories(${variant} INTERFACE fork_union/include)
+        target_compile_definitions(${variant} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
+        target_link_libraries(${variant} PUBLIC CUDA::cudart Threads::Threads)
+    endforeach ()
+endif ()
+
+# Link the StringZillas tests and benchmarks against the static libraries instead of recompiling the engines
+# header-only. The static lib carries the precompiled instantiations and exports SZ_DYNAMIC_DISPATCH=1 on its interface,
+# so these targets extern the engines and link them. Done here, after the libraries are defined.
+if (STRINGZILLAS_BUILD_SHARED)
+    foreach (consumer stringzillas_test_cpp17 stringzillas_test_cpp20 stringzillas_bench_similarities_cpp20
+                      stringzillas_bench_fingerprints_cpp20
+    )
+        if (TARGET ${consumer})
+            target_link_libraries(${consumer} PRIVATE stringzillas_cpus_static)
         endif ()
-    elseif (SZ_IS_64BIT_ARM_)
-        if (MSVC)
-            set_compiler_flags(stringzillas_cuda_shared "" "armv8.0" "${CMAKE_CUDA_COMPILER_ID}")
-        else ()
-            set_compiler_flags(stringzillas_cuda_shared "" "armv8-a" "${CMAKE_CUDA_COMPILER_ID}")
-        endif ()
-    else ()
-        set_compiler_flags(stringzillas_cuda_shared "" "" "${CMAKE_CUDA_COMPILER_ID}")
+    endforeach ()
+    if (STRINGZILLA_BUILD_CUDA)
+        foreach (consumer stringzillas_test_cu17 stringzillas_test_cu20 stringzillas_bench_similarities_cu20
+                          stringzillas_bench_fingerprints_cu20
+        )
+            if (TARGET ${consumer})
+                target_link_libraries(${consumer} PRIVATE stringzillas_cuda_static)
+            endif ()
+        endforeach ()
     endif ()
 endif ()
 

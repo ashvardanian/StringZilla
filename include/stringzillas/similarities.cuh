@@ -29,4 +29,39 @@
 #include "stringzillas/similarities/kepler.cuh" // Kepler specializations (#if SZ_USE_KEPLER)
 #include "stringzillas/similarities/hopper.cuh" // Hopper specializations (#if SZ_USE_HOPPER)
 
+// The per-tier `.cu` providers emit each engine's kernels once; here we only `extern` them so consumers link
+// rather than recompile. Mirror the providers exactly (NW global, SW local, Kepler only for Levenshtein).
+#if SZ_DYNAMIC_DISPATCH && SZ_USE_CUDA
+namespace ashvardanian {
+namespace stringzillas {
+
+extern template struct levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+extern template struct levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+#if SZ_USE_KEPLER
+extern template struct levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+extern template struct levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+#endif
+#if SZ_USE_HOPPER
+extern template struct levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+extern template struct levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+#endif
+
+// Needleman-Wunsch (global) and Smith-Waterman (local) share the `cuda_weighted_scores` base, which owns the heavy
+// out-of-class `run_trampoline_`; the `needleman_wunsch_scores`/`smith_waterman_scores` wrappers only inherit it, so
+// externing the base is what keeps the kernels out of the consumer TUs.
+extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_cap_cuda_k>;
+extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_cap_cuda_k>;
+extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_cap_cuda_k>;
+extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_cap_cuda_k>;
+#if SZ_USE_HOPPER
+extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_caps_ckh_k>;
+extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_caps_ckh_k>;
+extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_caps_ckh_k>;
+extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_caps_ckh_k>;
+#endif
+
+} // namespace stringzillas
+} // namespace ashvardanian
+#endif // SZ_DYNAMIC_DISPATCH && SZ_USE_CUDA
+
 #endif // STRINGZILLAS_SIMILARITIES_CUH_

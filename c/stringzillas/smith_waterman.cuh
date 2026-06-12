@@ -53,6 +53,9 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
     if (can_use_icelake && can_use_linear_costs)
         return emplace_smith_waterman_engine<szs::smith_waterman_icelake_t>(engine_punned, error_message,
                                                                             substitution_costs, linear_costs);
+    else if (can_use_icelake)
+        return emplace_smith_waterman_engine<szs::affine_smith_waterman_icelake_t>(engine_punned, error_message,
+                                                                                   substitution_costs, affine_costs);
 #endif // SZ_USE_ICELAKE
 
 #if SZ_USE_HASWELL
@@ -60,7 +63,20 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
     if (can_use_haswell && can_use_linear_costs)
         return emplace_smith_waterman_engine<szs::smith_waterman_haswell_t>(engine_punned, error_message,
                                                                             substitution_costs, linear_costs);
+    else if (can_use_haswell)
+        return emplace_smith_waterman_engine<szs::affine_smith_waterman_haswell_t>(engine_punned, error_message,
+                                                                                   substitution_costs, affine_costs);
 #endif // SZ_USE_HASWELL
+
+#if SZ_USE_NEON
+    bool const can_use_neon = (capabilities & sz_cap_neon_k) == sz_cap_neon_k;
+    if (can_use_neon && can_use_linear_costs)
+        return emplace_smith_waterman_engine<szs::smith_waterman_neon_t>(engine_punned, error_message,
+                                                                         substitution_costs, linear_costs);
+    else if (can_use_neon)
+        return emplace_smith_waterman_engine<szs::affine_smith_waterman_neon_t>(engine_punned, error_message,
+                                                                                substitution_costs, affine_costs);
+#endif // SZ_USE_NEON
 
     // Hopper reports the base-CUDA bit too, so the Hopper (DPX) tier must be tested before plain CUDA.
 #if SZ_USE_HOPPER
