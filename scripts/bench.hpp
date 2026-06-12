@@ -152,35 +152,39 @@ double seconds_per_call(function_type_ &&function) {
 
 /**
  *  @brief Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
- *         Use as `for (auto running_seconds : repeat_up_to(5.0)) { ... }`.
+ *         Use as `for (auto call_index : repeat_up_to(5.0)) { ... }`, then read `repeat.seconds()`.
+ *
+ *  The loop body receives the @b iteration index — the quantity it actually needs to rotate over tokens
+ *  and count calls. The elapsed time and iteration count are deliberately @b not yielded per-iteration;
+ *  they are exposed as `seconds()` and `count()`, computed live from the owning object. Nothing is cached,
+ *  so a read after the loop is as valid as one inside it — there is no stale snapshot to get the denominator
+ *  out of sync with the numerator.
  */
 struct repeat_up_to_t {
-    double max_seconds = 0;
-    double passed_seconds = 0;
+    double max_seconds_ = 0;
+    accurate_clock_t::time_point start_ = accurate_clock_t::now();
+    std::size_t count_ = 0;
 
     struct end_sentinel_t {};
-    class iterator_t {
-        accurate_clock_t::time_point start_time_;
-        double max_seconds_ = 0;
-        double &passed_seconds_;
-
-      public:
-        inline iterator_t(double max_seconds, double &passed_seconds)
-            : start_time_(accurate_clock_t::now()), max_seconds_(max_seconds), passed_seconds_(passed_seconds) {}
-        inline bool operator!=(end_sentinel_t) const {
-            accurate_clock_t::time_point current_time = accurate_clock_t::now();
-            passed_seconds_ = stdc::duration_cast<stdc::nanoseconds>(current_time - start_time_).count() / 1.e9;
-            return max_seconds_ != 0 && passed_seconds_ < max_seconds_;
-        }
-        inline double operator*() const { return passed_seconds_; }
-        constexpr void operator++() {} // No-op
+    struct iterator_t {
+        repeat_up_to_t *parent_;
+        inline bool operator!=(end_sentinel_t) const { return parent_->keep_running(); }
+        inline std::size_t operator*() const { return parent_->count_; }
+        inline void operator++() const { ++parent_->count_; }
     };
 
-    inline repeat_up_to_t(double max_seconds) : max_seconds(max_seconds) {}
-    inline repeat_up_to_t(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
-    inline iterator_t begin() { return {max_seconds, passed_seconds}; }
+    inline explicit repeat_up_to_t(double max_seconds) : max_seconds_(max_seconds) {}
+    inline explicit repeat_up_to_t(std::size_t max_seconds) : max_seconds_(static_cast<double>(max_seconds)) {}
+    inline iterator_t begin() { return start_ = accurate_clock_t::now(), count_ = 0, iterator_t {this}; }
     inline end_sentinel_t end() const noexcept { return {}; }
-    inline double seconds() const noexcept { return passed_seconds; }
+
+    /** @brief Live wall-clock seconds since `begin()` — computed on demand, never cached. */
+    inline double seconds() const noexcept {
+        return stdc::duration_cast<stdc::nanoseconds>(accurate_clock_t::now() - start_).count() / 1.e9;
+    }
+    /** @brief Number of completed iterations — authoritative both during and after the loop. */
+    inline std::size_t count() const noexcept { return count_; }
+    inline bool keep_running() const noexcept { return max_seconds_ != 0 && seconds() < max_seconds_; }
 };
 
 inline repeat_up_to_t repeat_up_to(double max_seconds) noexcept { return repeat_up_to_t {max_seconds}; }
@@ -712,8 +716,10 @@ bench_result_t bench_nullary(  //
     if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     // Perform the testing against the baseline, if provided.
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
-        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value) {
+        repeat_up_to_t stress = repeat_up_to(env.stress ? env.stress_seconds : 0.0);
+        for (auto call_index : stress) {
+            sz_unused_(call_index);
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
             ++result.stress_calls;
@@ -724,15 +730,18 @@ bench_result_t bench_nullary(  //
             ++result.errors;
             if (result.errors > env.stress_limit) {
                 std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            running_seconds);
+                            stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, {});
         }
+    }
 
     // Repeat the benchmark of the unary function. Assume most of them are applied to the entire
     // dataset and take a lot of time, so we don't unroll much, unlike `bench_unary`.
-    for (auto running_seconds : repeat_up_to(env.benchmark_seconds)) {
+    repeat_up_to_t repeat = repeat_up_to(env.benchmark_seconds);
+    for (auto call_index : repeat) {
+        sz_unused_(call_index);
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t call_result = callable();
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
@@ -741,11 +750,11 @@ bench_result_t bench_nullary(  //
         result.operations += call_result.operations;
         result.bytes_passed += call_result.bytes_passed;
         result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_seconds = running_seconds;
-        result.profiled_calls += 1;
         result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
         result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
     }
+    result.profiled_calls += repeat.count();
+    result.profiled_seconds = repeat.seconds();
 
     return result;
 }
@@ -785,23 +794,26 @@ bench_result_t bench_unary(    //
     if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
-        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
-            std::size_t const token_index = (result.stress_calls++) & lookup_mask;
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value) {
+        repeat_up_to_t stress = repeat_up_to(env.stress ? env.stress_seconds : 0.0);
+        for (auto call_index : stress) {
+            std::size_t const token_index = call_index & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);
             call_result_t const baseline_result = baseline(token_index);
-            result.stress_calls += accelerated_result.inputs_processed;
+            ++result.stress_calls;
+            result.stress_inputs += accelerated_result.inputs_processed;
             if (check_validator(accelerated_result.check_value, baseline_result.check_value)) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
                 std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            running_seconds);
+                            stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, token_index);
         }
+    }
 
     // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
@@ -820,17 +832,20 @@ bench_result_t bench_unary(    //
     result.profiled_seconds = first_call_duration;
     if (first_call_duration >= env.benchmark_seconds) return result;
 
-    // Repeat the benchmarks in unrolled batches until the time limit is reached.
-    for (auto running_seconds : repeat_up_to(env.benchmark_seconds - first_call_duration)) {
+    // Repeat the benchmarks in unrolled batches of `unroll_factor` until the time limit is reached.
+    constexpr std::size_t unroll_factor = 8;
+    repeat_up_to_t repeat = repeat_up_to(env.benchmark_seconds - first_call_duration);
+    for (auto batch_index : repeat) {
+        std::size_t const batch_start = batch_index * unroll_factor;
         std::uint64_t t0 = cpu_cycle_counter();
-        call_result_t r0 = callable((result.profiled_calls + 0) & lookup_mask);
-        call_result_t r1 = callable((result.profiled_calls + 1) & lookup_mask);
-        call_result_t r2 = callable((result.profiled_calls + 2) & lookup_mask);
-        call_result_t r3 = callable((result.profiled_calls + 3) & lookup_mask);
-        call_result_t r4 = callable((result.profiled_calls + 4) & lookup_mask);
-        call_result_t r5 = callable((result.profiled_calls + 5) & lookup_mask);
-        call_result_t r6 = callable((result.profiled_calls + 6) & lookup_mask);
-        call_result_t r7 = callable((result.profiled_calls + 7) & lookup_mask);
+        call_result_t r0 = callable((batch_start + 0) & lookup_mask);
+        call_result_t r1 = callable((batch_start + 1) & lookup_mask);
+        call_result_t r2 = callable((batch_start + 2) & lookup_mask);
+        call_result_t r3 = callable((batch_start + 3) & lookup_mask);
+        call_result_t r4 = callable((batch_start + 4) & lookup_mask);
+        call_result_t r5 = callable((batch_start + 5) & lookup_mask);
+        call_result_t r6 = callable((batch_start + 6) & lookup_mask);
+        call_result_t r7 = callable((batch_start + 7) & lookup_mask);
         std::uint64_t t7 = cpu_cycle_counter();
 
         // Aggregate all of them:
@@ -846,14 +861,12 @@ bench_result_t bench_unary(    //
             result.profiled_inputs += r2.inputs_processed, result.profiled_inputs += r3.inputs_processed, //
             result.profiled_inputs += r4.inputs_processed, result.profiled_inputs += r5.inputs_processed, //
             result.profiled_inputs += r6.inputs_processed, result.profiled_inputs += r7.inputs_processed; //
-        result.profiled_calls += 8;
 
-        result.profiled_seconds = running_seconds;
         result.profiled_cpu_cycles += t7 - t0;
-        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += 8;
+        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += unroll_factor;
     }
-
-    result.profiled_seconds += first_call_duration;
+    result.profiled_calls += repeat.count() * unroll_factor;
+    result.profiled_seconds = repeat.seconds() + first_call_duration;
     return result;
 }
 
