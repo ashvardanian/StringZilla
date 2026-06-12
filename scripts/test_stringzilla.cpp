@@ -1200,6 +1200,17 @@ void test_equivalence() {
         sz_utf8_find_newline_haswell,                //
         sz_utf8_find_whitespace_serial,              //
         sz_utf8_find_whitespace_haswell);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
+
+    std::size_t haswell_fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, haswell_fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, haswell_fuzz_queries);
 #endif
 #if SZ_USE_ICELAKE
     test_utf8_equivalence(                           //
@@ -1238,6 +1249,17 @@ void test_equivalence() {
         sz_utf8_find_newline_neon,                //
         sz_utf8_find_whitespace_serial,           //
         sz_utf8_find_whitespace_neon);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
+
+    std::size_t neon_fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, neon_fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, neon_fuzz_queries);
 #endif
 #if SZ_USE_SVE2
     test_utf8_equivalence(                        //
