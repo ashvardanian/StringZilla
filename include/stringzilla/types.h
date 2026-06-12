@@ -1023,7 +1023,7 @@ typedef union sz_u64_vec_t {
  *         as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
@@ -1064,12 +1064,12 @@ typedef union sz_u128_vec_t {
  *         as well as 2x XMM registers or 1x YMM register.
  */
 typedef union sz_u256_vec_t {
-#if SZ_USE_HASWELL
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m256i ymm;
     __m256d ymm_pd;
     __m256 ymm_ps;
 #endif
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
