@@ -450,6 +450,36 @@
 #endif
 #endif
 
+/*  SIMD micro-architecture tiers are cumulative supersets - there is no CPU with AVX-512 VBMI but
+ *  not AVX2, nor SVE without NEON - and higher-tier kernels call into lower-tier helpers (the Ice
+ *  Lake hash reuses the Westmere routines, the Ice Lake intersect kernel uses the 128/256-bit
+ *  register unions). Enabling a tier therefore REQUIRES its whole substrate. Close the set
+ *  downward so an isolated `-D SZ_USE_ICELAKE=1`, or a hand-edited development override, can never
+ *  name a tier without the ones it is built on. This is the single source of truth for the
+ *  nesting; everything downstream may assume a lower tier is on whenever a higher one is. Goldmont
+ *  (SHA) and the NEON/SVE crypto extensions are orthogonal feature flags, not part of the nesting.
+ */
+#if SZ_USE_ICELAKE && !SZ_USE_SKYLAKE
+#undef SZ_USE_SKYLAKE
+#define SZ_USE_SKYLAKE (1)
+#endif
+#if SZ_USE_SKYLAKE && !SZ_USE_HASWELL
+#undef SZ_USE_HASWELL
+#define SZ_USE_HASWELL (1)
+#endif
+#if SZ_USE_HASWELL && !SZ_USE_WESTMERE
+#undef SZ_USE_WESTMERE
+#define SZ_USE_WESTMERE (1)
+#endif
+#if SZ_USE_SVE2 && !SZ_USE_SVE
+#undef SZ_USE_SVE
+#define SZ_USE_SVE (1)
+#endif
+#if SZ_USE_SVE && !SZ_USE_NEON
+#undef SZ_USE_NEON
+#define SZ_USE_NEON (1)
+#endif
+
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */
 #if SZ_USE_V128
@@ -1023,7 +1053,7 @@ typedef union sz_u64_vec_t {
  *         as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
@@ -1064,12 +1094,12 @@ typedef union sz_u128_vec_t {
  *         as well as 2x XMM registers or 1x YMM register.
  */
 typedef union sz_u256_vec_t {
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_HASWELL
     __m256i ymm;
     __m256d ymm_pd;
     __m256 ymm_ps;
 #endif
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_WESTMERE || SZ_USE_HASWELL
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
