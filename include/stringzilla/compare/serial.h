@@ -42,7 +42,9 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     }
 #endif
     for (; a != min_end; ++a, ++b)
-        if (*a != *b) return sz_order_scalars_(*a, *b);
+        // Compare as `unsigned char` to match `memcmp`, `std::string`, and the byte-reversed
+        // `u64` fast path above; this also preserves UTF-8 code-point order (bytes >= 0x80).
+        if (*a != *b) return sz_order_scalars_((sz_u8_t)*a, (sz_u8_t)*b);
 
     // If the strings are equal up to `min_end`, then the shorter string is smaller
     return sz_order_scalars_(a_length, b_length);

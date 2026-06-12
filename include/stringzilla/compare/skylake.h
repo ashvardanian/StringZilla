@@ -40,7 +40,7 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
     if (mask_not_equal != 0) {
         // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
         unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
-        return sz_order_scalars_(a[first_diff], b[first_diff]);
+        return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
     }
     else if (head_length == a_length && head_length == b_length) { return sz_equal_k; }
     else { a += head_length, b += head_length, a_length -= head_length, b_length -= head_length; }
@@ -54,7 +54,7 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
         if (mask_not_equal != 0) {
             // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
             unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
-            return sz_order_scalars_(a[first_diff], b[first_diff]);
+            return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
         }
         a += 64, b += 64, a_length -= 64, b_length -= 64;
     }
@@ -74,7 +74,7 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
         if (mask_not_equal != 0) {
             // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
             unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
-            return sz_order_scalars_(a[first_diff], b[first_diff]);
+            return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
         }
         // From logic perspective, the hardest cases are "abc\0" and "abc".
         // The result must be `sz_greater_k`, as the latter is shorter.
