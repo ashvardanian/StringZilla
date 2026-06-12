@@ -67,6 +67,199 @@ SZ_INTERNAL sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load
     return invalid_mask ? (sz_size_t)sz_u64_ctz(invalid_mask) : chunk_size;
 }
 
+/**
+ *  Bit flags describing which UTF-8 lead-byte families occur in a chunk. Each family shares
+ *  one folding strategy, so the union of flags picks the chunk handler in a single dispatch -
+ *  instead of sequentially probing per-script fast paths, which degrades on mixed-script text.
+ *  Values are `VPERMB` table entries indexed by the low 6 bits of the lead byte: leads 0xC0-0xFF
+ *  map onto indices 0x00-0x3F injectively, and ASCII/continuation bytes are masked out upfront.
+ */
+enum sz_utf8_fold_lead_family_t_ {
+    sz_utf8_fold_lead_caseless_flag_ = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
+    sz_utf8_fold_lead_latin_flag_ = 1 << 1,          // C2-C3: Latin-1 Supplement
+    sz_utf8_fold_lead_latin_extended_flag_ = 1 << 2, // C4-C6: Latin Extended-A and the Ext-B block with +1 pairs
+    sz_utf8_fold_lead_cyrillic_flag_ = 1 << 3,       // D0-D1: basic Cyrillic
+    sz_utf8_fold_lead_greek_flag_ = 1 << 4,          // CE-CF: basic Greek
+    sz_utf8_fold_lead_e1_flag_ = 1 << 5,             // E1: Latin Ext Additional, Georgian, Greek Extended
+    sz_utf8_fold_lead_guarded_flag_ = 1 << 6,        // E2, EA, EF: case-awareness depends on the second byte
+    sz_utf8_fold_lead_complex_flag_ = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
+};
+
+/** @brief OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
+SZ_INTERNAL sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
+    __m256i upper_ymm = _mm512_extracti64x4_epi64(flags_zmm, 1);
+    __m256i or256_ymm = _mm256_or_si256(_mm512_castsi512_si256(flags_zmm), upper_ymm);
+    __m128i or128_xmm = _mm_or_si128(_mm256_castsi256_si128(or256_ymm), _mm256_extracti128_si256(or256_ymm, 1));
+    or128_xmm = _mm_or_si128(or128_xmm, _mm_unpackhi_epi64(or128_xmm, or128_xmm));
+    sz_u64_t or64 = (sz_u64_t)_mm_cvtsi128_si64(or128_xmm);
+    or64 |= or64 >> 32, or64 |= or64 >> 16, or64 |= or64 >> 8;
+    return (sz_u8_t)or64;
+}
+
+/**
+ *  @brief Folds a chunk containing only caseless multi-byte scripts mixed with ASCII.
+ *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
+ *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_caseless_chunk_(   //
+    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
+    __mmask64 is_two_byte_lead_mask, __mmask64 is_three_byte_lead_mask, sz_ptr_t target) {
+
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const subtract26_vec = _mm512_set1_epi8(26);
+    __m512i const ascii_case_offset = _mm512_set1_epi8(0x20);
+
+    // Don't split a trailing 2-byte or 3-byte sequence across chunks
+    __mmask64 incomplete_mask = (is_two_byte_lead_mask & ~sz_u64_mask_until_(chunk_size > 1 ? chunk_size - 1 : 0)) |
+                                (is_three_byte_lead_mask & ~sz_u64_mask_until_(chunk_size > 2 ? chunk_size - 2 : 0));
+    incomplete_mask &= load_mask;
+    sz_size_t copy_length = incomplete_mask ? (sz_size_t)sz_u64_ctz(incomplete_mask) : chunk_size;
+    if (copy_length == 0) return 0;
+
+    __mmask64 prefix_mask = sz_u64_mask_until_(copy_length);
+    _mm512_mask_storeu_epi8(target, prefix_mask, sz_icelake_fold_ascii_in_prefix_(source_zmm, prefix_mask));
+    return copy_length;
+}
+
+/**
+ *  @brief Folds a chunk of Latin text in place: ASCII, Latin-1 Supplement (C2-C3),
+ *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
+ *      of German, Czech, Vietnamese, and most other Latin-script languages.
+ *
+ *  Latin Extended folding is parity-based: uppercase codepoints are even and fold to the next
+ *  odd codepoint. The codepoint's low bit lives in the last byte of its UTF-8 sequence, so the
+ *  fold is an in-place masked +1. Per-codepoint deltas come from `VPERMB` tables indexed by the
+ *  continuation byte's low 6 bits; table entries flag the irregular codepoints (those that
+ *  expand, shrink, or fold across blocks), which truncate the chunk and route one rune to the
+ *  serial fallback.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_latin_chunk_(      //
+    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
+    __mmask64 is_continuation_mask, __mmask64 is_three_byte_lead_mask, sz_ptr_t target) {
+
+    __m512i const a_upper_vec = _mm512_set1_epi8('A');
+    __m512i const subtract26_vec = _mm512_set1_epi8(26);
+    __m512i const ascii_case_offset = _mm512_set1_epi8(0x20);
+
+    // Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation
+    // byte's low 6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (serial).
+    // Generated from Unicode full case folding; verified against the serial reference in tests.
+    __m512i const c4_deltas_lut = _mm512_set_epi8( // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
+        // clang-format off
+        // 'Ŀ' (U+013F, C4 BF) folds to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead
+        // byte, so it cannot fold in place and is flagged irregular alongside 'İ'.
+        (char)0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, (char)0x80, // 0x3F..0x30
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,          // 0x2F..0x20: even-parity pairs
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,          // 0x1F..0x10
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1           // 0x0F..0x00
+        // clang-format on
+    );
+    __m512i const c5_deltas_lut = _mm512_set_epi8( // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
+        // clang-format off
+        (char)0x80, 0, 1, 0, 1, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1, 0, 1, // 0x3F..0x30: 'ſ' and 'Ÿ' irregular
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x2F..0x20
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x1F..0x10
+        0, 1, 0, 1, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1, 0, 1, 0           // 0x0F..0x00: 'ŉ' irregular, odd head
+        // clang-format on
+    );
+    __m512i const c6_deltas_lut = _mm512_set_epi8( // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
+        // clang-format off
+        0, 0, 0, 1, 0, 0, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, (char)0x80, 0,
+        1, (char)0x80, 0, 1, 0, 0, (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1,
+        (char)0x80, 0, (char)0x80, (char)0x80, 0, 0, 0, 1, (char)0x80, (char)0x80, 0, (char)0x80, (char)0x80, 0, 1, (char)0x80,
+        (char)0x80, (char)0x80, 0, 0, 1, (char)0x80, (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, 0
+        // clang-format on
+    );
+
+    // Lead byte detection: C2/C3 Latin-1, C4-C6 Latin Extended, E1 Latin Extended Additional
+    __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC2));
+    __mmask64 is_c3_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC3));
+    __mmask64 is_c4_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC4));
+    __mmask64 is_c5_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC5));
+    __mmask64 is_c6_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC6));
+    __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xE1));
+
+    // E1 sequences qualify only when the second byte is B8-BB (Latin Extended Additional);
+    // other E1 sub-families (Georgian, Greek Extended) route to the generic paths.
+    __mmask64 e1_second_positions = (is_e1_mask << 1) & load_mask;
+    __mmask64 is_b8_bb_second_mask = e1_second_positions &
+                                     _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_zmm, _mm512_set1_epi8((char)0xB8)),
+                                                            _mm512_set1_epi8(0x04));
+    __mmask64 foreign_e1_second_mask = e1_second_positions & ~is_b8_bb_second_mask;
+
+    // Latin Extended Additional irregulars: E1 BA 96-9E expand or shrink when folded
+    __mmask64 e1_ba_third_positions =
+        ((is_b8_bb_second_mask & _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xBA))) << 1) & load_mask;
+    __mmask64 irregular_mask = e1_ba_third_positions &
+                               _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_zmm, _mm512_set1_epi8((char)0x96)),
+                                                      _mm512_set1_epi8(0x09));
+
+    // Latin Extended 2-byte deltas and their irregular flags
+    __mmask64 after_c4_mask = (is_c4_mask << 1) & is_continuation_mask;
+    __mmask64 after_c5_mask = (is_c5_mask << 1) & is_continuation_mask;
+    __mmask64 after_c6_mask = (is_c6_mask << 1) & is_continuation_mask;
+    __m512i c4_deltas = _mm512_maskz_permutexvar_epi8(after_c4_mask, source_zmm, c4_deltas_lut);
+    __m512i c5_deltas = _mm512_maskz_permutexvar_epi8(after_c5_mask, source_zmm, c5_deltas_lut);
+    __m512i c6_deltas = _mm512_maskz_permutexvar_epi8(after_c6_mask, source_zmm, c6_deltas_lut);
+    __m512i extended_deltas = _mm512_ternarylogic_epi64(c4_deltas, c5_deltas, c6_deltas, 0xFE); // A | B | C
+    irregular_mask |= _mm512_test_epi8_mask(extended_deltas, _mm512_set1_epi8((char)0x80));
+
+    // Truncate at the first irregular codepoint or foreign E1 sub-family - the byte BEFORE the
+    // flagged position is the lead, so step back to the start of that sequence
+    __mmask64 stop_mask = (irregular_mask | foreign_e1_second_mask) & load_mask;
+    sz_size_t fold_length = chunk_size;
+    if (stop_mask) {
+        sz_size_t first_flagged_position = (sz_size_t)sz_u64_ctz(stop_mask);
+        // Find the lead by walking back over continuations (at most 2 steps for E1 thirds)
+        while (first_flagged_position && ((is_continuation_mask >> first_flagged_position) & 1))
+            --first_flagged_position;
+        fold_length = first_flagged_position;
+    }
+
+    // Don't split a trailing 2-byte or 3-byte sequence across chunks
+    __mmask64 is_two_byte_lead_mask = is_c2_mask | is_c3_mask | is_c4_mask | is_c5_mask | is_c6_mask;
+    __mmask64 incomplete_mask = (is_two_byte_lead_mask & ~sz_u64_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
+                                (is_three_byte_lead_mask & ~sz_u64_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
+    incomplete_mask &= sz_u64_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u64_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+    __mmask64 prefix_mask = sz_u64_mask_until_(fold_length);
+
+    // 1. ASCII A-Z
+    __m512i folded = sz_icelake_fold_ascii_in_prefix_(source_zmm, prefix_mask);
+
+    // 2. Latin-1 Supplement: 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20
+    __mmask64 after_c3_mask = (is_c3_mask << 1) & prefix_mask;
+    __mmask64 is_latin1_upper_mask = _mm512_mask_cmplt_epu8_mask(
+        after_c3_mask, _mm512_sub_epi8(source_zmm, _mm512_set1_epi8((char)0x80)), _mm512_set1_epi8(0x1F));
+    is_latin1_upper_mask &= ~_mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0x97));
+    folded = _mm512_mask_add_epi8(folded, is_latin1_upper_mask, folded, ascii_case_offset);
+
+    // 3. 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73): replace both bytes in place
+    __mmask64 is_eszett_second_mask = after_c3_mask & _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0x9F));
+    folded = _mm512_mask_set1_epi8(folded, is_eszett_second_mask | (is_eszett_second_mask >> 1), 's');
+
+    // 4. 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC): both bytes replaced in place
+    __mmask64 is_micro_second_mask = ((is_c2_mask << 1) & prefix_mask) &
+                                     _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xB5));
+    folded = _mm512_mask_mov_epi8(folded, is_micro_second_mask >> 1, _mm512_set1_epi8((char)0xCE));
+    folded = _mm512_mask_mov_epi8(folded, is_micro_second_mask, _mm512_set1_epi8((char)0xBC));
+
+    // 5. Latin Extended-A/B: masked +1 on the continuation byte (deltas are 0x00 or 0x01 here)
+    __mmask64 extended_positions_mask = (after_c4_mask | after_c5_mask | after_c6_mask) & prefix_mask;
+    folded = _mm512_mask_add_epi8(folded, extended_positions_mask, folded, extended_deltas);
+
+    // 6. Latin Extended Additional: +1 on even third bytes of E1 B8-BB sequences
+    __mmask64 e1_third_positions = (is_b8_bb_second_mask << 1) & prefix_mask;
+    __mmask64 is_even_codepoint_mask = ~_mm512_test_epi8_mask(source_zmm, _mm512_set1_epi8(0x01));
+    folded = _mm512_mask_add_epi8(folded, e1_third_positions & is_even_codepoint_mask, folded, _mm512_set1_epi8(0x01));
+
+    _mm512_mask_storeu_epi8(target, prefix_mask, folded);
+    return fold_length;
+}
+
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
@@ -193,6 +386,52 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         __mmask64 is_three_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_3byte, utf8_3byte_pattern);
         __mmask64 is_four_byte_lead_mask = _mm512_cmpeq_epi8_mask(masked_4byte, utf8_3byte_test_mask);
 
+        // Classify lead bytes once: a single VPERMB maps every lead (0xC0-0xFF, via its low
+        // 6 bits) onto a folding-family flag, and an OR-reduction summarizes which families
+        // occur in this chunk. The dispatch below routes uniform chunks straight to their
+        // handler instead of probing per-script fast paths sequentially - mixed Latin text
+        // (e.g. Vietnamese with its 2-byte and 3-byte diacritics) otherwise fails every
+        // purity precondition and degrades to one short prefix per full cascade pass.
+        __mmask64 is_lead_mask = is_non_ascii & ~is_cont_mask & load_mask;
+        __m512i const lead_families_lut = _mm512_set_epi8(
+            // clang-format off
+            // Indices 0x3F..0x30 (leads F0-FF): supplementary planes and invalid leads
+            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            // Indices 0x2F..0x20 (leads E0-EF): EF/EA/E2 guarded, E1 special, the rest caseless
+            0x40, 0x01, 0x01, 0x01, 0x01, 0x40, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x40, 0x20, 0x01,
+            // Indices 0x1F..0x10 (leads D0-DF): D7-DF caseless, D2-D6 complex, D0-D1 Cyrillic
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, 0x08, 0x08,
+            // Indices 0x0F..0x00 (leads C0-CF): CE/CF Greek, C7-CD complex, C4-C6 Latin Ext, C2-C3 Latin
+            0x10, 0x10, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            0x04, 0x04, 0x04, 0x02, 0x02, (char)0x80, (char)0x80
+            // clang-format on
+        );
+        __m512i lead_families_vec = _mm512_maskz_permutexvar_epi8(is_lead_mask, source_vec.zmm, lead_families_lut);
+        sz_u8_t lead_families = sz_utf8_fold_icelake_reduce_or_u8_(lead_families_vec);
+
+        if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_)) {
+            __mmask64 is_two_byte_lead_mask = is_lead_mask & ~is_three_byte_lead_mask & ~is_four_byte_lead_mask;
+            sz_size_t handled = sz_utf8_case_fold_icelake_caseless_chunk_(
+                source_vec.zmm, load_mask, chunk_size, is_two_byte_lead_mask, is_three_byte_lead_mask, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
+        else if ((lead_families & (sz_utf8_fold_lead_latin_extended_flag_ | sz_utf8_fold_lead_e1_flag_)) &&
+                 !(lead_families & ~(sz_utf8_fold_lead_latin_flag_ | sz_utf8_fold_lead_latin_extended_flag_ |
+                                     sz_utf8_fold_lead_e1_flag_))) {
+            sz_size_t handled = sz_utf8_case_fold_icelake_latin_chunk_(source_vec.zmm, load_mask, chunk_size,
+                                                                       is_cont_mask, is_three_byte_lead_mask, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
+        // Mixed or complex chunks continue through the per-script fast paths below
+
         // Early fast path: Pure 3-byte content (no ASCII, no 2-byte, no 4-byte)
         // This is common for CJK, Hindi (Devanagari), Thai, etc.
         // Check if all non-ASCII bytes are 3-byte leads or continuations
@@ -272,9 +511,12 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         // 2.1. Latin-1 Supplement (C3 80 - C3 BF) mixed with ASCII
         __mmask64 is_latin1_lead = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xC3));
         __mmask64 latin1_second_byte_positions = is_latin1_lead << 1;
-        __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | latin1_second_byte_positions;
-        sz_size_t latin1_length = sz_icelake_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
-        latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1); // Don't split 2-byte seq
+        sz_size_t latin1_length = 0;
+        if (lead_families & sz_utf8_fold_lead_latin_flag_) {
+            __mmask64 is_valid_latin1_mix = ~is_non_ascii | is_latin1_lead | latin1_second_byte_positions;
+            latin1_length = sz_icelake_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
+            latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1); // Don't split 2-byte seq
+        }
 
         if (latin1_length >= 2) {
             __mmask64 prefix_mask = sz_u64_mask_until_(latin1_length);
@@ -311,7 +553,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         //
         // EXCLUDED from fast path: Cyrillic Extended-A (0x0460-04FF) which starts at D1 A0.
         // These use +1 folding for even codepoints and must go through the general 2-byte path.
-        {
+        if (lead_families & sz_utf8_fold_lead_cyrillic_flag_) {
             // Optimization: Range compression for D0/D1 Cyrillic detection.
             // D0 (0xD0) and D1 (0xD1) are adjacent, so instead of 2 CMPEQ + OR:
             //   is_d0_mask = CMPEQ(src, D0)  // p5-only
@@ -397,7 +639,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         //
         // EXCLUDED from fast path: Greek tonos/diacritics (CE 84-90) and extended symbols (CF 8C+).
         // These have irregular folding rules and must go through the general 2-byte path.
-        {
+        if (lead_families & sz_utf8_fold_lead_greek_flag_) {
             __mmask64 is_ce_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCE));
             __mmask64 is_cf_mask = _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xCF));
             __mmask64 is_greek_lead_mask = is_ce_mask | is_cf_mask;
@@ -472,8 +714,10 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         // Lead bytes D7-DF cover Hebrew (D7), Arabic (D8-DB), Syriac (DC-DD), Thaana/NKo (DE-DF).
         // None of these scripts have case distinctions, so we can just copy them unchanged.
         // Note: D5/D6 cover Armenian which HAS case folding (including U+0587 which expands).
-        __mmask64 is_caseless_2byte = _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD7)) &
-                                      _mm512_cmple_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xDF));
+        __mmask64 is_caseless_2byte = 0;
+        if (lead_families & sz_utf8_fold_lead_caseless_flag_)
+            is_caseless_2byte = _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xD7)) &
+                                _mm512_cmple_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xDF));
         if (is_caseless_2byte) {
             __mmask64 is_caseless_second = is_caseless_2byte << 1;
             __mmask64 is_valid_caseless = ~is_non_ascii | is_caseless_2byte | is_caseless_second;

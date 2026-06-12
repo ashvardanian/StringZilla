@@ -150,6 +150,8 @@
  *
  *  - `SZ_PUBLIC` is used for functions that are part of the public API.
  *  - `SZ_INTERNAL` is used for internal helper functions with unstable APIs.
+ *  - `SZ_FORCE_INLINE` is for internal helpers whose expansion is structural, not advisory,
+ *    e.g., shared driver loops whose function-pointer parameters must devirtualize per call site.
  *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
  *  - `SZ_EXTERNAL` is used for third-party libraries that are linked dynamically.
  */
@@ -158,6 +160,12 @@
 #define SZ_C_INLINE inline
 #else
 #define SZ_C_INLINE inline static
+#endif
+
+#if defined(_MSC_VER)
+#define SZ_FORCE_INLINE __forceinline static
+#else
+#define SZ_FORCE_INLINE __attribute__((always_inline)) SZ_C_INLINE
 #endif
 
 #if SZ_DYNAMIC_DISPATCH
