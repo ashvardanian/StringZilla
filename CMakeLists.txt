@@ -742,6 +742,7 @@ set(STRINGZILLAS_CPU_SOURCES
     # guarded by its `SZ_USE_*` macro, so the off-platform ones compile to empty objects.
     c/stringzillas/levenshtein_serial.cpp
     c/stringzillas/levenshtein_icelake.cpp
+    c/stringzillas/levenshtein_neon.cpp
     c/stringzillas/needleman_wunsch_serial.cpp
     c/stringzillas/needleman_wunsch_icelake.cpp
     c/stringzillas/needleman_wunsch_haswell.cpp

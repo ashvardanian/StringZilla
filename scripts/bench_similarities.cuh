@@ -38,6 +38,11 @@ using ashvardanian::stringzillas::needleman_wunsch_serial_t;
 using ashvardanian::stringzillas::smith_waterman_icelake_t;
 using ashvardanian::stringzillas::smith_waterman_serial_t;
 using ashvardanian::stringzillas::uniform_substitution_costs_t;
+#if SZ_USE_NEON
+using ashvardanian::stringzillas::affine_levenshtein_neon_t;
+using ashvardanian::stringzillas::levenshtein_neon_t;
+using ashvardanian::stringzillas::levenshtein_utf8_neon_t;
+#endif
 
 // StringZillas library symbols provided only by the CUDA backend:
 #if SZ_USE_CUDA
@@ -223,6 +228,33 @@ void bench_levenshtein(environment_t const &env) {
         bench_unary(env, "levenshtein_utf8_icelake:batch"s + std::to_string(batch_size), call_utf8_baseline,
                     similarities_callable<levenshtein_utf8_icelake_t>(
                         env, results_utf8_accelerated, levenshtein_utf8_icelake_t {weird_uniform, weird_linear}),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(utf8_baseline);
+        scramble_accelerated_results(results_utf8_accelerated);
+#endif
+
+#if SZ_USE_NEON
+        bench_unary(env, "levenshtein_neon:batch"s + std::to_string(batch_size), call_linear_baseline,
+                    similarities_callable<levenshtein_neon_t, fu::basic_pool_t &>(
+                        env, results_linear_accelerated, levenshtein_neon_t {weird_uniform, weird_linear}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_baseline);
+        scramble_accelerated_results(results_linear_accelerated);
+
+        bench_unary(
+            env, "affine_levenshtein_neon:batch"s + std::to_string(batch_size), call_affine_baseline,
+            similarities_callable<affine_levenshtein_neon_t, fu::basic_pool_t &>(
+                env, results_affine_accelerated, affine_levenshtein_neon_t {weird_uniform, weird_affine}, pool),
+            callable_no_op_t {},        // preprocessing
+            similarities_equality_t {}) // equality check
+            .log(linear_baseline, affine_baseline);
+        scramble_accelerated_results(results_affine_accelerated);
+
+        bench_unary(env, "levenshtein_utf8_neon:batch"s + std::to_string(batch_size), call_utf8_baseline,
+                    similarities_callable<levenshtein_utf8_neon_t>(
+                        env, results_utf8_accelerated, levenshtein_utf8_neon_t {weird_uniform, weird_linear}),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(utf8_baseline);
