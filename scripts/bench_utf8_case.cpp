@@ -84,6 +84,10 @@ void bench_utf8_case_fold(environment_t const &env) {
     bench_unary(env, "sz_utf8_case_fold_icelake", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_icelake> {env})
         .log(base);
 #endif
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_case_fold_haswell", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_haswell> {env})
+        .log(base);
+#endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_utf8_case_fold_neon", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_neon> {env})
         .log(base);
@@ -162,6 +166,11 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_utf8_case_insensitive_find_icelake", validator,
                 utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_case_insensitive_find_haswell", validator,
+                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
