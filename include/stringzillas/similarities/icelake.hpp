@@ -1255,7 +1255,7 @@ struct levenshtein_distance<char, gap_costs_type_, capability_,
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
@@ -1344,7 +1344,7 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         // Check if the strings are entirely composed of ASCII characters,
@@ -3304,7 +3304,7 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
@@ -3383,7 +3383,7 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
@@ -3461,7 +3461,7 @@ struct smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_ca
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
@@ -3539,7 +3539,7 @@ struct smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_ca
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
-                        scratch_space_t scratch_space, executor_type_ &&executor,
+                        scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;

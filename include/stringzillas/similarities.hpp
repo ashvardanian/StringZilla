@@ -65,4 +65,155 @@ using affine_smith_waterman_neon_t =
 } // namespace stringzillas
 } // namespace ashvardanian
 
+// The per-ISA `.cpp` providers emit each single-pair scorer's SIMD core once; here we only `extern` it so consumers
+// link rather than recompile, pinned to the two executors the C-API passes (`dummy_executor_t`, `fu::basic_pool_t`).
+// Gated on `!SZ_USE_CUDA` because the CUDA library keeps the CPU engines inline in its `.cu` entry TUs.
+#if SZ_DYNAMIC_DISPATCH && !SZ_USE_CUDA
+#if !defined(FU_ENABLE_NUMA)
+#define FU_ENABLE_NUMA 0 // Keep libnuma-free cross-builds compiling.
+#endif
+#include <fork_union.hpp>
+namespace ashvardanian {
+namespace stringzillas {
+namespace fu = ashvardanian::fork_union;
+
+// Serial baseline (always available).
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<affine_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<affine_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_cap_serial_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_cap_serial_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+
+#if SZ_USE_ICELAKE
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sil_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sil_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+#endif // SZ_USE_ICELAKE
+
+#if SZ_USE_HASWELL
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sh_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sh_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sh_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sh_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+#endif // SZ_USE_HASWELL
+
+#if SZ_USE_NEON
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t
+smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+#endif // SZ_USE_NEON
+
+} // namespace stringzillas
+} // namespace ashvardanian
+#endif // SZ_DYNAMIC_DISPATCH && !SZ_USE_CUDA
+
 #endif // STRINGZILLAS_SIMILARITIES_HPP_

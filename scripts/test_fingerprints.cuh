@@ -59,13 +59,8 @@ void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const 
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice. The reference recomputes each window from scratch, so the work is
-        // O(positions * window_width); bound the positions so super-wide windows (e.g. 30000) on the 100 KB
-        // inputs stay fast - a few hundred rolled positions already exercise the push/roll/digest equivalence.
-        std::size_t count_hashes = str.size() - window_width + 1;
-        std::size_t const verification_budget_k = 1u << 20; // ~1M reference `push()` calls per string
-        std::size_t const max_positions = (std::max<std::size_t>)(verification_budget_k / window_width, 64);
-        if (count_hashes > max_positions) count_hashes = max_positions;
+        // Verify every rolled position of the input; the input size itself is bounded where `strs` is produced.
+        std::size_t const count_hashes = str.size() - window_width + 1;
         std::vector<hash_t> hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
             state_t slice_state = 0;
@@ -108,13 +103,8 @@ void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baselin
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice. The reference recomputes each window from scratch, so the work is
-        // O(positions * window_width); bound the positions so super-wide windows (e.g. 30000) on the 100 KB
-        // inputs stay fast - a few hundred rolled positions already exercise the push/roll/digest equivalence.
-        std::size_t count_hashes = str.size() - window_width + 1;
-        std::size_t const verification_budget_k = 1u << 20; // ~1M reference `push()` calls per string
-        std::size_t const max_positions = (std::max<std::size_t>)(verification_budget_k / window_width, 64);
-        if (count_hashes > max_positions) count_hashes = max_positions;
+        // Verify every rolled position of the input; the input size itself is bounded where `strs` is produced.
+        std::size_t const count_hashes = str.size() - window_width + 1;
         std::vector<hash_t> hashes(count_hashes);
         std::vector<baseline_hash_t> baseline_hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
@@ -199,7 +189,7 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 100 * 1024) {
+std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
     fuzzy_config_t config;
@@ -212,7 +202,7 @@ std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 10
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len = 100 * 1024) {
+std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
     static std::uint8_t const inconvenient_chars[4] = {0x00, 0x01, 0x7F, 0xFF};

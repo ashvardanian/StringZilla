@@ -373,11 +373,11 @@ sz_status_t szs_levenshtein_distances_for_(                                     
             // Try ephemeral GPU on default scope (device 0)
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                szs::cuda_status_t status =
-                    ctx.status != sz::status_t::success_k
-                        ? ctx.status
-                        : engine_variant( //
-                              a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                szs::cuda_status_t status = ctx.status != sz::status_t::success_k
+                                                ? ctx.status
+                                                : engine_variant( //
+                                                      a_container, b_container, results_strided, ctx.executor,
+                                                      ctx.specs);
                 result = propagate_error(status, error_message);
             }
             else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
@@ -490,10 +490,13 @@ struct needleman_wunsch_backends_t {
      */
     std::variant<
 #if SZ_USE_ICELAKE
-        szs::needleman_wunsch_icelake_t, // ! No affine variant here yet
+        szs::needleman_wunsch_icelake_t, szs::affine_needleman_wunsch_icelake_t,
 #endif
 #if SZ_USE_HASWELL
-        szs::needleman_wunsch_haswell_t, // ! No affine variant here yet
+        szs::needleman_wunsch_haswell_t, szs::affine_needleman_wunsch_haswell_t,
+#endif
+#if SZ_USE_NEON
+        szs::needleman_wunsch_neon_t, szs::affine_needleman_wunsch_neon_t,
 #endif
 #if SZ_USE_CUDA
         szs::needleman_wunsch_cuda_t, szs::affine_needleman_wunsch_cuda_t,
@@ -544,11 +547,11 @@ sz_status_t szs_needleman_wunsch_scores_for_(                                   
             }
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                szs::cuda_status_t status =
-                    ctx.status != sz::status_t::success_k
-                        ? ctx.status
-                        : engine_variant( //
-                              a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                szs::cuda_status_t status = ctx.status != sz::status_t::success_k
+                                                ? ctx.status
+                                                : engine_variant( //
+                                                      a_container, b_container, results_strided, ctx.executor,
+                                                      ctx.specs);
                 result = propagate_error(status, error_message);
             }
             else { result = propagate_error(sz::status_t::unknown_k, error_message); }
@@ -590,10 +593,13 @@ struct smith_waterman_backends_t {
      */
     std::variant<
 #if SZ_USE_ICELAKE
-        szs::smith_waterman_icelake_t, // ! No affine variant here yet
+        szs::smith_waterman_icelake_t, szs::affine_smith_waterman_icelake_t,
 #endif
 #if SZ_USE_HASWELL
-        szs::smith_waterman_haswell_t, // ! No affine variant here yet
+        szs::smith_waterman_haswell_t, szs::affine_smith_waterman_haswell_t,
+#endif
+#if SZ_USE_NEON
+        szs::smith_waterman_neon_t, szs::affine_smith_waterman_neon_t,
 #endif
 #if SZ_USE_CUDA
         szs::smith_waterman_cuda_t, szs::affine_smith_waterman_cuda_t,

@@ -165,23 +165,45 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
+        // The per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so the
+        // build does not require libnuma (matches the `stringzillas.cuh` default and the CMake build).
+        .define("FU_ENABLE_NUMA", "0")
         .flag("-O2");
 
     // Nvidia GPU backend
     if is_cuda {
         build.cuda(true);
+        // nvcc rejects host compilers newer than the version it supports (CUDA 12.x caps out at GCC 14). Honor the
+        // standard CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake's
+        // CMAKE_CUDA_HOST_COMPILER. Example: `CUDAHOSTCXX=g++-14 cargo build --features cuda`.
+        if let Ok(host_cxx) = env::var("CUDAHOSTCXX") {
+            build.flag("-ccbin");
+            build.flag(&host_cxx);
+        }
         build.files([
+            // C-API entry translation units.
             "c/stringzillas/runtime.cu",
             "c/stringzillas/levenshtein.cu",
             "c/stringzillas/needleman_wunsch.cu",
             "c/stringzillas/smith_waterman.cu",
             "c/stringzillas/fingerprints.cu",
+            // Per-capability providers that emit each tier's kernels once (the entry TUs above only declare them).
+            "c/stringzillas/levenshtein_cuda.cu",
+            "c/stringzillas/levenshtein_kepler.cu",
+            "c/stringzillas/levenshtein_hopper.cu",
+            "c/stringzillas/needleman_wunsch_cuda.cu",
+            "c/stringzillas/needleman_wunsch_hopper.cu",
+            "c/stringzillas/smith_waterman_cuda.cu",
+            "c/stringzillas/smith_waterman_hopper.cu",
         ]);
         build.define("SZ_USE_CUDA", "1");
         build.define("SZ_USE_ROCM", "0");
         build.flag("-std=c++20");
         build.flag("--expt-relaxed-constexpr");
         build.flag("-arch=sm_90a");
+        // The kernels use the CUDA driver API (cuLaunchKernel, cuEventElapsedTime, cuFuncSetAttribute), so a binary
+        // linking this crate needs libcuda in addition to the cudart that `build.cuda(true)` already links.
+        println!("cargo:rustc-link-lib=dylib=cuda");
     }
     // AMD GPU backend
     else if is_rocm {
@@ -202,11 +224,24 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     else if is_cpus {
         build.cpp(true);
         build.files([
+            // C-API entry translation units.
             "c/stringzillas/runtime.cpp",
             "c/stringzillas/levenshtein.cpp",
             "c/stringzillas/needleman_wunsch.cpp",
             "c/stringzillas/smith_waterman.cpp",
             "c/stringzillas/fingerprints.cpp",
+            // Per-capability providers that emit each ISA's single-pair SIMD core once (the entry TUs above only
+            // declare them). The off-platform files compile to empty objects via their internal SZ_USE_* guards.
+            "c/stringzillas/levenshtein_serial.cpp",
+            "c/stringzillas/levenshtein_icelake.cpp",
+            "c/stringzillas/needleman_wunsch_serial.cpp",
+            "c/stringzillas/needleman_wunsch_icelake.cpp",
+            "c/stringzillas/needleman_wunsch_haswell.cpp",
+            "c/stringzillas/needleman_wunsch_neon.cpp",
+            "c/stringzillas/smith_waterman_serial.cpp",
+            "c/stringzillas/smith_waterman_icelake.cpp",
+            "c/stringzillas/smith_waterman_haswell.cpp",
+            "c/stringzillas/smith_waterman_neon.cpp",
         ]);
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "0");
