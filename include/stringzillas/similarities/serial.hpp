@@ -403,6 +403,32 @@ struct diagonal_memory_requirements {
 
 using scratch_space_t = span<std::byte>;
 
+/**
+ *  @brief A running, cache-line-padded scratch byte amount, used to lay out a walker's sub-buffers.
+ *
+ *  Each walker partitions its `scratch_space_t` into a handful of sub-buffers (score diagonals, a reversed
+ *  copy of the shorter string, a Myers `match_masks` table, ...). Growing this amount once per sub-buffer keeps
+ *  every offset cache-line aligned and yields the total scratch the walker needs - a single source of truth
+ *  shared by the walker's `layout()` and its `operator()`. Cache-line width is `>=` any CPU register width, so
+ *  the padding also keeps full-register SIMD over-reads near a buffer's end in bounds.
+ */
+struct scratch_amount_t {
+    // ? Deliberately a poison default (not `SZ_CACHE_LINE_WIDTH`): an instance built without an explicit
+    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge -> `bad_alloc`/ASan),
+    // ? surfacing any place that forgot to propagate the alignment rather than silently assuming 64 bytes.
+    size_t alignment = std::numeric_limits<size_t>::max();
+    size_t total = 0; // ? The accumulated, padded byte count == the next buffer's offset.
+
+    /** @brief Reads the current end of the scratch, i.e. the offset where the next sub-buffer would start. */
+    constexpr operator size_t() const noexcept { return total; }
+
+    /** @brief Reserves @p bytes for the next sub-buffer, padded so the following offset stays aligned. */
+    constexpr scratch_amount_t &operator+=(size_t bytes) noexcept {
+        total += round_up_to_multiple<size_t>(bytes, alignment);
+        return *this;
+    }
+};
+
 #pragma region - Core Templates
 
 #if SZ_HAS_CONCEPTS_
@@ -1202,6 +1228,33 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, linea
      */
     diagonal_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
+    /** @brief Byte offsets of this walker's scratch sub-buffers within its `scratch_space`. */
+    struct layout_t {
+        size_t previous_scores = 0;  // ? First of the 3 rotating score diagonals.
+        size_t current_scores = 0;   // ? Second of the 3 rotating score diagonals.
+        size_t next_scores = 0;      // ? Third of the 3 rotating score diagonals.
+        size_t shorter_reversed = 0; // ? Reversed copy of the shorter string, right after the diagonals.
+        size_t total = 0;            // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /**
+     *  @brief The single source of truth for this walker's scratch size and sub-buffer offsets.
+     *  @return Cache-line-padded byte offsets of every sub-buffer, and their `total`.
+     */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        size_t const diagonal_bytes = sizeof(score_t) * (shorter_length + 1); // one anti-diagonal, unpadded
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_scores = amount, amount += diagonal_bytes;
+        at.current_scores = amount, amount += diagonal_bytes;
+        at.next_scores = amount, amount += diagonal_bytes;
+        at.shorter_reversed = amount, amount += shorter_length * sizeof(char_t);
+        at.total = amount;
+        return at;
+    }
+
     /**
      *  @param[in] first The first string.
      *  @param[in] second The second string.
@@ -1246,19 +1299,19 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, linea
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
         size_t const diagonals_count = shorter_dim + longer_dim - 1;
         size_t const max_diagonal_length = shorter_length + 1;
-        size_t const padded_diagonal_length =
-            round_up_to_multiple(sizeof(score_t) * max_diagonal_length, specs.cache_line_width) / sizeof(score_t);
 
-        // We want to avoid reverse-order iteration over the shorter string.
-        // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-        size_t const scratch_required = sizeof(score_t) * padded_diagonal_length * 3 + shorter_length * sizeof(char_t);
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
+        // One `layout()` describes every sub-buffer, so the sizing in `scratch_space_needed` and the pointers
+        // here can never disagree. We validate the walker's own footprint; callers may hand us a larger span and
+        // keep the surplus for their own bookkeeping (e.g. the UTF-8 backend's transcode region).
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
 
-        // The next few pointers will be swapped around.
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_diagonal_length;
-        score_t *next_scores = current_scores + padded_diagonal_length;
-        char_t *const shorter_reversed = (char_t *)(next_scores + padded_diagonal_length);
+        // The next few pointers will be swapped around. The reversed shorter string sits right after the diagonals,
+        // so we can avoid reverse-order iteration over the shorter string.
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_scores);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_scores);
+        score_t *next_scores = (score_t *)(scratch_space.data() + at.next_scores);
+        char_t *const shorter_reversed = (char_t *)(scratch_space.data() + at.shorter_reversed);
 
         // Export the reversed string into the buffer.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -1394,6 +1447,41 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, affin
      */
     diagonal_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
+    /** @brief Byte offsets of this walker's scratch sub-buffers within its `scratch_space`. */
+    struct layout_t {
+        size_t previous_scores = 0; // ? The 3 rotating score diagonals.
+        size_t current_scores = 0;
+        size_t next_scores = 0;
+        size_t current_inserts = 0; // ? The 2 rotating insertion-gap diagonals.
+        size_t next_inserts = 0;
+        size_t current_deletes = 0; // ? The 2 rotating deletion-gap diagonals.
+        size_t next_deletes = 0;
+        size_t shorter_reversed = 0; // ? Reversed copy of the shorter string, right after the diagonals.
+        size_t total = 0;            // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /**
+     *  @brief The single source of truth for this walker's scratch size and sub-buffer offsets.
+     *  @return Cache-line-padded byte offsets of every sub-buffer, and their `total`.
+     */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        size_t const diagonal_bytes = sizeof(score_t) * (shorter_length + 1); // one anti-diagonal, unpadded
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_scores = amount, amount += diagonal_bytes;
+        at.current_scores = amount, amount += diagonal_bytes;
+        at.next_scores = amount, amount += diagonal_bytes;
+        at.current_inserts = amount, amount += diagonal_bytes;
+        at.next_inserts = amount, amount += diagonal_bytes;
+        at.current_deletes = amount, amount += diagonal_bytes;
+        at.next_deletes = amount, amount += diagonal_bytes;
+        at.shorter_reversed = amount, amount += shorter_length * sizeof(char_t);
+        at.total = amount;
+        return at;
+    }
+
     /**
      *  @param[in] first The first string.
      *  @param[in] second The second string.
@@ -1443,23 +1531,23 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, affin
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
         size_t const diagonals_count = shorter_dim + longer_dim - 1;
         size_t const max_diagonal_length = shorter_length + 1;
-        size_t const padded_diagonal_length =
-            round_up_to_multiple(sizeof(score_t) * max_diagonal_length, specs.cache_line_width) / sizeof(score_t);
 
-        // We want to avoid reverse-order iteration over the shorter string.
-        // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-        size_t const scratch_required = sizeof(score_t) * padded_diagonal_length * 7 + shorter_length * sizeof(char_t);
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
+        // One `layout()` describes every sub-buffer (7 diagonals + the reversed shorter string), so the sizing
+        // in `scratch_space_needed` and the pointers here can never disagree. We validate the walker's own
+        // footprint; callers may hand us a larger span and keep the surplus for their own bookkeeping.
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
 
-        // The next few pointers will be swapped around.
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_diagonal_length;
-        score_t *next_scores = current_scores + padded_diagonal_length;
-        score_t *current_inserts = next_scores + padded_diagonal_length;
-        score_t *next_inserts = current_inserts + padded_diagonal_length;
-        score_t *current_deletes = next_inserts + padded_diagonal_length;
-        score_t *next_deletes = current_deletes + padded_diagonal_length;
-        char_t *const shorter_reversed = (char_t *)(next_deletes + padded_diagonal_length);
+        // The next few pointers will be swapped around. The reversed shorter string sits right after the diagonals,
+        // so we can avoid reverse-order iteration over the shorter string.
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_scores);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_scores);
+        score_t *next_scores = (score_t *)(scratch_space.data() + at.next_scores);
+        score_t *current_inserts = (score_t *)(scratch_space.data() + at.current_inserts);
+        score_t *next_inserts = (score_t *)(scratch_space.data() + at.next_inserts);
+        score_t *current_deletes = (score_t *)(scratch_space.data() + at.current_deletes);
+        score_t *next_deletes = (score_t *)(scratch_space.data() + at.next_deletes);
+        char_t *const shorter_reversed = (char_t *)(scratch_space.data() + at.shorter_reversed);
 
         // Export the reversed string into the buffer.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -1618,13 +1706,23 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, lin
      */
     horizontal_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
-    /** @brief Scratch bytes for the two cache-line-padded rows this walker rolls over. */
-    size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
-                                cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_dim = sz_min_of_two(first.size(), second.size()) + 1;
-        size_t const padded_shorter_dim = round_up_to_multiple(sizeof(score_t) * shorter_dim, specs.cache_line_width) /
-                                          sizeof(score_t);
-        return sizeof(score_t) * padded_shorter_dim * 2;
+    /** @brief Byte offsets of the two cache-line-padded rows this walker rolls over. */
+    struct layout_t {
+        size_t previous_row = 0; // ? The 2 rotating score rows.
+        size_t current_row = 0;
+        size_t total = 0; // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = sizeof(score_t) * (sz_min_of_two(first.size(), second.size()) + 1);
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_row = amount, amount += row_bytes;
+        at.current_row = amount, amount += row_bytes;
+        at.total = amount;
+        return at;
     }
 
     /**
@@ -1664,16 +1762,14 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, lin
         // consumption or the inner loop performance.
         size_t const shorter_dim = shorter_length + 1;
         size_t const longer_dim = longer_length + 1;
-        size_t const padded_shorter_dim = round_up_to_multiple(sizeof(score_t) * shorter_dim, specs.cache_line_width) /
-                                          sizeof(score_t);
 
-        // We decide to use less memory!
-        size_t const scratch_required = sizeof(score_t) * padded_shorter_dim * 2;
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
+        // One `layout()` describes both rows; validate the walker's own footprint and place the pointers from it.
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
 
         // The next few pointers will be swapped around.
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_shorter_dim;
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_row);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_row);
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -1750,13 +1846,31 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, aff
      */
     horizontal_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
-    /** @brief Scratch bytes for the two cache-line-padded rows of each of the 3 affine matrices. */
-    size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
-                                cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_dim = sz_min_of_two(first.size(), second.size()) + 1;
-        size_t const padded_shorter_dim = round_up_to_multiple(sizeof(score_t) * shorter_dim, specs.cache_line_width) /
-                                          sizeof(score_t);
-        return sizeof(score_t) * padded_shorter_dim * 2 * 3;
+    /** @brief Byte offsets of the two cache-line-padded rows of each of the 3 affine matrices. */
+    struct layout_t {
+        size_t previous_scores = 0; // ? The 2 rotating score rows.
+        size_t current_scores = 0;
+        size_t previous_inserts = 0; // ? The 2 rotating insertion-gap rows.
+        size_t current_inserts = 0;
+        size_t previous_deletes = 0; // ? The 2 rotating deletion-gap rows.
+        size_t current_deletes = 0;
+        size_t total = 0; // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = sizeof(score_t) * (sz_min_of_two(first.size(), second.size()) + 1);
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_scores = amount, amount += row_bytes;
+        at.current_scores = amount, amount += row_bytes;
+        at.previous_inserts = amount, amount += row_bytes;
+        at.current_inserts = amount, amount += row_bytes;
+        at.previous_deletes = amount, amount += row_bytes;
+        at.current_deletes = amount, amount += row_bytes;
+        at.total = amount;
+        return at;
     }
 
     /**
@@ -1800,20 +1914,19 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, aff
         // consumption or the inner loop performance.
         size_t const shorter_dim = shorter_length + 1;
         size_t const longer_dim = longer_length + 1;
-        size_t const padded_shorter_dim = round_up_to_multiple(sizeof(score_t) * shorter_dim, specs.cache_line_width) /
-                                          sizeof(score_t);
 
-        // We decide to use less memory!
-        size_t const scratch_required = sizeof(score_t) * padded_shorter_dim * 2 * 3; // 2x rows of 3x matrices
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
+        // One `layout()` describes the 2 rows of each of the 3 affine matrices; validate the walker's own
+        // footprint and place the pointers from it.
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
 
         // The next few pointers will be swapped around.
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_shorter_dim;
-        score_t *previous_inserts = current_scores + padded_shorter_dim;
-        score_t *current_inserts = previous_inserts + padded_shorter_dim;
-        score_t *previous_deletes = current_inserts + padded_shorter_dim;
-        score_t *current_deletes = previous_deletes + padded_shorter_dim;
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_scores);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_scores);
+        score_t *previous_inserts = (score_t *)(scratch_space.data() + at.previous_inserts);
+        score_t *current_inserts = (score_t *)(scratch_space.data() + at.current_inserts);
+        score_t *previous_deletes = (score_t *)(scratch_space.data() + at.previous_deletes);
+        score_t *current_deletes = (score_t *)(scratch_space.data() + at.current_deletes);
 
         // Initialize the first row:
         tile_scorer_t scorer {substituter_, gap_costs_};
@@ -1871,11 +1984,23 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
     levenshtein_distance_myers() noexcept {}
 
-    /** @brief Scratch bytes for the bit-parallel tables: the two-word `match_masks[2][256]` is the worst case. */
-    size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
-                                cpu_specs_t const & /* specs */) const noexcept {
-        sz_unused_(first), sz_unused_(second);
-        return sizeof(u64_t) * 2 * 256;
+    /** @brief Byte offset of the bit-parallel `match_masks[words_count][256]` table. */
+    struct layout_t {
+        size_t match_masks = 0; // ? The per-word `Peq` tables (256 entries each).
+        size_t total = 0;       // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        // Must match the tier the dispatch in `operator()` picks (1/2/4/8 words -> shorter <= 64/128/256/512).
+        size_t const words_count = shorter_length <= 64 ? 1 : shorter_length <= 128 ? 2 : shorter_length <= 256 ? 4 : 8;
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.match_masks = amount, amount += sizeof(u64_t) * words_count * 256;
+        at.total = amount;
+        return at;
     }
 
     /**
@@ -1883,96 +2008,74 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *      Exact @b unit-cost edit distance in O(longer) word-operations, 64 DP cells per machine word,
      *      no DP matrix and no allocation.
      */
-    inline status_t one_word_(span<char const> shorter, span<char const> longer, size_t &result_ref,
-                              scratch_space_t scratch_space) noexcept {
+    using index_t = u32_t;
 
-        size_t const shorter_length = shorter.size(), longer_length = longer.size();
-        if (shorter_length > 64) return status_t::unexpected_dimensions_k;
-        // Empty pattern: the distance is the text length, and the loop's `>> (shorter_length - 1)` would underflow.
+    /**
+     *  @brief Bit-parallel Myers/Hyyrö unit-cost Levenshtein for one pair whose @b shorter side is at most
+     *      `words_count_ * 64` runes, carrying the horizontal deltas across the `words_count_` 64-bit blocks.
+     *      Exact edit distance in O(longer * words_count_) word-operations, 64 DP cells per machine word, no DP
+     *      matrix and (beyond the scratch `match_masks` table) no allocation. `words_count_` is a power of two so
+     *      it lines up with the Ice Lake lockstep family; trailing empty blocks stay at the boundary harmlessly.
+     */
+    template <index_t words_count_> // 1, 2, 4, 8  ->  shorter <= 64, 128, 256, 512
+    inline status_t unrolled_(span<char const> shorter, span<char const> longer, size_t &result_ref,
+                              scratch_space_t scratch_space) const noexcept {
+        index_t const shorter_length = (index_t)shorter.size();
+        size_t const longer_length = longer.size();
+        if (shorter_length > words_count_ * 64) return status_t::unexpected_dimensions_k;
+        // Empty pattern: the distance is the text length, and the top-bit read below would underflow.
         if (shorter_length == 0) {
             result_ref = longer_length;
             return status_t::success_k;
         }
-        if (scratch_space.size() < sizeof(u64_t) * 256) return status_t::bad_alloc_k;
+        if (scratch_space.size() < sizeof(u64_t) * words_count_ * 256) return status_t::bad_alloc_k;
 
-        using match_masks_t = u64_t[256];
+        using match_masks_t = u64_t[words_count_][256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
-        // Zero every entry this pair builds or reads first: the scratch is uninitialized (and may hold a previous
-        // walker's bytes), so entries for characters outside `shorter` are not guaranteed zero.
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] = 0;
-        for (size_t i = 0; i != longer_length; ++i) match_masks[(u8_t)longer[i]] = 0;
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] |= (u64_t)1 << j;
+        // Every block of every touched character is read, so zero them all before building the `Peq` table: the
+        // scratch is uninitialized (and may hold a previous walker's bytes).
+        for (index_t position = 0; position != shorter_length; ++position)
+            for (index_t word = 0; word != words_count_; ++word) match_masks[word][(u8_t)shorter[position]] = 0;
+        for (size_t position = 0; position != longer_length; ++position)
+            for (index_t word = 0; word != words_count_; ++word) match_masks[word][(u8_t)longer[position]] = 0;
+        for (index_t position = 0; position != shorter_length; ++position)
+            match_masks[position >> 6][(u8_t)shorter[position]] |= (u64_t)1 << (position & 63);
 
-        u64_t positives = ~(u64_t)0, negatives = 0; // Myers' VP / VN
+        u64_t vertical_positives[words_count_], vertical_negatives[words_count_]; // Myers' VP / VN, per block
+        for (index_t word = 0; word != words_count_; ++word)
+            vertical_positives[word] = ~(u64_t)0, vertical_negatives[word] = 0;
+        index_t const last_word = (shorter_length - 1) >> 6, last_bit = (shorter_length - 1) & 63;
         size_t distance = shorter_length;
-        for (size_t longer_char_index = 0; longer_char_index != longer_length; ++longer_char_index) {
-            u64_t const pattern_matches = match_masks[(u8_t)longer[longer_char_index]];
-            u64_t const vertical_carry = pattern_matches | negatives;
-            u64_t const diagonal_zero = (((pattern_matches & positives) + positives) ^ positives) | pattern_matches;
-            u64_t horizontal_positive = negatives | ~(diagonal_zero | positives);
-            u64_t horizontal_negative = positives & diagonal_zero;
-            distance += (horizontal_positive >> (shorter_length - 1)) & 1;
-            distance -= (horizontal_negative >> (shorter_length - 1)) & 1;
-            horizontal_positive = (horizontal_positive << 1) | 1;
-            horizontal_negative = horizontal_negative << 1;
-            positives = horizontal_negative | ~(vertical_carry | horizontal_positive);
-            negatives = horizontal_positive & vertical_carry;
-        }
-
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[(u8_t)shorter[j]] = 0;
-        result_ref = distance;
-        return status_t::success_k;
-    }
-
-    /**
-     *  @brief Two-word blocked variant for a @b shorter side of 65 to 128 runes, carrying the horizontal
-     *      deltas between the two 64-bit blocks. Same O(longer) word-operation profile, two words wide,
-     *      no DP matrix and no allocation.
-     */
-    inline status_t two_word_(span<char const> shorter, span<char const> longer, size_t &result_ref,
-                              scratch_space_t scratch_space) noexcept {
-        size_t const shorter_length = shorter.size(), longer_length = longer.size();
-        if (shorter_length > 128) return status_t::unexpected_dimensions_k;
-        if (scratch_space.size() < sizeof(u64_t) * 2 * 256) return status_t::bad_alloc_k;
-
-        using match_masks_t = u64_t[2][256];
-        match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
-        // Both blocks of every touched character are read, so zero both before building (see the one-word variant).
-        for (size_t j = 0; j != shorter_length; ++j)
-            match_masks[0][(u8_t)shorter[j]] = 0, match_masks[1][(u8_t)shorter[j]] = 0;
-        for (size_t i = 0; i != longer_length; ++i)
-            match_masks[0][(u8_t)longer[i]] = 0, match_masks[1][(u8_t)longer[i]] = 0;
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(u8_t)shorter[j]] |= (u64_t)1 << (j & 63);
-
-        u64_t positives[2] {~(u64_t)0, ~(u64_t)0}, negatives[2] {0, 0}; // Myers' VP / VN, per block
-        size_t const last_word = (shorter_length - 1) >> 6, last_bit = (shorter_length - 1) & 63;
-        size_t distance = shorter_length;
-        for (size_t longer_char_index = 0; longer_char_index != longer_length; ++longer_char_index) {
-            u8_t const symbol = (u8_t)longer[longer_char_index];
-            u64_t carry_positive = 1, carry_negative = 0; // Top-row boundary into block 0 is +1.
-            for (size_t w = 0; w != 2; ++w) {
-                u64_t const pattern_matches = match_masks[w][symbol];
-                u64_t const vertical_carry = pattern_matches | negatives[w];
-                u64_t const matched_with_carry = pattern_matches | carry_negative;
-                u64_t const diagonal_zero = (((matched_with_carry & positives[w]) + positives[w]) ^ positives[w]) |
-                                            matched_with_carry;
-                u64_t horizontal_positive = negatives[w] | ~(diagonal_zero | positives[w]);
-                u64_t horizontal_negative = positives[w] & diagonal_zero;
-                if (w == last_word) {
+        for (size_t longer_position = 0; longer_position != longer_length; ++longer_position) {
+            u8_t const symbol = (u8_t)longer[longer_position];
+            u64_t horizontal_positive_carry = 1, horizontal_negative_carry = 0; // Top-row boundary into block 0 is +1.
+            for (index_t word = 0; word != words_count_; ++word) {
+                u64_t const pattern_matches = match_masks[word][symbol];
+                u64_t const vertical_carry = pattern_matches | vertical_negatives[word];
+                u64_t const matched_with_carry = pattern_matches | horizontal_negative_carry;
+                u64_t const diagonal_zero =
+                    (((matched_with_carry & vertical_positives[word]) + vertical_positives[word]) ^
+                     vertical_positives[word]) |
+                    matched_with_carry;
+                u64_t horizontal_positive = vertical_negatives[word] | ~(diagonal_zero | vertical_positives[word]);
+                u64_t horizontal_negative = vertical_positives[word] & diagonal_zero;
+                if (word == last_word) {
                     distance += (horizontal_positive >> last_bit) & 1;
                     distance -= (horizontal_negative >> last_bit) & 1;
                 }
-                u64_t const carry_positive_next = horizontal_positive >> 63;
-                u64_t const carry_negative_next = horizontal_negative >> 63;
-                horizontal_positive = (horizontal_positive << 1) | carry_positive;
-                horizontal_negative = (horizontal_negative << 1) | carry_negative;
-                carry_positive = carry_positive_next, carry_negative = carry_negative_next;
-                positives[w] = horizontal_negative | ~(vertical_carry | horizontal_positive);
-                negatives[w] = horizontal_positive & vertical_carry;
+                u64_t const horizontal_positive_carry_next = horizontal_positive >> 63;
+                u64_t const horizontal_negative_carry_next = horizontal_negative >> 63;
+                horizontal_positive = (horizontal_positive << 1) | horizontal_positive_carry;
+                horizontal_negative = (horizontal_negative << 1) | horizontal_negative_carry;
+                horizontal_positive_carry = horizontal_positive_carry_next;
+                horizontal_negative_carry = horizontal_negative_carry_next;
+                vertical_positives[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
+                vertical_negatives[word] = horizontal_positive & vertical_carry;
             }
         }
 
-        for (size_t j = 0; j != shorter_length; ++j) match_masks[j >> 6][(u8_t)shorter[j]] = 0;
+        for (index_t position = 0; position != shorter_length; ++position)
+            match_masks[position >> 6][(u8_t)shorter[position]] = 0;
         result_ref = distance;
         return status_t::success_k;
     }
@@ -1983,8 +2086,10 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         span<char const> shorter = first_is_shorter ? first : second;
         span<char const> longer = first_is_shorter ? second : first;
         size_t const shorter_length = shorter.size();
-        return shorter_length <= 64 ? one_word_(shorter, longer, result_ref, scratch_space)
-                                    : two_word_(shorter, longer, result_ref, scratch_space);
+        if (shorter_length <= 64) return unrolled_<1>(shorter, longer, result_ref, scratch_space);
+        if (shorter_length <= 128) return unrolled_<2>(shorter, longer, result_ref, scratch_space);
+        if (shorter_length <= 256) return unrolled_<4>(shorter, longer, result_ref, scratch_space);
+        return unrolled_<8>(shorter, longer, result_ref, scratch_space); // shorter <= 512
     }
 };
 
@@ -2050,14 +2155,15 @@ struct levenshtein_distance {
                 return linear_backend.scratch_space_needed(first, second, specs);
             }
 
-        // Myers fast path, only when the shorter side fits its 128-rune limit (matches the guard in `operator()`).
+        // Myers fast path, only when the shorter side fits its 512-rune limit (matches the guard in `operator()`).
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
-                (std::min)(first.size(), second.size()) <= 128) {
-                return myers_t {}.scratch_space_needed(first, second, specs);
+                (std::min)(first.size(), second.size()) <= 512) {
+                return myers_t {}.layout(first, second, specs);
             }
 
-        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it. The dispatch below must
+        // mirror `operator()` so the chosen walker's `layout()` is the single authority for both sizing and running.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
         diagonal_memory_requirements_t requirements(                                   //
             first.size(), second.size(),                                               //
@@ -2065,9 +2171,14 @@ struct levenshtein_distance {
             sizeof(char_t), specs.cache_line_width);
 
         if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16)
-            return horizontal_u8_t {substituter_, gap_costs_}.scratch_space_needed(first, second, specs);
-
-        return requirements.total;
+            return horizontal_u8_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell <= 1)
+            return diagonal_u8_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell == 2)
+            return diagonal_u16_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell == 4)
+            return diagonal_u32_t {substituter_, gap_costs_}.layout(first, second, specs);
+        return diagonal_u64_t {substituter_, gap_costs_}.layout(first, second, specs);
     }
 
     /**
@@ -2093,10 +2204,10 @@ struct levenshtein_distance {
             }
 
         // Bit-parallel Myers fast path (~5x DP on short unit-cost pairs); only when the shorter side fits Myers'
-        // 128-rune limit, otherwise fall through to the anti-diagonal DP below.
+        // 512-rune limit, otherwise fall through to the anti-diagonal DP below.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
-                (std::min)(first.size(), second.size()) <= 128)
+                (std::min)(first.size(), second.size()) <= 512)
                 return myers_t {}(first, second, result_ref, scratch_space);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
@@ -2196,8 +2307,22 @@ struct levenshtein_distance_utf8 {
                                                                     specs.cache_line_width);
         size_t const second_unpacking_ceiling = round_up_to_multiple(sizeof(rune_t) * second.size(),
                                                                      specs.cache_line_width);
-        return ascii_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second, specs) +
-               first_unpacking_ceiling + second_unpacking_ceiling;
+        size_t const transcode_bytes = first_unpacking_ceiling + second_unpacking_ceiling;
+
+        // The UTF-8 path transcodes both strings into the front of scratch, then runs a @b rune diagonal walker on
+        // the remainder. The walker sees at most `first.size()`/`second.size()` runes (one rune per byte in the
+        // worst case), and its reversed-rune buffer costs `runes * sizeof(rune_t)` - so we must size the walker
+        // region from rune-width requirements, not the byte-width `ascii_fallback` (which would under-reserve here).
+        diagonal_memory_requirements<size_t> rune_requirements(                        //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
+            sizeof(rune_t), specs.cache_line_width);
+        size_t const utf8_path = transcode_bytes + rune_requirements.total;
+
+        // The pure-ASCII shortcut bypasses transcoding and runs the char fallback over the whole buffer instead.
+        size_t const ascii_path = ascii_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second,
+                                                                                                   specs);
+        return sz_max_of_two(utf8_path, ascii_path);
     }
 
     /**
@@ -2352,12 +2477,19 @@ struct needleman_wunsch_score {
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
+        // The dispatch must mirror `operator()` so the chosen walker's `layout()` is the single sizing authority.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
         diagonal_memory_requirements_t requirements(                                   //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), specs.cache_line_width);
-        return requirements.total;
+        if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16)
+            return horizontal_i16_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell <= 2)
+            return diagonal_i16_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell == 4)
+            return diagonal_i32_t {substituter_, gap_costs_}.layout(first, second, specs);
+        return diagonal_i64_t {substituter_, gap_costs_}.layout(first, second, specs);
     }
 
     /**
@@ -2458,12 +2590,19 @@ struct smith_waterman_score {
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
+        // The dispatch must mirror `operator()` so the chosen walker's `layout()` is the single sizing authority.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
         diagonal_memory_requirements_t requirements(                                   //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), specs.cache_line_width);
-        return requirements.total;
+        if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16)
+            return horizontal_i16_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell <= 2)
+            return diagonal_i16_t {substituter_, gap_costs_}.layout(first, second, specs);
+        if (requirements.bytes_per_cell == 4)
+            return diagonal_i32_t {substituter_, gap_costs_}.layout(first, second, specs);
+        return diagonal_i64_t {substituter_, gap_costs_}.layout(first, second, specs);
     }
 
     /**

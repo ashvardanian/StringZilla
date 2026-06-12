@@ -1225,6 +1225,37 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
     diagonal_walker() noexcept {}
     diagonal_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
+    /** @brief Byte offsets of this walker's scratch sub-buffers within its `scratch_space`. */
+    struct layout_t {
+        size_t previous_scores = 0; // ? The 3 rotating score diagonals.
+        size_t current_scores = 0;
+        size_t next_scores = 0;
+        size_t shorter_reversed = 0;         // ? Reversed shorter string (carries a step_classes_k overread guard).
+        size_t shorter_reversed_classes = 0; // ? Its pre-classified class indices.
+        size_t longer_classes = 0;           // ? The longer string's pre-classified class indices.
+        size_t total = 0;                    // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        size_t const longer_length = sz_max_of_two(first.size(), second.size());
+        size_t const diagonal_bytes = sizeof(score_t) * (shorter_length + 1); // one anti-diagonal, unpadded
+        size_t const shorter_stream_bytes = shorter_length + step_classes_k;  // string + SIMD overread guard
+        size_t const longer_stream_bytes = longer_length + step_classes_k;
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_scores = amount, amount += diagonal_bytes;
+        at.current_scores = amount, amount += diagonal_bytes;
+        at.next_scores = amount, amount += diagonal_bytes;
+        at.shorter_reversed = amount, amount += shorter_stream_bytes;
+        at.shorter_reversed_classes = amount, amount += shorter_stream_bytes;
+        at.longer_classes = amount, amount += longer_stream_bytes;
+        at.total = amount;
+        return at;
+    }
+
     /**
      *  @param[in] first The first string.
      *  @param[in] second The second string.
@@ -1264,25 +1295,18 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
         size_t const longer_dim = longer_length + 1;
         size_t const diagonals_count = shorter_dim + longer_dim - 1;
         size_t const max_diagonal_length = shorter_length + 1;
-        size_t const padded_diagonal_length =
-            round_up_to_multiple(sizeof(score_t) * max_diagonal_length, specs.cache_line_width) / sizeof(score_t);
 
-        // Beyond the 3 score diagonals, we keep the reversed shorter string and both class-index buffers.
-        // Each class-index buffer is padded by a step_classes_k-byte SIMD overread guard.
-        size_t const padded_shorter_stream_length = round_up_to_multiple(shorter_length + step_classes_k,
-                                                                         specs.cache_line_width);
-        size_t const padded_longer_stream_length = round_up_to_multiple(longer_length + step_classes_k,
-                                                                        specs.cache_line_width);
-        size_t const scratch_required = sizeof(score_t) * padded_diagonal_length * 3 +
-                                        padded_shorter_stream_length * 2 + padded_longer_stream_length;
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
-
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_diagonal_length;
-        score_t *next_scores = current_scores + padded_diagonal_length;
-        char_t *const shorter_reversed = (char_t *)(next_scores + padded_diagonal_length);
-        char_t *const shorter_reversed_classes = shorter_reversed + padded_shorter_stream_length;
-        char_t *const longer_classes = shorter_reversed_classes + padded_shorter_stream_length;
+        // One `layout()` describes every sub-buffer (3 diagonals, the reversed shorter string, and both
+        // class-index streams, each padded for the step_classes_k SIMD overread). We validate the walker's own
+        // footprint and place the pointers from it.
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_scores);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_scores);
+        score_t *next_scores = (score_t *)(scratch_space.data() + at.next_scores);
+        char_t *const shorter_reversed = (char_t *)(scratch_space.data() + at.shorter_reversed);
+        char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
+        char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
         // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -1402,6 +1426,45 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
     diagonal_walker() noexcept {}
     diagonal_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
 
+    /** @brief Byte offsets of this walker's scratch sub-buffers within its `scratch_space`. */
+    struct layout_t {
+        size_t previous_scores = 0; // ? The 3 rotating score diagonals.
+        size_t current_scores = 0;
+        size_t next_scores = 0;
+        size_t current_inserts = 0; // ? The 2 rotating insertion-gap diagonals.
+        size_t next_inserts = 0;
+        size_t current_deletes = 0; // ? The 2 rotating deletion-gap diagonals.
+        size_t next_deletes = 0;
+        size_t shorter_reversed = 0;         // ? Reversed shorter string (carries a step_classes_k overread guard).
+        size_t shorter_reversed_classes = 0; // ? Its pre-classified class indices.
+        size_t longer_classes = 0;           // ? The longer string's pre-classified class indices.
+        size_t total = 0;                    // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        size_t const longer_length = sz_max_of_two(first.size(), second.size());
+        size_t const diagonal_bytes = sizeof(score_t) * (shorter_length + 1); // one anti-diagonal, unpadded
+        size_t const shorter_stream_bytes = shorter_length + step_classes_k;  // string + SIMD overread guard
+        size_t const longer_stream_bytes = longer_length + step_classes_k;
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.previous_scores = amount, amount += diagonal_bytes;
+        at.current_scores = amount, amount += diagonal_bytes;
+        at.next_scores = amount, amount += diagonal_bytes;
+        at.current_inserts = amount, amount += diagonal_bytes;
+        at.next_inserts = amount, amount += diagonal_bytes;
+        at.current_deletes = amount, amount += diagonal_bytes;
+        at.next_deletes = amount, amount += diagonal_bytes;
+        at.shorter_reversed = amount, amount += shorter_stream_bytes;
+        at.shorter_reversed_classes = amount, amount += shorter_stream_bytes;
+        at.longer_classes = amount, amount += longer_stream_bytes;
+        at.total = amount;
+        return at;
+    }
+
     /**
      *  @param[in] first The first string.
      *  @param[in] second The second string.
@@ -1445,29 +1508,22 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
         size_t const longer_dim = longer_length + 1;
         size_t const diagonals_count = shorter_dim + longer_dim - 1;
         size_t const max_diagonal_length = shorter_length + 1;
-        size_t const padded_diagonal_length =
-            round_up_to_multiple(sizeof(score_t) * max_diagonal_length, specs.cache_line_width) / sizeof(score_t);
 
-        // Beyond the 7 score diagonals, we keep the reversed shorter string and both class-index buffers.
-        // Each class-index buffer is padded by a step_classes_k-byte SIMD overread guard.
-        size_t const padded_shorter_stream_length = round_up_to_multiple(shorter_length + step_classes_k,
-                                                                         specs.cache_line_width);
-        size_t const padded_longer_stream_length = round_up_to_multiple(longer_length + step_classes_k,
-                                                                        specs.cache_line_width);
-        size_t const scratch_required = sizeof(score_t) * padded_diagonal_length * 7 +
-                                        padded_shorter_stream_length * 2 + padded_longer_stream_length;
-        if (scratch_space.size() < scratch_required) return status_t::bad_alloc_k;
-
-        score_t *previous_scores = (score_t *)scratch_space.data();
-        score_t *current_scores = previous_scores + padded_diagonal_length;
-        score_t *next_scores = current_scores + padded_diagonal_length;
-        score_t *current_inserts = next_scores + padded_diagonal_length;
-        score_t *next_inserts = current_inserts + padded_diagonal_length;
-        score_t *current_deletes = next_inserts + padded_diagonal_length;
-        score_t *next_deletes = current_deletes + padded_diagonal_length;
-        char_t *const shorter_reversed = (char_t *)(next_deletes + padded_diagonal_length);
-        char_t *const shorter_reversed_classes = shorter_reversed + padded_shorter_stream_length;
-        char_t *const longer_classes = shorter_reversed_classes + padded_shorter_stream_length;
+        // One `layout()` describes every sub-buffer (7 diagonals, the reversed shorter string, and both
+        // class-index streams, each padded for the step_classes_k SIMD overread). We validate the walker's own
+        // footprint and place the pointers from it.
+        layout_t const at = layout(first, second, specs);
+        if (scratch_space.size() < at.total) return status_t::bad_alloc_k;
+        score_t *previous_scores = (score_t *)(scratch_space.data() + at.previous_scores);
+        score_t *current_scores = (score_t *)(scratch_space.data() + at.current_scores);
+        score_t *next_scores = (score_t *)(scratch_space.data() + at.next_scores);
+        score_t *current_inserts = (score_t *)(scratch_space.data() + at.current_inserts);
+        score_t *next_inserts = (score_t *)(scratch_space.data() + at.next_inserts);
+        score_t *current_deletes = (score_t *)(scratch_space.data() + at.current_deletes);
+        score_t *next_deletes = (score_t *)(scratch_space.data() + at.next_deletes);
+        char_t *const shorter_reversed = (char_t *)(scratch_space.data() + at.shorter_reversed);
+        char_t *const shorter_reversed_classes = (char_t *)(scratch_space.data() + at.shorter_reversed_classes);
+        char_t *const longer_classes = (char_t *)(scratch_space.data() + at.longer_classes);
 
         // Export the reversed shorter string, then classify both strings @b once into their class-index buffers.
         for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
