@@ -84,23 +84,33 @@ SZ_INTERNAL __m256i sz_haswell_next_bytes_(__m256i source_ymm) {
 SZ_INTERNAL sz_u32_t sz_haswell_mask_until_(sz_size_t n) { return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n); }
 
 /**
- *  @brief Folds a 32-byte chunk containing only caseless multi-byte scripts mixed with ASCII.
- *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
- *      Stores a full 32-byte vector and reports how many bytes were consumed: the destination is
- *      contractually ≥ 3× the source, so the ≤ 2-byte overshoot is always in bounds and the next
- *      chunk's store (or the serial tail) overwrites it.
- *  @return Bytes consumed and written - at least 30, since only the last two lanes can host an
- *      incomplete 2-byte or 3-byte lead in a full chunk.
+ *  @brief Folds a 32-byte chunk of caseless multi-byte scripts mixed with ASCII.
+ *      Folds ASCII A-Z in place and copies everything else, truncating before the first lead of
+ *      a case-aware family and trimming incomplete trailing sequences. Stores a full 32-byte
+ *      vector and reports how many bytes were consumed: the destination is contractually ≥ 3×
+ *      the source, so the overshoot is always in bounds and the next chunk's store (or the
+ *      serial tail) overwrites it.
+ *  @param is_foreign_lead_mask Lead bytes outside the caseless family: the chunk is truncated
+ *      before the first such lead, so Hebrew or CJK text with an embedded Latin or Cyrillic
+ *      word still copies its longest caseless prefix vectorized.
+ *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
 SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_caseless_chunk_( //
-    __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask, sz_ptr_t target) {
+    __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    // Don't split a trailing 2-byte or 3-byte sequence across chunks: in a full 32-byte chunk
-    // only a 2-byte lead in lane 31 or a 3-byte lead in lanes 30-31 can be incomplete.
-    sz_u32_t incomplete_mask = (is_two_byte_lead_mask & 0x80000000u) | (is_three_byte_lead_mask & 0xC0000000u);
-    sz_size_t copy_length = incomplete_mask ? (sz_size_t)sz_u32_ctz(incomplete_mask) : 32;
+    sz_size_t fold_length = is_foreign_lead_mask ? (sz_size_t)sz_u32_ctz(is_foreign_lead_mask) : 32;
+
+    // Don't split a trailing 2-byte or 3-byte sequence across chunks
+    sz_u32_t incomplete_mask = //
+        (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
+        (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
     _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
-    return copy_length;
+    return fold_length;
 }
 
 /**
@@ -124,10 +134,14 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_caseless_chunk_( //
  *  beyond the consumed length hold garbage that the next chunk's store overwrites (the destination
  *  is contractually ≥ 3× the source, so the overshoot stays in bounds).
  *
+ *  @param is_foreign_lead_mask Lead bytes outside this handler's families: the chunk is truncated
+ *      before the first such lead, so mixed-script chunks still fold their longest pure prefix
+ *      vectorized instead of degrading to one-rune serial steps per chunk.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_latin_chunk_( //
-    __m256i source_ymm, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask, sz_ptr_t target) {
+    __m256i source_ymm, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     // Shifted views of the data replace Ice Lake's k-mask shifts: comparing `previous_bytes`
     // against a lead value marks the continuation lanes directly, with no vector→GPR round-trip.
@@ -212,11 +226,13 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_latin_chunk_( //
         _mm256_and_si256(e1_latin_third_ymm, _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xBA))),
         sz_haswell_in_byte_range_(source_ymm, 0x96, 0x09));
 
-    // Truncate at the first irregular codepoint or foreign E1 sub-family - the flagged lane is a
-    // continuation, so walk back over continuations to the start of that sequence
+    // Truncate at the first irregular codepoint, foreign E1 sub-family, or foreign-family lead -
+    // an irregular-flagged lane is a continuation, so walk back over continuations to the start
+    // of that sequence (foreign leads are already at a sequence start, so the walk is a no-op)
     sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_or_si256(_mm256_or_si256(c4_irregular_ymm, c5_irregular_ymm),
                         _mm256_or_si256(c6_irregular_ymm, _mm256_or_si256(e1_irregular_ymm, foreign_e1_second_ymm))));
+    stop_mask |= is_foreign_lead_mask;
     sz_size_t fold_length = 32;
     if (stop_mask) {
         sz_size_t first_flagged_position = (sz_size_t)sz_u32_ctz(stop_mask);
@@ -270,6 +286,242 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_latin_chunk_( //
         folded_ymm, _mm256_and_si256(_mm256_or_si256(extended_fold_ymm, e1_fold_ymm), _mm256_set1_epi8(0x01)));
 
     _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk of basic Cyrillic (D0/D1 leads, U+0400-045F) mixed with ASCII -
+ *      the working set of Russian, Ukrainian, Bulgarian, and Serbian text.
+ *
+ *  The uppercase block maps onto the lowercase block with offsets keyed purely by the second
+ *  byte's high nibble, so one `VPSHUFB` over a 16-entry table replaces three range compares
+ *  plus three masked adds:
+ *
+ *  Input Range | Codepoints        | Output           | Transform
+ *  D0 80-8F    | Ѐ-Џ (U+0400-040F) | D1 90-9F (ѐ-џ)   | second +0x10, lead D0 → D1
+ *  D0 90-9F    | А-П (U+0410-041F) | D0 B0-BF (а-п)   | second +0x20
+ *  D0 A0-AF    | Р-Я (U+0420-042F) | D1 80-8F (р-я)   | second −0x20, lead D0 → D1
+ *  D0 B0-BF    | а-п lowercase     | unchanged        | high nibble B → offset 0
+ *  D1 80-9F    | р-џ lowercase     | unchanged        | only after-D0 lanes take offsets
+ *  D1 A0+      | Ext-A (U+0460+)   | → serial         | +1 parity folds, not modeled here
+ *
+ *  The D0 → D1 lead fixup is a masked +1 (D0 + 1 = D1), keeping the no-`VPBLENDVB` discipline.
+ *  Cyrillic Extended-A and foreign-family leads (Russian quotes «» are C2, dashes are E2)
+ *  truncate the chunk before the offending lead, so mixed chunks still fold their longest
+ *  pure prefix vectorized. A full 32-byte store is issued; lanes at or beyond the consumed
+ *  length are overwritten by the next chunk's store (the destination is ≥ 3× the source).
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_cyrillic_chunk_( //
+    __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+
+    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
+    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i is_after_d0_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD0));
+    __m256i is_after_d1_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD1));
+
+    // Cyrillic Extended-A ('Ѡ' U+0460 onward) starts at D1 A0 and folds by +1 parity - its
+    // flagged continuation maps back to the lead one lane before via `>> 1`; foreign-family
+    // leads are already at a sequence start
+    sz_u32_t is_extended_second_mask = (sz_u32_t)_mm256_movemask_epi8(
+        _mm256_and_si256(is_after_d1_ymm, sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x20)));
+    sz_u32_t stop_mask = is_foreign_lead_mask | (is_extended_second_mask >> 1);
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split a trailing D0/D1 lead across chunks - this family's only multi-byte leads
+    sz_u32_t is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xD0, 0x02));
+    sz_u32_t incomplete_mask = is_cyrillic_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    // The second byte's high nibble keys the fold offset: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0),
+    // B → 0. `VPSHUFB` works per 128-bit lane, so the 16-entry table is mirrored into both halves.
+    __m256i const cyrillic_offset_lut = _mm256_setr_epi8(            //
+        0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, (char)0xE0, 0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, (char)0xE0, 0, 0, 0, 0, 0);
+    __m256i high_nibbles_ymm = _mm256_and_si256(_mm256_srli_epi16(source_ymm, 4), _mm256_set1_epi8(0x0F));
+    __m256i offsets_ymm = _mm256_shuffle_epi8(cyrillic_offset_lut, high_nibbles_ymm);
+
+    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_after_d0_ymm, offsets_ymm));
+
+    // Lead fixup: Ѐ-Џ (seconds 80-8F) and Р-Я (seconds A0-AF) land in the D1 block, so their
+    // D0 lead takes a masked +1; А-П (seconds 90-9F) stay under D0
+    __m256i is_d0_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xD0));
+    __m256i needs_d1_ymm = _mm256_and_si256(
+        is_d0_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x80, 0x10),
+                                   sz_haswell_in_byte_range_(next_bytes_ymm, 0xA0, 0x10)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(needs_d1_ymm, _mm256_set1_epi8(0x01)));
+
+    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk of basic Greek (CE/CF leads, U+0370-03FF) mixed with ASCII.
+ *
+ *  Greek CE/CF uppercase → lowercase transformations:
+ *
+ *  Input Range  | Codepoints        | Output           | Transform
+ *  CE 91-9F     | Α-Ο (U+0391-039F) | CE B1-BF (α-ο)   | second +0x20
+ *  CE A0-A1     | Π-Ρ (U+03A0-03A1) | CF 80-81 (π-ρ)   | second −0x20, lead CE → CF
+ *  CE A3-AB     | Σ-Ϋ (U+03A3-03AB) | CF 83-8B (σ-ϋ)   | second −0x20, lead CE → CF
+ *  CE B1-BF     | α-ο lowercase     | unchanged        | —
+ *  CF 80-8B     | π-ϋ lowercase     | unchanged        | —
+ *  CF 82        | ς final sigma     | CF 83 (σ)        | second +1
+ *
+ *  CE A2 (U+03A2, unassigned) is deliberately neither folded nor flagged. The fold-side
+ *  exclusion set is narrower than the finder's: only sequences whose FOLD is irregular leave
+ *  the fast path - CE 80-90 (tonos and accented capitals with non-uniform offsets), CE B0
+ *  ('ΰ', which expands to three codepoints), and CF 8C+ (accented lowercase and archaic
+ *  symbols like 'ϐ'/'ϑ' that fold onto basic letters) and foreign-family leads truncate the
+ *  chunk before the offending lead, so mixed chunks still fold their longest pure prefix
+ *  vectorized. The CE → CF lead fixup is a masked +1.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_greek_chunk_( //
+    __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+
+    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
+    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i is_after_ce_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCE));
+    __m256i is_after_cf_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCF));
+
+    // Irregular folds truncate the chunk: CE 80-90 tonos/accents, CE B0 'ΰ' expansion, CF 8C+
+    // accented lowercase and archaic symbols. The flagged lane is a continuation, mapping back
+    // to its lead one lane before via `>> 1`; foreign leads are already at a sequence start.
+    __m256i ce_irregular_ymm = _mm256_and_si256(
+        is_after_ce_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0x80, 0x11),
+                                         _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB0))));
+    __m256i cf_irregular_ymm = _mm256_and_si256(is_after_cf_ymm, sz_haswell_in_byte_range_(source_ymm, 0x8C, 0x34));
+    sz_u32_t is_irregular_second_mask = (sz_u32_t)_mm256_movemask_epi8(
+        _mm256_or_si256(ce_irregular_ymm, cf_irregular_ymm));
+    sz_u32_t stop_mask = is_foreign_lead_mask | (is_irregular_second_mask >> 1);
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split a trailing CE/CF lead across chunks - this family's only multi-byte leads
+    sz_u32_t is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xCE, 0x02));
+    sz_u32_t incomplete_mask = is_greek_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+
+    // Α-Ο (CE 91-9F): second byte +0x20, lead stays CE
+    __m256i plus_fold_ymm = _mm256_and_si256(is_after_ce_ymm, sz_haswell_in_byte_range_(source_ymm, 0x91, 0x0F));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(plus_fold_ymm, _mm256_set1_epi8(0x20)));
+
+    // Π-Ρ (CE A0-A1) and Σ-Ϋ (CE A3-AB): second byte −0x20, lead CE → CF via masked +1;
+    // A2 is skipped because U+03A2 is unassigned
+    __m256i minus_second_ymm = _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x02),
+                                               sz_haswell_in_byte_range_(source_ymm, 0xA3, 0x09));
+    __m256i minus_fold_ymm = _mm256_and_si256(is_after_ce_ymm, minus_second_ymm);
+    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(minus_fold_ymm, _mm256_set1_epi8(0x20)));
+    __m256i is_ce_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xCE));
+    __m256i needs_cf_ymm = _mm256_and_si256(
+        is_ce_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0xA0, 0x02),
+                                   sz_haswell_in_byte_range_(next_bytes_ymm, 0xA3, 0x09)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(needs_cf_ymm, _mm256_set1_epi8(0x01)));
+
+    // Final sigma: 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83) is a +1 on the second byte
+    __m256i is_final_sigma_ymm = _mm256_and_si256(is_after_cf_ymm,
+                                                  _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x82)));
+    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_final_sigma_ymm, _mm256_set1_epi8(0x01)));
+
+    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk mixing ASCII with caseless and guarded 3-byte scripts -
+ *      CJK with E2 punctuation, German quotes („…“), Korean, and similar real-world blends.
+ *
+ *  The guarded leads (E2, EA) are case-aware only for specific second bytes, so the chunk
+ *  is a fold-ASCII-and-copy as long as every guarded sequence is provably caseless:
+ *    - E2 is safe for seconds 80-83 (General Punctuation - quotes, dashes, ellipses);
+ *      other E2 blocks (84 Letterlike Kelvin/Angstrom, B0-B3 Glagolitic/Coptic, …) fold;
+ *    - EA is safe except seconds 99-9F (Cyrillic Ext-B, Latin Ext-D) and AD-AE (Cherokee
+ *      Supplement) - Hangul (EA B0+) passes untouched;
+ *    - EF is never safe: fullwidth A-Z lives under EF BC and folds by +0x20.
+ *  The first unsafe or foreign-family lead truncates the chunk in place - no walk-back
+ *  needed, the flagged lane IS the lead - and one rune goes to the serial fallback.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_guarded_chunk_( //
+    __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+
+    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i is_e2_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE2));
+    __m256i is_ea_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEA));
+    __m256i is_ef_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEF));
+
+    // An E2 lead in lane 31 sees a zero `next` byte, fails the 80-83 test, and truncates -
+    // which doubles as the incomplete-sequence trim for that lane
+    __m256i unsafe_e2_ymm = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x80, 0x04), is_e2_ymm);
+    __m256i unsafe_ea_ymm = _mm256_and_si256(
+        is_ea_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x99, 0x07),
+                                   sz_haswell_in_byte_range_(next_bytes_ymm, 0xAD, 0x02)));
+    sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(
+        _mm256_or_si256(_mm256_or_si256(unsafe_e2_ymm, unsafe_ea_ymm), is_ef_ymm));
+    stop_mask |= is_foreign_lead_mask;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split trailing sequences: the caseless family contributes 2-byte leads (D7-DF)
+    // and both families contribute 3-byte leads
+    sz_u32_t incomplete_mask = //
+        (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
+        (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+    return fold_length;
+}
+
+/**
+ *  @brief Folds a 32-byte chunk of supplementary-plane 4-byte sequences (F0-F4 leads) mixed
+ *      with ASCII - emoji-rich text and historic scripts.
+ *
+ *  Every supplementary-plane codepoint WITH case folding (Deseret, Osage, Warang Citi, Adlam,
+ *  Garay, Medefaidrin, archaic Latin/Greek extensions, …) lives below U+1F000, i.e. its UTF-8
+ *  second byte is < 0x9F under an F0 lead. Sequences whose second byte is ≥ 0x9F - all emoji
+ *  and everything in planes 2+ - are caseless and copy through unchanged, with only the mixed
+ *  ASCII folded. Folding 4-byte sequences, the complex family's 2-byte leads (C0-C1, C7-CD,
+ *  D2-D6: Latin Ext-B tails, IPA, extended Cyrillic, Armenian), and foreign-family leads
+ *  truncate the chunk at their lead and route one rune to the serial fallback.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs the serial path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_supplementary_chunk_( //
+    __m256i source_ymm, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+
+    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i is_four_byte_lead_ymm = sz_haswell_in_byte_range_(source_ymm, 0xF0, 0x08);
+
+    // A 4-byte lead in lane 31 sees a zero `next` byte, fails the ≥ 0x9F test, and truncates -
+    // partially covering the incomplete-sequence trim; lanes 29-30 still need the trim below
+    __m256i folding_four_byte_ymm = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x9F, 0x61),
+                                                        is_four_byte_lead_ymm);
+    sz_u32_t stop_mask = (is_complex_lead_mask & ~is_four_byte_lead_mask) | is_foreign_lead_mask |
+                         (sz_u32_t)_mm256_movemask_epi8(folding_four_byte_ymm);
+    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+
+    // Don't split a trailing 4-byte sequence: a lead in lanes 29-31 lacks its continuations
+    sz_u32_t incomplete_mask = is_four_byte_lead_mask &
+                               ~sz_haswell_mask_until_(fold_length > 3 ? fold_length - 3 : 0);
+    incomplete_mask &= sz_haswell_mask_until_(fold_length);
+    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (fold_length == 0) return 0;
+
+    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
     return fold_length;
 }
 
@@ -335,26 +587,47 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
             ((is_greek_lead_mask != 0) << 4) | ((is_e1_lead_mask != 0) << 5) | ((is_guarded_lead_mask != 0) << 6) |
             ((is_complex_lead_mask != 0) << 7));
 
-        if (!(lead_families & ~sz_utf8_fold_haswell_lead_caseless_flag_)) {
-            sz_u32_t is_two_byte_lead_mask = is_lead_mask & ~is_three_byte_lead_mask & ~is_four_byte_lead_mask;
-            sz_size_t handled = sz_utf8_case_fold_haswell_caseless_chunk_(source_ymm, is_two_byte_lead_mask,
-                                                                          is_three_byte_lead_mask, target);
-            if (handled) {
-                target += handled, source += handled, source_length -= handled;
-                continue;
-            }
-        }
+        // Handler dispatch triggers on family PRESENCE, not exclusivity: every handler below
+        // truncates at the first lead outside its families, so a mixed chunk still folds its
+        // longest matching prefix vectorized. Without this, one foreign byte - a « quote in
+        // Russian, an — dash in German - poisons ~16 consecutive windows into one-rune serial
+        // steps, halving real-corpus throughput. A handler that cannot fold even the first
+        // character returns zero and falls through to the next family or the serial fallback.
+        sz_size_t handled = 0;
+        sz_u32_t is_two_byte_lead_mask = is_lead_mask & ~is_three_byte_lead_mask & ~is_four_byte_lead_mask;
+        if (lead_families & sz_utf8_fold_haswell_lead_caseless_flag_)
+            handled = sz_utf8_case_fold_haswell_caseless_chunk_(source_ymm, is_two_byte_lead_mask,
+                                                                is_three_byte_lead_mask,
+                                                                is_lead_mask & ~is_caseless_lead_mask, target);
         // Unlike Ice Lake, pure Latin-1 chunks (German, French) take this handler too: it covers
         // their C2/C3 folds exactly, and there is no separate Latin-1 cascade to fall back onto
-        else if (!(lead_families &
-                   ~(sz_utf8_fold_haswell_lead_latin_flag_ | sz_utf8_fold_haswell_lead_latin_extended_flag_ |
-                     sz_utf8_fold_haswell_lead_e1_flag_))) {
-            sz_size_t handled = sz_utf8_case_fold_haswell_latin_chunk_(source_ymm, is_continuation_mask,
-                                                                       is_three_byte_lead_mask, target);
-            if (handled) {
-                target += handled, source += handled, source_length -= handled;
-                continue;
-            }
+        if (!handled && (lead_families & (sz_utf8_fold_haswell_lead_latin_flag_ |
+                                          sz_utf8_fold_haswell_lead_latin_extended_flag_ |
+                                          sz_utf8_fold_haswell_lead_e1_flag_)))
+            handled = sz_utf8_case_fold_haswell_latin_chunk_(
+                source_ymm, is_continuation_mask, is_three_byte_lead_mask,
+                is_lead_mask & ~(is_latin_lead_mask | is_latin_extended_lead_mask | is_e1_lead_mask), target);
+        // Basic Cyrillic + ASCII - the common case for Russian, Ukrainian, and Bulgarian
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_cyrillic_flag_))
+            handled = sz_utf8_case_fold_haswell_cyrillic_chunk_(source_ymm, is_lead_mask & ~is_cyrillic_lead_mask,
+                                                                target);
+        // Basic Greek + ASCII
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_greek_flag_))
+            handled = sz_utf8_case_fold_haswell_greek_chunk_(source_ymm, is_lead_mask & ~is_greek_lead_mask, target);
+        // Guarded 3-byte leads mixed with caseless scripts - CJK or Hangul with E2 punctuation;
+        // the handler verifies the guarded seconds and truncates at the first folding sequence
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_guarded_flag_))
+            handled = sz_utf8_case_fold_haswell_guarded_chunk_(
+                source_ymm, is_two_byte_lead_mask, is_three_byte_lead_mask,
+                is_lead_mask & ~(is_caseless_lead_mask | is_guarded_lead_mask), target);
+        // Complex chunks are usually emoji runs: 4-byte sequences with caseless second bytes
+        // copy through; anything else in the family truncates to the serial path
+        if (!handled && (lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
+            handled = sz_utf8_case_fold_haswell_supplementary_chunk_(
+                source_ymm, is_complex_lead_mask, is_four_byte_lead_mask, is_lead_mask & ~is_complex_lead_mask, target);
+        if (handled) {
+            target += handled, source += handled, source_length -= handled;
+            continue;
         }
 
         // Mixed or complex chunks fold one rune serially and rejoin the vector loop; with ≥ 32
