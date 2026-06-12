@@ -205,7 +205,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_of_substitution_i16_vecs[2];
         cost_of_substitution_i16_vecs[0] = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        cost_of_substitution_i16_vecs[1] = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        cost_of_substitution_i16_vecs[1] = vmovl_high_s8(cost_of_substitution_i8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             int16x8_t pre_substitution_vec = vld1q_s16(scores_pre_substitution + part * 8);
@@ -317,7 +317,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linea
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_of_substitution_i16_vecs[2];
         cost_of_substitution_i16_vecs[0] = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        cost_of_substitution_i16_vecs[1] = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        cost_of_substitution_i16_vecs[1] = vmovl_high_s8(cost_of_substitution_i8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             int16x8_t pre_substitution_vec = vld1q_s16(scores_pre_substitution + part * 8);
@@ -432,12 +432,12 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
         // Sign-extend the 16 packed `i8` costs into four 4-lane `i32` quarters.
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_low_i16 = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        int16x8_t cost_high_i16 = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        int16x8_t cost_high_i16 = vmovl_high_s8(cost_of_substitution_i8_vec);
         int32x4_t cost_of_substitution_i32_vecs[4];
         cost_of_substitution_i32_vecs[0] = vmovl_s16(vget_low_s16(cost_low_i16));
-        cost_of_substitution_i32_vecs[1] = vmovl_s16(vget_high_s16(cost_low_i16));
+        cost_of_substitution_i32_vecs[1] = vmovl_high_s16(cost_low_i16);
         cost_of_substitution_i32_vecs[2] = vmovl_s16(vget_low_s16(cost_high_i16));
-        cost_of_substitution_i32_vecs[3] = vmovl_s16(vget_high_s16(cost_high_i16));
+        cost_of_substitution_i32_vecs[3] = vmovl_high_s16(cost_high_i16);
 
         for (size_t part = 0; part != 4; ++part) {
             int32x4_t pre_substitution_vec = vld1q_s32(scores_pre_substitution + part * 4);
@@ -543,12 +543,12 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linea
 
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_low_i16 = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        int16x8_t cost_high_i16 = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        int16x8_t cost_high_i16 = vmovl_high_s8(cost_of_substitution_i8_vec);
         int32x4_t cost_of_substitution_i32_vecs[4];
         cost_of_substitution_i32_vecs[0] = vmovl_s16(vget_low_s16(cost_low_i16));
-        cost_of_substitution_i32_vecs[1] = vmovl_s16(vget_high_s16(cost_low_i16));
+        cost_of_substitution_i32_vecs[1] = vmovl_high_s16(cost_low_i16);
         cost_of_substitution_i32_vecs[2] = vmovl_s16(vget_low_s16(cost_high_i16));
-        cost_of_substitution_i32_vecs[3] = vmovl_s16(vget_high_s16(cost_high_i16));
+        cost_of_substitution_i32_vecs[3] = vmovl_high_s16(cost_high_i16);
 
         for (size_t part = 0; part != 4; ++part) {
             int32x4_t pre_substitution_vec = vld1q_s32(scores_pre_substitution + part * 4);
@@ -671,7 +671,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_of_substitution_i16_vecs[2];
         cost_of_substitution_i16_vecs[0] = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        cost_of_substitution_i16_vecs[1] = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        cost_of_substitution_i16_vecs[1] = vmovl_high_s8(cost_of_substitution_i8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             int16x8_t pre_substitution_vec = vld1q_s16(scores_pre_substitution + part * 8);
@@ -817,7 +817,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affin
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_of_substitution_i16_vecs[2];
         cost_of_substitution_i16_vecs[0] = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        cost_of_substitution_i16_vecs[1] = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        cost_of_substitution_i16_vecs[1] = vmovl_high_s8(cost_of_substitution_i8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             int16x8_t pre_substitution_vec = vld1q_s16(scores_pre_substitution + part * 8);
@@ -965,12 +965,12 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
         // Sign-extend the 16 packed `i8` costs into four 4-lane `i32` quarters.
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_low_i16 = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        int16x8_t cost_high_i16 = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        int16x8_t cost_high_i16 = vmovl_high_s8(cost_of_substitution_i8_vec);
         int32x4_t cost_of_substitution_i32_vecs[4];
         cost_of_substitution_i32_vecs[0] = vmovl_s16(vget_low_s16(cost_low_i16));
-        cost_of_substitution_i32_vecs[1] = vmovl_s16(vget_high_s16(cost_low_i16));
+        cost_of_substitution_i32_vecs[1] = vmovl_high_s16(cost_low_i16);
         cost_of_substitution_i32_vecs[2] = vmovl_s16(vget_low_s16(cost_high_i16));
-        cost_of_substitution_i32_vecs[3] = vmovl_s16(vget_high_s16(cost_high_i16));
+        cost_of_substitution_i32_vecs[3] = vmovl_high_s16(cost_high_i16);
 
         for (size_t part = 0; part != 4; ++part) {
             int32x4_t pre_substitution_vec = vld1q_s32(scores_pre_substitution + part * 4);
@@ -1110,12 +1110,12 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
 
         int8x16_t cost_of_substitution_i8_vec = lookup_.lookup16(first_vec, second_vec);
         int16x8_t cost_low_i16 = vmovl_s8(vget_low_s8(cost_of_substitution_i8_vec));
-        int16x8_t cost_high_i16 = vmovl_s8(vget_high_s8(cost_of_substitution_i8_vec));
+        int16x8_t cost_high_i16 = vmovl_high_s8(cost_of_substitution_i8_vec);
         int32x4_t cost_of_substitution_i32_vecs[4];
         cost_of_substitution_i32_vecs[0] = vmovl_s16(vget_low_s16(cost_low_i16));
-        cost_of_substitution_i32_vecs[1] = vmovl_s16(vget_high_s16(cost_low_i16));
+        cost_of_substitution_i32_vecs[1] = vmovl_high_s16(cost_low_i16);
         cost_of_substitution_i32_vecs[2] = vmovl_s16(vget_low_s16(cost_high_i16));
-        cost_of_substitution_i32_vecs[3] = vmovl_s16(vget_high_s16(cost_high_i16));
+        cost_of_substitution_i32_vecs[3] = vmovl_high_s16(cost_high_i16);
 
         for (size_t part = 0; part != 4; ++part) {
             int32x4_t pre_substitution_vec = vld1q_s32(scores_pre_substitution + part * 4);
@@ -1279,7 +1279,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         uint8x16_t cost_u8_vec = vbslq_u8(equal_vec, match_cost_u8_vec, mismatch_cost_u8_vec);
         uint16x8_t cost_u16_vecs[2];
         cost_u16_vecs[0] = vmovl_u8(vget_low_u8(cost_u8_vec));
-        cost_u16_vecs[1] = vmovl_u8(vget_high_u8(cost_u8_vec));
+        cost_u16_vecs[1] = vmovl_high_u8(cost_u8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             uint16x8_t pre_substitution_vec = vld1q_u16(scores_pre_substitution + part * 8);
@@ -1377,12 +1377,12 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
         uint8x16_t equal_vec = vceqq_u8(first_vec, second_vec);
         uint8x16_t cost_u8_vec = vbslq_u8(equal_vec, match_cost_u8_vec, mismatch_cost_u8_vec);
         uint16x8_t cost_low_u16 = vmovl_u8(vget_low_u8(cost_u8_vec));
-        uint16x8_t cost_high_u16 = vmovl_u8(vget_high_u8(cost_u8_vec));
+        uint16x8_t cost_high_u16 = vmovl_high_u8(cost_u8_vec);
         uint32x4_t cost_u32_vecs[4];
         cost_u32_vecs[0] = vmovl_u16(vget_low_u16(cost_low_u16));
-        cost_u32_vecs[1] = vmovl_u16(vget_high_u16(cost_low_u16));
+        cost_u32_vecs[1] = vmovl_high_u16(cost_low_u16);
         cost_u32_vecs[2] = vmovl_u16(vget_low_u16(cost_high_u16));
-        cost_u32_vecs[3] = vmovl_u16(vget_high_u16(cost_high_u16));
+        cost_u32_vecs[3] = vmovl_high_u16(cost_high_u16);
 
         for (size_t part = 0; part != 4; ++part) {
             uint32x4_t pre_substitution_vec = vld1q_u32(scores_pre_substitution + part * 4);
@@ -1482,7 +1482,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         uint8x16_t cost_u8_vec = vbslq_u8(equal_vec, match_cost_u8_vec, mismatch_cost_u8_vec);
         uint16x8_t cost_u16_vecs[2];
         cost_u16_vecs[0] = vmovl_u8(vget_low_u8(cost_u8_vec));
-        cost_u16_vecs[1] = vmovl_u8(vget_high_u8(cost_u8_vec));
+        cost_u16_vecs[1] = vmovl_high_u8(cost_u8_vec);
 
         for (size_t part = 0; part != 2; ++part) {
             uint16x8_t pre_substitution_vec = vld1q_u16(scores_pre_substitution + part * 8);
@@ -1608,12 +1608,12 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
         uint8x16_t equal_vec = vceqq_u8(vld1q_u8(first_reversed_slice), vld1q_u8(second_slice));
         uint8x16_t cost_u8_vec = vbslq_u8(equal_vec, match_cost_u8_vec, mismatch_cost_u8_vec);
         uint16x8_t cost_low_u16 = vmovl_u8(vget_low_u8(cost_u8_vec));
-        uint16x8_t cost_high_u16 = vmovl_u8(vget_high_u8(cost_u8_vec));
+        uint16x8_t cost_high_u16 = vmovl_high_u8(cost_u8_vec);
         uint32x4_t cost_u32_vecs[4];
         cost_u32_vecs[0] = vmovl_u16(vget_low_u16(cost_low_u16));
-        cost_u32_vecs[1] = vmovl_u16(vget_high_u16(cost_low_u16));
+        cost_u32_vecs[1] = vmovl_high_u16(cost_low_u16);
         cost_u32_vecs[2] = vmovl_u16(vget_low_u16(cost_high_u16));
-        cost_u32_vecs[3] = vmovl_u16(vget_high_u16(cost_high_u16));
+        cost_u32_vecs[3] = vmovl_high_u16(cost_high_u16);
 
         for (size_t part = 0; part != 4; ++part) {
             uint32x4_t pre_substitution_vec = vld1q_u32(scores_pre_substitution + part * 4);
