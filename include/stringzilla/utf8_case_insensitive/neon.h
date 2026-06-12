@@ -533,55 +533,40 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_western_europe_fold_
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_western_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                       sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_u8x16x2_t_` signature
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_e1_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
-    sz_u32_t is_e2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE2)));
-    sz_u32_t is_ef_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xEF)));
-    sz_u32_t is_c5_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC5)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC5)));
-    sz_u32_t is_c3_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC3)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC3)));
+    // The driver only tests the danger mask for non-emptiness, so the whole alarm stays in the
+    // byte-mask domain: every pattern is anchored at its SECOND byte, with the lead read from the
+    // `previous` view and the third byte from the `next` view. AVX2's `movemask <</>> 1` predecessor
+    // algebra becomes plain `vceqq` against those shifted views, and a single `vmaxvq_u8` over the
+    // accumulated danger lanes replaces the dozen per-value horizontal reductions.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_ci_neon_next_bytes_u8x16x2_(text_u8x16x2);
 
-    // Second/third bytes
-    sz_u32_t is_ba_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xBA)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xBA)));
-    sz_u32_t is_84_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x84)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x84)));
-    sz_u32_t is_ac_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAC)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xAC)));
-    sz_u32_t is_bf_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xBF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xBF)));
-    sz_u32_t is_9f_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9F)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x9F)));
-    sz_u32_t is_aa_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAA)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xAA)));
-    sz_u32_t is_ab_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAB)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xAB)));
-    sz_u32_t is_b8_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB8)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB8)));
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
+        uint8x16_t next_u8x16 = next_u8x16x2.val[register_index];
+        uint8x16_t is_after_c5_u8x16 = vceqq_u8(previous_u8x16, vdupq_n_u8(0xC5));
 
-    // E1 BA is dangerous only when the third byte is 96-9E; the refinement is branched-over
-    // since most non-Vietnamese text has no E1 BA pairs at all
-    sz_u32_t is_e1_ba_danger_mask = (is_e1_mask << 1) & is_ba_mask;
-    if (is_e1_ba_danger_mask) {
-        sz_u32_t is_expanding_third_mask = sz_utf8_ci_neon_movemask_u8x16x2_(
-            sz_utf8_ci_neon_in_byte_range_u8x16_(low_u8x16, 0x96, 0x09),
-            sz_utf8_ci_neon_in_byte_range_u8x16_(high_u8x16, 0x96, 0x09));
-        is_e1_ba_danger_mask &= is_expanding_third_mask >> 1;
+        uint8x16_t danger_u8x16 = vandq_u8( // Capital Sharp S & co (E1 BA 96-9E)
+            vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xBA)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE1))),
+            sz_utf8_ci_neon_in_byte_range_u8x16_(next_u8x16, 0x96, 0x09));
+        danger_u8x16 = vorrq_u8( // Kelvin/Angstrom (E2 84 AA/AB)
+            danger_u8x16,
+            vandq_u8(vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x84)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))),
+                     vorrq_u8(vceqq_u8(next_u8x16, vdupq_n_u8(0xAA)), vceqq_u8(next_u8x16, vdupq_n_u8(0xAB)))));
+        danger_u8x16 = vorrq_u8( // Ligatures (EF AC xx)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xAC)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xEF))));
+        danger_u8x16 = vorrq_u8( // Long S (C5 BF)
+            danger_u8x16, vandq_u8(is_after_c5_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xBF))));
+        danger_u8x16 = vorrq_u8( // 'Ÿ' (C5 B8) → 'ÿ' (C3 BF)
+            danger_u8x16, vandq_u8(is_after_c5_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xB8))));
+        danger_u8x16 = vorrq_u8( // Sharp S (C3 9F)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x9F)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xC3))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
     }
-
-    // Danger mask construction (checking third bytes for E1 BA and E2 84 to avoid false positives)
-    return is_e1_ba_danger_mask |                                                // Capital Sharp S & co (E1 BA 96-9E)
-           ((is_e2_mask << 1) & is_84_mask & ((is_aa_mask | is_ab_mask) >> 1)) | // Kelvin/Angstrom (E2 84 AA/AB)
-           ((is_ef_mask << 1) & is_ac_mask) |                                    // Ligatures (EF AC xx)
-           ((is_c5_mask << 1) & is_bf_mask) |                                    // Long S (C5 BF)
-           ((is_c5_mask << 1) & is_b8_mask) |                                    // 'Ÿ' (C5 B8) → 'ÿ' (C3 BF)
-           ((is_c3_mask << 1) & is_9f_mask);                                     // Sharp S (C3 9F)
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -667,42 +652,36 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_central_europe_fold_
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_central_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                       sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_u8x16x2_t_` signature
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_e2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE2)));
-    sz_u32_t is_c3_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC3)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC3)));
-    sz_u32_t is_c4_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC4)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC4)));
-    sz_u32_t is_c5_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC5)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC5)));
-    sz_u32_t is_ef_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xEF)));
+    // Byte-mask danger detection anchored at the second byte; the lead comes from the `previous`
+    // view. All pairs are two-byte, so no `next` lookup is needed, and one `vmaxvq_u8` gates the
+    // driver's danger branch in place of seven per-value movemasks.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
-    // Second bytes
-    sz_u32_t is_84_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x84)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x84)));
-    sz_u32_t is_9f_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9F)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x9F)));
-    sz_u32_t is_b0_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB0)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB0)));
-    sz_u32_t is_bf_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xBF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xBF)));
-    sz_u32_t is_ac_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAC)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xAC)));
-    sz_u32_t is_b8_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB8)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB8)));
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
+        uint8x16_t is_after_c4_u8x16 = vceqq_u8(previous_u8x16, vdupq_n_u8(0xC4));
+        uint8x16_t is_after_c5_u8x16 = vceqq_u8(previous_u8x16, vdupq_n_u8(0xC5));
 
-    // Danger mask construction
-    return ((is_e2_mask << 1) & is_84_mask) | // Kelvin (E2 84 AA)
-           ((is_c3_mask << 1) & is_9f_mask) | // Sharp S (C3 9F)
-           ((is_c4_mask << 1) & is_b0_mask) | // Dotted I (C4 B0)
-           ((is_c4_mask << 1) & is_bf_mask) | // 'Ŀ' (C4 BF) → 'ŀ' (C5 80), crosses lead bytes
-           ((is_c5_mask << 1) & is_bf_mask) | // Long S (C5 BF)
-           ((is_c5_mask << 1) & is_b8_mask) | // 'Ÿ' (C5 B8) → 'ÿ' (C3 BF)
-           ((is_ef_mask << 1) & is_ac_mask);  // Ligatures (EF AC xx)
+        uint8x16_t danger_u8x16 = vandq_u8( // Kelvin (E2 84 AA)
+            vceqq_u8(text_u8x16, vdupq_n_u8(0x84)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2)));
+        danger_u8x16 = vorrq_u8( // Sharp S (C3 9F)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x9F)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xC3))));
+        danger_u8x16 = vorrq_u8( // Dotted I (C4 B0)
+            danger_u8x16, vandq_u8(is_after_c4_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xB0))));
+        danger_u8x16 = vorrq_u8( // 'Ŀ' (C4 BF) → 'ŀ' (C5 80), crosses lead bytes
+            danger_u8x16, vandq_u8(is_after_c4_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xBF))));
+        danger_u8x16 = vorrq_u8( // Long S (C5 BF)
+            danger_u8x16, vandq_u8(is_after_c5_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xBF))));
+        danger_u8x16 = vorrq_u8( // 'Ÿ' (C5 B8) → 'ÿ' (C3 BF)
+            danger_u8x16, vandq_u8(is_after_c5_u8x16, vceqq_u8(text_u8x16, vdupq_n_u8(0xB8))));
+        danger_u8x16 = vorrq_u8( // Ligatures (EF AC xx)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xAC)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xEF))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
+    }
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -779,19 +758,21 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_cyrillic_fold_u8x16x
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_cyrillic_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_u8x16x2_t_` signature
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
-    sz_u32_t is_e1_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
-    sz_u32_t is_b2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB2)));
-    sz_u32_t danger_mask = (is_e1_mask << 1) & is_b2_mask;
-    if (danger_mask) {
-        sz_u32_t is_folding_third_mask = sz_utf8_ci_neon_movemask_u8x16x2_(
-            sz_utf8_ci_neon_in_byte_range_u8x16_(low_u8x16, 0x80, 0x09),
-            sz_utf8_ci_neon_in_byte_range_u8x16_(high_u8x16, 0x80, 0x09));
-        danger_mask &= is_folding_third_mask >> 1;
+
+    // E1 B2 is dangerous only when the third (next) byte folds, i.e. lands in 80-88. Anchored at the
+    // B2 second byte: lead from `previous`, third from `next`, gated by one `vmaxvq_u8`.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_ci_neon_next_bytes_u8x16x2_(text_u8x16x2);
+
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t danger_u8x16 = vandq_u8(
+            vandq_u8(vceqq_u8(text_u8x16x2.val[register_index], vdupq_n_u8(0xB2)),
+                     vceqq_u8(previous_u8x16x2.val[register_index], vdupq_n_u8(0xE1))),
+            sz_utf8_ci_neon_in_byte_range_u8x16_(next_u8x16x2.val[register_index], 0x80, 0x09));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
     }
-    return danger_mask;
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -878,23 +859,21 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_armenian_fold_u8x16x
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_armenian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_u8x16x2_t_` signature
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_d6_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xD6)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xD6)));
-    sz_u32_t is_ef_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xEF)));
+    // Two two-byte pairs anchored at their second byte; lead from `previous`, gated by `vmaxvq_u8`.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
-    // Second bytes
-    sz_u32_t is_87_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x87)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x87)));
-    sz_u32_t is_ac_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAC)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xAC)));
-
-    // Danger mask construction
-    return ((is_d6_mask << 1) & is_87_mask) | // Ech-Yiwn (D6 87)
-           ((is_ef_mask << 1) & is_ac_mask);  // Ligatures (EF AC xx)
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
+        uint8x16_t danger_u8x16 = vandq_u8( // Ech-Yiwn (D6 87)
+            vceqq_u8(text_u8x16, vdupq_n_u8(0x87)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xD6)));
+        danger_u8x16 = vorrq_u8( // Ligatures (EF AC xx)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xAC)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xEF))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
+    }
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -1018,47 +997,41 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_greek_fold_u8x16x2_(
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_greek_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                              sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_u8x16x2_t_` signature
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_ce_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xCE)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xCE)));
-    sz_u32_t is_cf_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xCF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xCF)));
-    sz_u32_t is_e2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE2)));
-    sz_u32_t is_e1_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
-    sz_u32_t is_cd_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xCD)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xCD)));
+    // Pair danger anchored at the second byte (lead from `previous`); the polytonic & archaic leads
+    // E1/CD are blanket hazards flagged at their own lane. One `vmaxvq_u8` gates the danger branch.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
-    // Second bytes
-    sz_u32_t is_90_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x90)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x90)));
-    sz_u32_t is_b0_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB0)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB0)));
-    sz_u32_t is_9x_mask = is_90_mask |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x91)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x91))) |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x95)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x95))) |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x96)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x96)));
-    sz_u32_t is_bx_mask = is_b0_mask |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB1))) |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB4)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB4))) |
-                          sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB5)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB5)));
-    sz_u32_t is_84_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x84)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x84)));
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
 
-    // Danger mask construction
-    return ((is_ce_mask << 1) & (is_90_mask | is_b0_mask)) | // 'ΐ', 'ΰ' (CE 90 / CE B0)
-           ((is_cf_mask << 1) & (is_9x_mask | is_bx_mask)) | // Greek symbols (CF 9x / CF Bx)
-           ((is_e2_mask << 1) & is_84_mask) |                // Ohm sign (E2 84 A6)
-           is_e1_mask | is_cd_mask;                          // Blanket polytonic & archaic leads
+        // 'ΐ', 'ΰ' (CE 90 / CE B0)
+        uint8x16_t second_90_or_b0_u8x16 =
+            vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x90)), vceqq_u8(text_u8x16, vdupq_n_u8(0xB0)));
+        uint8x16_t danger_u8x16 = vandq_u8(vceqq_u8(previous_u8x16, vdupq_n_u8(0xCE)), second_90_or_b0_u8x16);
+
+        // Greek symbols (CF 9x / CF Bx)
+        uint8x16_t second_9x_u8x16 = vorrq_u8(
+            vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x90)), vceqq_u8(text_u8x16, vdupq_n_u8(0x91))),
+            vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x95)), vceqq_u8(text_u8x16, vdupq_n_u8(0x96))));
+        uint8x16_t second_bx_u8x16 = vorrq_u8(
+            vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xB0)), vceqq_u8(text_u8x16, vdupq_n_u8(0xB1))),
+            vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xB4)), vceqq_u8(text_u8x16, vdupq_n_u8(0xB5))));
+        danger_u8x16 = vorrq_u8(danger_u8x16, vandq_u8(vceqq_u8(previous_u8x16, vdupq_n_u8(0xCF)),
+                                                       vorrq_u8(second_9x_u8x16, second_bx_u8x16)));
+
+        // Ohm sign (E2 84 A6)
+        danger_u8x16 = vorrq_u8(
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x84)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))));
+
+        // Blanket polytonic & archaic leads
+        danger_u8x16 = vorrq_u8(
+            danger_u8x16, vorrq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xE1)), vceqq_u8(text_u8x16, vdupq_n_u8(0xCD))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
+    }
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -1172,49 +1145,33 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_case_insensitive_find_neon_vietnamese_fold_u8x1
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_vietnamese_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                   sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_e1_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
-    sz_u32_t is_c3_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC3)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC3)));
-    sz_u32_t is_c5_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC5)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xC5)));
-    sz_u32_t is_ef_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xEF)));
-    sz_u32_t is_e2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE2)));
+    // All hazards anchored at their second byte: lead from `previous`, the E1 BA expanding third
+    // byte from `next`. The dense-E1 early exit is unnecessary now that the per-value movemasks are
+    // gone - the whole alarm is a handful of `vceqq`/`vand` ops gated by one `vmaxvq_u8`.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_ci_neon_next_bytes_u8x16x2_(text_u8x16x2);
 
-    // Vietnamese text is dense in E1 (and the safe E1 BA letters), but plain Latin chunks
-    // skip all the second-byte work behind this early exit
-    if (!(is_e1_mask | is_c3_mask | is_c5_mask | is_ef_mask | is_e2_mask)) return 0;
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
+        uint8x16_t next_u8x16 = next_u8x16x2.val[register_index];
 
-    // E1 BA pairs refine on the expanding 96-9F third byte
-    sz_u32_t is_ba_second_mask = (is_e1_mask << 1) &
-                                 sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xBA)),
-                                                                   vceqq_u8(high_u8x16, vdupq_n_u8(0xBA)));
-    sz_u32_t is_bad_third_mask = (is_ba_second_mask << 1) &
-                                 sz_utf8_ci_neon_movemask_u8x16x2_(
-                                     sz_utf8_ci_neon_in_byte_range_u8x16_(low_u8x16, 0x96, 0x0A),
-                                     sz_utf8_ci_neon_in_byte_range_u8x16_(high_u8x16, 0x96, 0x0A));
-
-    // Two-byte pair alarms
-    sz_u32_t sharp_s_mask = (is_c3_mask << 1) &
-                            sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9F)),
-                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x9F)));
-    sz_u32_t long_s_mask = (is_c5_mask << 1) &
-                           sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xBF)),
-                                                             vceqq_u8(high_u8x16, vdupq_n_u8(0xBF)));
-    sz_u32_t ligature_mask = (is_ef_mask << 1) &
-                             sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xAC)),
-                                                               vceqq_u8(high_u8x16, vdupq_n_u8(0xAC)));
-    sz_u32_t kelvin_mask = (is_e2_mask << 1) &
-                           sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x84)),
-                                                             vceqq_u8(high_u8x16, vdupq_n_u8(0x84)));
-
-    // Shift back to sequence-start positions
-    return (is_bad_third_mask >> 2) | ((sharp_s_mask | long_s_mask | ligature_mask | kelvin_mask) >> 1);
+        uint8x16_t danger_u8x16 = vandq_u8( // E1 BA 96-9F (expanding third byte)
+            vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xBA)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE1))),
+            sz_utf8_ci_neon_in_byte_range_u8x16_(next_u8x16, 0x96, 0x0A));
+        danger_u8x16 = vorrq_u8( // Sharp S (C3 9F)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x9F)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xC3))));
+        danger_u8x16 = vorrq_u8( // Long S (C5 BF)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xBF)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xC5))));
+        danger_u8x16 = vorrq_u8( // Ligatures (EF AC xx)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xAC)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xEF))));
+        danger_u8x16 = vorrq_u8( // Kelvin (E2 84 xx)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x84)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
+    }
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
@@ -1254,32 +1211,29 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_neon_vietnamese_( //
 SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_neon_georgian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
-    uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
-    // Lead bytes
-    sz_u32_t is_e1_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
-    sz_u32_t is_e2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xE2)));
+    // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third (next) byte for Asomtavruli; E2 B4 =
+    // Nuskhuri. Anchored at the second byte (lead from `previous`), gated by one `vmaxvq_u8`.
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_ci_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_ci_neon_next_bytes_u8x16x2_(text_u8x16x2);
 
-    // Second bytes
-    sz_u32_t is_b2_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB2)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB2)));
-    sz_u32_t is_82_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x82)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0x82)));
-    sz_u32_t is_b4_mask = sz_utf8_ci_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xB4)),
-                                                            vceqq_u8(high_u8x16, vdupq_n_u8(0xB4)));
+    uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
+    for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
+        uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
+        uint8x16_t previous_u8x16 = previous_u8x16x2.val[register_index];
+        uint8x16_t next_u8x16 = next_u8x16x2.val[register_index];
+        uint8x16_t is_after_e1_u8x16 = vceqq_u8(previous_u8x16, vdupq_n_u8(0xE1));
 
-    // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third byte for Asomtavruli; E2 B4 = Nuskhuri
-    sz_u32_t mtavruli_mask = (is_e1_mask << 1) & is_b2_mask;
-    sz_u32_t asomtavruli_mask = (((is_e1_mask << 1) & is_82_mask) << 1) &
-                                sz_utf8_ci_neon_movemask_u8x16x2_(
-                                    sz_utf8_ci_neon_in_byte_range_u8x16_(low_u8x16, 0xA0, 0x46),
-                                    sz_utf8_ci_neon_in_byte_range_u8x16_(high_u8x16, 0xA0, 0x46));
-    sz_u32_t nuskhuri_mask = (is_e2_mask << 1) & is_b4_mask;
-
-    // Shift back to sequence-start positions
-    return (mtavruli_mask >> 1) | (asomtavruli_mask >> 2) | (nuskhuri_mask >> 1);
+        uint8x16_t danger_u8x16 = vandq_u8( // Mtavruli (E1 B2)
+            vceqq_u8(text_u8x16, vdupq_n_u8(0xB2)), is_after_e1_u8x16);
+        danger_u8x16 = vorrq_u8( // Asomtavruli (E1 82 A0-E5)
+            danger_u8x16, vandq_u8(vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x82)), is_after_e1_u8x16),
+                                   sz_utf8_ci_neon_in_byte_range_u8x16_(next_u8x16, 0xA0, 0x46)));
+        danger_u8x16 = vorrq_u8( // Nuskhuri (E2 B4)
+            danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xB4)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))));
+        any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
+    }
+    return vmaxvq_u8(any_danger_u8x16);
 }
 
 /**
