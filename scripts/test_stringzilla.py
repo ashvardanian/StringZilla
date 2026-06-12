@@ -1754,6 +1754,63 @@ def test_utf8_case_fold_all_codepoints():
     )
 
 
+def _reference_case_insensitive_find(haystack_bytes: bytes, needle_folded: bytes, unicode_folds: dict) -> int:
+    """Reference case-insensitive find from UCD rules: byte offset of the first
+    haystack position whose codepoint folds concatenate to exactly `needle_folded`."""
+    if not needle_folded:
+        return 0
+    text = haystack_bytes.decode("utf-8")
+    codepoint_byte_offsets = []
+    codepoint_folds = []
+    byte_offset = 0
+    for char in text:
+        char_bytes = char.encode("utf-8")
+        codepoint_byte_offsets.append(byte_offset)
+        codepoint_folds.append(unicode_folds.get(ord(char), char_bytes))
+        byte_offset += len(char_bytes)
+    for start in range(len(text)):
+        accumulated = b""
+        for index in range(start, len(text)):
+            accumulated += codepoint_folds[index]
+            if len(accumulated) >= len(needle_folded):
+                break
+        if accumulated == needle_folded:
+            return codepoint_byte_offsets[start]
+    return -1
+
+
+def test_utf8_case_insensitive_find_preimages():
+    """Adversarial probes from Unicode 17.0 CaseFolding.txt: for every codepoint whose
+    fold differs from itself, the fold OUTPUT is what a user types as the needle — and
+    the PREIMAGE is what hides in the haystack, placed at chunk-boundary offsets.
+    """
+    # Load Unicode 17.0 case folding rules (downloads and caches automatically)
+    try:
+        unicode_folds = _get_case_folding_rules("17.0.0")
+    except UnicodeDataDownloadError as e:
+        pytest.skip(f"Skipping due to network issue: {e}")
+
+    mismatches = []
+    for codepoint in sorted(unicode_folds):
+        if 0xD800 <= codepoint <= 0xDFFF:
+            continue
+        preimage_bytes = chr(codepoint).encode("utf-8")
+        folded_bytes = unicode_folds[codepoint]
+        if preimage_bytes == folded_bytes:
+            continue  # Identity folds carry no signal here
+        for offset in (0, 30, 62, 63, 64):
+            haystack = b"y" * offset + preimage_bytes + b"tail"
+            expected = _reference_case_insensitive_find(haystack, folded_bytes, unicode_folds)
+            actual = sz.utf8_case_insensitive_find(haystack, folded_bytes)
+            if actual != expected:
+                mismatches.append((f"U+{codepoint:04X}", offset, expected, actual))
+
+    assert not mismatches, (
+        f"{len(mismatches)} case-insensitive find mismatches vs Unicode 17.0 reference. "
+        f"First 10 (codepoint, offset, expected, actual): {mismatches[:10]}"
+    )
+
+
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_utf8_case_fold_random_strings(seed_value: int):
     """Test case folding on random multi-codepoint strings."""

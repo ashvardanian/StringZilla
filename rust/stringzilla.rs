@@ -4320,4 +4320,41 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines, vec![b"", b""]);
     }
+
+    #[test]
+    fn utf8_case_fold_golden_vectors() {
+        // One probe per kernel family: ASCII, Latin-1 (C3), Latin Extended (C4/C6),
+        // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
+        // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
+        let golden: &[(&str, &[u8])] = &[
+            ("HeLLo", b"hello"),                   // ASCII fast path
+            ("\u{00DF}", b"ss"),                   // ß → ss expansion
+            ("\u{1E9E}", b"ss"),                   // ẞ → ss (E1 BA lead bytes)
+            ("\u{03A3}", "\u{03C3}".as_bytes()),   // Σ → σ
+            ("\u{03C2}", "\u{03C3}".as_bytes()),   // final sigma ς → σ
+            ("\u{FB03}", b"ffi"),                  // ﬃ ligature → ffi
+            ("\u{041A}", "\u{043A}".as_bytes()),   // Cyrillic К → к
+            ("\u{00C4}", "\u{00E4}".as_bytes()),   // Ä → ä (C3 lead byte)
+            ("\u{0110}", "\u{0111}".as_bytes()),   // Đ → đ (C4 lead byte)
+            ("\u{0111}", "\u{0111}".as_bytes()),   // đ → đ (already folded)
+            ("\u{01A0}", "\u{01A1}".as_bytes()),   // Ơ → ơ (C6 lead byte)
+            ("\u{01A1}", "\u{01A1}".as_bytes()),   // ơ → ơ (already folded)
+            ("\u{1EA0}", "\u{1EA1}".as_bytes()),   // Ạ → ạ (E1 BA lead bytes)
+            ("\u{1EA1}", "\u{1EA1}".as_bytes()),   // ạ → ạ (already folded)
+            ("\u{212A}", b"k"),                    // Kelvin sign K → k
+            ("\u{10D50}", "\u{10D70}".as_bytes()), // Garay capital Ca → small Ca
+        ];
+        for (source, expected) in golden {
+            let mut destination = vec![0u8; source.len() * 3];
+            let folded_length = sz::utf8_case_fold(source, &mut destination[..]);
+            assert_eq!(&destination[..folded_length], *expected, "folding {:?}", source);
+        }
+
+        // Returned length tracks expansion: ẞ shrinks 3 → 2 bytes, ΐ grows 2 → 6 bytes
+        let mut destination = [0u8; 16];
+        assert_eq!(sz::utf8_case_fold("\u{1E9E}", &mut destination), 2);
+        let folded_length = sz::utf8_case_fold("\u{0390}", &mut destination);
+        assert_eq!(folded_length, 6);
+        assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
+    }
 }
