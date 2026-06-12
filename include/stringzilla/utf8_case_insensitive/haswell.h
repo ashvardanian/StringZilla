@@ -706,6 +706,425 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_cyrillic_( //
 
 #pragma endregion // Cyrillic Case-Insensitive Find
 
+#pragma region Armenian Case-Insensitive Find
+
+/**
+ *  @brief Fold a YMM register using Armenian case-folding rules.
+ *  @sa sz_utf8_case_rune_safe_armenian_k
+ *
+ *  Armenian uppercase spans two lead bytes and folds into three target blocks:
+ *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
+ *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
+ *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
+ *
+ *  Both lead rewrites are a +1 increment (D4 → D5, D5 → D6), so the second-byte flags
+ *  propagate one lane back through `next_bytes` and join the single merged offset add -
+ *  all rule masks flag disjoint byte positions. The D4 range checks only the lower bound,
+ *  mirroring the Ice Lake reference: valid continuation bytes never exceed BF.
+ */
+SZ_INTERNAL __m256i sz_utf8_case_insensitive_find_haswell_armenian_fold_ymm_(__m256i text_ymm) {
+    __m256i result_ymm = sz_utf8_case_insensitive_find_haswell_ascii_fold_ymm_(text_ymm);
+    __m256i previous_bytes_ymm = sz_utf8_ci_haswell_previous_bytes_(text_ymm);
+    __m256i is_after_d4_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD4));
+    __m256i is_after_d5_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD5));
+
+    // Second-byte classes; the [B1, FF] range realizes the unbounded `≥ B1` check
+    __m256i is_d4_upper_ymm = _mm256_and_si256(is_after_d4_ymm, //
+                                               sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xB1, 0x4F));
+    __m256i is_d5_low_ymm = _mm256_and_si256(is_after_d5_ymm, //
+                                             sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x80, 0x10));
+    __m256i is_d5_high_ymm = _mm256_and_si256(is_after_d5_ymm, //
+                                              sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x90, 0x07));
+
+    // Both −0x10 classes also bump their lead by one block (D4 → D5, D5 → D6)
+    __m256i is_minus_10_ymm = _mm256_or_si256(is_d4_upper_ymm, is_d5_high_ymm);
+    __m256i lead_plus_one_ymm = sz_utf8_ci_haswell_next_bytes_(is_minus_10_ymm);
+
+    // Disjoint positions merge into ONE offset vector and a single add
+    __m256i offsets_ymm = _mm256_and_si256(is_minus_10_ymm, _mm256_set1_epi8((char)0xF0));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_d5_low_ymm, _mm256_set1_epi8(0x30)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(lead_plus_one_ymm, _mm256_set1_epi8(0x01)));
+    return _mm256_add_epi8(result_ymm, offsets_ymm);
+}
+
+/**
+ *  @brief Alarm function for Armenian danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - D6 87: 'և' (U+0587) → "եւ" (D5 A5 D6 82), the Ech-Yiwn ligature (2 bytes → 4 bytes)
+ *  - EF AC 93-97: presentation-form ligatures 'ﬓ'-'ﬗ' (U+FB13-U+FB17) → 2 codepoints each
+ *
+ *  The EF AC pair alarms without a third-byte refinement, exactly like the Ice Lake
+ *  reference: the only EF AC neighbors are the Latin/Hebrew presentation forms, which
+ *  never appear inside Armenian haystacks, so the coarser test costs nothing in practice.
+ */
+SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_armenian_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_ymm_t_` signature
+
+    // Lead bytes (2 CMPEQ + movemask)
+    sz_u32_t is_d6_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xD6)));
+    sz_u32_t is_ef_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xEF)));
+
+    // Second bytes (2 CMPEQ + movemask)
+    sz_u32_t is_87_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x87)));
+    sz_u32_t is_ac_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xAC)));
+
+    // Danger mask construction
+    return ((is_d6_mask << 1) & is_87_mask) | // Ech-Yiwn (D6 87)
+           ((is_ef_mask << 1) & is_ac_mask);  // Ligatures (EF AC xx)
+}
+
+/**
+ *  @brief Armenian case-insensitive search for needles with safe slices up to 16 bytes.
+ *  @sa sz_utf8_case_rune_safe_armenian_k
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, //
+    sz_size_t *matched_length) {
+    return sz_utf8_case_insensitive_find_haswell_scripted_( //
+        sz_utf8_case_insensitive_find_haswell_armenian_fold_ymm_,
+        sz_utf8_case_insensitive_find_haswell_armenian_alarm_ymm_, //
+        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+}
+
+#pragma endregion // Armenian Case-Insensitive Find
+
+#pragma region Greek Case-Insensitive Find
+
+/**
+ *  @brief Fold a YMM register using Greek case-folding rules.
+ *  @sa sz_utf8_case_rune_safe_greek_k
+ *
+ *  Monotonic Greek folds entirely on the byte after a CE/CF/C2 lead:
+ *  - CE 91-9F: 'Α'-'Ο' → CE B1-BF 'α'-'ο' (second +0x20)
+ *  - CE A0-A9: 'Π'-'Ω' → CF 80-89 'π'-'ω' (second −0x20, lead CE → CF)
+ *  - CE 86: 'Ά' → CE AC 'ά' (second +0x26)
+ *  - CE 88-8A: 'Έ'-'Ί' → CE AD-AF 'έ'-'ί' (second +0x25)
+ *  - CE 8C: 'Ό' → CF 8C 'ό' (lead change only)
+ *  - CE 8E-8F: 'Ύ','Ώ' → CF 8D-8E 'ύ','ώ' (second −1, lead CE → CF)
+ *  - CE AA-AB: 'Ϊ','Ϋ' → CF 8A-8B 'ϊ','ϋ' (second −0x20, lead CE → CF)
+ *  - CF 82: 'ς' → CF 83 'σ' (final sigma, +1)
+ *  - C2 B5: 'µ' → CE BC 'μ' (micro sign joins Greek mu: lead +0x0C, second +0x07)
+ *
+ *  Every rule hits DISJOINT byte positions, so the per-rule deltas merge into one offset
+ *  vector with AND/OR ops and a single add applies them all. All CE → CF lead rewrites are
+ *  a +1 increment, propagated back from the second-byte flags through `next_bytes` like
+ *  the Eszett rewrite in the Western European fold.
+ */
+SZ_INTERNAL __m256i sz_utf8_case_insensitive_find_haswell_greek_fold_ymm_(__m256i text_ymm) {
+    __m256i result_ymm = sz_utf8_case_insensitive_find_haswell_ascii_fold_ymm_(text_ymm);
+    __m256i previous_bytes_ymm = sz_utf8_ci_haswell_previous_bytes_(text_ymm);
+    __m256i is_after_ce_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCE));
+    __m256i is_after_cf_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCF));
+    __m256i is_after_c2_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC2));
+
+    // Second-byte classes after a CE lead
+    __m256i is_basic1_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                             sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x91, 0x0F));
+    __m256i is_basic2_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                             sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xA0, 0x0A));
+    __m256i is_86_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                         _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x86)));
+    __m256i is_88_8a_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                            sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x88, 0x03));
+    __m256i is_8c_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                         _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x8C)));
+    __m256i is_8e_8f_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                            sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x8E, 0x02));
+    __m256i is_dialytika_ymm = _mm256_and_si256(is_after_ce_ymm, //
+                                                sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xAA, 0x02));
+
+    // Final sigma 'ς' (CF 82) and the micro sign's second byte (C2 B5)
+    __m256i is_final_sigma_ymm = _mm256_and_si256(is_after_cf_ymm, //
+                                                  _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x82)));
+    __m256i is_micro_second_ymm = _mm256_and_si256(is_after_c2_ymm, //
+                                                   _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB5)));
+
+    // Propagate the lead rewrites back from the second-byte flags: CE → CF is +1 for four
+    // classes; the micro sign's C2 → CE is +0x0C and stays separate
+    __m256i promote_lead_ymm = sz_utf8_ci_haswell_next_bytes_(
+        _mm256_or_si256(_mm256_or_si256(is_basic2_ymm, is_dialytika_ymm), _mm256_or_si256(is_8c_ymm, is_8e_8f_ymm)));
+    __m256i micro_lead_ymm = sz_utf8_ci_haswell_next_bytes_(is_micro_second_ymm);
+
+    // Disjoint positions merge into ONE offset vector and a single add
+    __m256i is_minus_20_ymm = _mm256_or_si256(is_basic2_ymm, is_dialytika_ymm);
+    __m256i is_plus_one_ymm = _mm256_or_si256(is_final_sigma_ymm, promote_lead_ymm);
+    __m256i offsets_ymm = _mm256_and_si256(is_basic1_ymm, _mm256_set1_epi8(0x20));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_minus_20_ymm, _mm256_set1_epi8((char)0xE0)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_86_ymm, _mm256_set1_epi8(0x26)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_88_8a_ymm, _mm256_set1_epi8(0x25)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_8e_8f_ymm, _mm256_set1_epi8((char)0xFF)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_plus_one_ymm, _mm256_set1_epi8(0x01)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(is_micro_second_ymm, _mm256_set1_epi8(0x07)));
+    offsets_ymm = _mm256_or_si256(offsets_ymm, _mm256_and_si256(micro_lead_ymm, _mm256_set1_epi8(0x0C)));
+    return _mm256_add_epi8(result_ymm, offsets_ymm);
+}
+
+/**
+ *  @brief Alarm function for Greek danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - CE 90 / CE B0: 'ΐ', 'ΰ' expand to 3 codepoints when folded
+ *  - CF 90, 91, 95, 96: Greek symbols 'ϐ', 'ϑ', 'ϕ', 'ϖ' fold to basic letters
+ *  - CF B0, B1, B4, B5: 'ϰ', 'ϱ', 'ϴ', 'ϵ' fold to basic letters ('ϴ' → CE B8 'θ')
+ *  - E2 84: Ohm sign 'Ω' (U+2126) prefix (3 bytes → 2 bytes)
+ *  - E1 (blanket): polytonic Greek Extended, with single-, double-, and triple-expanding folds
+ *  - CD (blanket): archaic letters and combining marks adjacent to the Greek block
+ *
+ *  Modern Greek text is pure CE/CF sequences, so the blanket E1/CD lead alarms almost
+ *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
+ *  sequence straddling the chunk edge fully visible in the next chunk.
+ */
+SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_greek_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_case_insensitive_alarm_ymm_t_` signature
+
+    // Lead bytes (5 CMPEQ + movemask)
+    sz_u32_t is_ce_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xCE)));
+    sz_u32_t is_cf_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xCF)));
+    sz_u32_t is_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE2)));
+    sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
+    sz_u32_t is_cd_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xCD)));
+
+    // Second bytes (9 CMPEQ + movemask)
+    sz_u32_t is_90_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x90)));
+    sz_u32_t is_b0_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB0)));
+    sz_u32_t is_9x_mask = is_90_mask |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x91))) |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x95))) |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x96)));
+    sz_u32_t is_bx_mask = is_b0_mask |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB1))) |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB4))) |
+                          (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB5)));
+    sz_u32_t is_84_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x84)));
+
+    // Danger mask construction
+    return ((is_ce_mask << 1) & (is_90_mask | is_b0_mask)) | // 'ΐ', 'ΰ' (CE 90 / CE B0)
+           ((is_cf_mask << 1) & (is_9x_mask | is_bx_mask)) | // Greek symbols (CF 9x / CF Bx)
+           ((is_e2_mask << 1) & is_84_mask) |                // Ohm sign (E2 84 A6)
+           is_e1_mask | is_cd_mask;                          // Blanket polytonic & archaic leads
+}
+
+/**
+ *  @brief Greek case-insensitive search for needles with safe slices up to 16 bytes.
+ *  @sa sz_utf8_case_rune_safe_greek_k
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_greek_(    //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, //
+    sz_size_t *matched_length) {
+    return sz_utf8_case_insensitive_find_haswell_scripted_( //
+        sz_utf8_case_insensitive_find_haswell_greek_fold_ymm_,
+        sz_utf8_case_insensitive_find_haswell_greek_alarm_ymm_, //
+        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+}
+
+#pragma endregion // Greek Case-Insensitive Find
+
+#pragma region Vietnamese Case-Insensitive Find
+
+/**
+ *  @brief Fold a YMM register using Vietnamese case-folding rules.
+ *  @sa sz_utf8_case_rune_safe_vietnamese_k
+ *
+ *  Vietnamese letters spread across four Latin blocks, all folding in place:
+ *  - C3 80-9E: Latin-1 Supplement uppercase → +0x20, except the caseless '×' (C3 97)
+ *  - C4/C5: Latin Extended-A folds with +1 keyed on continuation parity - the codepoint's
+ *    low bit equals the byte's low bit. Most of the block folds EVEN seconds; the
+ *    sub-ranges C4 B9-BE ('Ĺ'-'ľ') and C5 80-88 ('ŀ'-'ň') invert and fold ODD seconds
+ *  - C6 A0 / C6 AF: 'Ơ' → 'ơ' and 'Ư' → 'ư' (+1)
+ *  - E1 B8-BB: Latin Extended Additional folds EVEN third bytes with +1, except the
+ *    expanding E1 BA 96-9F block ('ẖ'-'ẟ'), which the alarm routes to the serial scanner
+ *
+ *  The third-byte rule needs the byte TWO lanes back, so a second `previous_bytes` pass
+ *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
+ */
+SZ_INTERNAL __m256i sz_utf8_case_insensitive_find_haswell_vietnamese_fold_ymm_(__m256i text_ymm) {
+    __m256i result_ymm = sz_utf8_case_insensitive_find_haswell_ascii_fold_ymm_(text_ymm);
+    __m256i previous_bytes_ymm = sz_utf8_ci_haswell_previous_bytes_(text_ymm);
+    __m256i previous2_bytes_ymm = sz_utf8_ci_haswell_previous_bytes_(previous_bytes_ymm);
+    __m256i is_after_c3_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC3));
+    __m256i is_after_c4_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC4));
+    __m256i is_after_c5_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC5));
+    __m256i is_after_c6_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC6));
+
+    // 1. Latin-1 Supplement: C3 80-9E → +0x20, except '×' (C3 97)
+    __m256i is_c3_target_ymm = _mm256_and_si256(
+        is_after_c3_ymm, _mm256_andnot_si256(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x97)),
+                                             sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x80, 0x1F)));
+
+    // 2. Latin Extended-A: +1 on EVEN seconds, except the inverted sub-ranges C4 B9-BE and
+    //    C5 00-88 (the unsigned `≤ 88` bound mirrors the Ice Lake reference) which fold ODD
+    __m256i is_odd_ymm = _mm256_cmpeq_epi8(_mm256_and_si256(text_ymm, _mm256_set1_epi8(0x01)), _mm256_set1_epi8(0x01));
+    __m256i is_inverted_ymm = _mm256_or_si256(
+        _mm256_and_si256(is_after_c4_ymm, sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xB9, 0x06)),
+        _mm256_and_si256(is_after_c5_ymm, sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x00, 0x89)));
+    __m256i is_extended_even_ymm = _mm256_andnot_si256(
+        is_odd_ymm, _mm256_andnot_si256(is_inverted_ymm, _mm256_or_si256(is_after_c4_ymm, is_after_c5_ymm)));
+    __m256i fold_extended_ymm = _mm256_or_si256(is_extended_even_ymm, _mm256_and_si256(is_inverted_ymm, is_odd_ymm));
+
+    // 3. Latin Extended-B: 'Ơ' (C6 A0) and 'Ư' (C6 AF) → +1
+    __m256i is_c6_target_ymm = _mm256_and_si256(
+        is_after_c6_ymm, _mm256_or_si256(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xA0)),
+                                         _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xAF))));
+
+    // 4. Latin Extended Additional: EVEN third bytes after an E1 B8-BB pair → +1,
+    //    except the expanding E1 BA 96-9F block
+    __m256i is_after_e1_pair_ymm = _mm256_and_si256(
+        _mm256_cmpeq_epi8(previous2_bytes_ymm, _mm256_set1_epi8((char)0xE1)),
+        sz_utf8_ci_haswell_in_byte_range_(previous_bytes_ymm, 0xB8, 0x04));
+    __m256i is_excluded_third_ymm = _mm256_and_si256(
+        _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xBA)),
+        sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x96, 0x0A));
+    __m256i fold_e1_ymm = _mm256_andnot_si256(
+        is_odd_ymm, _mm256_andnot_si256(is_excluded_third_ymm, is_after_e1_pair_ymm));
+
+    // Disjoint positions merge into ONE offset vector and a single add
+    __m256i is_plus_one_ymm = _mm256_or_si256(fold_extended_ymm, _mm256_or_si256(is_c6_target_ymm, fold_e1_ymm));
+    __m256i offsets_ymm = _mm256_or_si256(_mm256_and_si256(is_c3_target_ymm, _mm256_set1_epi8(0x20)),
+                                          _mm256_and_si256(is_plus_one_ymm, _mm256_set1_epi8(0x01)));
+    return _mm256_add_epi8(result_ymm, offsets_ymm);
+}
+
+/**
+ *  @brief Alarm function for Vietnamese danger zone detection.
+ *
+ *  Detects positions where danger characters occur that require special handling:
+ *  - E1 BA 96-9F: 'ẖ'-'ẟ' expand to ASCII-led sequences when folded ('ẞ' → "ss"); the
+ *    third-byte qualification matters because the rest of E1 BA covers Vietnamese letters
+ *    that fold in place - flagging them blanket-style would send dense Vietnamese text
+ *    into the serial danger-zone scanner on every chunk
+ *  - C3 9F: 'ß' (U+00DF) → "ss" (1 rune → 2 runes)
+ *  - C5 BF: 'ſ' (U+017F) → 's' (2 bytes → 1 byte)
+ *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
+ *  - E2 84 AA: 'K' Kelvin sign (3 bytes → 1 byte)
+ *
+ *  Ice Lake qualifies the third-byte range compare with the load mask; here the driver's
+ *  padded loads already zero every absent byte, and zero never lands inside [96, 9F], so
+ *  the unqualified compare is exactly as safe-negative on tail chunks. Unlike the other
+ *  alarms, the result is shifted back to the SEQUENCE-START positions, mirroring the
+ *  Ice Lake reference bit-for-bit.
+ */
+SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_vietnamese_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
+    sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
+
+    // Lead bytes (5 CMPEQ + movemask)
+    sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
+    sz_u32_t is_c3_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xC3)));
+    sz_u32_t is_c5_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xC5)));
+    sz_u32_t is_ef_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xEF)));
+    sz_u32_t is_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE2)));
+
+    // Vietnamese text is dense in E1 (and the safe E1 BA letters), but plain Latin chunks
+    // skip all the second-byte work behind this early exit
+    if (!(is_e1_mask | is_c3_mask | is_c5_mask | is_ef_mask | is_e2_mask)) return 0;
+
+    // E1 BA pairs refine on the expanding 96-9F third byte
+    sz_u32_t is_ba_second_mask = (is_e1_mask << 1) &
+                                 (sz_u32_t)_mm256_movemask_epi8(
+                                     _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBA)));
+    sz_u32_t is_bad_third_mask = (is_ba_second_mask << 1) &
+                                 (sz_u32_t)_mm256_movemask_epi8(
+                                     sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x96, 0x0A));
+
+    // Two-byte pair alarms (4 CMPEQ + movemask)
+    sz_u32_t sharp_s_mask = (is_c3_mask << 1) &
+                            (sz_u32_t)_mm256_movemask_epi8(
+                                _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x9F)));
+    sz_u32_t long_s_mask = (is_c5_mask << 1) &
+                           (sz_u32_t)_mm256_movemask_epi8(
+                               _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBF)));
+    sz_u32_t ligature_mask = (is_ef_mask << 1) &
+                             (sz_u32_t)_mm256_movemask_epi8(
+                                 _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xAC)));
+    sz_u32_t kelvin_mask = (is_e2_mask << 1) &
+                           (sz_u32_t)_mm256_movemask_epi8(
+                               _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x84)));
+
+    // Shift back to sequence-start positions
+    return (is_bad_third_mask >> 2) | ((sharp_s_mask | long_s_mask | ligature_mask | kelvin_mask) >> 1);
+}
+
+/**
+ *  @brief Vietnamese case-insensitive search for needles with safe slices up to 16 bytes.
+ *  @sa sz_utf8_case_rune_safe_vietnamese_k
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                       //
+    sz_cptr_t needle, sz_size_t needle_length,                           //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata,   //
+    sz_size_t *matched_length) {
+    return sz_utf8_case_insensitive_find_haswell_scripted_( //
+        sz_utf8_case_insensitive_find_haswell_vietnamese_fold_ymm_,
+        sz_utf8_case_insensitive_find_haswell_vietnamese_alarm_ymm_, //
+        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+}
+
+#pragma endregion // Vietnamese Case-Insensitive Find
+
+#pragma region Georgian Case-Insensitive Find
+
+/**
+ *  @brief Alarm function for Georgian danger zone detection.
+ *
+ *  Georgian Mkhedruli (E1 83 xx and the tail of E1 82) is caseless, so the haystack-side
+ *  hazards are the OTHER Georgian scripts, which all fold across blocks:
+ *  - E1 B2 xx: Mtavruli uppercase, folds to Mkhedruli
+ *  - E1 82 A0-E5: Asomtavruli historical uppercase, folds to Nuskhuri
+ *  - E2 B4 xx: Nuskhuri, target of Asomtavruli folds
+ *
+ *  Modern Georgian is E1 83 leads, so neither second-byte pair matches and the kernel
+ *  almost never alarms. The Asomtavruli third-byte range compare is unqualified by the
+ *  load mask: the driver's padded loads zero absent bytes, and zero never lands inside
+ *  [A0, E5], so tail chunks stay safe-negative. The result is shifted back to the
+ *  SEQUENCE-START positions, mirroring the Ice Lake reference bit-for-bit.
+ */
+SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_georgian_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
+    sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
+
+    // Lead bytes (2 CMPEQ + movemask)
+    sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
+    sz_u32_t is_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE2)));
+
+    // Second bytes (3 CMPEQ + movemask)
+    sz_u32_t is_b2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB2)));
+    sz_u32_t is_82_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x82)));
+    sz_u32_t is_b4_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB4)));
+
+    // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third byte for Asomtavruli; E2 B4 = Nuskhuri
+    sz_u32_t mtavruli_mask = (is_e1_mask << 1) & is_b2_mask;
+    sz_u32_t asomtavruli_mask = (((is_e1_mask << 1) & is_82_mask) << 1) &
+                                (sz_u32_t)_mm256_movemask_epi8(
+                                    sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xA0, 0x46));
+    sz_u32_t nuskhuri_mask = (is_e2_mask << 1) & is_b4_mask;
+
+    // Shift back to sequence-start positions
+    return (mtavruli_mask >> 1) | (asomtavruli_mask >> 2) | (nuskhuri_mask >> 1);
+}
+
+/**
+ *  @brief Georgian case-insensitive search for needles with safe slices up to 16 bytes.
+ *  @sa sz_utf8_case_rune_safe_georgian_k
+ *
+ *  The fastest non-ASCII kernel: Mkhedruli is caseless, so the fold callback is just the
+ *  ASCII fold for mixed Latin text and the alarm only watches for the historical scripts.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, //
+    sz_size_t *matched_length) {
+    return sz_utf8_case_insensitive_find_haswell_scripted_( //
+        sz_utf8_case_insensitive_find_haswell_ascii_fold_ymm_,
+        sz_utf8_case_insensitive_find_haswell_georgian_alarm_ymm_, //
+        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+}
+
+#pragma endregion // Georgian Case-Insensitive Find
+
 SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_haswell( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //
     sz_cptr_t needle, sz_size_t needle_length,             //
@@ -757,8 +1176,24 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_haswell( //
         return sz_utf8_case_insensitive_find_haswell_cyrillic_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 
-    // Greek, Armenian, Vietnamese & Georgian kernels are not ported to AVX2 yet; their kernel
-    // ids stay intact (the serial finder ignores the metadata), so future calls re-route here
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_greek_k)
+        return sz_utf8_case_insensitive_find_haswell_greek_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_armenian_k)
+        return sz_utf8_case_insensitive_find_haswell_armenian_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_vietnamese_k)
+        return sz_utf8_case_insensitive_find_haswell_vietnamese_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_case_rune_safe_georgian_k)
+        return sz_utf8_case_insensitive_find_haswell_georgian_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+
+    // No suitable SIMD path found (needle has complex Unicode), fall back to serial
+    needle_metadata->kernel_id = sz_utf8_case_rune_fallback_serial_k;
     return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                 matched_length);
 }
