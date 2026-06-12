@@ -868,7 +868,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_r
         // Multi-byte UTF-8: decode, fold, and buffer
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(it->ptr, &rune, &rune_length);
+        sz_rune_parse_unchecked(it->ptr, &rune, &rune_length);
 
         it->ptr += rune_length;
         // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
@@ -941,7 +941,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
     // Multi-byte UTF-8: decode and fold
     sz_rune_t rune;
     sz_rune_length_t rune_length;
-    sz_rune_parse(it->ptr, &rune, &rune_length);
+    sz_rune_parse_unchecked(it->ptr, &rune, &rune_length);
 
     // Store folded runes in pending buffer
     it->pending[0] = 0xFFFFFFFFu;

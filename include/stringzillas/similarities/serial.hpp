@@ -2370,12 +2370,12 @@ struct levenshtein_distance_utf8 {
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++first_length_utf32) {
-            sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + first_length_utf32, &rune_length);
+            sz_rune_parse_unchecked(first.data() + progress_utf8, first_data_utf32 + first_length_utf32, &rune_length);
             if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
         }
         for (size_t progress_utf8 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++second_length_utf32) {
-            sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + second_length_utf32, &rune_length);
+            sz_rune_parse_unchecked(second.data() + progress_utf8, second_data_utf32 + second_length_utf32, &rune_length);
             if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
         }
 

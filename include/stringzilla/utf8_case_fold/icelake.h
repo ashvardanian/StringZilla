@@ -649,15 +649,17 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
             // - CE 84-90: tonos/diacritics with irregular folding (U+0384-0390)
             // - CE 8C, 8E-8F: Ό, Ύ, Ώ with non-standard offsets
             // - CE B0: ΰ (U+03B0) expands to 3 codepoints
-            // - CF 8C+: symbols and extended Greek with irregular folding
+            // - CF 8F+: 'Ϗ' (U+03CF) and extended symbols with irregular folding
             // Check second bytes after CE leads
             __mmask64 is_ce_problematic =
                 (is_ce_mask << 1) &
                 (_mm512_cmplt_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x91)) | // < 0x91
                  _mm512_cmpeq_epi8_mask(source_vec.zmm, _mm512_set1_epi8((char)0xB0))); // == 0xB0 (ΰ expands)
-            // Check second bytes after CF leads (only allow 80-8B for basic lowercase + final sigma)
+            // Check second bytes after CF leads. 80-8E are basic lowercase incl. the tonos vowels
+            // 'ό' 'ύ' 'ώ' (CF 8C-8E), which fold to themselves; only 'Ϗ' (CF 8F) and the symbols
+            // beyond it have irregular folding. Final sigma (CF 82) is transformed below.
             __mmask64 is_cf_problematic = (is_cf_mask << 1) &
-                                          _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x8C));
+                                          _mm512_cmpge_epu8_mask(source_vec.zmm, _mm512_set1_epi8((char)0x8F));
 
             // Check for pure basic Greek + ASCII mix (no problematic ranges)
             __mmask64 is_valid_greek_mix_mask = ~is_non_ascii | is_greek_lead_mask | greek_second_byte_positions;
@@ -831,7 +833,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
                     // First character needs serial - process it and continue the main loop
                     sz_rune_t rune;
                     sz_rune_length_t rune_length;
-                    sz_rune_parse(source, &rune, &rune_length);
+                    sz_rune_parse(source, source + source_length, &rune, &rune_length);
                     sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
                     sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
                     for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
@@ -1307,7 +1309,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
                             // First char needs serial processing (assumes valid UTF-8)
                             sz_rune_t rune;
                             sz_rune_length_t rune_length;
-                            sz_rune_parse(source, &rune, &rune_length);
+                            sz_rune_parse(source, source + source_length, &rune, &rune_length);
                             sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
                             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
                             for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
@@ -1510,7 +1512,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
             // Serial fallback for remaining bytes (assumes valid UTF-8)
             sz_rune_t rune;
             sz_rune_length_t rune_length;
-            sz_rune_parse(source, &rune, &rune_length);
+            sz_rune_parse(source, source + source_length, &rune, &rune_length);
 
             sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);

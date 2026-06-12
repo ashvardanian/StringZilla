@@ -439,8 +439,10 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_cyrillic_chunk_(uint8x16x4_t source
  *  'Α'-'Ο' (CE 91-9F) fold with +0x20 in place; 'Π'-'Ρ' and 'Σ'-'Ϋ' (CE A0-A1, A3-AB - 'Ϣ'-class
  *  A2 is unassigned) fold with −0x20 plus a CE → CF lead promotion (+1); final sigma 'ς' (CF 82)
  *  folds to 'σ' with +1. The fold-side exclusions are NARROWER than the finder's: accented
- *  uppercase (CE 84-90), 'ΰ' (CE B0, expands when folded), and Greek symbols (CF 8C+) stop the
- *  chunk for the serial path, as does any out-of-family lead.
+ *  uppercase (CE 84-90), 'ΰ' (CE B0, expands when folded), and the cross-block Greek symbols
+ *  (CF 8F+: 'Ϗ' and the archaic letter pairs) stop the chunk for the serial path, as does any
+ *  out-of-family lead. The accented lowercase vowels 'ό' 'ύ' 'ώ' (CF 8C-8E, identity-folding and
+ *  very common in real Greek text) stay in the fast path - only CF 8F begins the symbol folds.
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
@@ -466,7 +468,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8
         uint8x16_t ce_excluded_u8x16 = vandq_u8(
             is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
                                   vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
-        uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8C)));
+        uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
         uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
@@ -514,6 +516,207 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8
 
     sz_u8_t last_byte = (sz_u8_t)source[63];
     return (last_byte == 0xCE || last_byte == 0xCF) ? 63 : 64;
+}
+
+/**
+ *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII.
+ *
+ *  Armenian uppercase spans two lead bytes and folds into three target blocks, reusing the exact
+ *  math verified in the NEON finder's `sz_utf8_case_insensitive_find_neon_armenian_fold_u8x16x2_`:
+ *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
+ *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
+ *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
+ *  Both lead rewrites are a +1 increment, decided at the LEAD position from its own next byte; the
+ *  three second-byte offsets fall on disjoint lanes, so they merge into one masked add. The −0x10
+ *  is added as +0xF0 (two's-complement wrap), exactly as the finder does.
+ *
+ *  Everything else in D4-D6 either passes through as identity (D5 97-BF reserved/punctuation and
+ *  lowercase, all of D6 except the ligature, Hebrew D6 90-BF) or stops the chunk for the serial
+ *  path: D4 80-B0 is the Cyrillic Supplement (U+0500-052F parity folds plus reserved U+0530, none
+ *  of which this Armenian handler folds), and 'և' (U+0587, D6 87) folds to two runes "եւ" - the
+ *  only length-changing fold in the block, so it cannot fold in place. Any out-of-family complex
+ *  lead (D2-D3 Cyrillic Extended-C/Supplement, C7-CD, F0+) also stops. A stop at byte 0 returns
+ *  zero, routing the leading non-Armenian rune to the serial fallback.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                             sz_ptr_t target) {
+    uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
+    uint8x16_t previous_is_d4_u8x16 = zero_u8x16, previous_is_d5_u8x16 = zero_u8x16;
+    uint8x16_t stop_masks_u8x16[4];
+    uint8x16_t any_stop_u8x16 = zero_u8x16;
+
+    for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+        uint8x16_t source_u8x16 = source_u8x16x4.val[register_index];
+        uint8x16_t next_register_u8x16 = register_index != 3 ? source_u8x16x4.val[register_index + 1] : zero_u8x16;
+        uint8x16_t next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+
+        uint8x16_t is_d4_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xD4));
+        uint8x16_t is_d5_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xD5));
+        uint8x16_t is_d6_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xD6));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
+        uint8x16_t is_armenian_lead_u8x16 = vorrq_u8(vorrq_u8(is_d4_u8x16, is_d5_u8x16), is_d6_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, is_armenian_lead_u8x16);
+
+        // Stops tested at the LEAD position so the walk-back lands on a character boundary:
+        // D4 with a Cyrillic-Supplement/reserved second byte (≤ B0) and the 'և' ligature (D6 87).
+        uint8x16_t is_d4_stop_u8x16 = vandq_u8(is_d4_u8x16, vcltq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
+        uint8x16_t is_ligature_stop_u8x16 = vandq_u8(is_d6_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x87)));
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16));
+        stop_masks_u8x16[register_index] = stop_u8x16;
+        any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
+
+        uint8x16_t after_d4_u8x16 = vextq_u8(previous_is_d4_u8x16, is_d4_u8x16, 15);
+        uint8x16_t after_d5_u8x16 = vextq_u8(previous_is_d5_u8x16, is_d5_u8x16, 15);
+
+        // Second-byte offsets on disjoint lanes: D4 B1-BF → −0x10 (+0xF0 wrap), D5 80-8F → +0x30,
+        // D5 90-96 → −0x10. The D4 range only needs a lower-bound check - valid continuations ≤ BF.
+        uint8x16_t is_d4_armenian_second_u8x16 = vandq_u8(after_d4_u8x16, vcgeq_u8(source_u8x16, vdupq_n_u8(0xB1)));
+        uint8x16_t is_d5_plus30_second_u8x16 = vandq_u8(
+            after_d5_u8x16, vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x10)));
+        uint8x16_t is_d5_minus10_second_u8x16 = vandq_u8(
+            after_d5_u8x16, vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x90)), vdupq_n_u8(0x07)));
+
+        uint8x16_t offsets_u8x16 = vandq_u8(vorrq_u8(is_d4_armenian_second_u8x16, is_d5_minus10_second_u8x16),
+                                            vdupq_n_u8(0xF0));
+        offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_d5_plus30_second_u8x16, vdupq_n_u8(0x30)));
+        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_neon_ascii_(source_u8x16), offsets_u8x16);
+
+        // Lead +1 rewrites decided from the lead's own next byte: D4 → D5 where next is B1-BF,
+        // D5 → D6 where next is 90-96. D5 80-8F keeps its lead.
+        uint8x16_t promotes_d4_u8x16 = vandq_u8(is_d4_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
+        uint8x16_t promotes_d5_u8x16 = vandq_u8(
+            is_d5_u8x16, vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x90)), vdupq_n_u8(0x07)));
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(vorrq_u8(promotes_d4_u8x16, promotes_d5_u8x16), vdupq_n_u8(0x01)));
+
+        vst1q_u8((sz_u8_t *)target + register_index * 16, folded_u8x16);
+        previous_is_d4_u8x16 = is_d4_u8x16, previous_is_d5_u8x16 = is_d5_u8x16;
+    }
+
+    if (vmaxvq_u8(any_stop_u8x16)) {
+        sz_size_t first_flagged_position = 64;
+        for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            if (!stop_nibbles) continue;
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            break;
+        }
+        while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
+            --first_flagged_position;
+        return first_flagged_position;
+    }
+
+    // Only a D4/D5/D6 lead in the last byte can be incomplete - the 2-byte trim is one test
+    sz_u8_t last_byte = (sz_u8_t)source[63];
+    return (last_byte == 0xD4 || last_byte == 0xD5 || last_byte == 0xD6) ? 63 : 64;
+}
+
+/**
+ *  @brief Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII.
+ *
+ *  Ordered AFTER the Latin handler: that one folds E1 B8-BB (Latin Extended Additional) and stops
+ *  at E1 82/83; this one picks up Georgian and stops at E1 BC-BF (Greek Extended) and every other
+ *  non-Georgian E1 second byte. Ports the verified Ice Lake "3.1. Georgian fast path" - a uniform
+ *  3-byte → 3-byte fold with a lead-byte rewrite:
+ *  - E1 82 A0-BF: 'Ⴀ'-'Ⴟ' (U+10A0-10BF) → E2 B4 80-9F (lead E1→E2, second 82→B4, third −0x20)
+ *  - E1 83 80-85: 'Ⴠ'-'Ⴥ' (U+10C0-10C5) → E2 B4 A0-A5 (lead E1→E2, second 83→B4, third +0x20)
+ *  - E1 83 87:    'Ⴧ' (U+10C7)           → E2 B4 A7      (same rewrite, third +0x20)
+ *  - E1 83 8D:    'Ⴭ' (U+10CD)           → E2 B4 AD      (same rewrite, third +0x20)
+ *  Lowercase Mkhedruli and reserved Georgian (E1 82 80-9F, E1 83 86/88-8C/8E-BF) copy unchanged.
+ *
+ *  The lead/second rewrites must fire only for the UPPERCASE subset, which is decided by the THIRD
+ *  byte - so the lead position reads two bytes forward through `vextq_u8(.., .., 2)` and the
+ *  uppercase flag is carried forward one lane to the second-byte rewrite and a second lane to the
+ *  third-byte offset. The two third-byte offsets land on disjoint sequences, so −0x20 (added as
+ *  +0xE0 wrap) and +0x20 merge into one add. Every fold here is length-preserving, so full-register
+ *  stores are exact for the consumed prefix.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                             sz_ptr_t target) {
+    uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
+    uint8x16_t previous_is_82_upper_lead_u8x16 = zero_u8x16, previous_is_83_upper_lead_u8x16 = zero_u8x16;
+    uint8x16_t previous_is_82_upper_second_u8x16 = zero_u8x16, previous_is_83_upper_second_u8x16 = zero_u8x16;
+    uint8x16_t stop_masks_u8x16[4];
+    uint8x16_t any_stop_u8x16 = zero_u8x16;
+
+    for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+        uint8x16_t source_u8x16 = source_u8x16x4.val[register_index];
+        uint8x16_t next_register_u8x16 = register_index != 3 ? source_u8x16x4.val[register_index + 1] : zero_u8x16;
+        // The lead position needs both its second (byte+1) and third (byte+2) bytes to classify a
+        // Georgian sequence, so two shifted views are built across the register boundary. A lead in
+        // the last two lanes is an incomplete sequence excluded by the trailing trim below.
+        uint8x16_t next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+        uint8x16_t next_next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 2);
+
+        uint8x16_t is_e1_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xE1));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, is_e1_u8x16);
+
+        // Georgian second bytes are 82 or 83; any other E1 second byte stops the chunk at the lead
+        uint8x16_t is_82_lead_u8x16 = vandq_u8(is_e1_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x82)));
+        uint8x16_t is_83_lead_u8x16 = vandq_u8(is_e1_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x83)));
+        uint8x16_t is_georgian_lead_u8x16 = vorrq_u8(is_82_lead_u8x16, is_83_lead_u8x16);
+        uint8x16_t is_foreign_e1_u8x16 = vbicq_u8(is_e1_u8x16, is_georgian_lead_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, is_foreign_e1_u8x16);
+        stop_masks_u8x16[register_index] = stop_u8x16;
+        any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
+
+        // Uppercase Georgian is keyed by the third byte: E1 82 third ≥ A0, E1 83 third in 80-85/87/8D
+        uint8x16_t is_82_upper_lead_u8x16 = vandq_u8(is_82_lead_u8x16, vcgeq_u8(next_next_byte_u8x16, vdupq_n_u8(0xA0)));
+        uint8x16_t is_83_third_range_u8x16 = vcltq_u8(vsubq_u8(next_next_byte_u8x16, vdupq_n_u8(0x80)),
+                                                      vdupq_n_u8(0x06));
+        uint8x16_t is_83_third_extra_u8x16 = vorrq_u8(vceqq_u8(next_next_byte_u8x16, vdupq_n_u8(0x87)),
+                                                      vceqq_u8(next_next_byte_u8x16, vdupq_n_u8(0x8D)));
+        uint8x16_t is_83_upper_lead_u8x16 = vandq_u8(is_83_lead_u8x16,
+                                                     vorrq_u8(is_83_third_range_u8x16, is_83_third_extra_u8x16));
+
+        // Carry the uppercase flag forward: lane +1 for the second-byte rewrite, lane +2 for the third
+        uint8x16_t is_82_upper_second_u8x16 = vextq_u8(previous_is_82_upper_lead_u8x16, is_82_upper_lead_u8x16, 15);
+        uint8x16_t is_83_upper_second_u8x16 = vextq_u8(previous_is_83_upper_lead_u8x16, is_83_upper_lead_u8x16, 15);
+        uint8x16_t is_82_upper_third_u8x16 = vextq_u8(previous_is_82_upper_second_u8x16, is_82_upper_second_u8x16, 15);
+        uint8x16_t is_83_upper_third_u8x16 = vextq_u8(previous_is_83_upper_second_u8x16, is_83_upper_second_u8x16, 15);
+
+        uint8x16_t is_upper_lead_u8x16 = vorrq_u8(is_82_upper_lead_u8x16, is_83_upper_lead_u8x16);
+        uint8x16_t is_upper_second_u8x16 = vorrq_u8(is_82_upper_second_u8x16, is_83_upper_second_u8x16);
+
+        // Rewrites: lead E1 → E2, second 82/83 → B4, third −0x20 (E1 82, added as +0xE0) or +0x20 (E1 83)
+        uint8x16_t folded_u8x16 = sz_utf8_fold_neon_ascii_(source_u8x16);
+        folded_u8x16 = vbslq_u8(is_upper_lead_u8x16, vdupq_n_u8(0xE2), folded_u8x16);
+        folded_u8x16 = vbslq_u8(is_upper_second_u8x16, vdupq_n_u8(0xB4), folded_u8x16);
+        uint8x16_t third_offsets_u8x16 = vorrq_u8(vandq_u8(is_82_upper_third_u8x16, vdupq_n_u8(0xE0)),
+                                                  vandq_u8(is_83_upper_third_u8x16, vdupq_n_u8(0x20)));
+        folded_u8x16 = vaddq_u8(folded_u8x16, third_offsets_u8x16);
+
+        vst1q_u8((sz_u8_t *)target + register_index * 16, folded_u8x16);
+        previous_is_82_upper_lead_u8x16 = is_82_upper_lead_u8x16;
+        previous_is_83_upper_lead_u8x16 = is_83_upper_lead_u8x16;
+        previous_is_82_upper_second_u8x16 = is_82_upper_second_u8x16;
+        previous_is_83_upper_second_u8x16 = is_83_upper_second_u8x16;
+    }
+
+    if (vmaxvq_u8(any_stop_u8x16)) {
+        sz_size_t first_flagged_position = 64;
+        for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            if (!stop_nibbles) continue;
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            break;
+        }
+        while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
+            --first_flagged_position;
+        return first_flagged_position;
+    }
+
+    // Don't split a trailing E1 sequence: a lead in the last two lanes (bytes 62-63) is incomplete
+    sz_u8_t second_to_last_byte = (sz_u8_t)source[62], last_byte = (sz_u8_t)source[63];
+    if (second_to_last_byte == 0xE1) return 62;
+    if (last_byte == 0xE1) return 63;
+    return 64;
 }
 
 /**
@@ -640,6 +843,15 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
                 continue;
             }
         }
+        // Georgian shares the E1 lead with Latin Extended Additional, so it runs second: the Latin
+        // handler folds E1 B8-BB and returns zero on a leading E1 82/83, and this picks those up.
+        if (lead_families & sz_utf8_fold_neon_lead_e1_flag_) {
+            sz_size_t handled = sz_utf8_case_fold_neon_georgian_chunk_(source_u8x16x4, source, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
         if (lead_families & sz_utf8_fold_neon_lead_cyrillic_flag_) {
             sz_size_t handled = sz_utf8_case_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
             if (handled) {
@@ -661,6 +873,15 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
                 continue;
             }
         }
+        // Armenian (D4-D6) plus the Cyrillic Supplement that shares the D4 lead both fall in the
+        // complex family; this handler folds them and truncates at any non-Armenian complex lead.
+        if (lead_families & sz_utf8_fold_neon_lead_complex_flag_) {
+            sz_size_t handled = sz_utf8_case_fold_neon_armenian_chunk_(source_u8x16x4, source, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
         // Complex leads (4-byte emoji, rare 2-byte blocks) and zero-returning handlers advance
         // by exactly ONE rune through the serial logic below: byte-for-byte the serial
         // reference output, just slower. Georgian, fullwidth, and supplementary copy handlers
@@ -668,7 +889,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
 
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        sz_rune_parse(source, &rune, &rune_length);
+        sz_rune_parse_unchecked(source, &rune, &rune_length);
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)

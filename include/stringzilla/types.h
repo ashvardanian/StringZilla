@@ -1682,14 +1682,17 @@ SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
 }
 
 /**
- *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer.
+ *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer, reading
+ *      the full 1-4 byte sequence the lead byte declares with @b no bounds checking.
  *  @param utf8 Pointer to the beginning of a valid UTF-8 encoded string.
  *  @param runes Output parameter to store the extracted UTF-32 codepoint.
  *  @param runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
- *  @note This function does not perform any bounds checking on the input string.
+ *  @warning Assumes valid UTF-8 input and that the declared sequence is complete - a truncated
+ *      trailing sequence over-reads. Use `sz_rune_parse` for the bounds-checked variant, or
+ *      `sz_utf8_valid()` first if validation is needed.
+ *  @sa sz_rune_parse
  */
-SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
+SZ_INTERNAL void sz_rune_parse_unchecked(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
     sz_u8_t const *u8s = (sz_u8_t const *)utf8;
     sz_u8_t lead = *u8s++;
 
@@ -1717,6 +1720,38 @@ SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_
 }
 
 /**
+ *  @brief Extracts one UTF-8 codepoint from a UTF-8 string, never reading at or beyond @p utf8_end.
+ *      A complete sequence decodes exactly like `sz_rune_parse_unchecked`; a truncated trailing
+ *      sequence - one whose declared length exceeds the bytes left before @p utf8_end - decodes only
+ *      the bytes present and reports that clamped length, so the caller advances past the partial
+ *      tail instead of over-reading.
+ *  @param utf8 Pointer to the next codepoint; the caller guarantees `utf8 < utf8_end`.
+ *  @param utf8_end Pointer to one past the last readable byte of the buffer.
+ *  @param rune Output parameter to store the extracted UTF-32 codepoint.
+ *  @param rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
+ *  @sa sz_rune_parse_unchecked
+ */
+SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
+    sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u8s);
+    sz_u8_t const lead = *u8s;
+    sz_rune_length_t const declared = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
+
+    // A complete sequence decodes byte-for-byte like the unchecked primitive
+    if ((sz_size_t)declared <= available) {
+        sz_rune_parse_unchecked(utf8, rune, rune_length);
+        return;
+    }
+
+    // Truncated trailing sequence: assemble only the bytes that exist - the lead's payload bits
+    // (the length prefix masked off) followed by every continuation byte still inside the buffer
+    sz_rune_t partial = (sz_rune_t)(lead & (0x7FU >> declared));
+    for (sz_size_t byte_index = 1; byte_index != available; ++byte_index)
+        partial = (partial << 6) | (u8s[byte_index] & 0x3FU);
+    *rune = partial, *rune_length = (sz_rune_length_t)available;
+}
+
+/**
  *  @brief Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
  *  @param utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
  *  @param rune Output parameter to store the extracted UTF-32 codepoint.
@@ -1732,7 +1767,7 @@ SZ_INTERNAL void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_len
     for (--u8s; (*u8s & 0xC0) == 0x80 && length < 4; --u8s, ++length) {}
 
     // Now u8s points to the lead byte, length is the sequence length
-    sz_rune_parse((sz_cptr_t)u8s, rune, rune_length);
+    sz_rune_parse_unchecked((sz_cptr_t)u8s, rune, rune_length);
     sz_assert_(*rune_length == (sz_rune_length_t)length && "Inconsistent rune length detected in sz_rune_rparse.");
 }
 
@@ -1779,7 +1814,7 @@ SZ_PUBLIC sz_size_t sz_runes_parse(sz_cptr_t utf8, sz_size_t utf8_length, sz_run
     sz_cptr_t const end = utf8 + utf8_length;
     sz_size_t count = 0;
     sz_rune_length_t rune_length;
-    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse(utf8, utf32, &rune_length);
+    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse_unchecked(utf8, utf32, &rune_length);
     return count;
 }
 

@@ -336,7 +336,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_neon_scripted_( //
     sz_rune_t needle_first_safe_folded_rune = 0;
     if (alarm) {
         sz_rune_length_t rune_byte_length;
-        sz_rune_parse((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
+        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
     }
 
     sz_cptr_t haystack_ptr = haystack;
