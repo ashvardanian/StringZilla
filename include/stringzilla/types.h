@@ -1063,6 +1063,8 @@ typedef union sz_u128_vec_t {
     uint16x8_t u16x8;
     uint32x4_t u32x4;
     uint64x2_t u64x2;
+    float64x2_t f64x2;
+    float32x4_t f32x4;
 #endif
 #if SZ_USE_LASX
     __m128i lsx;
