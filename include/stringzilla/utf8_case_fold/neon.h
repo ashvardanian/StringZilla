@@ -240,6 +240,16 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
         uint8x16_t is_e1_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xE1));
         uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
 
+        // Foreign leads stop the chunk: the handler triggers on family PRESENCE, so a German
+        // chunk mixing Latin words with E2 quotation marks folds its Latin prefix here and lets
+        // the guarded handler take the next chunk - measured a sixth faster on such mixes than
+        // pure subset dispatch on the AVX2 port.
+        uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, vdupq_n_u8(0x80));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(is_non_ascii_u8x16, is_continuation_u8x16);
+        uint8x16_t is_family_lead_u8x16 = vorrq_u8(
+            vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xC2)), vdupq_n_u8(0x05)), is_e1_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, is_family_lead_u8x16);
+
         uint8x16_t after_c2_u8x16 = vextq_u8(previous_is_c2_u8x16, is_c2_u8x16, 15);
         uint8x16_t after_c3_u8x16 = vextq_u8(previous_is_c3_u8x16, is_c3_u8x16, 15);
         uint8x16_t after_c4_u8x16 = vextq_u8(previous_is_c4_u8x16, is_c4_u8x16, 15);
@@ -271,7 +281,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
         uint8x16_t irregular_extended_u8x16 = vtstq_u8(extended_deltas_u8x16, vdupq_n_u8(0x80));
 
         uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(irregular_extended_u8x16, foreign_e1_second_u8x16),
-                                         irregular_additional_u8x16);
+                                         vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -348,6 +358,230 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
     return incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz(incomplete_nibbles) / 4) : 64;
 }
 
+
+/**
+ *  @brief Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII.
+ *
+ *  All three uppercase sub-ranges are keyed by the second byte's high nibble, so one
+ *  `vqtbl1q_u8` over a 16-entry table yields the offset (8 → +0x10, 9 → +0x20, A → −0x20)
+ *  and the D0 → D1 lead rewrite is a masked +1 wherever the next byte falls in the two
+ *  lead-changing ranges. Cyrillic Extended-A (D1 A0+) and any out-of-family lead stop the
+ *  chunk; the consumed prefix always ends on a character boundary.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                             sz_ptr_t target) {
+    static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
+    uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
+
+    uint8x16_t previous_is_d0_u8x16 = zero_u8x16;
+    uint8x16_t stop_masks_u8x16[4];
+    uint8x16_t any_stop_u8x16 = zero_u8x16;
+
+    for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+        uint8x16_t source_u8x16 = source_u8x16x4.val[register_index];
+        uint8x16_t next_register_u8x16 = register_index != 3 ? source_u8x16x4.val[register_index + 1] : zero_u8x16;
+        uint8x16_t next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+
+        uint8x16_t is_d0_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xD0));
+        uint8x16_t is_d1_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xD1));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, vorrq_u8(is_d0_u8x16, is_d1_u8x16));
+
+        // Cyrillic Extended-A ('Ѡ'+, D1 A0+) folds by parity and stays on the serial path
+        uint8x16_t is_extended_u8x16 = vandq_u8(is_d1_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0xA0)));
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, is_extended_u8x16);
+        stop_masks_u8x16[register_index] = stop_u8x16;
+        any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
+
+        // Second-byte offsets: 'Ѐ'-'Џ' (D0 80-8F) → +0x10, 'А'-'П' (90-9F) → +0x20,
+        // 'Р'-'Я' (A0-AF) → −0x20; lowercase B0+ maps to zero through the table.
+        uint8x16_t after_d0_u8x16 = vextq_u8(previous_is_d0_u8x16, is_d0_u8x16, 15);
+        uint8x16_t offsets_u8x16 = vandq_u8(vqtbl1q_u8(offsets_lut_u8x16, vshrq_n_u8(source_u8x16, 4)),
+                                            after_d0_u8x16);
+        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_neon_ascii_(source_u8x16), offsets_u8x16);
+
+        // Lead rewrite D0 → D1 (+1) where the lowercase lives in the next block:
+        // seconds 80-8F ('Ѐ'-'Џ' → 'ѐ'-'џ') and A0-AF ('Р'-'Я' → 'р'-'я')
+        uint8x16_t needs_d1_u8x16 = vandq_u8(
+            is_d0_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x10)),
+                                  vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xA0)), vdupq_n_u8(0x10))));
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(needs_d1_u8x16, vdupq_n_u8(0x01)));
+
+        vst1q_u8((sz_u8_t *)target + register_index * 16, folded_u8x16);
+        previous_is_d0_u8x16 = is_d0_u8x16;
+    }
+
+    if (vmaxvq_u8(any_stop_u8x16)) {
+        sz_size_t first_flagged_position = 64;
+        for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            if (!stop_nibbles) continue;
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            break;
+        }
+        while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
+            --first_flagged_position;
+        return first_flagged_position;
+    }
+
+    // Only a D0/D1 lead in the last byte can be incomplete - the 2-byte trim degenerates to one test
+    sz_u8_t last_byte = (sz_u8_t)source[63];
+    return (last_byte == 0xD0 || last_byte == 0xD1) ? 63 : 64;
+}
+
+/**
+ *  @brief Folds a 64-byte superchunk of basic Greek mixed with ASCII.
+ *
+ *  'Α'-'Ο' (CE 91-9F) fold with +0x20 in place; 'Π'-'Ρ' and 'Σ'-'Ϋ' (CE A0-A1, A3-AB - 'Ϣ'-class
+ *  A2 is unassigned) fold with −0x20 plus a CE → CF lead promotion (+1); final sigma 'ς' (CF 82)
+ *  folds to 'σ' with +1. The fold-side exclusions are NARROWER than the finder's: accented
+ *  uppercase (CE 84-90), 'ΰ' (CE B0, expands when folded), and Greek symbols (CF 8C+) stop the
+ *  chunk for the serial path, as does any out-of-family lead.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                          sz_ptr_t target) {
+    uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
+    uint8x16_t previous_is_ce_u8x16 = zero_u8x16, previous_is_cf_u8x16 = zero_u8x16;
+    uint8x16_t stop_masks_u8x16[4];
+    uint8x16_t any_stop_u8x16 = zero_u8x16;
+
+    for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+        uint8x16_t source_u8x16 = source_u8x16x4.val[register_index];
+        uint8x16_t next_register_u8x16 = register_index != 3 ? source_u8x16x4.val[register_index + 1] : zero_u8x16;
+        uint8x16_t next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+
+        uint8x16_t is_ce_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xCE));
+        uint8x16_t is_cf_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xCF));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, vorrq_u8(is_ce_u8x16, is_cf_u8x16));
+
+        // Exclusions, tested at the LEAD position so the walk-back lands on a boundary
+        uint8x16_t ce_excluded_u8x16 = vandq_u8(
+            is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
+                                  vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
+        uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8C)));
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16));
+        stop_masks_u8x16[register_index] = stop_u8x16;
+        any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
+
+        uint8x16_t after_ce_u8x16 = vextq_u8(previous_is_ce_u8x16, is_ce_u8x16, 15);
+        uint8x16_t after_cf_u8x16 = vextq_u8(previous_is_cf_u8x16, is_cf_u8x16, 15);
+
+        // 'Α'-'Ο': +0x20 in place
+        uint8x16_t is_basic_upper_u8x16 = vandq_u8(
+            after_ce_u8x16, vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x91)), vdupq_n_u8(0x0F)));
+        // 'Π'-'Ρ' and 'Σ'-'Ϋ': −0x20 with the lead moving to CF
+        uint8x16_t is_promoting_upper_u8x16 = vandq_u8(
+            after_ce_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xA0)), vdupq_n_u8(0x02)),
+                                     vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xA3)), vdupq_n_u8(0x09))));
+        // Final sigma 'ς' → 'σ': +1
+        uint8x16_t is_final_sigma_u8x16 = vandq_u8(after_cf_u8x16, vceqq_u8(source_u8x16, vdupq_n_u8(0x82)));
+
+        uint8x16_t folded_u8x16 = sz_utf8_fold_neon_ascii_(source_u8x16);
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_basic_upper_u8x16, vdupq_n_u8(0x20)));
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_promoting_upper_u8x16, vdupq_n_u8(0xE0)));
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_final_sigma_u8x16, vdupq_n_u8(0x01)));
+
+        // CE → CF lead promotion (+1) keyed by the next byte's membership in the promoting ranges
+        uint8x16_t promotes_lead_u8x16 = vandq_u8(
+            is_ce_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xA0)), vdupq_n_u8(0x02)),
+                                  vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xA3)), vdupq_n_u8(0x09))));
+        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(promotes_lead_u8x16, vdupq_n_u8(0x01)));
+
+        vst1q_u8((sz_u8_t *)target + register_index * 16, folded_u8x16);
+        previous_is_ce_u8x16 = is_ce_u8x16, previous_is_cf_u8x16 = is_cf_u8x16;
+    }
+
+    if (vmaxvq_u8(any_stop_u8x16)) {
+        sz_size_t first_flagged_position = 64;
+        for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            if (!stop_nibbles) continue;
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            break;
+        }
+        while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
+            --first_flagged_position;
+        return first_flagged_position;
+    }
+
+    sz_u8_t last_byte = (sz_u8_t)source[63];
+    return (last_byte == 0xCE || last_byte == 0xCF) ? 63 : 64;
+}
+
+/**
+ *  @brief Folds a 64-byte superchunk of caseless scripts mixed with SAFE guarded punctuation.
+ *      Folds ASCII and copies the rest. The guarded leads are case-aware only for some second
+ *      bytes: E2 is safe for 80-83 (General Punctuation quotes and dashes), EA for everything
+ *      except 99-9F and AD-AE (Cyrillic Extended-B and Cherokee Supplement); E1 and EF always
+ *      stop, as does any 2-byte lead outside the caseless D7-DF run and any 4-byte lead.
+ *
+ *  @return Bytes consumed and written, or zero if the first character needs another path.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+                                                            sz_ptr_t target) {
+    uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
+    uint8x16_t stop_masks_u8x16[4];
+    uint8x16_t any_stop_u8x16 = zero_u8x16;
+
+    for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+        uint8x16_t source_u8x16 = source_u8x16x4.val[register_index];
+        uint8x16_t next_register_u8x16 = register_index != 3 ? source_u8x16x4.val[register_index + 1] : zero_u8x16;
+        uint8x16_t next_byte_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+
+        uint8x16_t is_caseless_two_byte_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xD7)), vdupq_n_u8(0x09));
+        uint8x16_t is_three_byte_u8x16 = vceqq_u8(vandq_u8(source_u8x16, vdupq_n_u8(0xF0)), vdupq_n_u8(0xE0));
+        uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(vcgeq_u8(source_u8x16, vdupq_n_u8(0x80)), is_continuation_u8x16);
+        uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16,
+                                                    vorrq_u8(is_caseless_two_byte_u8x16, is_three_byte_u8x16));
+
+        // E1 and EF are always case-aware; E2 and EA only for some second bytes
+        uint8x16_t is_e2_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xE2));
+        uint8x16_t is_ea_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xEA));
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16,
+                                         vorrq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE1)),
+                                                  vceqq_u8(source_u8x16, vdupq_n_u8(0xEF))));
+        stop_u8x16 = vorrq_u8(stop_u8x16, vbicq_u8(is_e2_u8x16, vcltq_u8(vsubq_u8(next_byte_u8x16,
+                                                                                  vdupq_n_u8(0x80)),
+                                                                          vdupq_n_u8(0x04))));
+        stop_u8x16 = vorrq_u8(
+            stop_u8x16, vandq_u8(is_ea_u8x16,
+                                 vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x99)), vdupq_n_u8(0x07)),
+                                          vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xAD)), vdupq_n_u8(0x02)))));
+        stop_masks_u8x16[register_index] = stop_u8x16;
+        any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
+
+        vst1q_u8((sz_u8_t *)target + register_index * 16, sz_utf8_fold_neon_ascii_(source_u8x16));
+    }
+
+    if (vmaxvq_u8(any_stop_u8x16)) {
+        sz_size_t first_flagged_position = 64;
+        for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
+            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            if (!stop_nibbles) continue;
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            break;
+        }
+        while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
+            --first_flagged_position;
+        return first_flagged_position;
+    }
+
+    // Trailing trim mirrors the caseless handler: 2-byte lead in the last byte, 3-byte in the last two
+    sz_u8_t second_to_last_byte = (sz_u8_t)source[62], last_byte = (sz_u8_t)source[63];
+    if ((second_to_last_byte & 0xF0) == 0xE0) return 62;
+    if ((last_byte & 0xF0) == 0xE0 || (sz_u8_t)(last_byte - 0xD7) < 0x09) return 63;
+    return 64;
+}
+
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // The main loop processes a 64-byte logical superchunk - four 16-byte NEON registers - so
     // chunk decisions stay comparable to the Ice Lake kernel on the same input, which makes
@@ -393,22 +627,44 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
             target += handled, source += handled, source_length -= handled;
             continue;
         }
-        // Latin union chunk: nothing outside (latin | latin_extended | e1). Unlike Ice Lake,
-        // pure Latin-1 subsets route here too - the union handler folds them correctly, and
-        // skipping a dedicated Latin-1 path keeps the dispatch chain one test shorter.
-        if (!(lead_families & ~(sz_utf8_fold_neon_lead_latin_flag_ | sz_utf8_fold_neon_lead_latin_extended_flag_ |
-                                sz_utf8_fold_neon_lead_e1_flag_))) {
+        // Handlers trigger on family PRESENCE in priority order and truncate at the first
+        // out-of-family lead (validated on the AVX2 port: a sixth faster on Russian than pure
+        // subset dispatch, because quotes and dashes no longer poison whole superchunks into
+        // one-rune serial steps). A handler that cannot fold the first character returns zero
+        // and the chunk falls through to the next family - or to the serial rune below.
+        if (lead_families & (sz_utf8_fold_neon_lead_latin_flag_ | sz_utf8_fold_neon_lead_latin_extended_flag_ |
+                             sz_utf8_fold_neon_lead_e1_flag_)) {
             sz_size_t handled = sz_utf8_case_fold_neon_latin_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        // Dispatch slots for the remaining families, mirroring the Ice Lake subset-test chain:
-        //  • Cyrillic, Greek, guarded (E2/EA/EF) chunks follow the same subset-test shape.
-        // Until those land, every other non-caseless superchunk - and any superchunk whose
-        // handler truncated to zero - advances by exactly ONE rune through the serial logic
-        // below: byte-for-byte the serial reference output, just slower.
+        if (lead_families & sz_utf8_fold_neon_lead_cyrillic_flag_) {
+            sz_size_t handled = sz_utf8_case_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
+        if (lead_families & sz_utf8_fold_neon_lead_greek_flag_) {
+            sz_size_t handled = sz_utf8_case_fold_neon_greek_chunk_(source_u8x16x4, source, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
+        if (lead_families & sz_utf8_fold_neon_lead_guarded_flag_) {
+            sz_size_t handled = sz_utf8_case_fold_neon_guarded_chunk_(source_u8x16x4, source, target);
+            if (handled) {
+                target += handled, source += handled, source_length -= handled;
+                continue;
+            }
+        }
+        // Complex leads (4-byte emoji, rare 2-byte blocks) and zero-returning handlers advance
+        // by exactly ONE rune through the serial logic below: byte-for-byte the serial
+        // reference output, just slower. Georgian, fullwidth, and supplementary copy handlers
+        // are candidates for the ARM-hardware tuning round if profiles justify them.
 
         sz_rune_t rune;
         sz_rune_length_t rune_length;
