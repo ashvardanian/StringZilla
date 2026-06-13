@@ -71,13 +71,13 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
     for (sz_size_t block_index = start_in_sequence; block_index + pgrams_per_register <= end_in_sequence;
          block_index += pgrams_per_register) {
         pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + block_index);
-        count_smaller += sz_u32_popcount(_mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
-        count_greater += sz_u32_popcount(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
+        count_smaller += _mm_popcnt_u32(_mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
+        count_greater += _mm_popcnt_u32(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
     }
     if (tail_count) {
         pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_mask, initial_pgrams + end_in_sequence - tail_count);
-        count_smaller += sz_u32_popcount(_mm512_mask_cmplt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
-        count_greater += sz_u32_popcount(_mm512_mask_cmpgt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
+        count_smaller += _mm_popcnt_u32(_mm512_mask_cmplt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
+        count_greater += _mm_popcnt_u32(_mm512_mask_cmpgt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
     }
 
     // Now all we need to do is to loop through the collection and export them into the temporary buffer
