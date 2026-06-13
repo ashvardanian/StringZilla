@@ -954,11 +954,13 @@ typedef sz_ordering_t (*sz_utf8_case_insensitive_order_t)(sz_cptr_t, sz_size_t, 
 /** @brief Signature of `sz_utf8_case_agnostic`. */
 typedef sz_bool_t (*sz_utf8_case_agnostic_t)(sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_word_find_boundary`. */
-typedef sz_cptr_t (*sz_utf8_word_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
+/** @brief Signature of `sz_utf8_word_find_boundaries`. */
+typedef sz_size_t (*sz_utf8_word_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
+sz_size_t *);
 
-/** @brief Signature of `sz_utf8_word_rfind_boundary`. */
-typedef sz_cptr_t (*sz_utf8_word_rfind_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
+/** @brief Signature of `sz_utf8_word_rfind_boundaries`. */
+typedef sz_size_t (*sz_utf8_word_rfind_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
+sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);

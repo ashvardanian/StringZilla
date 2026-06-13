@@ -67,8 +67,8 @@ typedef struct sz_implementations_t {
     sz_utf8_case_fold_t utf8_case_fold;
     sz_utf8_case_insensitive_find_t utf8_case_insensitive_find;
 
-    sz_utf8_word_find_boundary_t utf8_word_find_boundary;
-    sz_utf8_word_rfind_boundary_t utf8_word_rfind_boundary;
+    sz_utf8_word_find_boundaries_t utf8_word_find_boundaries;
+    sz_utf8_word_rfind_boundaries_t utf8_word_rfind_boundaries;
     sz_utf8_case_insensitive_order_t utf8_case_insensitive_order;
 
     sz_sequence_argsort_t sequence_argsort;

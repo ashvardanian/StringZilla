@@ -431,10 +431,11 @@ SZ_INTERNAL int sz_wb_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t after_raw, 
 /*  Common driver: builds the vectorized property table, derives effective forward/backward props, and
  *  produces the boundary decision per codepoint start. `find` walks forward, `rfind` walks backward;
  *  both share the identical decision logic so they remain value-exact w.r.t. the serial reference. */
-SZ_INTERNAL sz_cptr_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width, int reverse) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_INTERNAL sz_size_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
+                                      sz_size_t words_capacity, sz_size_t *bytes_consumed, int reverse) {
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = (length == 0) ? 0 : (reverse ? length : 0);
+        return 0;
     }
 
     // Heap-free for small/medium inputs; fall back to the serial reference for very large inputs to avoid
@@ -443,8 +444,10 @@ SZ_INTERNAL sz_cptr_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_
     // Delegate to the serial reference (value-identical) when the input is too large for the stack table or
     // is not well-formed UTF-8 (where serial's mixed stepping cannot be reproduced from a forward table).
     if (length >= sz_wb_stack_cap_k_ || !sz_wb_is_well_formed_rvv_(text, length))
-        return reverse ? sz_utf8_word_rfind_boundary_serial(text, length, boundary_width)
-                       : sz_utf8_word_find_boundary_serial(text, length, boundary_width);
+        return reverse ? sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
+                                                              bytes_consumed)
+                       : sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
+                                                             bytes_consumed);
 
     sz_size_t offsets[sz_wb_stack_cap_k_ + 1];
     sz_rune_t runes[sz_wb_stack_cap_k_ + 1];
@@ -484,8 +487,10 @@ SZ_INTERNAL sz_cptr_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_
         }
     }
 
+    sz_size_t words = 0;
     if (!reverse) {
-        // Forward: position 0 is always a boundary; scan codepoint starts after it.
+        // Forward: position 0 is always a boundary; scan codepoint starts after it, emitting one word per gap.
+        sz_size_t word_start = 0;
         for (sz_size_t codepoint_index = 1; codepoint_index < codepoint_count; ++codepoint_index) {
             sz_u8_t prev_prop = backward_props[codepoint_index - 1];
             sz_u8_t after_raw = props[codepoint_index];
@@ -495,15 +500,29 @@ SZ_INTERNAL sz_cptr_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_
             if (decision < 0) { is_boundary = sz_utf8_is_word_boundary_serial(text, length, offsets[codepoint_index]); }
             else { is_boundary = (sz_bool_t)decision; }
             if (is_boundary) {
-                if (boundary_width) *boundary_width = offsets[codepoint_index];
-                return text + offsets[codepoint_index];
+                if (words == words_capacity) {
+                    if (bytes_consumed) *bytes_consumed = word_start;
+                    return words;
+                }
+                word_starts[words] = word_start;
+                word_lengths[words] = offsets[codepoint_index] - word_start;
+                ++words;
+                word_start = offsets[codepoint_index];
             }
         }
-        if (boundary_width) *boundary_width = length;
-        return text + length;
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_start;
+            return words;
+        }
+        word_starts[words] = word_start;
+        word_lengths[words] = length - word_start;
+        ++words;
+        if (bytes_consumed) *bytes_consumed = length;
+        return words;
     }
     else {
         // Reverse: position length is always a boundary; scan codepoint starts before it, high to low.
+        sz_size_t word_end = length;
         for (sz_size_t codepoint_index = codepoint_count; codepoint_index-- > 1;) {
             sz_u8_t prev_prop = backward_props[codepoint_index - 1];
             sz_u8_t after_raw = props[codepoint_index];
@@ -513,21 +532,38 @@ SZ_INTERNAL sz_cptr_t sz_wb_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_
             if (decision < 0) { is_boundary = sz_utf8_is_word_boundary_serial(text, length, offsets[codepoint_index]); }
             else { is_boundary = (sz_bool_t)decision; }
             if (is_boundary) {
-                if (boundary_width) *boundary_width = length - offsets[codepoint_index];
-                return text + offsets[codepoint_index];
+                if (words == words_capacity) {
+                    if (bytes_consumed) *bytes_consumed = word_end;
+                    return words;
+                }
+                word_starts[words] = offsets[codepoint_index];
+                word_lengths[words] = word_end - offsets[codepoint_index];
+                ++words;
+                word_end = offsets[codepoint_index];
             }
         }
-        if (boundary_width) *boundary_width = length;
-        return text;
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_end;
+            return words;
+        }
+        word_starts[words] = 0;
+        word_lengths[words] = word_end;
+        ++words;
+        if (bytes_consumed) *bytes_consumed = 0;
+        return words;
     }
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_wb_scan_rvv_(text, length, boundary_width, 0);
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                     sz_size_t *bytes_consumed) {
+    return sz_wb_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 0);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_wb_scan_rvv_(text, length, boundary_width, 1);
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed) {
+    return sz_wb_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 1);
 }
 
 #if defined(__clang__)

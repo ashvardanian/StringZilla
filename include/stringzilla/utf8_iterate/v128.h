@@ -321,13 +321,19 @@ SZ_INTERNAL v128_t sz_wb_interior_mask_v128_(v128_t bytes) {
     return wasm_v128_and(is_ascii, interior);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_v128(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = 0;
+        return 0;
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
+    sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Skip the first codepoint (position 0 is always a boundary, WB1).
     sz_size_t position = sz_utf8_char_length_(text_u8[0]);
 
@@ -359,23 +365,42 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_v128(sz_cptr_t text, sz_size_t le
         }
 
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = position - word_start;
+            ++words;
+            word_start = position;
         }
         position += sz_utf8_char_length_(text_u8[position]);
     }
 
-    if (boundary_width) *boundary_width = length;
-    return text + length;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_start;
+        return words;
+    }
+    word_starts[words] = word_start;
+    word_lengths[words] = length - word_start;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = length;
+    return words;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *word_starts, sz_size_t *word_lengths,    //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = length;
+        return 0;
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
+    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
     // Move back one codepoint from the end (position length is always a boundary, WB2).
     sz_size_t position = length - 1;
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
@@ -406,15 +431,28 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t l
         }
 
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = length - position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_end;
+                return words;
+            }
+            word_starts[words] = position;
+            word_lengths[words] = word_end - position;
+            ++words;
+            word_end = position;
         }
         position--;
         while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
 
-    if (boundary_width) *boundary_width = length;
-    return text;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_end;
+        return words;
+    }
+    word_starts[words] = 0;
+    word_lengths[words] = word_end;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = 0;
+    return words;
 }
 
 #if defined(__clang__)

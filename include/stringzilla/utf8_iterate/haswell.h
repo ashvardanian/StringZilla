@@ -437,16 +437,21 @@ SZ_INTERNAL void sz_wb_classify_window_haswell_(sz_cptr_t window, sz_size_t vali
     for (sz_size_t i = valid; i < 32; ++i) props_out[i] = SZ_WB_PROP_SENTINEL_;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *word_starts, sz_size_t *word_lengths,      //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = 0;
+        return 0;
     }
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t position = 0;
+    sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Skip first codepoint (position 0 is always a boundary), matching the serial reference.
-    position += sz_utf8_char_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_char_length_(text_u8[0]);
 
     // Window of classified properties covering [base, base+32).
     sz_u8_t props[32];
@@ -482,26 +487,43 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_haswell(sz_cptr_t text, sz_size_t
         else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
 
         if (is_boundary) {
-            if (boundary_width) *boundary_width = position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = position - word_start;
+            ++words;
+            word_start = position;
         }
         position += sz_utf8_char_length_(text_u8[position]);
     }
 
-    if (boundary_width) *boundary_width = length;
-    return text + length;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_start;
+        return words;
+    }
+    word_starts[words] = word_start;
+    word_lengths[words] = length - word_start;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = length;
+    return words;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *word_starts, sz_size_t *word_lengths,       //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = length;
+        return 0;
     }
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t position = length;
-    // Move back one codepoint (position length is always a boundary).
-    position--;
+    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
+    sz_size_t position = length - 1;
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
     sz_u8_t props[32];
@@ -532,15 +554,28 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_haswell(sz_cptr_t text, sz_size_
         else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
 
         if (is_boundary) {
-            if (boundary_width) *boundary_width = length - position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_end;
+                return words;
+            }
+            word_starts[words] = position;
+            word_lengths[words] = word_end - position;
+            ++words;
+            word_end = position;
         }
         position--;
         while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
 
-    if (boundary_width) *boundary_width = length;
-    return text;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_end;
+        return words;
+    }
+    word_starts[words] = 0;
+    word_lengths[words] = word_end;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = 0;
+    return words;
 }
 
 #if defined(__clang__)

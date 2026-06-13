@@ -225,12 +225,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t lengt
  *  Extend/Format/ZWJ skipping, WB6/WB7 mid-letter look-around, WB11/WB12 numeric, WB15/WB16 Regional
  *  Indicator pairing). There is no byte-exact slice a vector pass can accelerate cheaply, so the
  *  sve2 symbols delegate to their `_serial` references for value-identical output. */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_utf8_word_find_boundary_serial(text, length, boundary_width);
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed) {
+    return sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_utf8_word_rfind_boundary_serial(text, length, boundary_width);
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                       sz_size_t *bytes_consumed) {
+    return sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
+                                                bytes_consumed);
 }
 #endif // SZ_USE_SVE2
 
