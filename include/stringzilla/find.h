@@ -808,6 +808,13 @@ SZ_INTERNAL sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t h, sz_size_t h_length, sz_
 
     sz_size_t prefix_length = n_length - suffix_length;
     while (1) {
+        // A partial-suffix match shrinks `h_length` (below) guarded only by the
+        // prefix room; a short tail can then leave fewer than `suffix_length`
+        // bytes for the next `find_suffix`, underflowing its unsigned loop bound
+        // (`i <= h_length - n_length` -> ~2^64) into an out-of-bounds read. Guard
+        // up front, mirroring the forward twin `sz_find_with_prefix_`'s
+        // `remaining < n_length` check.
+        if (h_length < n_length) return SZ_NULL_CHAR;
         sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
         if (!found) return SZ_NULL_CHAR;
 
