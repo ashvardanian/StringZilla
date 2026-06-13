@@ -242,62 +242,75 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_s
 
 /*  UAX-29 word boundary detection.
  *
- *  The full UAX-29 segmenter is a stateful walk whose decision at each candidate position depends on the
- *  Word_Break properties of the surrounding runes, including look-around (WB6/WB7 mid-letter, WB11/WB12
- *  numeric, WB15/WB16 Regional Indicator parity) and WB4 Extend/Format/ZWJ skipping. We keep those stateful
- *  sub-rules in the serial reference, but accelerate the dominant common case: long runs of ASCII letters
- *  (`[A-Za-z]`) or ASCII digits (`[0-9]`).
- *
- *  Inside a maximal run of consecutive ASCII letters, every interior position is governed @b unconditionally
- *  by WB5 (AHLetter × AHLetter ⇒ no break): both neighbours are ALetter, neither is CR/LF/Newline/ZWJ/
- *  Extend/Format, and WB5 needs no look-around. Likewise interior positions of an ASCII-digit run are covered
- *  unconditionally by WB8 (Numeric × Numeric ⇒ no break). So no interior position of such a run can be a word
- *  boundary, and we may skip it. The first byte that is @b not the same word-class as its predecessor (or the
- *  first non-ASCII byte) is the earliest position that could possibly be a boundary; from there we hand off to
- *  the serial reference, which re-tests that exact position. Skipping only proven non-boundaries keeps the
- *  result byte-for-byte identical to `_serial` (same returned pointer and `boundary_width`).
- *
- *  `vqtbl1q_u8` classifies a 16-byte window into a per-byte class (0 = letter, 1 = digit, 2 = other/ASCII-
- *  punct, 3 = non-ASCII) via the low nibble for ASCII and a high-bit test for the rest. We then look for the
- *  first lane where the class differs from the previous lane (a class transition) or is not letter/digit. */
+ *  An all-ASCII window is classified to Word_Break property values via a 128-entry table lookup, the full set
+ *  of ASCII no-break rules is evaluated branchlessly as neighbour bit-shifts (see
+ *  `sz_utf8_word_break_boundary_mask_neon_`), and the resulting boundary positions are emitted directly - no
+ *  per-candidate serial oracle. ASCII has no Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana, so the
+ *  stateful WB4 and WB15/16 rules never apply inside such a window; non-ASCII windows and the leading/trailing
+ *  edges take a single step of the serial reference, keeping the result byte-for-byte identical to `_serial`. */
 
-SZ_INTERNAL uint8x16_t sz_utf8_wb_classify_neon_(uint8x16_t v) {
-    // Classify each byte: 0 = ASCII letter [A-Za-z], 1 = ASCII digit [0-9], 2 = other ASCII, 3 = non-ASCII.
-    // Non-ASCII (high bit set) -> class 3.
-    uint8x16_t is_high = vcgeq_u8(v, vdupq_n_u8(0x80));
-    uint8x16_t is_digit = vandq_u8(vcgeq_u8(v, vdupq_n_u8('0')), vcleq_u8(v, vdupq_n_u8('9')));
-    uint8x16_t is_upper = vandq_u8(vcgeq_u8(v, vdupq_n_u8('A')), vcleq_u8(v, vdupq_n_u8('Z')));
-    uint8x16_t is_lower = vandq_u8(vcgeq_u8(v, vdupq_n_u8('a')), vcleq_u8(v, vdupq_n_u8('z')));
-    uint8x16_t is_letter = vorrq_u8(is_upper, is_lower);
-    // Start from class 2 (other ASCII), override.
-    uint8x16_t cls = vdupq_n_u8(2);
-    cls = vbslq_u8(is_digit, vdupq_n_u8(1), cls);
-    cls = vbslq_u8(is_letter, vdupq_n_u8(0), cls);
-    cls = vbslq_u8(is_high, vdupq_n_u8(3), cls);
-    return cls;
+/*  Classify an all-ASCII 16-byte window into Word_Break property values via the 128-entry table. The property
+ *  table is not separable into two nibble bitsets (ALetter spans non-rectangular byte ranges), so this is a
+ *  full byte lookup: two `vqtbl4q_u8` cover entries 0..63 and 64..127 (each returns zero for out-of-range
+ *  indices), combined with an OR. Valid only when every byte is ASCII (< 0x80). */
+SZ_INTERNAL uint8x16_t sz_utf8_word_break_classify_property_neon_(uint8x16_t bytes) {
+    uint8x16x4_t low_table = vld1q_u8_x4(sz_utf8_word_break_property_ascii_);         // entries 0..63
+    uint8x16x4_t high_table = vld1q_u8_x4(sz_utf8_word_break_property_ascii_ + 64);   // entries 64..127
+    uint8x16_t from_low = vqtbl4q_u8(low_table, bytes);                               // zero where byte >= 64
+    uint8x16_t from_high = vqtbl4q_u8(high_table, veorq_u8(bytes, vdupq_n_u8(0x40))); // zero where byte < 64
+    return vorrq_u8(from_low, from_high);
 }
 
-/*  Advance `position` over bytes that are provably interior to an ASCII letter/digit run (and hence not word
- *  boundaries), starting from a position that is known to be a run interior or run start. Returns the first
- *  position that may be a boundary. */
-SZ_INTERNAL sz_size_t sz_utf8_wb_skip_run_neon_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    while (position + 16 <= length) {
-        uint8x16_t v = vld1q_u8(text_u8 + position);
-        uint8x16_t cls = sz_utf8_wb_classify_neon_(v);
-        // Previous-lane class via a 1-byte shift bringing in the byte at position-1.
-        uint8x16_t previous = vextq_u8(sz_utf8_wb_classify_neon_(vdupq_n_u8(text_u8[position - 1])), cls, 15);
-        // A position is a "safe interior" iff its class == previous class AND class is letter(0) or digit(1).
-        uint8x16_t same = vceqq_u8(cls, previous);
-        uint8x16_t wordy = vcleq_u8(cls, vdupq_n_u8(1)); // class 0 or 1
-        uint8x16_t safe = vandq_u8(same, wordy);
-        // Find first lane that is NOT safe.
-        sz_u64_t safe_mask = sz_utf8_vreinterpretq_u8_u4_(safe);
-        sz_u64_t not_safe = (~safe_mask) & 0x8888888888888888ull;
-        if (not_safe) return position + (sz_u64_ctz(not_safe) / 4);
-        position += 16;
-    }
-    return position;
+/*  Given an all-ASCII 16-byte window, return a nibble-mask (bit 4*j+3 set) of word boundaries at lanes [2,14] -
+ *  the lanes whose i-2 and i+1 neighbours are both in-window, so every UAX-29 rule that can apply to ASCII is
+ *  resolved without the serial oracle. ASCII contains no Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana,
+ *  so WB4 and WB15/16 never apply and WB6/7/11/12 reduce to neighbour lane shifts. */
+SZ_INTERNAL sz_u64_t sz_utf8_word_break_boundary_mask_neon_(uint8x16_t window_bytes) {
+    uint8x16_t classes = sz_utf8_word_break_classify_property_neon_(window_bytes);
+    uint8x16_t aletter = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_aletter_k));
+    uint8x16_t numeric = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_numeric_k));
+    uint8x16_t extendnumlet = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_extendnumlet_k));
+    uint8x16_t midletter = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_midletter_k));
+    uint8x16_t midnum = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_midnum_k));
+    uint8x16_t mid_quotes = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_mid_quotes_k));
+    uint8x16_t carriage_return = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_cr_k));
+    uint8x16_t line_feed = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_lf_k));
+    uint8x16_t mid_letter_or_quotes = vorrq_u8(midletter, mid_quotes);
+    uint8x16_t mid_num_or_quotes = vorrq_u8(midnum, mid_quotes);
+    uint8x16_t zero = vdupq_n_u8(0);
+
+    // Neighbour group vectors: `previous` brings lane (j-1) to lane j, `before_previous` lane (j-2), `next` (j+1).
+    uint8x16_t aletter_previous = vextq_u8(zero, aletter, 15);
+    uint8x16_t aletter_before_previous = vextq_u8(zero, aletter, 14);
+    uint8x16_t aletter_next = vextq_u8(aletter, zero, 1);
+    uint8x16_t numeric_previous = vextq_u8(zero, numeric, 15);
+    uint8x16_t numeric_before_previous = vextq_u8(zero, numeric, 14);
+    uint8x16_t numeric_next = vextq_u8(numeric, zero, 1);
+    uint8x16_t extendnumlet_previous = vextq_u8(zero, extendnumlet, 15);
+    uint8x16_t mid_letter_or_quotes_previous = vextq_u8(zero, mid_letter_or_quotes, 15);
+    uint8x16_t mid_num_or_quotes_previous = vextq_u8(zero, mid_num_or_quotes, 15);
+    uint8x16_t carriage_return_previous = vextq_u8(zero, carriage_return, 15);
+
+    uint8x16_t join = vandq_u8(carriage_return_previous, line_feed);                                 // WB3  CR x LF
+    join = vorrq_u8(join, vandq_u8(aletter_previous, aletter));                                      // WB5
+    join = vorrq_u8(join, vandq_u8(vandq_u8(aletter_previous, mid_letter_or_quotes), aletter_next)); // WB6
+    join = vorrq_u8(join, vandq_u8(vandq_u8(aletter_before_previous, mid_letter_or_quotes_previous), aletter)); // WB7
+    join = vorrq_u8(join, vandq_u8(numeric_previous, numeric));                                                 // WB8
+    join = vorrq_u8(join, vandq_u8(aletter_previous, numeric));                                                 // WB9
+    join = vorrq_u8(join, vandq_u8(numeric_previous, aletter));                                                 // WB10
+    join = vorrq_u8(join, vandq_u8(vandq_u8(numeric_previous, mid_num_or_quotes), numeric_next));               // WB11
+    join = vorrq_u8(join, vandq_u8(vandq_u8(numeric_before_previous, mid_num_or_quotes_previous), numeric));    // WB12
+    uint8x16_t aletter_numeric_or_extendnumlet_previous = vorrq_u8(vorrq_u8(aletter_previous, numeric_previous),
+                                                                   extendnumlet_previous);
+    join = vorrq_u8(join, vandq_u8(aletter_numeric_or_extendnumlet_previous, extendnumlet)); // WB13a
+    join = vorrq_u8(join, vandq_u8(extendnumlet_previous, vorrq_u8(aletter, numeric)));      // WB13b
+
+    uint8x16_t boundary = vmvnq_u8(join);
+    // Trust only lanes [2,14]; lanes 0,1 lack a left neighbour and lane 15 lacks a right neighbour.
+    static sz_u8_t const trusted_lanes[16] = {0,    0,    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                              0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
+    boundary = vandq_u8(boundary, vld1q_u8(trusted_lanes));
+    return sz_utf8_vreinterpretq_u8_u4_(boundary) & 0x8888888888888888ull;
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //
@@ -311,17 +324,34 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //
         return 0;
     }
 
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
-    sz_size_t position = sz_utf8_char_length_((sz_u8_t)text[0]);
+    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
     while (position < length) {
-        // Try to skip a vectorized run of proven non-boundaries first - no boundary lives inside such a run.
-        if (position > 0 && position + 16 <= length) {
-            sz_size_t skipped = sz_utf8_wb_skip_run_neon_(text, length, position);
-            if (skipped > position) {
-                position = skipped;
-                if (position >= length) break;
+        // Oracle-free fast path: a window [position-2, position+14) gives lanes [2,14] full +/-2 context, so an
+        // all-ASCII window resolves boundaries at positions [position, position+12] directly from the mask.
+        if (position >= 2 && position + 14 <= length) {
+            uint8x16_t window = vld1q_u8(text_u8 + position - 2);
+            if (vmaxvq_u8(window) < 0x80) {
+                sz_u64_t boundary_mask = sz_utf8_word_break_boundary_mask_neon_(window);
+                while (boundary_mask) {
+                    sz_size_t lane = (sz_size_t)(sz_u64_ctz(boundary_mask) >> 2);
+                    sz_size_t boundary_position = position - 2 + lane;
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
+                    }
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
+                    boundary_mask &= boundary_mask - 1;
+                }
+                position += 13; // Resolved [position, position+12]; next unresolved boundary is at position+13.
+                continue;
             }
         }
+        // Serial step for non-ASCII windows and the leading/trailing edges.
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
@@ -332,7 +362,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //
             ++words;
             word_start = position;
         }
-        position += sz_utf8_char_length_((sz_u8_t)text[position]);
+        position += sz_utf8_codepoint_length_(text_u8[position]);
     }
 
     if (words == words_capacity) {
@@ -346,37 +376,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //
     return words;
 }
 
-/*  Reverse counterpart of `sz_utf8_wb_skip_run_neon_`: given a `position` known to sit at a run interior
- *  or end, walk backward over bytes that are provably non-boundaries (same ASCII letter/digit class as their
- *  predecessor). Returns the smallest position whose non-boundary status is still proven; the caller tests it
- *  and anything below it serially. */
-SZ_INTERNAL sz_size_t sz_utf8_wb_rskip_run_neon_(sz_cptr_t text, sz_size_t position) {
-    // Window [base, base+16) == [position-15, position+1), so the top lane is `position` itself. Position `j`
-    // is a proven non-boundary when its class equals the class of byte j-1 and both are letter/digit. The
-    // highest unsafe lane `high_bit_index` is the lowest position we must still test serially; everything in
-    // (high_bit_index, position] is proven safe, so we jump straight to it. If all lanes are safe we jump to
-    // `base` and continue from
-    // there.
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    while (position >= 16) {
-        sz_size_t base = position - 15;
-        uint8x16_t v = vld1q_u8(text_u8 + base);
-        uint8x16_t cls = sz_utf8_wb_classify_neon_(v);
-        uint8x16_t previous = vextq_u8(sz_utf8_wb_classify_neon_(vdupq_n_u8(text_u8[base - 1])), cls, 15);
-        uint8x16_t same = vceqq_u8(cls, previous);
-        uint8x16_t wordy = vcleq_u8(cls, vdupq_n_u8(1));
-        uint8x16_t safe = vandq_u8(same, wordy);
-        sz_u64_t safe_mask = sz_utf8_vreinterpretq_u8_u4_(safe);
-        sz_u64_t not_safe = (~safe_mask) & 0x8888888888888888ull;
-        if (not_safe) {
-            int high_bit_index = 63 - sz_u64_clz(not_safe); // bit index of highest unsafe lane
-            return base + (high_bit_index / 4);
-        }
-        position = base;
-    }
-    return position;
-}
-
 SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_neon( //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *word_starts, sz_size_t *word_lengths,    //
@@ -388,15 +387,32 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_neon( //
         return 0;
     }
 
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
     sz_size_t position = length - 1;
     while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     while (position > 0) {
-        if (position >= 16) {
-            sz_size_t skipped = sz_utf8_wb_rskip_run_neon_(text, position);
-            if (skipped < position) {
-                position = skipped;
-                if (position == 0) break;
+        // Oracle-free fast path: a window [position-14, position+2) gives lanes [2,14] full +/-2 context,
+        // resolving boundaries at positions [position-12, position]; emit them high-to-low.
+        if (position >= 14 && position + 2 <= length) {
+            uint8x16_t window = vld1q_u8(text_u8 + position - 14); // lane j = byte position-14+j; lane 14 = position
+            if (vmaxvq_u8(window) < 0x80) {
+                sz_u64_t boundary_mask = sz_utf8_word_break_boundary_mask_neon_(window);
+                while (boundary_mask) {
+                    sz_size_t bit = (sz_size_t)(63 - sz_u64_clz(boundary_mask)); // highest set lane first
+                    sz_size_t boundary_position = position - 14 + (bit >> 2);
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
+                    }
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
+                    boundary_mask &= ~((sz_u64_t)1 << bit);
+                }
+                position -= 13; // Resolved [position-12, position]; next unresolved boundary is at position-13.
+                continue;
             }
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {

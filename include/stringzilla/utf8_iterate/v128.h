@@ -267,7 +267,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
         v128_t bytes = wasm_v128_load(text_cursor);
         // Any byte >= 0x80 has its sign bit set; if present, defer the whole window to serial.
         if (wasm_i8x16_bitmask(bytes) != 0) break;
-        // Widen 16x u8 -> 16x u32 and store as runes (zero-extension == the ASCII code point value).
+        // Widen 16x u8 → 16x u32 and store as runes (zero-extension == the ASCII code point value).
         v128_t low_u16x8 = wasm_u16x8_extend_low_u8x16(bytes);
         v128_t high_u16x8 = wasm_u16x8_extend_high_u8x16(bytes);
         wasm_v128_store(runes + runes_written + 0, wasm_u32x4_extend_low_u16x8(low_u16x8));
@@ -296,7 +296,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
  *  yet the serial scanner pays a full property lookup + rule cascade per byte.
  *
  *  We accelerate exactly that case. The word-interior set is exactly the ASCII bytes {A-Z, a-z, 0-9,
- *  '_' = ExtendNumLet}, which `sz_wb_interior_mask_v128_` detects directly. For a candidate at byte
+ *  '_' = ExtendNumLet}, which `sz_utf8_word_break_nonboundary_mask_v128_` detects directly. For a candidate at byte
  *  offset `i`, if both `byte[i-1]` and `byte[i]` are word-interior, then *every* UAX-29 rule that could
  *  fire (WB5/8/9/10/13a/13b and their context-needing siblings) resolves to "do NOT break" — verified
  *  exhaustively against the serial decision table — because ASCII contains no Extend/Format/ZWJ/RI/
@@ -305,20 +305,36 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
  *  is not a guaranteed interior, is handed to `sz_utf8_is_word_boundary_serial` verbatim, so the result
  *  is bit-for-bit identical to the serial reference (the hard, stateful sub-rules stay serial). */
 
-/** @brief Per-byte mask (0xFF) where a byte is ASCII and word-interior {ALetter,Numeric,ExtendNumLet}. */
-SZ_INTERNAL v128_t sz_wb_interior_mask_v128_(v128_t bytes) {
-    // The interior set is exactly {A-Z, a-z, 0-9, '_'}, so we test it directly instead of running the
-    // full Word_Break classifier and then matching three property values. ASCII letters fold to a-z
-    // by OR-ing 0x20; the `is_ascii` guard rejects any high byte that the fold might alias into range.
-    v128_t is_ascii = wasm_i8x16_ge(bytes, wasm_i8x16_splat(0)); // high bit clear (signed >= 0)
-    v128_t lowered_vec = wasm_v128_or(bytes, wasm_i8x16_splat(0x20));
-    v128_t is_alpha = wasm_v128_and(wasm_i8x16_ge(lowered_vec, wasm_i8x16_splat(0x61)),
-                                    wasm_i8x16_le(lowered_vec, wasm_i8x16_splat(0x7A)));
-    v128_t is_digit = wasm_v128_and(wasm_i8x16_ge(bytes, wasm_i8x16_splat(0x30)),
-                                    wasm_i8x16_le(bytes, wasm_i8x16_splat(0x39)));
-    v128_t is_underscore = wasm_i8x16_eq(bytes, wasm_i8x16_splat(0x5F));
-    v128_t interior = wasm_v128_or(wasm_v128_or(is_alpha, is_digit), is_underscore);
-    return wasm_v128_and(is_ascii, interior);
+/*  Per-class 16-bit lane mask for an all-ASCII window via `wasm_i8x16_bitmask`. Each Word_Break class is a
+ *  small set of ASCII byte ranges/singletons (ALetter = A-Z|a-z via the 0x20 fold, Numeric = 0-9,
+ *  ExtendNumLet = '_', MidLetter = ':', MidNum = ','|';', MidQuotes = '"'|'\''|'.', plus CR and LF), so no
+ *  property table is needed. */
+SZ_INTERNAL sz_u64_t sz_utf8_word_break_class_bitmask_v128_(v128_t equal_vec) {
+    return (sz_u64_t)((sz_u32_t)wasm_i8x16_bitmask(equal_vec) & 0xFFFFu);
+}
+
+/*  Boundary mask for the trusted lanes [2,14] of an all-ASCII 16-byte window: bit i set => a word boundary
+ *  precedes lane i. Computed branchlessly via the shared portable join routine. */
+SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
+    v128_t lowered = wasm_v128_or(window, wasm_i8x16_splat(0x20)); // fold A-Z onto a-z
+    sz_u64_t aletter_mask = sz_utf8_word_break_class_bitmask_v128_(
+        wasm_v128_and(wasm_u8x16_ge(lowered, wasm_i8x16_splat(0x61)), wasm_u8x16_le(lowered, wasm_i8x16_splat(0x7A))));
+    sz_u64_t numeric_mask = sz_utf8_word_break_class_bitmask_v128_(
+        wasm_v128_and(wasm_u8x16_ge(window, wasm_i8x16_splat(0x30)), wasm_u8x16_le(window, wasm_i8x16_splat(0x39))));
+    sz_u64_t extendnumlet_mask = sz_utf8_word_break_class_bitmask_v128_(wasm_i8x16_eq(window, wasm_i8x16_splat(0x5F)));
+    sz_u64_t midletter_mask = sz_utf8_word_break_class_bitmask_v128_(wasm_i8x16_eq(window, wasm_i8x16_splat(0x3A)));
+    sz_u64_t midnum_mask = sz_utf8_word_break_class_bitmask_v128_(
+        wasm_v128_or(wasm_i8x16_eq(window, wasm_i8x16_splat(0x2C)), wasm_i8x16_eq(window, wasm_i8x16_splat(0x3B))));
+    sz_u64_t mid_quotes_mask = sz_utf8_word_break_class_bitmask_v128_(wasm_v128_or(
+        wasm_v128_or(wasm_i8x16_eq(window, wasm_i8x16_splat(0x22)), wasm_i8x16_eq(window, wasm_i8x16_splat(0x27))),
+        wasm_i8x16_eq(window, wasm_i8x16_splat(0x2E))));
+    sz_u64_t carriage_return_mask = sz_utf8_word_break_class_bitmask_v128_(
+        wasm_i8x16_eq(window, wasm_i8x16_splat(0x0D)));
+    sz_u64_t line_feed_mask = sz_utf8_word_break_class_bitmask_v128_(wasm_i8x16_eq(window, wasm_i8x16_splat(0x0A)));
+    sz_u64_t join = sz_utf8_word_break_join_from_class_masks_(aletter_mask, numeric_mask, extendnumlet_mask,
+                                                              midletter_mask, midnum_mask, mid_quotes_mask,
+                                                              carriage_return_mask, line_feed_mask);
+    return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
@@ -335,35 +351,31 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
 
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Skip the first codepoint (position 0 is always a boundary, WB1).
-    sz_size_t position = sz_utf8_char_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
 
     while (position < length) {
-        // Vectorized fast-skip over ASCII word/number interiors. A candidate at offset `i` is a
-        // guaranteed non-boundary iff byte[i-1] and byte[i] are both ASCII word-interior. We load a
-        // 16-byte window anchored one byte BEFORE `position`, so lane 0 = byte[position-1] and lane 1 = byte[position].
-        if (position >= 1 && position + 16 <= length) {
-            v128_t window = wasm_v128_load(text_u8 + position - 1);
-            v128_t interior = sz_wb_interior_mask_v128_(window);
-            // Pair[i] interior iff lane i and lane i-1 both interior. Shift interior right by one lane
-            // (lane i gets lane i-1's value); zero the wrapped lane 0 so it never claims a pair.
-            v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-                                                 25, 26, 27, 28, 29, 30);
-            v128_t pair = wasm_v128_and(interior, previous);
-            // Bit i (i>=1) set => offset (position-1+i) is a guaranteed non-boundary. Candidates correspond
-            // to lanes 1..15 (offsets position..position+14). A clear bit among those is the first real candidate.
-            sz_u32_t pair_mask = (sz_u32_t)wasm_i8x16_bitmask(pair);
-            // Consider only lanes 1..15; a non-boundary run is a prefix of set bits there.
-            sz_u32_t candidate_bits = (~pair_mask) & 0xFFFEu; // clear lane 0, look at lanes 1..15
-            if (candidate_bits == 0) {
-                // All of offsets position..position+14 are guaranteed non-boundaries; advance past them.
-                position += 15;
+        // Oracle-free fast path: a window [position-2, position+14) gives lanes [2,14] full +/-2 context, so an
+        // all-ASCII window resolves boundaries at positions [position, position+12] directly from the mask.
+        if (position >= 2 && position + 14 <= length) {
+            v128_t window = wasm_v128_load(text_u8 + position - 2); // lane j = byte position-2+j
+            if (((sz_u32_t)wasm_i8x16_bitmask(window) & 0xFFFFu) == 0) {
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_v128_(window);
+                while (boundary) {
+                    sz_size_t boundary_position = position - 2 + (sz_size_t)sz_u32_ctz(boundary);
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
+                    }
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
+                    boundary &= boundary - 1;
+                }
+                position += 13; // Resolved [position, position+12]; next unresolved boundary is at position+13.
                 continue;
             }
-            int first = sz_u32_ctz(candidate_bits); // lane index 1..15
-            position += (sz_size_t)(first - 1);     // move to that codepoint-aligned candidate offset
-            // Fall through to the serial check at this `position`.
         }
-
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
@@ -374,7 +386,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
             ++words;
             word_start = position;
         }
-        position += sz_utf8_char_length_(text_u8[position]);
+        position += sz_utf8_codepoint_length_(text_u8[position]);
     }
 
     if (words == words_capacity) {
@@ -406,30 +418,29 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
     while (position > 0) {
-        // Vectorized fast-skip backward over ASCII word/number interiors. Anchor a 16-byte window so
-        // lane 15 = byte[position] and lane 14 = byte[position-1]: load at (position-15). Then pair[i] (i in 1..15)
-        // = interior[i] && interior[i-1] marks offset (base+i) as a guaranteed non-boundary.
-        if (position >= 15 && position + 1 <= length) {
-            sz_size_t base = position - 15;
-            v128_t window = wasm_v128_load(text_u8 + base);
-            v128_t interior = sz_wb_interior_mask_v128_(window);
-            v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-                                                 25, 26, 27, 28, 29, 30);
-            v128_t pair = wasm_v128_and(interior, previous);
-            sz_u32_t pair_mask = (sz_u32_t)wasm_i8x16_bitmask(pair);
-            // Offsets base+1 .. base+15 map to lanes 1..15. We scan downward from lane 15 (offset position).
-            // A guaranteed non-boundary run is a suffix of set bits in lanes 1..15.
-            sz_u32_t candidate_bits = (~pair_mask) & 0xFFFEu;
-            if (candidate_bits == 0) {
-                // Offsets base+1..base+15 (== position-14..position) are all guaranteed non-boundaries; jump below.
-                position = base; // base == position-15 > 0 here; loop re-checks position>0
+        // Oracle-free fast path: a window [position-14, position+2) gives lanes [2,14] full +/-2 context,
+        // resolving boundaries at positions [position-12, position]; emit them high-to-low.
+        if (position >= 14 && position + 2 <= length) {
+            v128_t window = wasm_v128_load(text_u8 + position - 14); // lane j = byte position-14+j; lane 14 = position
+            if (((sz_u32_t)wasm_i8x16_bitmask(window) & 0xFFFFu) == 0) {
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_v128_(window);
+                while (boundary) {
+                    int lane = 31 - sz_u32_clz(boundary); // highest set lane first
+                    sz_size_t boundary_position = position - 14 + (sz_size_t)lane;
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
+                    }
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
+                    boundary &= ~((sz_u32_t)1 << lane);
+                }
+                position -= 13; // Resolved [position-12, position]; next unresolved boundary is at position-13.
                 continue;
             }
-            int last = 31 - sz_u32_clz(candidate_bits); // highest candidate lane 1..15
-            position = base + (sz_size_t)last;          // first real candidate at/below current position
-            // Fall through to serial check at this `position`.
         }
-
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_end;
