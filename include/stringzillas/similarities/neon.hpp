@@ -28,7 +28,6 @@ namespace stringzillas {
 #pragma GCC target("+simd")
 #endif
 
-
 /**
  *  @brief Until a bit-parallel Myers fast path is vectorized for NEON, reuse the serial one. The serial
  *         Myers is SIMD-free (64-bit-word lanes), so it runs unchanged on AArch64; the byte-level
@@ -1227,8 +1226,8 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
  *         cell widths; this catches the rarely-instantiated `u8`/`u64` cells (and any not-yet-vectorized
  *         iterator/gap combination) so the dispatch never lands on an undefined template.
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename gap_costs_type_, sz_capability_t capability_>
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_, typename gap_costs_type_,
+          sz_capability_t capability_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, uniform_substitution_costs_t,
                    gap_costs_type_, sz_minimize_distance_k, sz_similarity_global_k, capability_,
                    std::enable_if_t<(capability_ & sz_cap_neon_k) != 0>>
@@ -1301,10 +1300,10 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
-        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
-        u16_t const *scores_pre_deletion, u16_t *scores_new,                     //
+    SZ_NOINLINE void score_slice_trampoline_(                                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,                             //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,                //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                                    //
         uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec, uint16x8_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
@@ -1404,10 +1403,10 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
-        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion, //
-        u32_t const *scores_pre_deletion, u32_t *scores_new,                     //
+    SZ_NOINLINE void score_slice_trampoline_(                                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,                             //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,                //
+        u32_t const *scores_pre_deletion, u32_t *scores_new,                                    //
         uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec, uint32x4_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
@@ -1473,7 +1472,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions, //
         u16_t const *scores_running_deletions, u16_t *scores_new,                 //
         u16_t *scores_new_insertions, u16_t *scores_new_deletions,                //
-        uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec, //
+        uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec,            //
         uint16x8_t gap_open_vec, uint16x8_t gap_extend_vec) const noexcept {
 
         uint8x16_t equal_vec = vceqq_u8(vld1q_u8(first_reversed_slice), vld1q_u8(second_slice));
@@ -1600,7 +1599,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
         u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions, //
         u32_t const *scores_running_deletions, u32_t *scores_new,                 //
         u32_t *scores_new_insertions, u32_t *scores_new_deletions,                //
-        uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec, //
+        uint8x16_t match_cost_u8_vec, uint8x16_t mismatch_cost_u8_vec,            //
         uint32x4_t gap_open_vec, uint32x4_t gap_extend_vec) const noexcept {
 
         uint8x16_t equal_vec = vceqq_u8(vld1q_u8(first_reversed_slice), vld1q_u8(second_slice));
@@ -1752,9 +1751,9 @@ struct tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_c
         }
     }
 
-    SZ_INLINE void slice_1char(                                                  //
+    SZ_INLINE void slice_1char(                                                   //
         rune_t const *first_reversed_slice, rune_t const *second_slice, size_t i, //
-        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,  //
         u16_t const *scores_pre_deletion, u16_t *scores_new, u16_t gap) const noexcept {
         u16_t const cost = first_reversed_slice[i] == second_slice[i] ? (u16_t)this->substituter_.match
                                                                       : (u16_t)this->substituter_.mismatch;
@@ -1763,10 +1762,10 @@ struct tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_c
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
-        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
-        u16_t const *scores_pre_deletion, u16_t *scores_new,                     //
+    SZ_NOINLINE void score_slice_trampoline_(                                             //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,                   //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,          //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                              //
         uint16x8_t match_cost_vec, uint16x8_t mismatch_cost_vec, uint16x8_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
@@ -1856,10 +1855,10 @@ struct tile_scorer<rune_t const *, rune_t const *, u32_t, uniform_substitution_c
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
-        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion, //
-        u32_t const *scores_pre_deletion, u32_t *scores_new,                     //
+    SZ_NOINLINE void score_slice_trampoline_(                                             //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,                   //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,          //
+        u32_t const *scores_pre_deletion, u32_t *scores_new,                              //
         uint32x4_t match_cost_vec, uint32x4_t mismatch_cost_vec, uint32x4_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
@@ -1919,9 +1918,9 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
     static constexpr size_t step_k = 16;
 
     SZ_INLINE void slice_16chars(                                              //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,           //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,            //
         u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
-        u8_t const *scores_pre_deletion, u8_t *scores_new,                    //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                     //
         uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_cost_vec) const noexcept {
 
         uint8x16_t equal_vec = vceqq_u8(vld1q_u8(first_reversed_slice), vld1q_u8(second_slice));
@@ -1934,8 +1933,8 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         vst1q_u8(scores_new, vminq_u8(cost_if_substitution_vec, cost_if_gap_vec));
     }
 
-    SZ_INLINE void slice_1char(                                               //
-        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i, //
+    SZ_INLINE void slice_1char(                                                //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,  //
         u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
         u8_t const *scores_pre_deletion, u8_t *scores_new, u8_t gap) const noexcept {
         u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
@@ -1945,10 +1944,10 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                 //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,          //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
-        u8_t const *scores_pre_deletion, u8_t *scores_new,                   //
+    SZ_NOINLINE void score_slice_trampoline_(                                             //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,                       //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,            //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                                //
         uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
@@ -2008,12 +2007,12 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t step_k = 16;
 
-    SZ_INLINE void slice_16chars(                                                //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,   //
-        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions,  //
-        u8_t const *scores_running_deletions, u8_t *scores_new,                  //
-        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                 //
+    SZ_INLINE void slice_16chars(                                               //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,             //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
         uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_open_vec,
         uint8x16_t gap_extend_vec) const noexcept {
 
@@ -2028,18 +2027,19 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         uint8x16_t cost_if_delete_vec = vminq_u8(vaddq_u8(pre_delete_open_vec, gap_open_vec),
                                                  vaddq_u8(run_delete_vec, gap_extend_vec));
         uint8x16_t cost_if_substitution_vec = vaddq_u8(vld1q_u8(scores_pre_substitution), cost_vec);
-        uint8x16_t cell_score_vec = vminq_u8(vminq_u8(cost_if_insert_vec, cost_if_delete_vec), cost_if_substitution_vec);
+        uint8x16_t cell_score_vec = vminq_u8(vminq_u8(cost_if_insert_vec, cost_if_delete_vec),
+                                             cost_if_substitution_vec);
         vst1q_u8(scores_new, cell_score_vec);
         vst1q_u8(scores_new_insertions, cost_if_insert_vec);
         vst1q_u8(scores_new_deletions, cost_if_delete_vec);
     }
 
-    SZ_INLINE void slice_1char(                                                  //
-        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,     //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,    //
-        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions,   //
-        u8_t const *scores_running_deletions, u8_t *scores_new,                   //
-        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                  //
+    SZ_INLINE void slice_1char(                                                 //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,   //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
         u8_t gap_open, u8_t gap_extend) const noexcept {
         u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
                                                                      : (u8_t)this->substituter_.mismatch;
@@ -2053,14 +2053,14 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         scores_new_deletions[i] = if_deletion;
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,   //
-        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions,  //
-        u8_t const *scores_running_deletions, u8_t *scores_new,                  //
-        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                 //
-        uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_open_vec,
-        uint8x16_t gap_extend_vec, size_t from, size_t to) const noexcept {
+    SZ_NOINLINE void score_slice_trampoline_(                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,             //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
+        uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_open_vec, uint8x16_t gap_extend_vec,
+        size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
             size_t const progress = idx_slice * step_k;
             slice_16chars(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
@@ -2128,10 +2128,10 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t step_k = 16;
 
-    SZ_INLINE void slice_16chars(                                             //
-        rune_t const *first_reversed_slice, rune_t const *second_slice,       //
+    SZ_INLINE void slice_16chars(                                              //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,        //
         u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
-        u8_t const *scores_pre_deletion, u8_t *scores_new,                    //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                     //
         uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_cost_vec) const noexcept {
 
         u32_t const *first = (u32_t const *)first_reversed_slice;
@@ -2149,8 +2149,8 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 
     SZ_INLINE void slice_1char(                                                   //
-        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t i,  //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,     //
+        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t i, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,    //
         u8_t const *scores_pre_deletion, u8_t *scores_new, u8_t gap) const noexcept {
         u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
                                                                      : (u8_t)this->substituter_.mismatch;
@@ -2159,10 +2159,10 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
         scores_new[i] = sz_min_of_two(if_substitution, if_gap);
     }
 
-    SZ_NOINLINE void score_slice_trampoline_(                                    //
-        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
-        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,    //
-        u8_t const *scores_pre_deletion, u8_t *scores_new,                       //
+    SZ_NOINLINE void score_slice_trampoline_(                                             //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,                   //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,            //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                                //
         uint8x16_t match_cost_vec, uint8x16_t mismatch_cost_vec, uint8x16_t gap_cost_vec, //
         size_t from, size_t to) const noexcept {
         for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {

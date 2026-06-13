@@ -28,55 +28,6 @@ extern "C" {
 #pragma GCC target("avx2", "bmi", "bmi2")
 #endif
 
-#if SZ_DEBUG
-
-/**
- *  @brief Verifies the SIMD result against the serial implementation.
- *      If they differ, dumps a copy-pastable repro and crashes to help debugging.
- */
-SZ_INTERNAL void sz_utf8_ci_haswell_find_assert_and_crash_( //
-    sz_cptr_t result, sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, char const *file, int line) {
-
-    sz_size_t serial_matched_length;
-    sz_cptr_t expected = sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, 0,
-                                                              &serial_matched_length);
-    if (result == expected) return;
-
-#if !SZ_AVOID_LIBC
-    fprintf(stderr, "--------------------------------------------------------\n");
-    fprintf(stderr, "AVX2 SIMD Mismatch at %s:%d\n", file, line);
-    fprintf(stderr, "Haystack Length: %zu, Needle Length: %zu\n", haystack_length, needle_length);
-    if (expected) fprintf(stderr, "Expected Offset: %zu\n", (size_t)(expected - haystack));
-    else fprintf(stderr, "Expected: NULL (Not Found)\n");
-    if (result) fprintf(stderr, "Found Offset: %zu\n", (size_t)(result - haystack));
-    else fprintf(stderr, "Found: NULL (Not Found)\n");
-    if (needle_metadata)
-        fprintf(stderr, "Metadata: kernel_id=%u, offset_in_unfolded=%zu, folded_slice_length=%u\n",
-                needle_metadata->kernel_id, needle_metadata->offset_in_unfolded, needle_metadata->folded_slice_length);
-    fprintf(stderr, "Needle (Hex): ");
-    for (sz_size_t byte_index = 0; byte_index < needle_length; ++byte_index)
-        fprintf(stderr, "%02X ", (unsigned char)needle[byte_index]);
-    fprintf(stderr, "\nHaystack (Hex): ");
-    for (sz_size_t byte_index = 0; byte_index < haystack_length; ++byte_index)
-        fprintf(stderr, "%02X ", (unsigned char)haystack[byte_index]);
-    fprintf(stderr, "\n--------------------------------------------------------\n");
-    abort();
-#else
-    sz_unused_(needle_metadata);
-    // Force crash without LibC
-    *((volatile int *)0) = 0;
-#endif
-}
-
-#define sz_utf8_ci_haswell_find_assert_(result, haystack, haystack_length, needle, needle_length, needle_metadata) \
-    sz_utf8_ci_haswell_find_assert_and_crash_(result, haystack, haystack_length, needle, needle_length,            \
-                                              needle_metadata, __FILE__, __LINE__)
-
-#else
-#define sz_utf8_ci_haswell_find_assert_(result, haystack, haystack_length, needle, needle_length, needle_metadata)
-#endif
-
 #pragma region Shared AVX2 Helpers
 
 /**
@@ -213,16 +164,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_haswell_ascii_3probe_( //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
-            if (match) {
-                sz_utf8_ci_haswell_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
         haystack_ptr += valid_starts;
     }
 
-    sz_utf8_ci_haswell_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length, needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -298,7 +244,8 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_haswell_scripted_( //
     sz_rune_t needle_first_safe_folded_rune = 0;
     if (alarm) {
         sz_rune_length_t rune_byte_length;
-        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
+        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune,
+                                &rune_byte_length);
     }
 
     sz_cptr_t haystack_ptr = haystack;
@@ -371,11 +318,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_haswell_scripted_( //
                 needle_metadata->offset_in_unfolded,                                     // head
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
-            if (match) {
-                sz_utf8_ci_haswell_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
         haystack_ptr += step;
     }
@@ -391,13 +334,9 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_haswell_scripted_( //
             needle_first_safe_folded_rune,                               // pivot point
             needle_metadata->offset_in_unfolded,                         // its location in the needle
             matched_length);
-        if (match) {
-            sz_utf8_ci_haswell_find_assert_(match, haystack, haystack_length, needle, needle_length, needle_metadata);
-            return match;
-        }
+        if (match) { return match; }
     }
 
-    sz_utf8_ci_haswell_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length, needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -979,8 +918,8 @@ SZ_INTERNAL __m256i sz_utf8_case_insensitive_find_haswell_vietnamese_fold_ymm_(_
     __m256i is_excluded_third_ymm = _mm256_and_si256(
         _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xBA)),
         sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x96, 0x0A));
-    __m256i fold_e1_ymm = _mm256_andnot_si256(
-        is_odd_ymm, _mm256_andnot_si256(is_excluded_third_ymm, is_after_e1_pair_ymm));
+    __m256i fold_e1_ymm = _mm256_andnot_si256(is_odd_ymm,
+                                              _mm256_andnot_si256(is_excluded_third_ymm, is_after_e1_pair_ymm));
 
     // Disjoint positions merge into ONE offset vector and a single add
     __m256i is_plus_one_ymm = _mm256_or_si256(fold_extended_ymm, _mm256_or_si256(is_c6_target_ymm, fold_e1_ymm));
@@ -1023,26 +962,21 @@ SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_vietnamese_alarm_ymm_
     if (!(is_e1_mask | is_c3_mask | is_c5_mask | is_ef_mask | is_e2_mask)) return 0;
 
     // E1 BA pairs refine on the expanding 96-9F third byte
-    sz_u32_t is_ba_second_mask = (is_e1_mask << 1) &
-                                 (sz_u32_t)_mm256_movemask_epi8(
-                                     _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBA)));
+    sz_u32_t is_ba_second_mask = (is_e1_mask << 1) & (sz_u32_t)_mm256_movemask_epi8(
+                                                         _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBA)));
     sz_u32_t is_bad_third_mask = (is_ba_second_mask << 1) &
                                  (sz_u32_t)_mm256_movemask_epi8(
                                      sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0x96, 0x0A));
 
     // Two-byte pair alarms (4 CMPEQ + movemask)
     sz_u32_t sharp_s_mask = (is_c3_mask << 1) &
-                            (sz_u32_t)_mm256_movemask_epi8(
-                                _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x9F)));
+                            (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x9F)));
     sz_u32_t long_s_mask = (is_c5_mask << 1) &
-                           (sz_u32_t)_mm256_movemask_epi8(
-                               _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBF)));
+                           (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xBF)));
     sz_u32_t ligature_mask = (is_ef_mask << 1) &
-                             (sz_u32_t)_mm256_movemask_epi8(
-                                 _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xAC)));
+                             (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xAC)));
     sz_u32_t kelvin_mask = (is_e2_mask << 1) &
-                           (sz_u32_t)_mm256_movemask_epi8(
-                               _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x84)));
+                           (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x84)));
 
     // Shift back to sequence-start positions
     return (is_bad_third_mask >> 2) | ((sharp_s_mask | long_s_mask | ligature_mask | kelvin_mask) >> 1);
@@ -1097,8 +1031,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_case_insensitive_find_haswell_georgian_alarm_ymm_(_
     // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third byte for Asomtavruli; E2 B4 = Nuskhuri
     sz_u32_t mtavruli_mask = (is_e1_mask << 1) & is_b2_mask;
     sz_u32_t asomtavruli_mask = (((is_e1_mask << 1) & is_82_mask) << 1) &
-                                (sz_u32_t)_mm256_movemask_epi8(
-                                    sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xA0, 0x46));
+                                (sz_u32_t)_mm256_movemask_epi8(sz_utf8_ci_haswell_in_byte_range_(text_ymm, 0xA0, 0x46));
     sz_u32_t nuskhuri_mask = (is_e2_mask << 1) & is_b4_mask;
 
     // Shift back to sequence-start positions

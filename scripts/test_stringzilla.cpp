@@ -376,7 +376,7 @@ void test_multiseed_hashing() {
     test_hash_multiseed_equivalence(sz_hash_multiseed_icelake, sz_hash_icelake);
 #endif
 #if SZ_USE_NEONAES
-    test_hash_multiseed_equivalence(sz_hash_multiseed_neon, sz_hash_neon);
+    test_hash_multiseed_equivalence(sz_hash_multiseed_neonaes, sz_hash_neonaes);
 #endif
 }
 
@@ -1132,7 +1132,7 @@ static void print_utf8_case_test_bytes(char const *label, char const *bytes, std
  *  Both the match pointer offset and the matched length must agree, including the not-found case
  *  where both backends return `SZ_NULL_CHAR`. On mismatch prints the needle and haystack as hex.
  */
-static void check_utf8_ci_find_pair(                                                       //
+static void check_utf8_ci_find_pair(                                                      //
     sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd, //
     char const *haystack, std::size_t haystack_length,                                    //
     char const *needle, std::size_t needle_length, char const *test_name) {
@@ -1168,8 +1168,7 @@ static void check_utf8_ci_find_pair(                                            
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
  *  with the same adversarial shapes.
  */
-void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base,
-                                 sz_utf8_case_insensitive_find_t find_simd) {
+void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd) {
 
     std::printf("  - testing case-insensitive find against all fold preimages...\n");
 
@@ -1254,7 +1253,8 @@ void test_utf8_case_invariant_closure() {
 
         for (sz_size_t i = 0; i < folded_count; ++i) {
             if (sz_rune_is_case_invariant_(folded_runes[i]) != sz_false_k) {
-                std::fprintf(stderr, "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
+                std::fprintf(stderr,
+                             "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
                              folded_runes[i], rune);
                 assert(false && "Fold outputs must not be case-invariant");
             }
@@ -1298,7 +1298,8 @@ void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base
         entry.preimage_length = (std::size_t)sz_rune_export(preimage, entry.preimage_utf8);
         entry.folded_length = 0;
         for (sz_size_t i = 0; i < folded_count; ++i)
-            entry.folded_length += (std::size_t)sz_rune_export(folded_runes[i], entry.folded_utf8 + entry.folded_length);
+            entry.folded_length += (std::size_t)sz_rune_export(folded_runes[i],
+                                                               entry.folded_utf8 + entry.folded_length);
         if (entry.folded_length == entry.preimage_length) continue; // Same width → not a tail-expansion shape
         expanding_preimages.push_back(entry);
     }
@@ -1472,17 +1473,17 @@ void test_equivalence() {
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_neon, sz_hash_state_init_neon,                    //
-        sz_hash_state_update_neon, sz_hash_state_digest_neon);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
+        sz_hash_neonaes, sz_hash_state_init_neonaes,              //
+        sz_hash_state_update_neonaes, sz_hash_state_digest_neonaes);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neonaes);
 #endif
 #if SZ_USE_SVE2AES
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_sve2, sz_hash_state_init_sve2,                    //
-        sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
+        sz_hash_sve2aes, sz_hash_state_init_sve2aes,              //
+        sz_hash_state_update_sve2aes, sz_hash_state_digest_sve2aes);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2aes);
 #endif
 #if SZ_USE_V128
     test_hash_equivalence(                                        //
@@ -1539,9 +1540,9 @@ void test_equivalence() {
     );
 #endif
 #if SZ_USE_NEONSHA
-    test_sha256_equivalence(                                                                       //
-        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
-        sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
+    test_sha256_equivalence(                                                                         //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,   //
+        sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha, sz_sha256_state_digest_neonsha //
     );
 #endif
 #if SZ_USE_V128
@@ -2189,13 +2190,16 @@ void test_stl_compatibility_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
 
-    // clang-format off
-    // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6)
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_first_of("\xC6\xC7") == 9);  // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_first_of("\xC0\xC1") == 54); // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC6\xC7") == 9);   // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC0\xC1") == 54);  // sets
-    // clang-format on
+    // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6). The `\xFA`/`0` boundary is
+    // load-bearing: a literal hex digit after `\xFA` would extend the escape, so keep it split.
+    {
+        char const *non_ascii_set = "abcdefgh\x01\xC6ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\xC0\xFA" //
+                                    "0123456789+-";                                                        // 68 bytes
+        assert(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);                                     // sets
+        assert(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);                                    // sets
+        assert(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);                                      // sets
+        assert(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);                                     // sets
+    }
 
     // Boundary conditions.
     assert(str("hello").find_first_of("ox", 4) == 4);
@@ -2593,10 +2597,11 @@ void test_non_stl_extensions_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
     assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
-    let_assert(
-        str s =
-            "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对" "他失去童" "年、" "被" "过" "度" "消" "费" "的" "担" "忧" "。" "八" "岁" "的" "加" "文" "，" "已" "当" "网" "红" "近" "六" "年" "了" "，" "可" "以" "说" "，" "自" "懂" "事" "以" "来" "，" "他" "没" "有" "过" "过" "一" "天没有名气的日子。",
-        s.bytesum() == accumulate_bytes(s));
+    let_assert(str s = "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累" //
+                       "瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、被过度" //
+                       "消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事" //
+                       "以来，他没有过过一天没有名气的日子。",
+               s.bytesum() == accumulate_bytes(s));
 }
 
 void test_non_stl_extensions_for_updates() {
@@ -3946,11 +3951,23 @@ void test_utf8_case() {
     // Complex SIMD Regression Trigger
     // Needle includes: ǰ (Latin B), ẞ (Sharp S), Turkish ı, Emoji
     std::string complex_haystack =
-        "\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82" "\x46\x21\xC3\xA0\x31" "\x21\xC6\xA0\xEF\xAC" "\x85\x57\x6F\x72\x6C" "\x64" "\xC4\x91\xE4" "\xB8\xAD\xE6" "\x96\x87\x43" "\xCF\x83\xE3" "\x81\x82\xE3" "\x81" "\x84" "\xD4" "\xB2" "\xD4" "\xB1" "\xD5" "\x90" "\xD4" "\xB5" "\xD5" "\x8E" "\xC4" "\xB1" "\x6E" "\x32" "\xE4" "\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF\x8C\xCF" "\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21" "\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0" "\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F" "\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3" "\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85\xD0\x91\xC5\xBF" "\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91" "\x4D\x52\xE1\xBA\xA1\x4A\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F" "\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3" "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A" "\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91\x66\x67\x6F\x41\xC3\x85" "\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA" "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF" "\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F\xCE\x92" "\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA" "\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59\xEF\xAC\x86\x59\x56\x2E\x33\xC3" "\xA9\x7A\x4C\x4C";
+        "\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC" //
+        "\x85\x57\x6F\x72\x6C\x64\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81\x84\xD4\xB2\xD4" //
+        "\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF" //
+        "\x8C\xCF\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96" //
+        "\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80" //
+        "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85" //
+        "\xD0\x91\xC5\xBF\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91\x4D\x52\xE1\xBA\xA1\x4A" //
+        "\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3" //
+        "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91" //
+        "\x66\x67\x6F\x41\xC3\x85\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA\xD4\xB2\xD4\xB1" //
+        "\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F" //
+        "\xCE\x92\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59" //
+        "\xEF\xAC\x86\x59\x56\x2E\x33\xC3\xA9\x7A\x4C\x4C";
 
-    std::string
-        complex_needle = "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80" "\x3F\xC4\xB1\xE1\xBA\x9E"
-                                                                                            "\x74\x68" "\x65" "\xC3" "\xB1\x45\x7A\xC3\xBC" "\x49" "\x74" "\x68" "\x65";
+    std::string complex_needle =
+        "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3" //
+        "\xB1\x45\x7A\xC3\xBC\x49\x74\x68\x65";
 
     let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
 
@@ -4810,8 +4827,8 @@ void test_sorting_algorithms() {
     // A duplicate-heavy, mixed-case, multi-script dataset exercising every new knob.
     strs_t mixed;
     {
-        char const *seed_words[] = {"apple", "Apple", "APPLE", "banana", "BANANA", "ab", "AB", "Ab", "aB",
-                                    "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "", "a", "A"};
+        char const *seed_words[] = {"apple",  "Apple",   "APPLE",  "banana", "BANANA", "ab",     "AB", "Ab", "aB",
+                                    "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "",   "a",  "A"};
         for (std::size_t repeat = 0; repeat < 200; ++repeat)
             for (char const *word : seed_words) mixed.push_back(word);
         for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::scripts::random_string(i % 6, "abc", 3));
@@ -5001,23 +5018,26 @@ int main(int argc, char const **argv) {
 
     std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    failures +=
-        run_test("test_stl_compatibility_for_reads<std::string_view>", test_stl_compatibility_for_reads<std::string_view>);
+    failures += run_test("test_stl_compatibility_for_reads<std::string_view>",
+                         test_stl_compatibility_for_reads<std::string_view>);
 #endif
-    failures += run_test("test_stl_compatibility_for_reads<std::string>", test_stl_compatibility_for_reads<std::string>);
-    failures +=
-        run_test("test_stl_compatibility_for_reads<sz::string_view>", test_stl_compatibility_for_reads<sz::string_view>);
+    failures += run_test("test_stl_compatibility_for_reads<std::string>",
+                         test_stl_compatibility_for_reads<std::string>);
+    failures += run_test("test_stl_compatibility_for_reads<sz::string_view>",
+                         test_stl_compatibility_for_reads<sz::string_view>);
     failures += run_test("test_stl_compatibility_for_reads<sz::string>", test_stl_compatibility_for_reads<sz::string>);
-    failures +=
-        run_test("test_stl_compatibility_for_updates<std::string>", test_stl_compatibility_for_updates<std::string>);
-    failures += run_test("test_stl_compatibility_for_updates<sz::string>", test_stl_compatibility_for_updates<sz::string>);
+    failures += run_test("test_stl_compatibility_for_updates<std::string>",
+                         test_stl_compatibility_for_updates<std::string>);
+    failures += run_test("test_stl_compatibility_for_updates<sz::string>",
+                         test_stl_compatibility_for_updates<sz::string>);
     failures += run_test("test_stl_conversions", test_stl_conversions);
     failures += run_test("test_stl_containers", test_stl_containers);
 
     std::printf("\n=== StringZilla Extensions ===\n");
-    failures +=
-        run_test("test_non_stl_extensions_for_reads<sz::string_view>", test_non_stl_extensions_for_reads<sz::string_view>);
-    failures += run_test("test_non_stl_extensions_for_reads<sz::string>", test_non_stl_extensions_for_reads<sz::string>);
+    failures += run_test("test_non_stl_extensions_for_reads<sz::string_view>",
+                         test_non_stl_extensions_for_reads<sz::string_view>);
+    failures += run_test("test_non_stl_extensions_for_reads<sz::string>",
+                         test_non_stl_extensions_for_reads<sz::string>);
     failures += run_test("test_non_stl_extensions_for_updates", test_non_stl_extensions_for_updates);
 
     std::printf("\n=== String Class Implementation ===\n");

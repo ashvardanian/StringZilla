@@ -12,24 +12,16 @@ def parse_arguments():
         specified. A word is a non-zero-length sequence of acters delimited by white space."
     )
     parser.add_argument("files", nargs="*", default=["-"], help="Files to process")
-    parser.add_argument(
-        "-c", "--bytes", action="store_true", help="print the byte counts"
-    )
-    parser.add_argument(
-        "-m", "--chars", action="store_true", help="print the character counts"
-    )
-    parser.add_argument(
-        "-l", "--lines", action="store_true", help="print the newline counts"
-    )
+    parser.add_argument("-c", "--bytes", action="store_true", help="print the byte counts")
+    parser.add_argument("-m", "--chars", action="store_true", help="print the character counts")
+    parser.add_argument("-l", "--lines", action="store_true", help="print the newline counts")
     parser.add_argument(
         "-L",
         "--max-line-length",
         action="store_true",
         help="print the maximum display width",
     )
-    parser.add_argument(
-        "-w", "--words", action="store_true", help="print the word counts"
-    )
+    parser.add_argument("-w", "--words", action="store_true", help="print the word counts")
     parser.add_argument(
         "--files0-from",
         metavar="filename",

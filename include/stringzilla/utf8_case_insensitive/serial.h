@@ -1547,7 +1547,8 @@ SZ_INTERNAL void sz_utf8_case_insensitive_needle_metadata_(sz_cptr_t needle, sz_
             sz_rune_t next_next_rune = 0;
             if (next_rune != 0 && position + rune_bytes + next_bytes < needle_end) {
                 sz_rune_length_t next_next_bytes;
-                sz_rune_parse_unchecked((sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune, &next_next_bytes);
+                sz_rune_parse_unchecked((sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune,
+                                        &next_next_bytes);
                 if (position + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
             }
 

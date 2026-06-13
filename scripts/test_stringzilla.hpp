@@ -44,14 +44,14 @@
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::strcmp`
 
-#include <algorithm>  // `std::copy`, `std::generate`
-#include <chrono>     // `std::chrono::steady_clock` for per-test timing
-#include <exception>  // `std::exception`
-#include <fstream>    // `std::ifstream`
-#include <random>     // `std::random_device`
-#include <regex>      // `std::regex_search` for `SZ_TESTS_FILTER`
-#include <string>     // `std::string`
-#include <vector>     // `std::vector`
+#include <algorithm> // `std::copy`, `std::generate`
+#include <chrono>    // `std::chrono::steady_clock` for per-test timing
+#include <exception> // `std::exception`
+#include <fstream>   // `std::ifstream`
+#include <random>    // `std::random_device`
+#include <regex>     // `std::regex_search` for `SZ_TESTS_FILTER`
+#include <string>    // `std::string`
+#include <vector>    // `std::vector`
 
 #if defined(__linux__)
 #include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`

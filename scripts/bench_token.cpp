@@ -360,10 +360,10 @@ void bench_hashing(environment_t const &env) {
     bench_unary(env, "sz_hash_icelake", validator, hash_from_sz<sz_hash_icelake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEONAES
-    bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon> {env}).log(base, base_stl);
+    bench_unary(env, "sz_hash_neonaes", validator, hash_from_sz<sz_hash_neonaes> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SVE2AES
-    bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
+    bench_unary(env, "sz_hash_sve2aes", validator, hash_from_sz<sz_hash_sve2aes> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_V128
     bench_unary(env, "sz_hash_v128", validator, hash_from_sz<sz_hash_v128> {env}).log(base, base_stl);
@@ -399,7 +399,7 @@ void bench_hashing_multiseed(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEONAES
-    bench_unary(env, "sz_hash_multiseed_neon", validator, hash_multiseed_from_sz<sz_hash_multiseed_neon> {env})
+    bench_unary(env, "sz_hash_multiseed_neonaes", validator, hash_multiseed_from_sz<sz_hash_multiseed_neonaes> {env})
         .log(base);
 #endif
 }
@@ -435,7 +435,8 @@ void bench_stream_hashing(environment_t const &env) {
 #if SZ_USE_NEONAES
     bench_unary(
         env, "sz_hash_stream_neon", validator,
-        hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_update_neon, sz_hash_state_digest_neon> {env})
+        hash_stream_from_sz<sz_hash_state_init_neonaes, sz_hash_state_update_neonaes, sz_hash_state_digest_neonaes> {
+            env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_V128
@@ -512,10 +513,9 @@ void bench_sha256(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEONSHA
-    bench_unary(
-        env, "sz_sha256_neon", validator,
-        sha256_stream_from_sz<sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon> {
-            env})
+    bench_unary(env, "sz_sha256_neon", validator,
+                sha256_stream_from_sz<sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha,
+                                      sz_sha256_state_digest_neonsha> {env})
         .log(base);
 #endif
 #if SZ_USE_V128

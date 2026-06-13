@@ -10,12 +10,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Output pieces of FILE to PREFIXaa, PREFIXab, ...; default size is 1000 lines, and default PREFIX is 'x'."
     )
-    parser.add_argument(
-        "file", nargs="?", default="-", help='File to process, "-" for standard input'
-    )
-    parser.add_argument(
-        "prefix", nargs="?", default="X", help='Output file prefix, default is "x"'
-    )
+    parser.add_argument("file", nargs="?", default="-", help='File to process, "-" for standard input')
+    parser.add_argument("prefix", nargs="?", default="X", help='Output file prefix, default is "x"')
     parser.add_argument(
         "-l",
         "--lines",
@@ -55,11 +51,7 @@ def split_file(file_path, lines_per_file, output_prefix, separator, number_of_fi
             chunk_size = total_length // number_of_files
             for file_part in range(number_of_files):
                 start = file_part * chunk_size
-                end = (
-                    start + chunk_size
-                    if file_part < number_of_files - 1
-                    else total_length
-                )
+                end = start + chunk_size if file_part < number_of_files - 1 else total_length
                 current_slice = file_contents[start:end]
                 output_path = f"{output_prefix}{file_part}"
                 current_slice.write_to(output_path)
@@ -77,9 +69,7 @@ def split_file(file_path, lines_per_file, output_prefix, separator, number_of_fi
             if newline_position == -1 and current_position < len(file_contents):
                 newline_position = len(file_contents)
 
-            section_length = (
-                newline_position - current_position if newline_position != -1 else 0
-            )
+            section_length = newline_position - current_position if newline_position != -1 else 0
 
             if section_length > 0:
                 current_slice = file_contents[current_position : newline_position + 1]

@@ -103,7 +103,7 @@ SZ_INTERNAL void sz_hash_minimal_update_neon_(sz_hash_minimal_t_ *state, uint8x1
     state->sum.u64x2 = vaddq_u64(vreinterpretq_u64_u8(sum_shuffled_u8x16), vreinterpretq_u64_u8(block_u8x16));
 }
 
-SZ_PUBLIC void sz_hash_state_init_neon(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_PUBLIC void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     uint64x2_t seed_u64x2 = vdupq_n_u64(seed);
     vst1q_u64((sz_u64_t *)state->key, seed_u64x2);
@@ -171,7 +171,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_internal_t_ cons
     return vgetq_lane_u64(vreinterpretq_u64_u8(final_mixed_u8x16), 0);
 }
 
-SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
 
     // The worst usage pattern... that we should ironically handle first - is updating the state
     // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
@@ -287,7 +287,7 @@ SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text,
     state->ins_length = local_state.ins_length;
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state) {
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state) {
     // This whole function is identical to Haswell.
     sz_size_t length = state->ins_length;
     if (length >= 64) {
@@ -338,7 +338,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state) {
     }
 }
 
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_minimal_t_ state;
@@ -404,7 +404,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t 
     }
     else {
         sz_align_(64) sz_hash_state_internal_t_ state;
-        sz_hash_state_init_neon((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_neonaes((sz_hash_state_t *)&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 0));
             state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 16));
@@ -429,7 +429,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t 
 
 /**
  *  @brief Splits a short (<= 64B) input into up to four 128-bit text-lanes using NEON loads.
- *         Mirrors the loading ladder of `sz_hash_neon`: full `vld1q_u8` loads for complete lanes
+ *         Mirrors the loading ladder of `sz_hash_neonaes`: full `vld1q_u8` loads for complete lanes
  *         and one overlapping load + in-register shift for the partial tail; byte-by-byte only for
  *         the `< 16` case, where a 16-byte NEON load could read past the input.
  *  @return The number of populated text-lanes (1..4).
@@ -458,20 +458,20 @@ SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t 
     return text_lanes_count;
 }
 
-SZ_PUBLIC void sz_hash_multiseed_neon(sz_cptr_t text, sz_size_t length,             //
-                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                      sz_u64_t *hashes) {
+SZ_PUBLIC void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,             //
+                                         sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                         sz_u64_t *hashes) {
     // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
     if (seeds_count == 0) return;
     if (seeds_count == 1) {
-        hashes[0] = sz_hash_neon(text, length, seeds[0]);
+        hashes[0] = sz_hash_neonaes(text, length, seeds[0]);
         return;
     }
     // NEON `AESE` is per-128-bit register, so there is no cross-lane packing; the win is the shared
     // normalization pass plus interleaving two independent AES chains to hide the AES latency.
     if (length > 64) {
         for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_neon(text, length, seeds[seed_index]);
+            hashes[seed_index] = sz_hash_neonaes(text, length, seeds[seed_index]);
         return;
     }
 
@@ -499,7 +499,7 @@ SZ_PUBLIC void sz_hash_multiseed_neon(sz_cptr_t text, sz_size_t length,         
     }
 }
 
-SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_PUBLIC void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_pointer = sz_hash_pi_constants_();
     if (length <= 16) {
         uint64x2_t input_u64x2 = vdupq_n_u64(nonce);

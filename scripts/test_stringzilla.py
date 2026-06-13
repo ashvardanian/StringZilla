@@ -2356,7 +2356,14 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
 
     # Generate random test strings
     test_chars = (
-        "abcdefghijklmnopqrstuvwxyz" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "0123456789" " \t\n" ".,;:!?'" "äöüß" "αβγδ" "абвг"
+        "abcdefghijklmnopqrstuvwxyz"  #
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  #
+        "0123456789"  #
+        " \t\n"  #
+        ".,;:!?'"  #
+        "äöüß"  #
+        "αβγδ"  #
+        "абвг"  #
     )
 
     for _ in range(50):

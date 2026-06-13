@@ -140,8 +140,8 @@ SZ_INTERNAL void sz_sequence_argsort_sve_3way_partition_(
  */
 SZ_PUBLIC void sz_sequence_argsort_sve_recursively_(sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,
                                                     sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order,
-                                                    sz_size_t const start_in_sequence,
-                                                    sz_size_t const end_in_sequence, sz_size_t const top_count) {
+                                                    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
+                                                    sz_size_t const top_count) {
     sz_size_t const count = end_in_sequence - start_in_sequence;
     sz_size_t const pgrams_per_vector = svcntd();
     if (count <= pgrams_per_vector) {

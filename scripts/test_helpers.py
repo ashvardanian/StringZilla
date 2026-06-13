@@ -58,6 +58,7 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
     tree = ET.parse(cache_path)
     return tree.getroot()
 
+
 def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
     """Return all assigned/defined codepoints in Unicode."""
     root = get_unicode_xml_data(version)
@@ -68,6 +69,7 @@ def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
         if cp_str:
             codepoints.append(int(cp_str, 16))
     return sorted(codepoints)
+
 
 def parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
     """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
@@ -184,9 +186,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
         Dict mapping codepoints to their normalization properties.
         Properties include: NFC_QC, NFD_QC, NFKC_QC, NFKD_QC (Quick_Check values)
     """
-    cache_path = os.path.join(
-        tempfile.gettempdir(), f"DerivedNormalizationProps-{version}.txt"
-    )
+    cache_path = os.path.join(tempfile.gettempdir(), f"DerivedNormalizationProps-{version}.txt")
 
     if not os.path.exists(cache_path):
         url = f"https://www.unicode.org/Public/{version}/ucd/DerivedNormalizationProps.txt"
@@ -195,9 +195,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
             urllib.request.urlretrieve(url, cache_path)
             print(f"Cached to {cache_path}")
         except Exception as e:
-            raise UnicodeDataDownloadError(
-                f"Could not download DerivedNormalizationProps.txt from {url}: {e}"
-            )
+            raise UnicodeDataDownloadError(f"Could not download DerivedNormalizationProps.txt from {url}: {e}")
     else:
         print(f"Using cached Unicode {version} DerivedNormalizationProps.txt: {cache_path}")
 

@@ -246,8 +246,8 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
         // pure subset dispatch on the AVX2 port.
         uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, vdupq_n_u8(0x80));
         uint8x16_t is_lead_u8x16 = vbicq_u8(is_non_ascii_u8x16, is_continuation_u8x16);
-        uint8x16_t is_family_lead_u8x16 = vorrq_u8(
-            vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xC2)), vdupq_n_u8(0x05)), is_e1_u8x16);
+        uint8x16_t is_family_lead_u8x16 = vorrq_u8(vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xC2)), vdupq_n_u8(0x05)),
+                                                   is_e1_u8x16);
         uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, is_family_lead_u8x16);
 
         uint8x16_t after_c2_u8x16 = vextq_u8(previous_is_c2_u8x16, is_c2_u8x16, 15);
@@ -358,7 +358,6 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
     return incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz(incomplete_nibbles) / 4) : 64;
 }
 
-
 /**
  *  @brief Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII.
  *
@@ -400,8 +399,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_cyrillic_chunk_(uint8x16x4_t source
         // Second-byte offsets: 'Ѐ'-'Џ' (D0 80-8F) → +0x10, 'А'-'П' (90-9F) → +0x20,
         // 'Р'-'Я' (A0-AF) → −0x20; lowercase B0+ maps to zero through the table.
         uint8x16_t after_d0_u8x16 = vextq_u8(previous_is_d0_u8x16, is_d0_u8x16, 15);
-        uint8x16_t offsets_u8x16 = vandq_u8(vqtbl1q_u8(offsets_lut_u8x16, vshrq_n_u8(source_u8x16, 4)),
-                                            after_d0_u8x16);
+        uint8x16_t offsets_u8x16 = vandq_u8(vqtbl1q_u8(offsets_lut_u8x16, vshrq_n_u8(source_u8x16, 4)), after_d0_u8x16);
         uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_neon_ascii_(source_u8x16), offsets_u8x16);
 
         // Lead rewrite D0 → D1 (+1) where the lowercase lives in the next block:
@@ -465,9 +463,8 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8
         uint8x16_t is_foreign_lead_u8x16 = vbicq_u8(is_lead_u8x16, vorrq_u8(is_ce_u8x16, is_cf_u8x16));
 
         // Exclusions, tested at the LEAD position so the walk-back lands on a boundary
-        uint8x16_t ce_excluded_u8x16 = vandq_u8(
-            is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
-                                  vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
+        uint8x16_t ce_excluded_u8x16 = vandq_u8(is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
+                                                                      vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
         uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
         uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
@@ -589,7 +586,8 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_armenian_chunk_(uint8x16x4_t source
         uint8x16_t promotes_d4_u8x16 = vandq_u8(is_d4_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
         uint8x16_t promotes_d5_u8x16 = vandq_u8(
             is_d5_u8x16, vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x90)), vdupq_n_u8(0x07)));
-        folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(vorrq_u8(promotes_d4_u8x16, promotes_d5_u8x16), vdupq_n_u8(0x01)));
+        folded_u8x16 = vaddq_u8(folded_u8x16,
+                                vandq_u8(vorrq_u8(promotes_d4_u8x16, promotes_d5_u8x16), vdupq_n_u8(0x01)));
 
         vst1q_u8((sz_u8_t *)target + register_index * 16, folded_u8x16);
         previous_is_d4_u8x16 = is_d4_u8x16, previous_is_d5_u8x16 = is_d5_u8x16;
@@ -667,7 +665,8 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_georgian_chunk_(uint8x16x4_t source
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
         // Uppercase Georgian is keyed by the third byte: E1 82 third ≥ A0, E1 83 third in 80-85/87/8D
-        uint8x16_t is_82_upper_lead_u8x16 = vandq_u8(is_82_lead_u8x16, vcgeq_u8(next_next_byte_u8x16, vdupq_n_u8(0xA0)));
+        uint8x16_t is_82_upper_lead_u8x16 = vandq_u8(is_82_lead_u8x16,
+                                                     vcgeq_u8(next_next_byte_u8x16, vdupq_n_u8(0xA0)));
         uint8x16_t is_83_third_range_u8x16 = vcltq_u8(vsubq_u8(next_next_byte_u8x16, vdupq_n_u8(0x80)),
                                                       vdupq_n_u8(0x06));
         uint8x16_t is_83_third_extra_u8x16 = vorrq_u8(vceqq_u8(next_next_byte_u8x16, vdupq_n_u8(0x87)),
@@ -749,16 +748,14 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_guarded_chunk_(uint8x16x4_t source_
         // E1 and EF are always case-aware; E2 and EA only for some second bytes
         uint8x16_t is_e2_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xE2));
         uint8x16_t is_ea_u8x16 = vceqq_u8(source_u8x16, vdupq_n_u8(0xEA));
-        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16,
-                                         vorrq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE1)),
-                                                  vceqq_u8(source_u8x16, vdupq_n_u8(0xEF))));
-        stop_u8x16 = vorrq_u8(stop_u8x16, vbicq_u8(is_e2_u8x16, vcltq_u8(vsubq_u8(next_byte_u8x16,
-                                                                                  vdupq_n_u8(0x80)),
-                                                                          vdupq_n_u8(0x04))));
+        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE1)),
+                                                                         vceqq_u8(source_u8x16, vdupq_n_u8(0xEF))));
         stop_u8x16 = vorrq_u8(
-            stop_u8x16, vandq_u8(is_ea_u8x16,
-                                 vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x99)), vdupq_n_u8(0x07)),
-                                          vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xAD)), vdupq_n_u8(0x02)))));
+            stop_u8x16, vbicq_u8(is_e2_u8x16, vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x04))));
+        stop_u8x16 = vorrq_u8(
+            stop_u8x16,
+            vandq_u8(is_ea_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x99)), vdupq_n_u8(0x07)),
+                                           vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xAD)), vdupq_n_u8(0x02)))));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 

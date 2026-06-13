@@ -731,21 +731,23 @@ typedef enum sz_capability_t {
     sz_cap_hopper_k = 1 << 23, ///< CUDA capability with support for Hopper's DPX instructions
 
     sz_caps_none_k = 0,
-    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,   ///< Serial code with Fork Union
-    sz_caps_sh_k = sz_cap_serial_k | sz_cap_haswell_k,    ///< Serial code with Haswell
-    sz_caps_sn_k = sz_cap_serial_k | sz_cap_neon_k,       ///< Serial code with NEON
-    sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k,   ///< Serial code with Ice Lake
+
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
+    sz_caps_sh_k = sz_cap_serial_k | sz_cap_haswell_k,  ///< Serial code with Haswell
+    sz_caps_sn_k = sz_cap_serial_k | sz_cap_neon_k,     ///< Serial code with NEON
+    sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
+
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
-        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
+                     sz_cap_icelake_k,                                  ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
-        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
-        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_lasx_k |
-        sz_cap_powervsx_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
+                     sz_cap_rvv_k | sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -1059,7 +1061,7 @@ typedef union sz_u64_vec_t {
  *         as well as 1x XMM register.
  */
 typedef union sz_u128_vec_t {
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL
+#if SZ_USE_WESTMERE
     __m128i xmm;
     __m128d xmm_pd;
     __m128 xmm_ps;
@@ -1107,7 +1109,7 @@ typedef union sz_u256_vec_t {
     __m256d ymm_pd;
     __m256 ymm_ps;
 #endif
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL
+#if SZ_USE_WESTMERE
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
@@ -1140,15 +1142,15 @@ typedef union sz_u256_vec_t {
  *         as well as 4x XMM registers or 2x YMM registers or 1x ZMM register.
  */
 typedef union sz_u512_vec_t {
-#if SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_SKYLAKE
     __m512i zmm;
     __m512d zmm_pd;
     __m512 zmm_ps;
 #endif
-#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_HASWELL
     __m256i ymms[2];
 #endif
-#if SZ_USE_WESTMERE || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
+#if SZ_USE_WESTMERE
     __m128i xmms[4];
 #endif
 #if SZ_USE_NEON
@@ -1516,9 +1518,7 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
  *  @brief Computes the ceiling of @p x divided by @p divisor - the number of @p divisor-sized
  *         chunks needed to cover @p x. Assumes a non-zero @p divisor and no overflow on `x + divisor`.
  */
-SZ_INTERNAL sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) {
-    return (x + divisor - 1) / divisor;
-}
+SZ_INTERNAL sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + divisor - 1) / divisor; }
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.

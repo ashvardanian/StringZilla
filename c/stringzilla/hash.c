@@ -90,20 +90,20 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 
 #if SZ_USE_NEONAES
     if (caps & sz_cap_neonaes_k) {
-        impl->hash = sz_hash_neon;
-        impl->hash_multiseed = sz_hash_multiseed_neon;
-        impl->hash_state_init = sz_hash_state_init_neon;
-        impl->hash_state_update = sz_hash_state_update_neon;
-        impl->hash_state_digest = sz_hash_state_digest_neon;
-        impl->fill_random = sz_fill_random_neon;
+        impl->hash = sz_hash_neonaes;
+        impl->hash_multiseed = sz_hash_multiseed_neonaes;
+        impl->hash_state_init = sz_hash_state_init_neonaes;
+        impl->hash_state_update = sz_hash_state_update_neonaes;
+        impl->hash_state_digest = sz_hash_state_digest_neonaes;
+        impl->fill_random = sz_fill_random_neonaes;
     }
 #endif
 
 #if SZ_USE_NEONSHA
     if (caps & sz_cap_neonsha_k) {
-        impl->sha256_state_init = sz_sha256_state_init_neon;
-        impl->sha256_state_update = sz_sha256_state_update_neon;
-        impl->sha256_state_digest = sz_sha256_state_digest_neon;
+        impl->sha256_state_init = sz_sha256_state_init_neonsha;
+        impl->sha256_state_update = sz_sha256_state_update_neonsha;
+        impl->sha256_state_digest = sz_sha256_state_digest_neonsha;
     }
 #endif
 
@@ -117,11 +117,11 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 
 #if SZ_USE_SVE2AES
     if (caps & sz_cap_sve2aes_k) {
-        impl->hash = sz_hash_sve2;
-        impl->hash_state_init = sz_hash_state_init_sve2;
-        impl->hash_state_update = sz_hash_state_update_sve2;
-        impl->hash_state_digest = sz_hash_state_digest_sve2;
-        impl->fill_random = sz_fill_random_sve2;
+        impl->hash = sz_hash_sve2aes;
+        impl->hash_state_init = sz_hash_state_init_sve2aes;
+        impl->hash_state_update = sz_hash_state_update_sve2aes;
+        impl->hash_state_digest = sz_hash_state_digest_sve2aes;
+        impl->fill_random = sz_fill_random_sve2aes;
     }
 #endif
 

@@ -511,9 +511,10 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(
+        PyErr_Format( //
             PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " "Convert using: stringzilla.Strs(your_string_list)",
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
             Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
@@ -788,9 +789,10 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(
+        PyErr_Format( //
             PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " "Convert using: stringzilla.Strs(your_string_list)",
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
             Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
@@ -1104,9 +1106,10 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(
+        PyErr_Format( //
             PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " "Convert using: stringzilla.Strs(your_string_list)",
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
             Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
@@ -1415,9 +1418,10 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(
+        PyErr_Format( //
             PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " "Convert using: stringzilla.Strs(your_string_list)",
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
             Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
