@@ -16,6 +16,269 @@
 extern "C" {
 #endif
 
+#pragma region Generic Public Helpers
+
+/**
+ *  @brief Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase.
+ *         Needs no extra memory and is used as a fallback for small inputs.
+ */
+SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
+    // Assume `order` is already initialized with 0, 1, 2, ... N.
+    for (sz_size_t element_index = 1; element_index < sequence->count; ++element_index) {
+        sz_sorted_idx_t current_idx = order[element_index];
+        sz_size_t position_index = element_index;
+        while (position_index > 0) {
+            // Get the two strings to compare.
+            sz_sorted_idx_t previous_idx = order[position_index - 1];
+            sz_cptr_t previous_start = sequence->get_start(sequence->handle, previous_idx);
+            sz_cptr_t current_start = sequence->get_start(sequence->handle, current_idx);
+            sz_size_t previous_length = sequence->get_length(sequence->handle, previous_idx);
+            sz_size_t current_length = sequence->get_length(sequence->handle, current_idx);
+
+            // Use the provided sz_order to compare.
+            sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
+
+            // If the previous string is not greater than current_idx, we're done.
+            if (ordering != sz_greater_k) break;
+
+            // Otherwise, shift the previous element to the right.
+            order[position_index] = order[position_index - 1];
+            --position_index;
+        }
+        order[position_index] = current_idx;
+    }
+}
+
+/**
+ *  @brief Quadratic complexity @b stable insertion sort adjust for our @b pgram-sorting usecase.
+ *         Needs no extra memory and is used as a fallback for small inputs.
+ */
+
+SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
+
+    // Assume `order` is already initialized with 0, 1, 2, ... N.
+    for (sz_size_t element_index = 1; element_index < count; ++element_index) {
+        // Save the current key and corresponding index.
+        sz_pgram_t current_key = pgrams[element_index];
+        sz_sorted_idx_t current_idx = order[element_index];
+        sz_size_t position_index = element_index;
+
+        // Shift elements of the sorted region that are greater than the current key
+        // to the right. This loop stops as soon as the correct insertion point is found.
+        while (position_index > 0 && pgrams[position_index - 1] > current_key) {
+            pgrams[position_index] = pgrams[position_index - 1];
+            order[position_index] = order[position_index - 1];
+            --position_index;
+        }
+
+        // Insert the current key and index into their proper location.
+        pgrams[position_index] = current_key;
+        order[position_index] = current_idx;
+    }
+
+#if SZ_DEBUG
+    for (sz_size_t element_index = 1; element_index < count; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] &&
+                   "The pgrams should be sorted in ascending order.");
+#endif
+}
+
+#pragma endregion // Generic Public Helpers
+
+#pragma region Generic Internal Helpers
+
+/**
+ *  @brief Convenience macro for of conditional swap of "pgrams" and their indices for a sorting network.
+ *  @see https://en.wikipedia.org/wiki/Sorting_network
+ */
+#define sz_sequence_sorting_network_conditional_swap_(i, j)    \
+    do {                                                       \
+        if (pgrams[i] > pgrams[j]) {                           \
+            sz_swap_(sz_pgram_t, pgrams[i], pgrams[j]);        \
+            sz_swap_(sz_sorted_idx_t, offsets[i], offsets[j]); \
+        }                                                      \
+    } while (0)
+
+/**
+ *  @brief Sorting network for 2 elements is just a single compare-swap.
+ */
+SZ_INTERNAL void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+    sz_sequence_sorting_network_conditional_swap_(0, 1);
+}
+
+/**
+ *  @brief Sorting network for 3 elements.
+ *
+ *  The network uses 3 compare-swap operations:
+ *
+ *      Stage 1: (0, 1)
+ *      Stage 2: (0, 2)
+ *      Stage 3: (1, 2)
+ */
+SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    sz_sequence_sorting_network_conditional_swap_(0, 1);
+    sz_sequence_sorting_network_conditional_swap_(0, 2);
+    sz_sequence_sorting_network_conditional_swap_(1, 2);
+
+#if SZ_DEBUG
+    for (sz_size_t element_index = 1; element_index < 3; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] && "Sorting network for 3 elements failed.");
+#endif
+}
+
+/**
+ *  @brief Sorting network for 4 elements.
+ *
+ *  The network uses 5 compare-swap operations:
+ *
+ *      Stage 1: (0, 1) and (2, 3)
+ *      Stage 2: (0, 2)
+ *      Stage 3: (1, 3)
+ *      Stage 4: (1, 2)
+ */
+SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    // Stage 1: Compare-swap adjacent pairs.
+    sz_sequence_sorting_network_conditional_swap_(0, 1);
+    sz_sequence_sorting_network_conditional_swap_(2, 3);
+
+    // Stage 2: Compare-swap (0, 2)
+    sz_sequence_sorting_network_conditional_swap_(0, 2);
+
+    // Stage 3: Compare-swap (1, 3)
+    sz_sequence_sorting_network_conditional_swap_(1, 3);
+
+    // Stage 4: Final compare-swap (1, 2)
+    sz_sequence_sorting_network_conditional_swap_(1, 2);
+
+#if SZ_DEBUG
+    for (sz_size_t element_index = 1; element_index < 4; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] && "Sorting network for 4 elements failed.");
+#endif
+}
+
+/**
+ *  @brief A scalar sorting network for 8 elements that reorders both the pgrams
+ *         and their corresponding offsets in only 19 comparisons, the most efficient
+ *         variant currently known.
+ *
+ *  The network consists of 6 stages with the following compare-swap pairs:
+ *
+ *      Stage 1: (0,1), (2,3), (4,5), (6,7)
+ *      Stage 2: (0,2), (1,3), (4,6), (5,7)
+ *      Stage 3: (1,2), (5,6)
+ *      Stage 4: (0,4), (1,5), (2,6), (3,7)
+ *      Stage 5: (2,4), (3,5)
+ *      Stage 6: (1,2), (3,4), (5,6)
+ */
+SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    // Stage 1: Compare-swap adjacent pairs.
+    sz_sequence_sorting_network_conditional_swap_(0, 1);
+    sz_sequence_sorting_network_conditional_swap_(2, 3);
+    sz_sequence_sorting_network_conditional_swap_(4, 5);
+    sz_sequence_sorting_network_conditional_swap_(6, 7);
+
+    // Stage 2: Compare-swap with stride 2.
+    sz_sequence_sorting_network_conditional_swap_(0, 2);
+    sz_sequence_sorting_network_conditional_swap_(1, 3);
+    sz_sequence_sorting_network_conditional_swap_(4, 6);
+    sz_sequence_sorting_network_conditional_swap_(5, 7);
+
+    // Stage 3: Compare-swap between middle elements.
+    sz_sequence_sorting_network_conditional_swap_(1, 2);
+    sz_sequence_sorting_network_conditional_swap_(5, 6);
+
+    // Stage 4: Compare-swap across the two halves.
+    sz_sequence_sorting_network_conditional_swap_(0, 4);
+    sz_sequence_sorting_network_conditional_swap_(1, 5);
+    sz_sequence_sorting_network_conditional_swap_(2, 6);
+    sz_sequence_sorting_network_conditional_swap_(3, 7);
+
+    // Stage 5: Compare-swap within each half.
+    sz_sequence_sorting_network_conditional_swap_(2, 4);
+    sz_sequence_sorting_network_conditional_swap_(3, 5);
+
+    // Stage 6: Final compare-swap of adjacent elements.
+    sz_sequence_sorting_network_conditional_swap_(1, 2);
+    sz_sequence_sorting_network_conditional_swap_(3, 4);
+    sz_sequence_sorting_network_conditional_swap_(5, 6);
+
+#if SZ_DEBUG
+    // Validate the sorting network.
+    for (sz_size_t element_index = 1; element_index < 8; ++element_index)
+        sz_assert_(pgrams[element_index - 1] <= pgrams[element_index] &&
+                   "The sorting network must sort the pgrams in ascending order.");
+#endif
+}
+
+#undef sz_sequence_sorting_network_conditional_swap_
+
+/**
+ *  @brief Stable in-place ascending sort of an @p order slice by original index. Restores stable order
+ *      within a terminal run of byte-identical (or fold-identical) strings, whose pgrams are all equal
+ *      and carry no further ordering information.
+ *
+ *  Uses an iterative QuickSort with a median-of-three pivot and an insertion-sort base case. A plain
+ *  insertion sort would be quadratic on large runs of one repeated string (e.g. a very common word),
+ *  so the indices - which are distinct integers - get the same log-linear treatment as the pgrams.
+ */
+SZ_INTERNAL void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
+    // A small explicit stack of deferred half-open ranges; always recursing into the smaller side and
+    // looping on the larger keeps the depth below `log2(count)`, so 2*64 slots cover any 64-bit count.
+    sz_size_t stack[2 * 64];
+    sz_size_t stack_size = 0;
+    sz_size_t range_start = 0, range_end = count;
+    for (;;) {
+        // Insertion sort the small base case, then pop the next deferred range (if any).
+        if (range_end - range_start < 32) {
+            for (sz_size_t element_index = range_start + 1; element_index < range_end; ++element_index) {
+                sz_sorted_idx_t const current_idx = order[element_index];
+                sz_size_t position_index = element_index;
+                while (position_index > range_start && order[position_index - 1] > current_idx) {
+                    order[position_index] = order[position_index - 1];
+                    --position_index;
+                }
+                order[position_index] = current_idx;
+            }
+            if (!stack_size) break;
+            range_end = stack[--stack_size], range_start = stack[--stack_size];
+            continue;
+        }
+
+        // Median-of-three pivot, parked at the end of the range for a Lomuto partition.
+        sz_size_t const middle = range_start + (range_end - range_start) / 2;
+        sz_size_t const last = range_end - 1;
+        if (order[middle] < order[range_start]) sz_swap_(sz_sorted_idx_t, order[middle], order[range_start]);
+        if (order[last] < order[range_start]) sz_swap_(sz_sorted_idx_t, order[last], order[range_start]);
+        if (order[last] < order[middle]) sz_swap_(sz_sorted_idx_t, order[last], order[middle]);
+        sz_swap_(sz_sorted_idx_t, order[middle], order[last]);
+        sz_sorted_idx_t const pivot = order[last];
+
+        sz_size_t store = range_start;
+        for (sz_size_t scan = range_start; scan < last; ++scan)
+            if (order[scan] < pivot) {
+                sz_swap_(sz_sorted_idx_t, order[scan], order[store]);
+                ++store;
+            }
+        sz_swap_(sz_sorted_idx_t, order[store], order[last]);
+
+        // Defer the larger partition, continue on the smaller one to bound the stack depth.
+        sz_size_t const left_start = range_start, left_end = store;
+        sz_size_t const right_start = store + 1, right_end = range_end;
+        if (left_end - left_start > right_end - right_start) {
+            stack[stack_size++] = left_start, stack[stack_size++] = left_end;
+            range_start = right_start, range_end = right_end;
+        }
+        else {
+            stack[stack_size++] = right_start, stack[stack_size++] = right_end;
+            range_start = left_start, range_end = left_end;
+        }
+    }
+}
+
+#pragma endregion // Generic Internal Helpers
 /**
  *  @brief Exports the next N-gram (pgram) slice for each string in the given range, storing the results
  *      as byte-reversed integers so that simple integer comparisons yield lexicographic ordering.
