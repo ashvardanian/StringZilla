@@ -427,6 +427,78 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t 
     }
 }
 
+/**
+ *  @brief Splits a short (<= 64B) input into up to four 128-bit text-lanes using NEON loads.
+ *         Mirrors the loading ladder of `sz_hash_neon`: full `vld1q_u8` loads for complete lanes
+ *         and one overlapping load + in-register shift for the partial tail; byte-by-byte only for
+ *         the `< 16` case, where a 16-byte NEON load could read past the input.
+ *  @return The number of populated text-lanes (1..4).
+ */
+SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+    if (length <= 16) {
+        sz_u128_vec_t lane;
+        if (length == 16) { lane.u8x16 = vld1q_u8((sz_u8_t const *)text); }
+        else {
+            lane.u8x16 = vdupq_n_u8(0);
+            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) lane.u8s[byte_index] = text[byte_index];
+        }
+        text_lanes->u128s[0] = lane;
+        return 1;
+    }
+    sz_size_t const text_lanes_count = sz_size_divide_round_up(length, 16);
+    for (sz_size_t lane_index = 0; lane_index + 1 < text_lanes_count; ++lane_index)
+        text_lanes->u128s[lane_index].u8x16 = vld1q_u8((sz_u8_t const *)(text + lane_index * 16));
+    // De-interleave the partial tail lane with a single table lookup: output byte i pulls input byte
+    // (i + shift); indices that run past 15 make `vqtbl1q_u8` emit a zero - a clean in-register right
+    // shift, without the compile-time immediate that `vextq_u8` would demand for a data-dependent shift.
+    sz_align_(16) static sz_u8_t const lane_iota[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const tail = vld1q_u8((sz_u8_t const *)(text + length - 16));
+    uint8x16_t const shift = vdupq_n_u8((sz_u8_t)(text_lanes_count * 16 - length));
+    text_lanes->u128s[text_lanes_count - 1].u8x16 = vqtbl1q_u8(tail, vaddq_u8(vld1q_u8(lane_iota), shift));
+    return text_lanes_count;
+}
+
+SZ_PUBLIC void sz_hash_multiseed_neon(sz_cptr_t text, sz_size_t length,             //
+                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                      sz_u64_t *hashes) {
+    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_neon(text, length, seeds[0]);
+        return;
+    }
+    // NEON `AESE` is per-128-bit register, so there is no cross-lane packing; the win is the shared
+    // normalization pass plus interleaving two independent AES chains to hide the AES latency.
+    if (length > 64) {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_neon(text, length, seeds[seed_index]);
+        return;
+    }
+
+    sz_u512_vec_t text_lanes;
+    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_neon_(text, length, &text_lanes);
+
+    sz_size_t seed_index = 0;
+    for (; seed_index + 2 <= seeds_count; seed_index += 2) {
+        sz_hash_minimal_t_ state0, state1;
+        sz_hash_minimal_init_neon_(&state0, seeds[seed_index + 0]);
+        sz_hash_minimal_init_neon_(&state1, seeds[seed_index + 1]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
+            sz_hash_minimal_update_neon_(&state0, text_lanes.u128s[lane_index].u8x16);
+            sz_hash_minimal_update_neon_(&state1, text_lanes.u128s[lane_index].u8x16);
+        }
+        hashes[seed_index + 0] = sz_hash_minimal_finalize_neon_(&state0, length);
+        hashes[seed_index + 1] = sz_hash_minimal_finalize_neon_(&state1, length);
+    }
+    if (seed_index < seeds_count) {
+        sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_neon_(&state, seeds[seed_index]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+            sz_hash_minimal_update_neon_(&state, text_lanes.u128s[lane_index].u8x16);
+        hashes[seed_index] = sz_hash_minimal_finalize_neon_(&state, length);
+    }
+}
+
 SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_pointer = sz_hash_pi_constants_();
     if (length <= 16) {

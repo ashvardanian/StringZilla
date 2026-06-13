@@ -323,6 +323,64 @@ void test_hash_equivalence(                                               //
 }
 
 /**
+ *  @brief Verifies `sz_hash_multiseed` produces exactly the same output as a loop of `sz_hash`,
+ *         for one backend, across many lengths and seed counts (covering the 4-lane tail handling).
+ */
+void test_hash_multiseed_equivalence(sz_hash_multiseed_t multiseed, sz_hash_t hash_one) {
+    // Enough seeds to exercise full 4-wide groups plus every 1..3-seed tail remainder.
+    std::vector<sz_u64_t> seeds = {0u,
+                                   1u,
+                                   42u,
+                                   314159u,
+                                   std::numeric_limits<sz_u32_t>::max(),
+                                   std::numeric_limits<sz_u64_t>::max(),
+                                   7u,
+                                   8u,
+                                   9u,
+                                   10u,
+                                   11u,
+                                   12u,
+                                   13u,
+                                   14u,
+                                   15u,
+                                   16u,
+                                   17u};
+
+    auto check = [&](std::string const &text) {
+        for (std::size_t count = 0; count <= seeds.size(); ++count) {
+            // One guard slot past the end catches any write beyond `count`.
+            std::vector<sz_u64_t> out(count + 1, 0xDEADBEEFDEADBEEFull);
+            multiseed(text.data(), text.size(), seeds.data(), count, out.data());
+            for (std::size_t i = 0; i < count; ++i) assert(out[i] == hash_one(text.data(), text.size(), seeds[i]));
+            assert(out[count] == 0xDEADBEEFDEADBEEFull); // No overwrite past `count`
+        }
+    };
+
+    // Cover the minimal (<= 64 byte) ladder boundaries and the wide path.
+    for (std::size_t length = 0; length != 70; ++length) {
+        std::string text(length, '\0');
+        randomize_string(&text[0], length);
+        check(text);
+    }
+}
+
+void test_multiseed_hashing() {
+    test_hash_multiseed_equivalence(sz_hash_multiseed, sz_hash);
+
+    // And every backend that ships a specialized multi-seed kernel must match its own single-shot.
+    test_hash_multiseed_equivalence(sz_hash_multiseed_serial, sz_hash_serial);
+#if SZ_USE_WESTMERE
+    test_hash_multiseed_equivalence(sz_hash_multiseed_westmere, sz_hash_westmere);
+#endif
+#if SZ_USE_ICELAKE
+    test_hash_multiseed_equivalence(sz_hash_multiseed_icelake, sz_hash_icelake);
+#endif
+#if SZ_USE_NEONAES
+    test_hash_multiseed_equivalence(sz_hash_multiseed_neon, sz_hash_neon);
+#endif
+}
+
+/**
  *  @brief Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
  *         produces exactly the same output across different SIMD implementations.
  */
@@ -4928,6 +4986,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_memory_allocator_struct", test_memory_allocator_struct);
     failures += run_test("test_byteset_struct", test_byteset_struct);
     failures += run_test("test_equivalence", test_equivalence);
+    failures += run_test("test_multiseed_hashing", test_multiseed_hashing);
 
     std::printf("\n=== Sequence Algorithms ===\n");
     failures += run_test("test_sorting_algorithms", test_sorting_algorithms);

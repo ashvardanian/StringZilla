@@ -24,6 +24,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 
     impl->bytesum = sz_bytesum_serial;
     impl->hash = sz_hash_serial;
+    impl->hash_multiseed = sz_hash_multiseed_serial;
     impl->hash_state_init = sz_hash_state_init_serial;
     impl->hash_state_update = sz_hash_state_update_serial;
     impl->hash_state_digest = sz_hash_state_digest_serial;
@@ -36,6 +37,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 #if SZ_USE_WESTMERE
     if (caps & sz_cap_westmere_k) {
         impl->hash = sz_hash_westmere;
+        impl->hash_multiseed = sz_hash_multiseed_westmere;
         impl->hash_state_init = sz_hash_state_init_westmere;
         impl->hash_state_update = sz_hash_state_update_westmere;
         impl->hash_state_digest = sz_hash_state_digest_westmere;
@@ -70,6 +72,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
     if (caps & sz_cap_icelake_k) {
         impl->bytesum = sz_bytesum_icelake;
         impl->hash = sz_hash_icelake;
+        impl->hash_multiseed = sz_hash_multiseed_icelake;
         impl->hash_state_init = sz_hash_state_init_icelake;
         impl->hash_state_update = sz_hash_state_update_icelake;
         impl->hash_state_digest = sz_hash_state_digest_icelake;
@@ -88,6 +91,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 #if SZ_USE_NEONAES
     if (caps & sz_cap_neonaes_k) {
         impl->hash = sz_hash_neon;
+        impl->hash_multiseed = sz_hash_multiseed_neon;
         impl->hash_state_init = sz_hash_state_init_neon;
         impl->hash_state_update = sz_hash_state_update_neon;
         impl->hash_state_digest = sz_hash_state_digest_neon;
@@ -202,6 +206,11 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) { return sz_dis
 
 SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_dispatch_table.hash(text, length, seed);
+}
+
+SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                  sz_u64_t *hashes) {
+    sz_dispatch_table.hash_multiseed(text, length, seeds, seeds_count, hashes);
 }
 
 SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {

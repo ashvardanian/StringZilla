@@ -449,6 +449,102 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_icelake_(sz_hash_minimal_x4_t_ *state
 }
 
 /**
+ *  @brief Initializes the 4-wide parallel minimal state with four @b distinct seeds (one per lane).
+ *         Unlike `sz_hash_minimal_x4_init_icelake_`, which seeds all four lanes identically to hash
+ *         four different strings, this seeds each lane differently to hash one string under four seeds.
+ *  @param state Pointer to the 4-wide minimal hash state to initialize.
+ *  @param seeds_vec Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the 512-bit register.
+ */
+SZ_INTERNAL void sz_hash_multiseed_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, __m512i seeds_vec) {
+    state->key.zmm = seeds_vec;
+    // Replicate the first 128 bits of each Pi half across all four lanes, then XOR the per-lane seeds.
+    sz_u64_t const *pi = sz_hash_pi_constants_();
+    __m512i pi0 = _mm512_shuffle_i64x2(_mm512_load_si512((__m512i const *)(pi)), //
+                                       _mm512_load_si512((__m512i const *)(pi)), 0);
+    __m512i pi1 = _mm512_shuffle_i64x2(_mm512_load_si512((__m512i const *)(pi + 8)), //
+                                       _mm512_load_si512((__m512i const *)(pi + 8)), 0);
+    state->aes.zmm = _mm512_xor_si512(seeds_vec, pi0);
+    state->sum.zmm = _mm512_xor_si512(seeds_vec, pi1);
+}
+
+/**
+ *  @brief Finalizes the 4-wide parallel minimal state, folding in the input length.
+ *  @param state Pointer to the (const) 4-wide minimal hash state.
+ *  @param lengths The length addend broadcast into each seed-lane's key low half, i.e.
+ *                 `[0, length, 0, length, 0, length, 0, length]`. Seed-independent, so the caller
+ *                 builds it once and reuses it across all seed groups.
+ *  @return 256-bit vector with four 64-bit hashes, one per lane.
+ */
+SZ_INTERNAL __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_minimal_x4_t_ const *state, __m512i lengths) {
+    __m512i key_with_length = _mm512_add_epi64(state->key.zmm, lengths);
+    __m512i mixed = _mm512_aesenc_epi128(state->sum.zmm, state->aes.zmm);
+    __m512i mixed_in_register = _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed, key_with_length), mixed);
+    return _mm512_castsi512_si256(
+        _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_in_register));
+}
+
+SZ_PUBLIC void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,             //
+                                         sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                         sz_u64_t *hashes) {
+    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_icelake(text, length, seeds[0]);
+        return;
+    }
+    // Long strings gain nothing from seed-packing - the AES work scales with the byte count regardless.
+    if (length > 64) {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_icelake(text, length, seeds[seed_index]);
+        return;
+    }
+
+    // One branchless masked load pulls the whole <= 64 byte input into a single ZMM; its four 128-bit
+    // halves ARE the de-interleaved text-lanes (each up to 16 contiguous, low-justified, zero-padded
+    // bytes), so no scalar normalization is needed. Each text-lane is then broadcast to all four
+    // @b seed-lanes of a ZMM, so a single `VAESENC` advances four seeds at once; the text-lanes are
+    // consumed one after another, never as a single 512-bit value.
+    sz_u512_vec_t text_lanes;
+    text_lanes.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length), text);
+    sz_size_t const text_lanes_count = length <= 16 ? 1 : sz_size_divide_round_up(length, 16);
+    __m512i broadcast_text_lanes[4];
+    for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+        broadcast_text_lanes[lane_index] = _mm512_broadcast_i32x4(text_lanes.xmms[lane_index]);
+
+    // Both addends below are seed-independent, so hoist them out of the per-group loop:
+    // - `lengths` folds the input length into each seed-lane's key half at finalization;
+    // - `seed_spread` turns a contiguous `[s0,s1,s2,s3]` load into per-seed-lane `[s0,s0,s1,s1,s2,s2,s3,s3]`.
+    __m512i const lengths = _mm512_set_epi64(0, (sz_i64_t)length, 0, (sz_i64_t)length, //
+                                             0, (sz_i64_t)length, 0, (sz_i64_t)length);
+    __m512i const seed_spread = _mm512_set_epi64(3, 3, 2, 2, 1, 1, 0, 0);
+
+    sz_size_t seed_index = 0;
+    for (; seed_index + 4 <= seeds_count; seed_index += 4) {
+        sz_hash_minimal_x4_t_ state;
+        __m512i const seeds_vec = _mm512_permutexvar_epi64(
+            seed_spread, _mm512_castsi256_si512(_mm256_loadu_si256((__m256i const *)(seeds + seed_index))));
+        sz_hash_multiseed_x4_init_icelake_(&state, seeds_vec);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+            sz_hash_minimal_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
+        _mm256_storeu_si256((__m256i *)(hashes + seed_index), sz_hash_multiseed_x4_finalize_icelake_(&state, lengths));
+    }
+
+    // Tail: a final partial group of 1..3 seeds, masked so we never read or write past the arrays
+    // and stay entirely within VAES instead of dropping to a scalar AES-NI loop.
+    if (seed_index < seeds_count) {
+        __mmask8 const seed_mask = (__mmask8)((1u << (seeds_count - seed_index)) - 1);
+        sz_hash_minimal_x4_t_ state;
+        __m512i const seeds_vec = _mm512_permutexvar_epi64(
+            seed_spread, _mm512_castsi256_si512(_mm256_maskz_loadu_epi64(seed_mask, seeds + seed_index)));
+        sz_hash_multiseed_x4_init_icelake_(&state, seeds_vec);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+            sz_hash_minimal_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
+        _mm256_mask_storeu_epi64(hashes + seed_index, seed_mask,
+                                 sz_hash_multiseed_x4_finalize_icelake_(&state, lengths));
+    }
+}
+
+/**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256 with SHA-NI and AVX-512.
  *  @param hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param block Pointer to 64-byte message block.

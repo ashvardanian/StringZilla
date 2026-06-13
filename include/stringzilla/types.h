@@ -912,6 +912,9 @@ SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz
 /** @brief Signature of `sz_hash`. */
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t);
 
+/** @brief Signature of `sz_hash_multiseed`. */
+typedef void (*sz_hash_multiseed_t)(sz_cptr_t, sz_size_t, sz_u64_t const *, sz_size_t, sz_u64_t *);
+
 /** @brief Signature of `sz_hash_state_init`. */
 typedef void (*sz_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t);
 
@@ -1164,6 +1167,9 @@ typedef union sz_u512_vec_t {
     sz_i16_t i16s[32];
     sz_u8_t u8s[64];
     sz_i8_t i8s[64];
+
+    sz_u128_vec_t u128s[4];
+    sz_u128_vec_t u256s[2];
 } sz_u512_vec_t;
 
 #pragma endregion
@@ -1504,6 +1510,14 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
     int leading_zeros = sz_u64_clz(x);
     return (sz_size_t)(63 - leading_zeros);
+}
+
+/**
+ *  @brief Computes the ceiling of @p x divided by @p divisor - the number of @p divisor-sized
+ *         chunks needed to cover @p x. Assumes a non-zero @p divisor and no overflow on `x + divisor`.
+ */
+SZ_INTERNAL sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) {
+    return (x + divisor - 1) / divisor;
 }
 
 /**

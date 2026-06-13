@@ -139,6 +139,43 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
 SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /**
+ *  @brief Hashes one string under @b many seeds at once, the "multi-seed" hash.
+ *         Equivalent to calling `sz_hash(text, length, seeds[i])` for each seed, but normalizes the
+ *         input into AES blocks @b once and replays the cheap per-seed rounds over that prepared form.
+ *
+ *  @param text String to hash.
+ *  @param length Number of bytes in the text.
+ *  @param seeds Array of @p seeds_count 64-bit seeds.
+ *  @param seeds_count Number of seeds, and the number of hashes written to @p hashes.
+ *  @param hashes Caller-allocated output buffer of @p seeds_count 64-bit hashes.
+ *
+ *  Designed for workloads that need several independent hashes of the same (often short) key:
+ *  feature-hashing & Count-Min sketches for BM25/TF-IDF, Bloom filters, cuckoo hashing, MinHash /
+ *  SimHash / LSH banding, and rendezvous (HRW) hashing. Two effects make it faster than a loop of
+ *  `sz_hash`: the branch-heavy load & de-interleave of variable-length short strings is amortized
+ *  across all seeds, and AES-capable backends advance multiple seed-lanes per instruction.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/hash.h>
+ *      int main() {
+ *          sz_u64_t seeds[3] = {1, 2, 3}, hashes[3];
+ *          sz_hash_multiseed("token", 5, seeds, 3, hashes);
+ *          return hashes[0] == sz_hash("token", 5, 1) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note Biggest speedups are for `length <= 64`; above that only the input load is shared.
+ *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake, sz_hash_multiseed_neon
+ */
+SZ_DYNAMIC void sz_hash_multiseed(                //
+    sz_cptr_t text, sz_size_t length,             //
+    sz_u64_t const *seeds, sz_size_t seeds_count, //
+    sz_u64_t *hashes);
+
+/**
  *  @brief A Pseudorandom Number Generator (PRNG), inspired the AES-CTR-128 algorithm,
  *         but using only one round of AES mixing as opposed to "NIST SP 800-90A".
  *
@@ -287,6 +324,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
+/** @copydoc sz_hash_multiseed */
+SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                        sz_u64_t *hashes);
+
 /** @copydoc sz_fill_random */
 SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
@@ -303,6 +344,10 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
 
 /** @copydoc sz_hash */
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_hash_multiseed */
+SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                          sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
 SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
@@ -368,6 +413,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
+/** @copydoc sz_hash_multiseed */
+SZ_PUBLIC void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                         sz_u64_t *hashes);
+
 /** @copydoc sz_fill_random */
 SZ_PUBLIC void sz_fill_random_icelake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
@@ -402,6 +451,10 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash */
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_hash_multiseed */
+SZ_PUBLIC void sz_hash_multiseed_neon(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                      sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
 SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
@@ -556,6 +609,20 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_hash_neon(text, length, seed);
 #else
     return sz_hash_serial(text, length, seed);
+#endif
+}
+
+SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
+                                  sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                  sz_u64_t *hashes) {
+#if SZ_USE_ICELAKE
+    sz_hash_multiseed_icelake(text, length, seeds, seeds_count, hashes);
+#elif SZ_USE_WESTMERE
+    sz_hash_multiseed_westmere(text, length, seeds, seeds_count, hashes);
+#elif SZ_USE_NEONAES
+    sz_hash_multiseed_neon(text, length, seeds, seeds_count, hashes);
+#else
+    sz_hash_multiseed_serial(text, length, seeds, seeds_count, hashes);
 #endif
 }
 
