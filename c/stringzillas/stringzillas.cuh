@@ -320,6 +320,9 @@ struct levenshtein_backends_t {
 #if SZ_USE_ICELAKE
         szs::levenshtein_icelake_t, szs::affine_levenshtein_icelake_t,
 #endif
+#if SZ_USE_NEON
+        szs::levenshtein_neon_t, szs::affine_levenshtein_neon_t,
+#endif
 #if SZ_USE_CUDA
         szs::levenshtein_cuda_t, szs::affine_levenshtein_cuda_t,
 #endif
@@ -419,6 +422,9 @@ struct levenshtein_utf8_backends_t {
     std::variant<
 #if SZ_USE_ICELAKE
         szs::levenshtein_utf8_icelake_t, // ! `szs::affine_levenshtein_utf8_icelake_t` won't compile yet
+#endif
+#if SZ_USE_NEON
+        szs::levenshtein_utf8_neon_t, // ! `szs::affine_levenshtein_utf8_neon_t` is linear-only for now
 #endif
         szs::levenshtein_utf8_serial_t, szs::affine_levenshtein_utf8_serial_t>
         variants;

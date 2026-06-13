@@ -192,6 +192,13 @@ void bench_fingerprints(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 #endif // SZ_USE_SKYLAKE
 
+#if SZ_USE_NEON
+    using floating_neon_t = floating_rolling_hashers<sz_cap_neon_k, default_embedding_dims_k>;
+    auto floating_neon = std::make_unique<floating_neon_t>();
+    if (floating_neon->try_seed(default_window_width_k) != status_t::success_k)
+        throw std::runtime_error("Can't build NEON Floating Hasher.");
+#endif // SZ_USE_NEON
+
 #if SZ_USE_CUDA
     using floating_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_embedding_dims_k>;
     auto floating_cuda = std::make_unique<floating_cuda_t>();
@@ -291,6 +298,17 @@ void bench_fingerprints(environment_t const &env) {
         .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_SKYLAKE
+
+#if SZ_USE_NEON
+    bench_nullary(                                           //
+        env, "floating_neon", basic_rolling_f64_serial_call, //
+        fingerprint_callable<floating_neon_t, fu::basic_pool_t &>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_neon, pool), //
+        callable_no_op_t {},                                                             // preprocessing
+        fingerprints_equality_t {})                                                      // equality check
+        .log(basic_rolling_f64_serial_result, floating_serial_result);
+    scramble_accelerated_results();
+#endif // SZ_USE_NEON
 
 #if SZ_USE_CUDA
     bench_nullary(                                           //

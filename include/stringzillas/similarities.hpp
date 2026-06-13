@@ -34,33 +34,9 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-#if SZ_USE_HASWELL
-/**
- *  @brief In @b AVX2 (Haswell) we vectorize the per-character substitution lookups for horizontal "walkers",
- *         emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends.
- */
-using needleman_wunsch_haswell_t =
-    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
-using smith_waterman_haswell_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
-using affine_needleman_wunsch_haswell_t =
-    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
-using affine_smith_waterman_haswell_t =
-    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
-#endif // SZ_USE_HASWELL
-
-#if SZ_USE_NEON
-/**
- *  @brief In @b ARM NEON (AArch64) the per-character class lookups use the native `vqtbl4q_u8` byte-gather,
- *         feeding the anti-diagonal scorers.
- */
-using needleman_wunsch_neon_t =
-    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
-using smith_waterman_neon_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
-using affine_needleman_wunsch_neon_t =
-    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
-using affine_smith_waterman_neon_t =
-    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
-#endif // SZ_USE_NEON
+// All CPU backend aliases (serial, Ice Lake, Haswell, NEON) are declared unconditionally in
+// `similarities/serial.hpp` - their composite capabilities are plain constants and the engine
+// templates are always declared, so only their instantiation is gated below by `SZ_USE_*`.
 
 } // namespace stringzillas
 } // namespace ashvardanian
@@ -186,6 +162,18 @@ smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sh_k
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_NEON
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sn_k>::operator()<fu::basic_pool_t>(
+    span<char const>, span<char const>, size_t &, scratch_space_t, fu::basic_pool_t &, cpu_specs_t const &) const;
 extern template status_t
 needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sn_k>::operator()<dummy_executor_t>(
     span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &, cpu_specs_t const &) const;

@@ -731,8 +731,10 @@ typedef enum sz_capability_t {
     sz_cap_hopper_k = 1 << 23, ///< CUDA capability with support for Hopper's DPX instructions
 
     sz_caps_none_k = 0,
-    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
-    sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,   ///< Serial code with Fork Union
+    sz_caps_sh_k = sz_cap_serial_k | sz_cap_haswell_k,    ///< Serial code with Haswell
+    sz_caps_sn_k = sz_cap_serial_k | sz_cap_neon_k,       ///< Serial code with NEON
+    sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k,   ///< Serial code with Ice Lake
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
         sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
@@ -1064,6 +1066,8 @@ typedef union sz_u128_vec_t {
     uint16x8_t u16x8;
     uint32x4_t u32x4;
     uint64x2_t u64x2;
+    float64x2_t f64x2;
+    float32x4_t f32x4;
 #endif
 #if SZ_USE_LASX
     __m128i lsx;
