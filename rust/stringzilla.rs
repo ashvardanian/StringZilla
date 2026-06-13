@@ -472,6 +472,13 @@ extern "C" {
 
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
+    pub(crate) fn sz_hash_multiseed(
+        text: *const c_void,
+        length: usize,
+        seeds: *const u64,
+        seeds_count: usize,
+        hashes: *mut u64,
+    );
     pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
     pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
     pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
@@ -1330,6 +1337,38 @@ where
     T: AsRef<[u8]>,
 {
     hash_with_seed(text, 0)
+}
+
+/// Hashes one byte slice under many seeds at once, writing the results into `out`.
+/// Equivalent to `out[i] = hash_with_seed(text, seeds[i])`, but normalizes the input into AES
+/// blocks once and replays the cheap per-seed rounds - markedly faster for short strings under
+/// many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).
+///
+/// # Arguments
+///
+/// * `text`: The byte slice to hash.
+/// * `seeds`: The 64-bit seeds to hash under.
+/// * `out`: The output buffer, filled with one hash per seed. Must be the same length as `seeds`.
+///
+/// # Panics
+///
+/// Panics if `out.len() != seeds.len()`.
+#[inline(always)]
+pub fn hash_multiseed_into<T>(text: T, seeds: &[u64], out: &mut [u64])
+where
+    T: AsRef<[u8]>,
+{
+    assert_eq!(seeds.len(), out.len(), "`out` must have one slot per seed");
+    let text_ref = text.as_ref();
+    unsafe {
+        sz_hash_multiseed(
+            text_ref.as_ptr() as _,
+            text_ref.len(),
+            seeds.as_ptr(),
+            seeds.len(),
+            out.as_mut_ptr(),
+        )
+    }
 }
 
 /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -3529,6 +3568,37 @@ mod tests {
     }
 
     #[test]
+    fn multiseed_hash() {
+        // More than four seeds to exercise the 4-wide tail handling on the Ice Lake backend.
+        let seeds: Vec<u64> = (0..9u64)
+            .map(|i| i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(7))
+            .collect();
+        let texts: [&[u8]; 5] = [
+            b"",
+            b"token",
+            b"sixteen_bytes!!!",
+            b"sixty four chars exactly here to fill one whole block boundary..",
+            b"a string definitely longer than sixty four bytes to hit the wide path here please",
+        ];
+        for text in texts {
+            for k in 0..=seeds.len() {
+                let mut out = vec![0u64; k];
+                sz::hash_multiseed_into(text, &seeds[..k], &mut out);
+                for i in 0..k {
+                    assert_eq!(
+                        out[i],
+                        sz::hash_with_seed(text, seeds[i]),
+                        "len={} k={} i={}",
+                        text.len(),
+                        k,
+                        i
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn hashmap_with_sz() {
         let mut map: HashMap<&str, i32, sz::BuildSzHasher> = HashMap::with_hasher(sz::BuildSzHasher::with_seed(0));
         map.insert("a", 1);
@@ -3791,7 +3861,8 @@ mod tests {
             Person { name: "Bob", age: 40 },
         ];
         let mut order = [0; 3];
-        sz::argsort_by(|i: usize| people[i].name.as_bytes(), &mut order, Default::default()).expect("argsort_by failed");
+        sz::argsort_by(|i: usize| people[i].name.as_bytes(), &mut order, Default::default())
+            .expect("argsort_by failed");
 
         let sorted_from_api: Vec<_> = order.iter().map(|&i| people[i].name).collect();
 

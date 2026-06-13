@@ -2608,6 +2608,14 @@ class basic_string_slice {
         return static_cast<size_type>(sz_hash(start_, length_, static_cast<sz_u64_t>(seed)));
     }
 
+    /**  @brief Hashes the string under each of @p seeds at once, writing one hash per seed into @p hashes.
+     *   @note Equivalent to `hashes[i] = hash(seeds[i])`, but amortizes the input loading. @sa sz_hash_multiseed */
+    void hash_multiseed(span<std::uint64_t const> seeds, span<std::uint64_t> hashes) const noexcept {
+        sz_assert_(seeds.size() == hashes.size() && "Need one output slot per seed");
+        sz_hash_multiseed(start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()),
+                          static_cast<sz_size_t>(seeds.size()), reinterpret_cast<sz_u64_t *>(hashes.data()));
+    }
+
     /**  @brief Aggregates the values of individual bytes of a string. */
     size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
 

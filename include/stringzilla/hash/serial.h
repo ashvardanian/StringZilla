@@ -582,6 +582,86 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state) {
     }
 }
 
+#pragma region Multi-Seed Hashing
+
+/**
+ *  @brief Splits a short (<= 64 byte) input into up to four de-interleaved 128-bit @b text-lanes, once.
+ *  @param text Input string.
+ *  @param length Number of bytes, must be <= 64.
+ *  @param text_lanes Output: each `u128s[i]` holds up to 16 contiguous input bytes, low-justified
+ *                    and zero-padded. Shared by every backend's multi-seed replay routine.
+ *  @return The number of populated text-lanes (1..4).
+ *
+ *  The branchy, length-dependent work of loading and de-interleaving the input depends only on
+ *  `(text, length)`, never on the seed - so `sz_hash_multiseed` does it exactly once and replays the
+ *  cheap per-seed AES rounds over these text-lanes. That amortizes both the input loads and the
+ *  branch-heavy tail handling that dominate the cost of hashing short, variable-length strings,
+ *  on top of any per-backend AES parallelism across seeds.
+ *
+ *  @note The text-lane contents are bit-identical to the `length <= 64` ladder of `sz_hash` on every
+ *        backend (both the serial in-register shift and the masked-load variants), so replaying them
+ *        yields exactly `sz_hash(text, length, seed)` for each seed.
+ *  @sa sz_hash_multiseed, sz_hash_multiseed_replay_serial_
+ */
+SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+    sz_assert_(length <= 64 && "The text-lane form only covers the minimal (<= 64 byte) path");
+
+    // Zero the whole 64-byte register first, so trailing bytes of the last partial lane are defined.
+    for (int word_index = 0; word_index < 8; ++word_index) text_lanes->u64s[word_index] = 0;
+
+    // One text-lane per (up to) 16 bytes; empty inputs still absorb a single zero lane, matching `sz_hash`.
+    sz_size_t const text_lanes_count = length <= 16 ? 1 : sz_size_divide_round_up(length, 16);
+    for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
+        sz_size_t const lane_offset = lane_index * 16;
+        sz_size_t const lane_length = length - lane_offset < 16 ? length - lane_offset : 16;
+        for (sz_size_t byte_index = 0; byte_index < lane_length; ++byte_index)
+            text_lanes->u8s[lane_offset + byte_index] = text[lane_offset + byte_index];
+    }
+    return text_lanes_count;
+}
+
+/**
+ *  @brief Replays prepared text-lanes through the serial minimal AES state for a single seed.
+ *  @param text_lanes Text-lanes from `sz_hash_multiseed_prepare_serial_`.
+ *  @param text_lanes_count Number of populated text-lanes.
+ *  @param length Original byte length, folded into the digest.
+ *  @param seed 64-bit seed for this output.
+ *  @return 64-bit hash, identical to `sz_hash_serial(text, length, seed)`.
+ */
+SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
+                                                      sz_size_t length, sz_u64_t seed) {
+    sz_hash_minimal_t_ state;
+    sz_hash_minimal_init_serial_(&state, seed);
+    for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+        sz_hash_minimal_update_serial_(&state, text_lanes->u128s[lane_index]);
+    return sz_hash_minimal_finalize_serial_(&state, length);
+}
+
+SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,             //
+                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                        sz_u64_t *hashes) {
+    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_serial(text, length, seeds[0]);
+        return;
+    }
+    // Short strings share one normalization pass; long strings have no de-interleaving to amortize.
+    if (length <= 64) {
+        sz_u512_vec_t text_lanes;
+        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes);
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_multiseed_replay_serial_(&text_lanes, text_lanes_count, length,
+                                                                  seeds[seed_index]);
+    }
+    else {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_serial(text, length, seeds[seed_index]);
+    }
+}
+
+#pragma endregion // Multi-Seed Hashing
+
 #pragma region Serial SHA256 Implementation
 
 /** @brief SHA256 rotate right operation. */

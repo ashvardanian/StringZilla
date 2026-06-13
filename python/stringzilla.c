@@ -1320,6 +1320,119 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
+static char const doc_hash_multiseed[] = //
+    "Hash one string under many seeds at once.\n"
+    "\n"
+    "Equivalent to ``tuple(hash(text, s) for s in seeds)``, but normalizes the input into AES\n"
+    "blocks once and replays the cheap per-seed rounds - markedly faster for short strings under\n"
+    "many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).\n"
+    "\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string to hash (positional-only when standalone).\n"
+    "  seeds (buffer of uint64): Contiguous 64-bit seeds, e.g. numpy.uint64 array or array('Q', ...).\n"
+    "       Plain int lists are not accepted - wrap them in array('Q', seeds) or numpy.\n"
+    "  out (writable uint64 buffer, optional): A contiguous buffer of at least len(seeds) elements.\n"
+    "       When given it is filled in place and None is returned; otherwise a tuple of ints is returned.\n"
+    "Returns:\n"
+    "  tuple[int, ...] | None: Tuple of 64-bit hashes, or None when writing into `out`.\n"
+    "\n"
+    "Example:\n"
+    "  >>> def hash_multiseed(text, seeds, /, out=None) -> tuple | None: ...";
+
+static PyObject *Str_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple) {
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    PyObject *text_obj = is_member ? self : NULL;
+    PyObject *seeds_obj = NULL;
+    PyObject *out_obj = NULL;
+
+    // Positional layout: [text if standalone], seeds, [out]
+    Py_ssize_t const seeds_slot = is_member ? 0 : 1;
+    if (!is_member && positional_args_count >= 1) text_obj = args[0];
+    if (positional_args_count > seeds_slot) seeds_obj = args[seeds_slot];
+    if (positional_args_count > seeds_slot + 1) out_obj = args[seeds_slot + 1];
+
+    // Keyword arguments: `seeds`, `out`
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, i);
+        PyObject *const value = args[positional_args_count + i];
+        if (PyUnicode_CompareWithASCIIString(key, "seeds") == 0 && !seeds_obj) seeds_obj = value;
+        else if (PyUnicode_CompareWithASCIIString(key, "out") == 0 && !out_obj) out_obj = value;
+        else {
+            PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+            return NULL;
+        }
+    }
+
+    if (!text_obj || !seeds_obj) {
+        PyErr_SetString(PyExc_TypeError, "hash_multiseed() requires a text and a sequence of seeds");
+        return NULL;
+    }
+
+    sz_string_view_t text;
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    // Acquire the seeds as a contiguous, read-only 64-bit buffer (e.g. NumPy uint64, array('Q'),
+    // memoryview) - zero-copy, no allocation, no per-element boxing. Plain int lists are rejected.
+    Py_buffer seeds_view;
+    if (PyObject_GetBuffer(seeds_obj, &seeds_view, PyBUF_CONTIG_RO | PyBUF_FORMAT) != 0) return NULL;
+    if (seeds_view.itemsize != (Py_ssize_t)sizeof(sz_u64_t)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "seeds must be a contiguous buffer of 64-bit integers (e.g. numpy.uint64 or array('Q'))");
+        PyBuffer_Release(&seeds_view);
+        return NULL;
+    }
+    sz_size_t const count = (sz_size_t)(seeds_view.len / (Py_ssize_t)sizeof(sz_u64_t));
+    sz_u64_t const *seeds = (sz_u64_t const *)seeds_view.buf;
+
+    // Write the hashes into the caller buffer (zero allocation), or build a tuple via a stack scratch.
+    if (out_obj && out_obj != Py_None) {
+        Py_buffer out_view;
+        // PyBUF_CONTIG = writable + C-contiguous; rejects strided/non-contiguous targets up front.
+        if (PyObject_GetBuffer(out_obj, &out_view, PyBUF_CONTIG) != 0) {
+            PyBuffer_Release(&seeds_view);
+            return NULL;
+        }
+        if ((size_t)out_view.len < (size_t)count * sizeof(sz_u64_t)) {
+            PyErr_Format(PyExc_ValueError, "out buffer holds %zd bytes, need %zu for %zu seeds",
+                         (Py_ssize_t)out_view.len, (size_t)count * sizeof(sz_u64_t), (size_t)count);
+            PyBuffer_Release(&out_view);
+            PyBuffer_Release(&seeds_view);
+            return NULL;
+        }
+        if (count) sz_hash_multiseed(text.start, text.length, seeds, count, (sz_u64_t *)out_view.buf);
+        PyBuffer_Release(&out_view);
+        PyBuffer_Release(&seeds_view);
+        Py_RETURN_NONE;
+    }
+
+    PyObject *result = PyTuple_New((Py_ssize_t)count);
+    if (!result) {
+        PyBuffer_Release(&seeds_view);
+        return NULL;
+    }
+    sz_u64_t scratch[256];
+    for (sz_size_t offset = 0; offset < count; offset += 256) {
+        sz_size_t const chunk = count - offset < 256 ? count - offset : 256;
+        sz_hash_multiseed(text.start, text.length, seeds + offset, chunk, scratch);
+        for (sz_size_t i = 0; i < chunk; ++i) {
+            PyObject *item = PyLong_FromUnsignedLongLong((unsigned long long)scratch[i]);
+            if (!item) {
+                Py_DECREF(result);
+                PyBuffer_Release(&seeds_view);
+                return NULL;
+            }
+            PyTuple_SET_ITEM(result, (Py_ssize_t)(offset + i), item);
+        }
+    }
+    PyBuffer_Release(&seeds_view);
+    return result;
+}
+
 static char const doc_fill_random[] = //
     "Fill a string-like buffer in place with pseudo-random bytes.\n"
     "\n"
@@ -5258,6 +5371,7 @@ static PyMethodDef Str_methods[] = {
     {"endswith", (PyCFunction)Str_like_endswith, SZ_METHOD_FLAGS, doc_endswith},
     {"decode", (PyCFunction)Str_like_decode, SZ_METHOD_FLAGS, doc_decode},
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, SZ_METHOD_FLAGS, doc_hash_multiseed},
     {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
     {"lstrip", (PyCFunction)Str_like_lstrip, SZ_METHOD_FLAGS, doc_lstrip},
     {"rstrip", (PyCFunction)Str_like_rstrip, SZ_METHOD_FLAGS, doc_rstrip},
@@ -7812,6 +7926,7 @@ static PyMethodDef stringzilla_methods[] = {
 
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, SZ_METHOD_FLAGS, doc_hash_multiseed},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
     {"sha256", (PyCFunction)Str_like_sha256, SZ_METHOD_FLAGS, doc_like_sha256},
     {"hmac_sha256", (PyCFunction)hmac_sha256, SZ_METHOD_FLAGS, doc_hmac_sha256},

@@ -47,6 +47,7 @@
  *  This file is the sibling of `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include <numeric> // `std::accumulate`
+#include <array>   // `std::array`
 
 #include "bench.hpp"
 #include "test_stringzilla.hpp" // `log_environment`
@@ -172,6 +173,45 @@ struct hash_from_std_t {
         std::size_t hash = std::hash<std::string_view> {}(buffer);
         do_not_optimize(hash); //! The used function is not documented and can't be tested against anything
         return {buffer.size() /* static_cast<check_value_t>(hash) */};
+    }
+};
+
+/** @brief Fixed seed schedule shared by the multi-seed hashing baseline and kernels. */
+inline std::array<sz_u64_t, 8> multiway_seeds() noexcept {
+    return {0u, 1u, 42u, 314159u, 2654435761u, 11400714819323198485ull, 7u, 8u};
+}
+
+/** @brief Baseline: hashes one token under every seed via independent `sz_hash` calls. */
+template <sz_hash_t func_>
+struct hash_multiseed_loop_from_sz {
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        auto const seeds = multiway_seeds();
+        sz_u64_t mixed = 0;
+        for (sz_u64_t seed : seeds) mixed ^= func_(buffer.data(), buffer.size(), seed);
+        do_not_optimize(mixed);
+        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed)};
+    }
+};
+
+/** @brief Hashes one token under every seed in a single `sz_hash_multiseed` call. */
+template <sz_hash_multiseed_t func_>
+struct hash_multiseed_from_sz {
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        auto seeds = multiway_seeds();
+        decltype(seeds) hashes; // Same std::array type - carries the compile-time seed count.
+        func_(buffer.data(), buffer.size(), seeds.data(), seeds.size(), hashes.data());
+        sz_u64_t mixed = 0;
+        for (sz_u64_t hash : hashes) mixed ^= hash;
+        do_not_optimize(mixed);
+        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed)};
     }
 };
 
@@ -339,6 +379,28 @@ void bench_hashing(environment_t const &env) {
 #endif
 #if SZ_USE_POWERVSX
     bench_unary(env, "sz_hash_powervsx", validator, hash_from_sz<sz_hash_powervsx> {env}).log(base, base_stl);
+#endif
+}
+
+void bench_hashing_multiseed(environment_t const &env) {
+
+    // Baseline is the realistic status quo: K dispatched single-shot `sz_hash` calls per token, so the
+    // reported speedup isolates the multi-seed structural win rather than a backend-vs-serial difference.
+    auto validator = hash_multiseed_loop_from_sz<sz_hash> {env};
+    bench_result_t base = bench_unary(env, "sz_hash_loop", validator).log();
+
+    bench_unary(env, "sz_hash_multiseed", validator, hash_multiseed_from_sz<sz_hash_multiseed> {env}).log(base);
+#if SZ_USE_WESTMERE
+    bench_unary(env, "sz_hash_multiseed_westmere", validator, hash_multiseed_from_sz<sz_hash_multiseed_westmere> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_hash_multiseed_icelake", validator, hash_multiseed_from_sz<sz_hash_multiseed_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEONAES
+    bench_unary(env, "sz_hash_multiseed_neon", validator, hash_multiseed_from_sz<sz_hash_multiseed_neon> {env})
+        .log(base);
 #endif
 }
 
@@ -688,6 +750,7 @@ int main(int argc, char const **argv) {
     bench_utf8_count(env);
     bench_utf8_unpack(env);
     bench_hashing(env);
+    bench_hashing_multiseed(env);
     bench_stream_hashing(env);
     bench_sha256(env);
 

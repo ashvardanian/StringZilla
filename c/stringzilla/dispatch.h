@@ -41,6 +41,7 @@ typedef struct sz_implementations_t {
 
     sz_bytesum_t bytesum;
     sz_hash_t hash;
+    sz_hash_multiseed_t hash_multiseed;
     sz_hash_state_init_t hash_state_init;
     sz_hash_state_update_t hash_state_update;
     sz_hash_state_digest_t hash_state_digest;

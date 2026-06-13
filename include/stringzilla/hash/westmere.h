@@ -247,6 +247,76 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
     }
 }
 
+/**
+ *  @brief Splits a short (<= 64B) input into up to four 128-bit text-lanes using SSE loads.
+ *         Mirrors the loading ladder of `sz_hash_westmere`: full `lddqu` loads for complete lanes
+ *         and one overlapping load + in-register shift for the partial tail; byte-by-byte only for
+ *         the `< 16` case, where a 16-byte SSE load could read past the input.
+ *  @return The number of populated text-lanes (1..4).
+ */
+SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+    if (length <= 16) {
+        sz_u128_vec_t lane;
+        if (length == 16) { lane.xmm = _mm_lddqu_si128((__m128i const *)text); }
+        else {
+            lane.xmm = _mm_setzero_si128();
+            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) lane.u8s[byte_index] = text[byte_index];
+        }
+        text_lanes->u128s[0] = lane;
+        return 1;
+    }
+    sz_size_t const text_lanes_count = sz_size_divide_round_up(length, 16);
+    for (sz_size_t lane_index = 0; lane_index + 1 < text_lanes_count; ++lane_index)
+        text_lanes->u128s[lane_index].xmm = _mm_lddqu_si128((__m128i const *)(text + lane_index * 16));
+    sz_u128_vec_t tail;
+    tail.xmm = _mm_lddqu_si128((__m128i const *)(text + length - 16));
+    sz_hash_shift_in_register_serial_(&tail, (int)(text_lanes_count * 16 - length));
+    text_lanes->u128s[text_lanes_count - 1] = tail;
+    return text_lanes_count;
+}
+
+SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,             //
+                                          sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                          sz_u64_t *hashes) {
+    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_westmere(text, length, seeds[0]);
+        return;
+    }
+    // Without VAES there is no cross-lane AES, so the win here is the shared normalization pass plus
+    // the instruction-level parallelism of two independent single-lane AES chains.
+    if (length > 64) {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_westmere(text, length, seeds[seed_index]);
+        return;
+    }
+
+    sz_u512_vec_t text_lanes;
+    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_westmere_(text, length, &text_lanes);
+    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+
+    sz_size_t seed_index = 0;
+    for (; seed_index + 2 <= seeds_count; seed_index += 2) {
+        sz_align_(16) sz_hash_minimal_t_ state0, state1;
+        sz_hash_minimal_init_westmere_aligned_(&state0, seeds[seed_index + 0]);
+        sz_hash_minimal_init_westmere_aligned_(&state1, seeds[seed_index + 1]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
+            sz_hash_minimal_update_westmere_aligned_(&state0, text_lanes.u128s[lane_index].xmm, order);
+            sz_hash_minimal_update_westmere_aligned_(&state1, text_lanes.u128s[lane_index].xmm, order);
+        }
+        hashes[seed_index + 0] = sz_hash_minimal_finalize_westmere_aligned_(&state0, length);
+        hashes[seed_index + 1] = sz_hash_minimal_finalize_westmere_aligned_(&state1, length);
+    }
+    if (seed_index < seeds_count) {
+        sz_align_(16) sz_hash_minimal_t_ state;
+        sz_hash_minimal_init_westmere_aligned_(&state, seeds[seed_index]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+            sz_hash_minimal_update_westmere_aligned_(&state, text_lanes.u128s[lane_index].xmm, order);
+        hashes[seed_index] = sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+    }
+}
+
 SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
     // The worst usage pattern... that we should ironically handle first - is updating the state

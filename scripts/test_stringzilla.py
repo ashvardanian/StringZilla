@@ -1062,6 +1062,36 @@ def test_hasher_reset_and_hexdigest(seed_value: int):
     assert streamed_hex == re_streamed_hex
 
 
+@pytest.mark.parametrize("body", ["", "x", "hello", "abcdefg", "a" * 17, "a" * 32, "a" * 64, "a" * 100])
+def test_hash_multiseed_equivalence(body: str):
+    from array import array
+
+    seeds_list = [0, 1, 42, 314159, 7, 8, 9, 10, 11]  # > 4 to exercise the 4-wide tail handling
+    seeds = array("Q", seeds_list)
+    expected = tuple(sz.hash(body, s) for s in seeds_list)
+
+    # Tuple-returning form, standalone and as a member of `Str`
+    assert sz.hash_multiseed(body, seeds) == expected
+    assert sz.Str(body).hash_multiseed(seeds) == expected
+
+    # Output-buffer form fills in place and returns None
+    out = array("Q", [0] * len(seeds))
+    assert sz.hash_multiseed(body, seeds, out=out) is None
+    assert tuple(out) == expected
+
+
+def test_hash_multiseed_errors():
+    from array import array
+
+    seeds = array("Q", [1, 2, 3])
+    with pytest.raises(TypeError):  # A plain list of ints is not a uint64 buffer
+        sz.hash_multiseed("x", [1, 2, 3])
+    with pytest.raises(TypeError):  # Wrong item size (32-bit) is rejected
+        sz.hash_multiseed("x", array("I", [1, 2, 3]))
+    with pytest.raises(ValueError):  # Output buffer too small for the seed count
+        sz.hash_multiseed("x", seeds, out=array("Q", [0]))
+
+
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_bytesum_random(length: int, seed_value: int):
