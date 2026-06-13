@@ -38,11 +38,9 @@ using ashvardanian::stringzillas::needleman_wunsch_serial_t;
 using ashvardanian::stringzillas::smith_waterman_icelake_t;
 using ashvardanian::stringzillas::smith_waterman_serial_t;
 using ashvardanian::stringzillas::uniform_substitution_costs_t;
-#if SZ_USE_NEON
 using ashvardanian::stringzillas::affine_levenshtein_neon_t;
 using ashvardanian::stringzillas::levenshtein_neon_t;
 using ashvardanian::stringzillas::levenshtein_utf8_neon_t;
-#endif
 
 // StringZillas library symbols provided only by the CUDA backend:
 #if SZ_USE_CUDA
