@@ -136,6 +136,23 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
 SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                             sz_sorted_idx_t *order);
 
+#if SZ_USE_HASWELL
+
+/** @copydoc sz_sequence_argsort */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_haswell( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_pgrams_sort_serial */
+SZ_PUBLIC sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                             sz_sorted_idx_t *order);
+
+#endif
+
 #if SZ_USE_SKYLAKE
 
 /** @copydoc sz_sequence_argsort */
@@ -190,6 +207,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
 #pragma endregion
 
 #include "stringzilla/sort/serial.h"
+#include "stringzilla/sort/haswell.h"
 #include "stringzilla/sort/skylake.h"
 #include "stringzilla/sort/sve.h"
 #include "stringzilla/sort/neon.h"
@@ -204,6 +222,8 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
                                            sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
     return sz_sequence_argsort_skylake(sequence, alloc, order, top_count, reverse);
+#elif SZ_USE_HASWELL
+    return sz_sequence_argsort_haswell(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_SVE
     return sz_sequence_argsort_sve(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_NEON
@@ -218,6 +238,8 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
     return sz_sequence_argsort_utf8_case_insensitive_skylake(sequence, alloc, order, top_count, reverse);
+#elif SZ_USE_HASWELL
+    return sz_sequence_argsort_utf8_case_insensitive_haswell(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_SVE
     return sz_sequence_argsort_utf8_case_insensitive_sve(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_NEON

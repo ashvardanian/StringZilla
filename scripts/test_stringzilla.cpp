@@ -4710,6 +4710,119 @@ void test_replacements(std::size_t lookup_tables_to_try = 32, std::size_t slices
     }
 }
 
+#pragma region Per-ISA Sort Equivalence
+
+/** @brief Wraps a `std::vector<std::string>` as an `sz_sequence_t` so C backends can be called directly. */
+static sz_cptr_t sort_sequence_get_start_(void const *handle, sz_sorted_idx_t index) {
+    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].data();
+}
+static sz_size_t sort_sequence_get_length_(void const *handle, sz_sorted_idx_t index) {
+    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].size();
+}
+
+/**
+ *  @brief Demands a SIMD sort backend produce results identical to the serial backend, across many inputs.
+ *
+ *  Both the byte and case-insensitive arg-sorts are @b stable, so for any input the permutation is unique -
+ *  the SIMD and serial `order` arrays must match exactly across ascending, descending, and top-K modes. The
+ *  pgram integer sort is not stable, so only the @b sorted key arrays are compared (equal keys may tie-break
+ *  differently between backends), with the permutation checked for validity.
+ *
+ *  Mirrors `test_hash_equivalence` & friends: one generic checker, invoked once per ISA under `SZ_USE_*`.
+ */
+void test_sort_backend_equivalence(                      //
+    sz_sequence_argsort_t argsort_simd,                  //
+    sz_sequence_argsort_t argsort_case_insensitive_simd, //
+    sz_pgrams_sort_t pgrams_sort_simd) {
+
+    using strs_t = std::vector<std::string>;
+    auto &generator = global_random_generator();
+
+    // Datasets spanning the vectorized block, the scalar tail, and the slack-region boundaries; sizes are
+    // deliberately > 32 so the QuickSort partition (not the insertion-sort fallback) is exercised.
+    std::vector<strs_t> datasets;
+    for (std::size_t count : {33u, 64u, 100u, 1000u, 5000u}) {
+        strs_t fixed_dups; // Short strings over a tiny alphabet => many exact duplicates (fills the equal region).
+        for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(sz::scripts::random_string(i % 5, "ab", 2));
+        datasets.push_back(fixed_dups);
+        strs_t varied; // Longer, common-prefix strings => deep pgram recursion.
+        for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::scripts::random_string(6 + i % 40, "abc", 3));
+        datasets.push_back(varied);
+    }
+    { // Deterministic mixed-case / multi-script set so the case-insensitive path sees real folds.
+        char const *seed[] = {"Apple",   "apple",  "BANANA", "banana", "Straße",
+                              "STRASSE", "Привет", "ПРИВЕТ", "Ab",     "aB"};
+        strs_t mixed;
+        for (std::size_t r = 0; r < 50; ++r)
+            for (char const *word : seed) mixed.push_back(word);
+        std::shuffle(mixed.begin(), mixed.end(), generator);
+        datasets.push_back(mixed);
+    }
+
+    for (strs_t const &dataset : datasets) {
+        std::size_t const count = dataset.size();
+        sz_sequence_t sequence;
+        sequence.handle = &dataset;
+        sequence.count = count;
+        sequence.get_start = sort_sequence_get_start_;
+        sequence.get_length = sort_sequence_get_length_;
+
+        std::vector<sz_sorted_idx_t> order_serial(count), order_simd(count);
+        for (sz_size_t top : {sz_size_t(0), sz_size_t(1), (sz_size_t)(count / 3), (sz_size_t)count}) {
+            for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
+                std::size_t const head = (top != 0 && top < count) ? top : count;
+
+                // Byte arg-sort: stable, so the permutations must match exactly over the ordered prefix.
+                sz_sequence_argsort_serial(&sequence, nullptr, order_serial.data(), top, reverse);
+                argsort_simd(&sequence, nullptr, order_simd.data(), top, reverse);
+                for (std::size_t i = 0; i < head; ++i)
+                    assert(order_serial[i] == order_simd[i] && "SIMD byte arg-sort disagrees with serial");
+
+                // Case-insensitive arg-sort: also stable, same exact-match requirement.
+                sz_sequence_argsort_utf8_case_insensitive_serial(&sequence, nullptr, order_serial.data(), top, reverse);
+                argsort_case_insensitive_simd(&sequence, nullptr, order_simd.data(), top, reverse);
+                for (std::size_t i = 0; i < head; ++i)
+                    assert(order_serial[i] == order_simd[i] && "SIMD case-insensitive arg-sort disagrees with serial");
+            }
+        }
+    }
+
+    // Pgram integer sort: compare the sorted key arrays (the sort is not stable, so permutations may differ).
+    for (std::size_t count : {33u, 100u, 1000u, 5000u}) {
+        std::vector<sz_pgram_t> keys(count);
+        for (auto &key : keys) key = (sz_pgram_t)(generator() % 50); // Heavy duplication exercises the equal region.
+        std::vector<sz_pgram_t> keys_serial = keys, keys_simd = keys;
+        std::vector<sz_sorted_idx_t> order_serial(count), order_simd(count);
+        sz_pgrams_sort_serial(keys_serial.data(), count, nullptr, order_serial.data());
+        pgrams_sort_simd(keys_simd.data(), count, nullptr, order_simd.data());
+        assert(keys_serial == keys_simd && "SIMD pgram sort produced a different sorted order than serial");
+        for (std::size_t i = 0; i < count; ++i)
+            assert(keys[order_simd[i]] == keys_simd[i] && "SIMD pgram sort permutation is invalid");
+    }
+}
+
+/** @brief Runs `test_sort_backend_equivalence` for every SIMD sort backend the build enables. */
+void test_sort_backends() {
+#if SZ_USE_HASWELL
+    test_sort_backend_equivalence(sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_case_insensitive_haswell,
+                                  sz_pgrams_sort_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    test_sort_backend_equivalence(sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_case_insensitive_skylake,
+                                  sz_pgrams_sort_skylake);
+#endif
+#if SZ_USE_SVE
+    test_sort_backend_equivalence(sz_sequence_argsort_sve, sz_sequence_argsort_utf8_case_insensitive_sve,
+                                  sz_pgrams_sort_sve);
+#endif
+#if SZ_USE_NEON
+    test_sort_backend_equivalence(sz_sequence_argsort_neon, sz_sequence_argsort_utf8_case_insensitive_neon,
+                                  sz_pgrams_sort_neon);
+#endif
+}
+
+#pragma endregion // Per-ISA Sort Equivalence
+
 /**
  *  @brief Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
  *
@@ -5007,6 +5120,7 @@ int main(int argc, char const **argv) {
 
     std::printf("\n=== Sequence Algorithms ===\n");
     failures += run_test("test_sorting_algorithms", test_sorting_algorithms);
+    failures += run_test("test_sort_backends", test_sort_backends);
     failures += run_test("test_intersecting_algorithms", test_intersecting_algorithms);
 
     std::printf("\n=== Core APIs ===\n");

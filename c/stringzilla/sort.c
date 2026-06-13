@@ -16,6 +16,13 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps) {
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_argsort_utf8_case_insensitive = sz_sequence_argsort_utf8_case_insensitive_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) {
+        impl->sequence_argsort = sz_sequence_argsort_haswell;
+        impl->sequence_argsort_utf8_case_insensitive = sz_sequence_argsort_utf8_case_insensitive_haswell;
+    }
+#endif
+
 #if SZ_USE_SKYLAKE
     if (caps & sz_cap_skylake_k) {
         impl->sequence_argsort = sz_sequence_argsort_skylake;

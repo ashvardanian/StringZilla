@@ -137,7 +137,7 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
  *  @param start_in_sequence First index (inclusive) of the range to sort.
  *  @param end_in_sequence One-past-the-last index of the range to sort.
  */
-SZ_PUBLIC void sz_sequence_argsort_skylake_recursively_(            //
+SZ_PUBLIC void sz_sequence_argsort_skylake_quicksort_pgrams_(       //
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
     sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
@@ -162,11 +162,11 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_recursively_(            //
     // Recursively sort the left and right partitions, if there are at least 2 elements in each.
     // The right partition is skipped entirely if it lies past the `top_count` cut-off.
     if (start_in_sequence + 1 < first_pivot_index)
-        sz_sequence_argsort_skylake_recursively_(                             //
+        sz_sequence_argsort_skylake_quicksort_pgrams_(                        //
             initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
             start_in_sequence, first_pivot_index, top_count);
     if (last_pivot_index + 2 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_skylake_recursively_(                             //
+        sz_sequence_argsort_skylake_quicksort_pgrams_(                        //
             initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
             last_pivot_index + 1, end_in_sequence, top_count);
 }
@@ -191,7 +191,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     // Reuse the string sorting algorithm for sorting the "pgrams" - a plain full ascending sort.
-    sz_sequence_argsort_skylake_recursively_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
+    sz_sequence_argsort_skylake_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     // Deallocate the temporary memory used for partitioning.
     alloc->free(temporary_pgrams, memory_usage, alloc);
@@ -200,7 +200,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
 
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
- *      It combines `sz_sequence_argsort_serial_export_next_pgrams_` and `sz_sequence_argsort_skylake_recursively_`,
+ *      It combines `sz_sequence_argsort_serial_export_byte_window_` and `sz_sequence_argsort_skylake_quicksort_pgrams_`,
  *      recursively diving into groups of identical pgrams.
  *
  *  @param sequence The collection of strings to sort.
@@ -214,7 +214,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
  *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param reverse Whether to export complemented keys for descending order.
  */
-SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        //
+SZ_PUBLIC void sz_sequence_argsort_skylake_sort_byte_windows_(                  //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,       //
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, //
@@ -222,11 +222,11 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        
     sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
 
     // Prepare the new range of pgrams
-    sz_sequence_argsort_serial_export_next_pgrams_( //
+    sz_sequence_argsort_serial_export_byte_window_( //
         sequence, global_pgrams, global_order, start_in_sequence, end_in_sequence, start_character, reverse);
 
     // Sort current pgrams with a quicksort
-    sz_sequence_argsort_skylake_recursively_( //
+    sz_sequence_argsort_skylake_quicksort_pgrams_( //
         global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_sequence, end_in_sequence, top_count);
 
     // Depending on the architecture, we will export a different number of bytes.
@@ -256,7 +256,7 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_skylake_next_pgrams_( //
+            sz_sequence_argsort_skylake_sort_byte_windows_( //
                 sequence, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
                 start_character + pgram_capacity, top_count, reverse);
         else if (has_multiple_strings)
@@ -298,20 +298,84 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     if (!global_pgrams) return sz_bad_alloc_k;
 
     // Recursively sort the whole sequence.
-    sz_sequence_argsort_skylake_next_pgrams_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, //
-                                             0, count, 0, top_count, reverse);
+    sz_sequence_argsort_skylake_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, //
+                                                   0, count, 0, top_count, reverse);
 
     // Free temporary storage.
     alloc->free(global_pgrams, memory_usage, alloc);
     return sz_success_k;
 }
 
+/**
+ *  @brief Case-insensitive twin of `sz_sequence_argsort_skylake_sort_byte_windows_`: the folded code-point export
+ *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
+ *      AVX-512 partition - which is where Skylake beats the fully-serial case-insensitive path.
+ */
+SZ_PUBLIC void sz_sequence_argsort_skylake_sort_casefold_windows_(
+    sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
+    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
+    sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
+    sz_bool_t const reverse) {
+
+    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
+                                                       end_in_sequence, folded_skip_count, reverse);
+    sz_sequence_argsort_skylake_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                                  start_in_sequence, end_in_sequence, top_count);
+
+    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
+    // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
+    sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
+    sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
+    sz_size_t nested_start = start_in_sequence;
+    sz_size_t nested_end = start_in_sequence;
+    while (nested_end != end_in_sequence) {
+        if (top_count != 0 && nested_start >= top_count) break;
+
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+        sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
+        int has_multiple_strings = nested_end - nested_start > 1;
+        int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
+        if (has_multiple_strings && has_more_characters_in_each)
+            sz_sequence_argsort_skylake_sort_casefold_windows_(
+                sequence, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
+                folded_skip_count + fields_per_pgram, top_count, reverse);
+        else if (has_multiple_strings)
+            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+        nested_start = nested_end;
+    }
+}
+
 SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_skylake( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
-    // Case-folding the pgram window on the fly is inherently scalar, so the SIMD partition buys little
-    // over the folding cost; reuse the serial folded sort verbatim.
-    return sz_sequence_argsort_utf8_case_insensitive_serial(sequence, alloc, order, top_count, reverse);
+
+    sz_size_t const count = sequence->count;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
+
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    // Same layout as the byte arg-sort - working pgrams (count) + the partition's two scratch regions. The
+    // AVX-512 compress-store is exact, so no slack is needed. The folded export is stateless (re-folds the
+    // prefix on demand), so unlike the earlier design there is no per-string cursor array.
+    sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    if (!global_pgrams) return sz_bad_alloc_k;
+    sz_pgram_t *temporary_pgrams = global_pgrams + count;
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+
+    sz_sequence_argsort_skylake_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams,
+                                                       temporary_order, 0, count, 0, top_count, reverse);
+
+    alloc->free(global_pgrams, memory_usage, alloc);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

@@ -33,36 +33,6 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-/**
- *  @brief 16x32 = 512-byte left-pack table for `vqtbl2q_u8`. For a 4-bit lane mask, row `[m]` holds the 32
- *      byte indices that gather the selected u64 lanes (of 4) to the front, leaving the rest in-range. The
- *      first 16 bytes feed the first lookup (output lanes 0-1), the last 16 the second (output lanes 2-3).
- *      Kept `static const` - 512 bytes stays warm in cache, unlike the 16 KB an 8-wide `vqtbl4q` table needs.
- */
-static sz_u8_t const sz_sort_neon_compact4_lut_[16][32] = {
-    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
-    {24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7},
-    {16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-    {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7},
-    {8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
-     24, 25, 26, 27, 28, 29, 30, 31, 0,  1,  2,  3,  4,  5,  6,  7},
-    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31},
-};
-
-/** @brief Population count of each 4-bit lane mask, parallel to @ref sz_sort_neon_compact4_lut_. */
-static sz_u8_t const sz_sort_neon_popcount4_lut_[16] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
-
 /** @brief Collapses two `uint64x2_t` compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
 SZ_INTERNAL sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
     static sz_u16_t const lane_weights[4] = {1, 2, 4, 8};
@@ -80,8 +50,38 @@ SZ_INTERNAL sz_size_t sz_sort_neon_compact4_(                          //
     uint8x16x2_t const keys_u8x16x2, uint8x16x2_t const order_u8x16x2, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
-    sz_size_t const taken = sz_sort_neon_popcount4_lut_[mask4];
-    sz_u8_t const *const indices = sz_sort_neon_compact4_lut_[mask4];
+    // 16x32 = 512-byte left-pack table for `vqtbl2q_u8`: row `[m]` holds the 32 byte indices that gather the
+    // `m`-selected u64 lanes (of 4) to the front - first 16 bytes feed lookup 0 (out lanes 0-1), last 16 feed
+    // lookup 1 (out lanes 2-3). 512 bytes stays cache-warm; an 8-wide `vqtbl4q` table would need 16 KB.
+    static sz_u8_t const compact_lut[16][32] = {
+        {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
+        {24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7},
+        {16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+         0,  1,  2,  3,  4,  5,  6,  7,  0,  1,  2,  3,  4,  5,  6,  7},
+        {0,  1,  2,  3,  4,  5,  6,  7,  16, 17, 18, 19, 20, 21, 22, 23,
+         24, 25, 26, 27, 28, 29, 30, 31, 0,  1,  2,  3,  4,  5,  6,  7},
+        {8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+         24, 25, 26, 27, 28, 29, 30, 31, 0,  1,  2,  3,  4,  5,  6,  7},
+        {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+         16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31},
+    };
+
+    // Unlike x86, AArch64 has no scalar population-count instruction (`cnt` is vector-only), so a 16-byte LUT
+    // beats spilling the 4-bit mask to a vector for one `cnt`+`addv`.
+    static sz_u8_t const popcount_lut[16] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
+
+    sz_size_t const taken = popcount_lut[mask4];
+    sz_u8_t const *const indices = compact_lut[mask4];
     uint8x16_t const indices_u8x16 = vld1q_u8(indices);
     uint8x16_t const indices_high_u8x16 = vld1q_u8(indices + 16);
     vst1q_u64((sz_u64_t *)(out_pgrams), vreinterpretq_u64_u8(vqtbl2q_u8(keys_u8x16x2, indices_u8x16)));
@@ -220,10 +220,11 @@ SZ_INTERNAL void sz_sequence_argsort_neon_3way_partition_(                      
     *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-SZ_PUBLIC void sz_sequence_argsort_neon_recursively_(sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,
-                                                     sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order,
-                                                     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
-                                                     sz_size_t const top_count) {
+SZ_PUBLIC void sz_sequence_argsort_neon_quicksort_pgrams_(sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,
+                                                          sz_pgram_t *temporary_pgrams,
+                                                          sz_sorted_idx_t *temporary_order,
+                                                          sz_size_t const start_in_sequence,
+                                                          sz_size_t const end_in_sequence, sz_size_t const top_count) {
     sz_size_t const count = end_in_sequence - start_in_sequence;
     if (count <= 32) { // Below the vectorization break-even, a stable insertion sort wins.
         sz_pgrams_sort_with_insertion(initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
@@ -235,11 +236,11 @@ SZ_PUBLIC void sz_sequence_argsort_neon_recursively_(sz_pgram_t *initial_pgrams,
                                              start_in_sequence, end_in_sequence, &first_pivot_index, &last_pivot_index);
 
     if (start_in_sequence + 1 < first_pivot_index)
-        sz_sequence_argsort_neon_recursively_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
-                                              start_in_sequence, first_pivot_index, top_count);
+        sz_sequence_argsort_neon_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+                                                   start_in_sequence, first_pivot_index, top_count);
     if (last_pivot_index + 2 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_neon_recursively_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
-                                              last_pivot_index + 1, end_in_sequence, top_count);
+        sz_sequence_argsort_neon_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+                                                   last_pivot_index + 1, end_in_sequence, top_count);
 }
 
 SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
@@ -258,23 +259,23 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_neon_recursively_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
+    sz_sequence_argsort_neon_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     alloc->free(temporary_pgrams, memory_usage, alloc);
     return sz_success_k;
 }
 
-SZ_PUBLIC void sz_sequence_argsort_neon_next_pgrams_(
+SZ_PUBLIC void sz_sequence_argsort_neon_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
-    sz_sequence_argsort_serial_export_next_pgrams_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_serial_export_byte_window_(sequence, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character, reverse);
 
-    sz_sequence_argsort_neon_recursively_(global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                          start_in_sequence, end_in_sequence, top_count);
+    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                               start_in_sequence, end_in_sequence, top_count);
 
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
     sz_size_t nested_start = start_in_sequence;
@@ -295,9 +296,9 @@ SZ_PUBLIC void sz_sequence_argsort_neon_next_pgrams_(
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_neon_next_pgrams_(sequence, global_pgrams, global_order, temporary_pgrams,
-                                                  temporary_order, nested_start, nested_end,
-                                                  start_character + pgram_capacity, top_count, reverse);
+            sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+                                                        temporary_order, nested_start, nested_end,
+                                                        start_character + pgram_capacity, top_count, reverse);
         else if (has_multiple_strings)
             sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
         nested_start = nested_end;
@@ -328,18 +329,83 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!global_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_neon_next_pgrams_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0, count,
-                                          0, top_count, reverse);
+    sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
+                                                count, 0, top_count, reverse);
 
     alloc->free(global_pgrams, memory_usage, alloc);
     return sz_success_k;
 }
 
+/**
+ *  @brief Case-insensitive twin of `sz_sequence_argsort_neon_sort_byte_windows_`: the folded code-point export
+ *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
+ *      NEON partition - which is where NEON beats the fully-serial case-insensitive path.
+ */
+SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
+    sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
+    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
+    sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
+    sz_bool_t const reverse) {
+
+    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
+                                                       end_in_sequence, folded_skip_count, reverse);
+    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                               start_in_sequence, end_in_sequence, top_count);
+
+    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
+    // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
+    sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
+    sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
+    sz_size_t nested_start = start_in_sequence;
+    sz_size_t nested_end = start_in_sequence;
+    while (nested_end != end_in_sequence) {
+        if (top_count != 0 && nested_start >= top_count) break;
+
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+        sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
+        int has_multiple_strings = nested_end - nested_start > 1;
+        int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
+        if (has_multiple_strings && has_more_characters_in_each)
+            sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+                                                            temporary_order, nested_start, nested_end,
+                                                            folded_skip_count + fields_per_pgram, top_count, reverse);
+        else if (has_multiple_strings)
+            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+        nested_start = nested_end;
+    }
+}
+
 SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_neon( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,      //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
-    // Case-folding the pgram window on the fly is inherently scalar, so reuse the serial folded sort.
-    return sz_sequence_argsort_utf8_case_insensitive_serial(sequence, alloc, order, top_count, reverse);
+
+    sz_size_t const count = sequence->count;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
+
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    // Same layout as the byte arg-sort - `global_pgrams` (count) + two scratch buffers (count + 24 slack each:
+    // two inter-region gaps + spill, since the NEON table compaction overruns). The folded export is stateless
+    // (re-folds the prefix on demand), so unlike the earlier design there is no per-string cursor array.
+    sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    if (!global_pgrams) return sz_bad_alloc_k;
+    sz_pgram_t *temporary_pgrams = global_pgrams + count;
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
+
+    sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
+                                                    0, count, 0, top_count, reverse);
+
+    alloc->free(global_pgrams, memory_usage, alloc);
+    return sz_success_k;
 }
 
 #if defined(__clang__)
