@@ -28,8 +28,6 @@ namespace stringzillas {
 #pragma GCC target("+simd")
 #endif
 
-/** @brief Serial fallback combined with the NEON backend, mirroring `sz_caps_sil_k` for Ice Lake. */
-static constexpr sz_capability_t sz_caps_sn_k = (sz_capability_t)(sz_cap_serial_k | sz_cap_neon_k);
 
 /**
  *  @brief Until a bit-parallel Myers fast path is vectorized for NEON, reuse the serial one. The serial

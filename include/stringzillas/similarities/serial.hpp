@@ -665,6 +665,37 @@ using affine_needleman_wunsch_icelake_t =
 using affine_smith_waterman_icelake_t =
     smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
+/**
+ *  In @b AVX2 (Haswell) we vectorize the per-character substitution lookups for horizontal "walkers",
+ *  emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends. The aliases are
+ *  always declared (the composite capability is a plain constant); only their instantiation is `SZ_USE_HASWELL`-gated.
+ */
+using needleman_wunsch_haswell_t =
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using smith_waterman_haswell_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using affine_needleman_wunsch_haswell_t =
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using affine_smith_waterman_haswell_t =
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
+
+/**
+ *  In @b ARM NEON (AArch64) the per-character class lookups use the native `vqtbl4q_u8` byte-gather, feeding
+ *  the anti-diagonal scorers; uniform-cost Levenshtein swaps that lookup for a `vceqq`/`vbslq` match-vs-mismatch
+ *  select and minimizes with `vminq`. As with Ice Lake, the aliases are unconditional; only their instantiation
+ *  is `SZ_USE_NEON`-gated.
+ */
+using levenshtein_neon_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using levenshtein_utf8_neon_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using needleman_wunsch_neon_t =
+    needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using smith_waterman_neon_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sn_k>;
+
+using affine_levenshtein_neon_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using affine_needleman_wunsch_neon_t =
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+using affine_smith_waterman_neon_t =
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+
 #pragma endregion - Common Aliases
 
 #pragma region - Autovectorized Tile Scorer
