@@ -10,7 +10,7 @@
  *  - Nth-codepoint location - @b utf8_find_nth (the BMI/PDEP "Nth set bit" kernel on x86).
  *  - Newline scanning - @b utf8_find_newline.
  *  - Whitespace scanning - @b utf8_find_whitespace (Unicode White_Space property).
- *  - UAX-29 word-boundary segmentation, forward & reverse - @b utf8_word_find_boundary / @b _rfind_boundary.
+ *  - UAX-29 word-boundary segmentation, forward & reverse - @b utf8_word_find_boundaries / @b _rfind_boundary.
  *  - UTF-8 -> UTF-32 transcoding - @b utf8_unpack_chunk.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
@@ -143,7 +143,7 @@ struct utf8_find_delimiter_from_sz {
     }
 };
 
-/** @brief  Iterates every UAX-29 word boundary forward across each token; checksum = number of boundaries. */
+/** @brief  Segments each token into UAX-29 words forward; checksum = number of words. */
 template <auto func_>
 struct utf8_word_forward_from_sz {
     environment_t const &env;
@@ -152,21 +152,22 @@ struct utf8_word_forward_from_sz {
         token_view_t token = env.tokens[i];
         sz_cptr_t cursor = token.data();
         sz_size_t remaining = token.size();
-        std::size_t boundaries = 0;
+        sz_size_t starts[16], lengths[16];
+        std::size_t words = 0;
         while (remaining) {
-            sz_size_t width = 0; // `boundary_width` is the offset of the boundary from `cursor`.
-            func_(cursor, remaining, &width);
-            if (width == 0 || width >= remaining) break; // Reached the trailing boundary at the end.
-            ++boundaries;
-            cursor += width;
-            remaining -= width;
+            sz_size_t consumed = 0;
+            sz_size_t produced = func_(cursor, remaining, starts, lengths, 16, &consumed);
+            words += static_cast<std::size_t>(produced);
+            if (produced == 0 || consumed >= remaining) break; // Whole suffix segmented.
+            cursor += consumed;                                // Resume from the first word that did not fit.
+            remaining -= consumed;
         }
-        do_not_optimize(boundaries);
-        return {token.size(), static_cast<check_value_t>(boundaries)};
+        do_not_optimize(words);
+        return {token.size(), static_cast<check_value_t>(words)};
     }
 };
 
-/** @brief  Iterates every UAX-29 word boundary in reverse across each token; checksum = number of boundaries. */
+/** @brief  Segments each token into UAX-29 words from the end backward; checksum = number of words. */
 template <auto func_>
 struct utf8_word_reverse_from_sz {
     environment_t const &env;
@@ -175,18 +176,17 @@ struct utf8_word_reverse_from_sz {
         token_view_t token = env.tokens[i];
         sz_cptr_t base = token.data();
         sz_size_t remaining = token.size();
-        std::size_t boundaries = 0;
+        sz_size_t starts[16], lengths[16];
+        std::size_t words = 0;
         while (remaining) {
-            sz_size_t width =
-                0; // `boundary_width` is `remaining - byte_position`; the boundary sits at `base + byte_position`.
-            sz_cptr_t boundary = func_(base, remaining, &width);
-            std::size_t byte_position = static_cast<std::size_t>(boundary - base);
-            if (byte_position == 0 || byte_position >= remaining) break; // Reached the leading boundary at the start.
-            ++boundaries;
-            remaining = byte_position; // Continue the reverse scan over the prefix [base, byte_position).
+            sz_size_t consumed = 0;
+            sz_size_t produced = func_(base, remaining, starts, lengths, 16, &consumed);
+            words += static_cast<std::size_t>(produced);
+            if (produced == 0 || consumed == 0) break; // Whole prefix segmented.
+            remaining = consumed;                      // Continue the reverse scan over the prefix [base, consumed).
         }
-        do_not_optimize(boundaries);
-        return {token.size(), static_cast<check_value_t>(boundaries)};
+        do_not_optimize(words);
+        return {token.size(), static_cast<check_value_t>(words)};
     }
 };
 
@@ -321,61 +321,61 @@ void bench_utf8_find_whitespace(environment_t const &env) {
                    .log(base);)
 }
 
-void bench_utf8_word_find_boundary(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_word_find_boundary_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_word_find_boundary_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_find_boundary_haswell", base_v,
-                              utf8_word_forward_from_sz<sz_utf8_word_find_boundary_haswell> {env})
+void bench_utf8_word_find_boundaries(environment_t const &env) {
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_word_find_boundaries_serial", base_v).log();
+    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_find_boundaries_haswell", base_v,
+                              utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_haswell> {env})
                       .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_find_boundary_icelake", base_v,
-                              utf8_word_forward_from_sz<sz_utf8_word_find_boundary_icelake> {env})
+    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_find_boundaries_icelake", base_v,
+                              utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_icelake> {env})
                       .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_find_boundary_neon", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundary_neon> {env})
+    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_find_boundaries_neon", base_v,
+                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_neon> {env})
                    .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_find_boundary_sve2", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundary_sve2> {env})
+    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_find_boundaries_sve2", base_v,
+                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_sve2> {env})
                    .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_word_find_boundary_v128", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundary_v128> {env})
+    SZ_IF_V128(bench_unary(env, "sz_utf8_word_find_boundaries_v128", base_v,
+                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_v128> {env})
                    .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_find_boundary_rvv", base_v,
-                          utf8_word_forward_from_sz<sz_utf8_word_find_boundary_rvv> {env})
+    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_find_boundaries_rvv", base_v,
+                          utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_rvv> {env})
                   .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_find_boundary_powervsx", base_v,
-                               utf8_word_forward_from_sz<sz_utf8_word_find_boundary_powervsx> {env})
+    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_find_boundaries_powervsx", base_v,
+                               utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_powervsx> {env})
                        .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_find_boundary_lasx", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundary_lasx> {env})
+    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_find_boundaries_lasx", base_v,
+                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_lasx> {env})
                    .log(base);)
 }
 
-void bench_utf8_word_rfind_boundary(environment_t const &env) {
-    auto base_v = utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_word_rfind_boundary_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_rfind_boundary_haswell", base_v,
-                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_haswell> {env})
+void bench_utf8_word_rfind_boundaries(environment_t const &env) {
+    auto base_v = utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_word_rfind_boundaries_serial", base_v).log();
+    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_rfind_boundaries_haswell", base_v,
+                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_haswell> {env})
                       .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_rfind_boundary_icelake", base_v,
-                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_icelake> {env})
+    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_rfind_boundaries_icelake", base_v,
+                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_icelake> {env})
                       .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_rfind_boundary_neon", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_neon> {env})
+    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_rfind_boundaries_neon", base_v,
+                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_neon> {env})
                    .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_rfind_boundary_sve2", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_sve2> {env})
+    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_rfind_boundaries_sve2", base_v,
+                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_sve2> {env})
                    .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_word_rfind_boundary_v128", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_v128> {env})
+    SZ_IF_V128(bench_unary(env, "sz_utf8_word_rfind_boundaries_v128", base_v,
+                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_v128> {env})
                    .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_rfind_boundary_rvv", base_v,
-                          utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_rvv> {env})
+    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_rfind_boundaries_rvv", base_v,
+                          utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_rvv> {env})
                   .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_rfind_boundary_powervsx", base_v,
-                               utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_powervsx> {env})
+    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_rfind_boundaries_powervsx", base_v,
+                               utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_powervsx> {env})
                        .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_rfind_boundary_lasx", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundary_lasx> {env})
+    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_rfind_boundaries_lasx", base_v,
+                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_lasx> {env})
                    .log(base);)
 }
 
@@ -420,8 +420,8 @@ int main(int argc, char const **argv) {
     bench_utf8_find_nth(env);
     bench_utf8_find_newline(env);
     bench_utf8_find_whitespace(env);
-    bench_utf8_word_find_boundary(env);
-    bench_utf8_word_rfind_boundary(env);
+    bench_utf8_word_find_boundaries(env);
+    bench_utf8_word_rfind_boundaries(env);
     bench_utf8_unpack_chunk(env);
 
     std::printf("All benchmarks passed.\n");

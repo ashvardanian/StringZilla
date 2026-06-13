@@ -234,12 +234,18 @@ SZ_INTERNAL sz_u64_t sz_utf8_wb_safe_mask_powervsx_(sz_cptr_t text, sz_size_t ba
     return mask;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *word_starts, sz_size_t *word_lengths,       //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = 0;
+        return 0;
     }
     sz_u8_t first_byte = (sz_u8_t)text[0];
+    sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     sz_size_t position = (sz_size_t)(1 + (first_byte >= 0xC0) + (first_byte >= 0xE0) + (first_byte >= 0xF0));
     while (position < length) {
         if (position > 0 && position + 16 <= length) {
@@ -256,22 +262,41 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_powervsx(sz_cptr_t text, sz_size_
             }
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = position - word_start;
+            ++words;
+            word_start = position;
         }
         sz_u8_t byte_at_position = (sz_u8_t)text[position];
         position += (sz_size_t)(1 + (byte_at_position >= 0xC0) + (byte_at_position >= 0xE0) +
                                 (byte_at_position >= 0xF0));
     }
-    if (boundary_width) *boundary_width = length;
-    return text + length;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_start;
+        return words;
+    }
+    word_starts[words] = word_start;
+    word_lengths[words] = length - word_start;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = length;
+    return words;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *word_starts, sz_size_t *word_lengths,        //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = length;
+        return 0;
     }
+    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
     sz_size_t position = length - 1;
     while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     while (position > 0) {
@@ -288,14 +313,27 @@ SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_powervsx(sz_cptr_t text, sz_size
             if (position == 0) break;
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = length - position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_end;
+                return words;
+            }
+            word_starts[words] = position;
+            word_lengths[words] = word_end - position;
+            ++words;
+            word_end = position;
         }
         position--;
         while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     }
-    if (boundary_width) *boundary_width = length;
-    return text;
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_end;
+        return words;
+    }
+    word_starts[words] = 0;
+    word_lengths[words] = word_end;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = 0;
+    return words;
 }
 
 #if defined(__clang__)

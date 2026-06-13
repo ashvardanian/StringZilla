@@ -17,8 +17,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps)
     impl->utf8_find_newline = sz_utf8_find_newline_serial;
     impl->utf8_find_whitespace = sz_utf8_find_whitespace_serial;
     impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_serial;
-    impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_serial;
-    impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_serial;
+    impl->utf8_word_find_boundaries = sz_utf8_word_find_boundaries_serial;
+    impl->utf8_word_rfind_boundaries = sz_utf8_word_rfind_boundaries_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
@@ -68,8 +68,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps)
         impl->utf8_find_newline = sz_utf8_find_newline_v128;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_v128;
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_v128;
-        impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_v128;
-        impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_v128;
+        impl->utf8_word_find_boundaries = sz_utf8_word_find_boundaries_v128;
+        impl->utf8_word_rfind_boundaries = sz_utf8_word_rfind_boundaries_v128;
     }
 #endif
 
@@ -89,8 +89,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps)
         impl->utf8_find_newline = sz_utf8_find_newline_rvv;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_rvv;
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_rvv;
-        impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_rvv;
-        impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_rvv;
+        impl->utf8_word_find_boundaries = sz_utf8_word_find_boundaries_rvv;
+        impl->utf8_word_rfind_boundaries = sz_utf8_word_rfind_boundaries_rvv;
     }
 #endif
 
@@ -101,8 +101,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps)
         impl->utf8_find_newline = sz_utf8_find_newline_lasx;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_lasx;
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_lasx;
-        impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_lasx;
-        impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_lasx;
+        impl->utf8_word_find_boundaries = sz_utf8_word_find_boundaries_lasx;
+        impl->utf8_word_rfind_boundaries = sz_utf8_word_rfind_boundaries_lasx;
     }
 #endif
 
@@ -113,8 +113,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps)
         impl->utf8_find_newline = sz_utf8_find_newline_powervsx;
         impl->utf8_find_whitespace = sz_utf8_find_whitespace_powervsx;
         impl->utf8_unpack_chunk = sz_utf8_unpack_chunk_powervsx;
-        impl->utf8_word_find_boundary = sz_utf8_word_find_boundary_powervsx;
-        impl->utf8_word_rfind_boundary = sz_utf8_word_rfind_boundary_powervsx;
+        impl->utf8_word_find_boundaries = sz_utf8_word_find_boundaries_powervsx;
+        impl->utf8_word_rfind_boundaries = sz_utf8_word_rfind_boundaries_powervsx;
     }
 #endif
 }
@@ -140,10 +140,16 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
     return sz_dispatch_table.utf8_find_whitespace(text, length, matched_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_dispatch_table.utf8_word_find_boundary(text, length, boundary_width);
+SZ_DYNAMIC sz_size_t sz_utf8_word_find_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed) {
+    return sz_dispatch_table.utf8_word_find_boundaries(text, length, word_starts, word_lengths, words_capacity,
+                                                       bytes_consumed);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    return sz_dispatch_table.utf8_word_rfind_boundary(text, length, boundary_width);
+SZ_DYNAMIC sz_size_t sz_utf8_word_rfind_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                   sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                   sz_size_t *bytes_consumed) {
+    return sz_dispatch_table.utf8_word_rfind_boundaries(text, length, word_starts, word_lengths, words_capacity,
+                                                        bytes_consumed);
 }

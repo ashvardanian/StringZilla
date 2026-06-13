@@ -1119,56 +1119,108 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+/*  Plural UAX-29 word segmentation.
+ *
+ *  A single left-to-right sweep emits every word into two parallel arrays - `word_starts[i]` is the byte
+ *  offset of the i-th word and `word_lengths[i]` its byte length - so one call segments the whole input
+ *  without the caller looping. The boundary set is exactly the set of positions for which
+ *  `sz_utf8_is_word_boundary_serial` is true.
+ *
+ *  When the output arrays fill before the input is exhausted, `*bytes_consumed` is set to the start of the
+ *  first word that did not fit - always a true TR29 boundary - so a caller can resume from `text +
+ *  *bytes_consumed` with a fresh buffer and obtain the identical remainder (a boundary resets all WB context,
+ *  so resuming with start-of-text semantics at a boundary is exact). Consecutive boundaries are always at
+ *  least one codepoint apart, so no zero-length word is ever emitted; `length == 0` emits zero words.
+ */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_serial( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *word_starts, sz_size_t *word_lengths,     //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = 0;
+        return 0;
     }
 
-    sz_size_t position = 0;
-    // Skip first codepoint (position 0 is always a boundary)
-    if (position < length) { position += sz_utf8_char_length_((sz_u8_t)text[position]); }
+    sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
+    // Position 0 is always a boundary, so the first reportable interior boundary is after the first codepoint.
+    sz_size_t position = sz_utf8_char_length_((sz_u8_t)text[0]);
 
-    // Scan for next boundary
     while (position < length) {
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = position - word_start;
+            ++words;
+            word_start = position;
         }
         position += sz_utf8_char_length_((sz_u8_t)text[position]);
     }
 
-    // End of text is always a boundary
-    if (boundary_width) *boundary_width = length;
-    return text + length;
+    // The trailing span [word_start, length) is the last word (end of text is always a boundary).
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_start;
+        return words;
+    }
+    word_starts[words] = word_start;
+    word_lengths[words] = length - word_start;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = length;
+    return words;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
-    if (length == 0) {
-        if (boundary_width) *boundary_width = 0;
-        return text;
+/*  Reverse counterpart of `sz_utf8_word_find_boundaries_serial`: words are emitted from the end of the text
+ *  backward (`word_starts[0]` is the last word, `word_starts[1]` the one before it, and so on). The boundary
+ *  decision still uses the forward predicate `sz_utf8_is_word_boundary_serial`, which always sees full left
+ *  context, so the segmentation matches the forward pass.
+ *  On a full buffer `*bytes_consumed` is set to the end offset of the earliest (leftmost) emitted word - a true
+ *  boundary - so a caller resumes by calling again with `length == *bytes_consumed`.
+ */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_serial( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *word_starts, sz_size_t *word_lengths,      //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+
+    sz_size_t words = 0;
+    if (length == 0 || words_capacity == 0) {
+        if (bytes_consumed) *bytes_consumed = length;
+        return 0;
     }
 
-    sz_size_t position = length;
-    // Move back one codepoint (position length is always a boundary)
-    if (position > 0) {
-        position--;
-        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
-    }
+    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
+    // Position `length` is always a boundary, so step back one codepoint to the first reportable position.
+    sz_size_t position = length - 1;
+    while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
 
-    // Scan backward for previous boundary
     while (position > 0) {
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (boundary_width) *boundary_width = length - position;
-            return text + position;
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_end;
+                return words;
+            }
+            word_starts[words] = position;
+            word_lengths[words] = word_end - position;
+            ++words;
+            word_end = position;
         }
         position--;
         while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
     }
 
-    // Start of text is always a boundary
-    if (boundary_width) *boundary_width = length;
-    return text;
+    // The leading span [0, word_end) is the last word emitted (start of text is always a boundary).
+    if (words == words_capacity) {
+        if (bytes_consumed) *bytes_consumed = word_end;
+        return words;
+    }
+    word_starts[words] = 0;
+    word_lengths[words] = word_end;
+    ++words;
+    if (bytes_consumed) *bytes_consumed = 0;
+    return words;
 }
 
 #pragma endregion // UAX-29 Word Boundaries

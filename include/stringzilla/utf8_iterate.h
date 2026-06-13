@@ -243,27 +243,49 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
- *  @brief Find the next word boundary in UTF-8 text (dispatch function).
+ *  @brief Segment UTF-8 text into UAX-29 words in a single pass (dispatch function).
  *
- *  Scans forward from the start of text to find the first word boundary position.
- *  Returns a pointer to the boundary position and optionally outputs the boundary width.
+ *  Walks the whole input left-to-right and writes one entry per word into two parallel output arrays:
+ *  `word_starts[i]` is the byte offset of the i-th word and `word_lengths[i]` its byte length. Words are the
+ *  spans between consecutive TR29 boundaries, so a single call segments the entire input without the caller
+ *  having to loop and restart a scan for every word.
  *
  *  @param text UTF-8 encoded text.
- *  @param length Byte length of text.
- *  @param boundary_width Optional output: bytes spanning the boundary.
- *  @return Pointer to boundary position, or text+length at end.
+ *  @param length Byte length of @p text.
+ *  @param word_starts Output array of word byte offsets (at least @p words_capacity entries).
+ *  @param word_lengths Output array of word byte lengths (at least @p words_capacity entries).
+ *  @param words_capacity Capacity of the output arrays, in entries.
+ *  @param bytes_consumed Optional output: byte offset up to which the input was segmented. Equals @p length
+ *         when everything fit; otherwise it is the start of the first word that did not fit (a TR29 boundary),
+ *         so the caller may resume from @c text+*bytes_consumed.
+ *  @return Number of words written (at most @p words_capacity).
+ *
+ *  @note No zero-length words are emitted; @p length == 0 returns 0.
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+SZ_DYNAMIC sz_size_t sz_utf8_word_find_boundaries(   //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed);
 
 /**
- *  @brief Find the previous word boundary in UTF-8 text (dispatch function).
+ *  @brief Segment UTF-8 text into UAX-29 words from the end backward (dispatch function).
+ *
+ *  Like @c sz_utf8_word_find_boundaries but emits words starting from the end of the text: `word_starts[0]` is
+ *  the last word, `word_starts[1]` the one before it, and so on. On a full buffer @p bytes_consumed is the end
+ *  offset of the earliest emitted word (a TR29 boundary); resume by calling again with @c length == *bytes_consumed.
  *
  *  @param text UTF-8 encoded text.
- *  @param length Byte length of text.
- *  @param boundary_width Optional output: bytes spanning the boundary.
- *  @return Pointer to boundary position, or text at start.
+ *  @param length Byte length of @p text.
+ *  @param word_starts Output array of word byte offsets (at least @p words_capacity entries).
+ *  @param word_lengths Output array of word byte lengths (at least @p words_capacity entries).
+ *  @param words_capacity Capacity of the output arrays, in entries.
+ *  @param bytes_consumed Optional output: byte offset down to which the input was segmented (0 when done).
+ *  @return Number of words written (at most @p words_capacity).
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+SZ_DYNAMIC sz_size_t sz_utf8_word_rfind_boundaries(  //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
+    sz_size_t words_capacity, sz_size_t *bytes_consumed);
 
 /**
  *  @brief Check if a position in UTF-8 text is a word boundary per Unicode TR29.
@@ -301,10 +323,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
     sz_size_t *runes_unpacked);
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                        sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                        sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                         sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                         sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_count */
@@ -315,10 +341,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 /** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                         sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                         sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                          sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
@@ -334,10 +364,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                         sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                         sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                          sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
@@ -353,10 +387,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t lengt
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon( //
     sz_cptr_t text, sz_size_t length,          //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_neon(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_neon(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                       sz_size_t *bytes_consumed);
 #endif
 
 /**
@@ -374,38 +412,58 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_s
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
 /** @copydoc sz_utf8_find_whitespace */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                       sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_V128
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_v128(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_v128(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                       sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_RVV
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                     sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_LASX
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                       sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_POWERVSX
-/** @copydoc sz_utf8_word_find_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_find_boundary_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
-/** @copydoc sz_utf8_word_rfind_boundary */
-SZ_PUBLIC sz_cptr_t sz_utf8_word_rfind_boundary_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width);
+/** @copydoc sz_utf8_word_find_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                          sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_word_rfind_boundaries */
+SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -543,47 +601,58 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, s
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_find_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
+SZ_DYNAMIC sz_size_t sz_utf8_word_find_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_word_find_boundary_icelake(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_icelake(text, length, word_starts, word_lengths, words_capacity,
+                                                bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_word_find_boundary_haswell(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_haswell(text, length, word_starts, word_lengths, words_capacity,
+                                                bytes_consumed);
 #elif SZ_USE_SVE2
-    return sz_utf8_word_find_boundary_sve2(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_word_find_boundary_neon(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_V128
-    return sz_utf8_word_find_boundary_v128(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_RVV
-    return sz_utf8_word_find_boundary_rvv(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_LASX
-    return sz_utf8_word_find_boundary_lasx(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_word_find_boundary_powervsx(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_powervsx(text, length, word_starts, word_lengths, words_capacity,
+                                                 bytes_consumed);
 #else
-    return sz_utf8_word_find_boundary_serial(text, length, boundary_width);
+    return sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_word_rfind_boundary(sz_cptr_t text, sz_size_t length, sz_size_t *boundary_width) {
+SZ_DYNAMIC sz_size_t sz_utf8_word_rfind_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                   sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                   sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_word_rfind_boundary_icelake(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_icelake(text, length, word_starts, word_lengths, words_capacity,
+                                                 bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_word_rfind_boundary_haswell(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_haswell(text, length, word_starts, word_lengths, words_capacity,
+                                                 bytes_consumed);
 #elif SZ_USE_SVE2
-    return sz_utf8_word_rfind_boundary_sve2(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_word_rfind_boundary_neon(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_V128
-    return sz_utf8_word_rfind_boundary_v128(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_RVV
-    return sz_utf8_word_rfind_boundary_rvv(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_LASX
-    return sz_utf8_word_rfind_boundary_lasx(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_word_rfind_boundary_powervsx(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_powervsx(text, length, word_starts, word_lengths, words_capacity,
+                                                  bytes_consumed);
 #else
-    return sz_utf8_word_rfind_boundary_serial(text, length, boundary_width);
+    return sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
+                                                bytes_consumed);
 #endif
 }
 
