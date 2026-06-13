@@ -549,6 +549,7 @@ For testing we use PyTest, which may not be installed on your system.
 uv pip install pytest pytest-repeat numpy pyarrow                                       # for repeated fuzzy tests
 uv run --no-project python -m pytest scripts/test_stringzilla.py                        # to run with default settings
 uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -p no:warnings   # to pass custom settings
+uv run --no-project python -m pytest scripts/test_doctests.py                           # to run the docstring examples
 uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```
 

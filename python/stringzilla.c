@@ -1094,19 +1094,23 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
 static PyMethodDef File_methods[] = { //
     {NULL, NULL, 0, NULL}};
 
-static char const doc_File[] =                                                            //
-    "File(path, mode='r')\n"                                                              //
-    "\n"                                                                                  //
-    "Memory-mapped file class that exposes the memory range for low-level access.\n"      //
-    "Provides efficient read-only access to file contents without loading into memory.\n" //
-    "\n"                                                                                  //
-    "Args:\n"                                                                             //
-    "  path (str): Path to the file to memory-map.\n"                                     //
-    "  mode (str): File access mode (default: 'r' for read-only).\n"                      //
-    "\n"                                                                                  //
-    "Example:\n"                                                                          //
-    "  >>> f = sz.File('data.txt')\n"                                                     //
-    "  >>> content = str(f)  # Access file contents as string";
+static char const doc_File[] =                                                               //
+    "File(path, mode='r')\n"                                                                 //
+    "\n"                                                                                     //
+    "Memory-mapped file class that exposes the memory range for low-level access.\n"         //
+    "Provides efficient read-only access to file contents without loading into memory.\n"    //
+    "\n"                                                                                     //
+    "Args:\n"                                                                                //
+    "  path (str): Path to the file to memory-map.\n"                                        //
+    "  mode (str): File access mode (default: 'r' for read-only).\n"                         //
+    "\n"                                                                                     //
+    "Example:\n"                                                                             //
+    "  >>> import os, tempfile, pathlib\n"                                                   //
+    "  >>> path = os.path.join(tempfile.mkdtemp(), 'log.txt')\n"                             //
+    "  >>> _ = pathlib.Path(path).write_text('error: disk full\\nok\\nerror: timeout\\n')\n" //
+    "  >>> # Memory-map and scan in place - no copy into RAM, SIMD-accelerated:\n"           //
+    "  >>> sz.Str(sz.File(path)).count('error')\n"                                           //
+    "  2";
 
 static PyTypeObject FileType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
@@ -1646,7 +1650,7 @@ static char const doc_like_bytesum[] =                                          
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
     "\n"                                                                                              //
     "Example:\n"                                                                                      //
-    "  >>> sz.Str('abc').bytesum()\n"                                                                 //
+    "  >>> sz.bytesum('abc')\n"                                                                       //
     "  294";
 
 static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -1850,7 +1854,7 @@ static char const doc_like_equal[] =                                            
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
     "\n"                                                                                              //
     "Example:\n"                                                                                      //
-    "  >>> sz.Str('abc').equal('abc')\n"                                                              //
+    "  >>> sz.equal('abc', 'abc')\n"                                                                  //
     "  True";
 
 static PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -3450,7 +3454,7 @@ static char const doc_translate[] =                                             
     "  TypeError: If the table is not a string or dictionary.\n"                                  //
     "\n"                                                                                          //
     "Example:\n"                                                                                  //
-    "  >>> sz.Str('abc').translate({ord('a'): ord('A')}) == 'Abc'\n"                              //
+    "  >>> sz.Str('abc').translate({'a': 'A'}) == b'Abc'\n"                                       //
     "  True";
 
 static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -4579,7 +4583,7 @@ static char const doc_rsplit_byteset[] =                                        
     "\n"                                                                                    //
     "Example:\n"                                                                            //
     "  >>> list(map(str, sz.Str('a,b;c').rsplit_byteset(',;')))\n"                          //
-    "  ['c', 'b', 'a']";
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple) {
@@ -4587,21 +4591,22 @@ static PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, 
                                          sz_true_k, sz_false_k);
 }
 
-static char const doc_split_iter[] =                                                       //
-    "Create an iterator for splitting a string by a separator.\n"                          //
-    "\n"                                                                                   //
-    "Args:\n"                                                                              //
-    "  text (Str or str or bytes): The string object.\n"                                   //
-    "  separator (str): The separator to split by (cannot be empty).\n"                    //
-    "  keepseparator (bool, optional): Include separator in results (default is False).\n" //
-    "Returns:\n"                                                                           //
-    "  iterator: An iterator yielding split substrings.\n"                                 //
-    "Raises:\n"                                                                            //
-    "  ValueError: If the separator is an empty string.\n"                                 //
-    "\n"                                                                                   //
-    "Example:\n"                                                                           //
-    "  >>> list(map(str, sz.Str('a,b,c').split_iter(',')))\n"                              //
-    "  ['a', 'b', 'c']";
+static char const doc_split_iter[] =                                                               //
+    "Create an iterator for splitting a string by a separator.\n"                                  //
+    "\n"                                                                                           //
+    "Args:\n"                                                                                      //
+    "  text (Str or str or bytes): The string object.\n"                                           //
+    "  separator (str): The separator to split by (cannot be empty).\n"                            //
+    "  keepseparator (bool, optional): Include separator in results (default is False).\n"         //
+    "Returns:\n"                                                                                   //
+    "  iterator: An iterator yielding split substrings.\n"                                         //
+    "Raises:\n"                                                                                    //
+    "  ValueError: If the separator is an empty string.\n"                                         //
+    "\n"                                                                                           //
+    "Example:\n"                                                                                   //
+    "  >>> # Stream parts lazily instead of materializing a list (that is what split() is for):\n" //
+    "  >>> sum(1 for _ in sz.Str('a,b,c').split_iter(','))\n"                                      //
+    "  3";
 
 static PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple) {
@@ -4622,8 +4627,9 @@ static char const doc_rsplit_iter[] =                                           
     "  ValueError: If the separator is an empty string.\n"                                 //
     "\n"                                                                                   //
     "Example:\n"                                                                           //
-    "  >>> len(list(sz.Str('a,b,c').rsplit_iter(',')))\n"                                  //
-    "  3";
+    "  >>> # Iterates from the end; the first yielded part is the last field:\n"           //
+    "  >>> str(next(iter(sz.Str('a/b/c').rsplit_iter('/'))))\n"                            //
+    "  'c'";
 
 static PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple) {
@@ -4642,8 +4648,9 @@ static char const doc_split_byteset_iter[] =                                    
     "  iterator: An iterator yielding split substrings.\n"                                  //
     "\n"                                                                                    //
     "Example:\n"                                                                            //
-    "  >>> list(map(str, sz.Str('a,b;c').split_byteset_iter(',;')))\n"                      //
-    "  ['a', 'b', 'c']";
+    "  >>> # Splits on ANY byte in the set, streamed lazily:\n"                             //
+    "  >>> str(next(iter(sz.Str('a,b;c').split_byteset_iter(',;'))))\n"                     //
+    "  'a'";
 
 static PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                              PyObject *args_names_tuple) {
@@ -4662,8 +4669,9 @@ static char const doc_rsplit_byteset_iter[] =                                   
     "  iterator: An iterator yielding split substrings in reverse.\n"                                //
     "\n"                                                                                             //
     "Example:\n"                                                                                     //
-    "  >>> len(list(sz.Str('a,b;c').rsplit_byteset_iter(',;')))\n"                                   //
-    "  3";
+    "  >>> # Reverse byteset split; first yielded part is the last field:\n"                         //
+    "  >>> str(next(iter(sz.Str('a,b;c').rsplit_byteset_iter(',;'))))\n"                             //
+    "  'c'";
 
 static PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple) {
@@ -4736,8 +4744,8 @@ static char const doc_utf8_splitlines_iter[] =                                  
     "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"           //
     "\n"                                                                                 //
     "Example:\n"                                                                         //
-    "  >>> list(map(str, sz.Str('a\\nb').utf8_splitlines_iter()))\n"                     //
-    "  ['a', 'b']";
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_splitlines_iter())\n"                     //
+    "  2";
 
 static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                                PyObject *args_names_tuple) {
@@ -4837,7 +4845,7 @@ static char const doc_utf8_split_iter[] =                                       
     "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                //
     "\n"                                                                                 //
     "Example:\n"                                                                         //
-    "  >>> len(list(sz.Str('foo bar baz').utf8_split_iter()))\n"                         //
+    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_iter())\n"                    //
     "  3";
 
 static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -4915,7 +4923,8 @@ static char const doc_utf8_word_iter[] =                                        
     "    Iterator yielding Str objects for each word.\n\n"                           //
     "\n"                                                                             //
     "Example:\n"                                                                     //
-    "  >>> 'world' in [str(w) for w in sz.Str('Hi, world').utf8_word_iter()]\n"      //
+    "  >>> # Stream TR29 word tokens lazily:\n"                                      //
+    "  >>> 'world' in (str(w) for w in sz.utf8_word_iter('Hi, world'))\n"            //
     "  True";
 
 static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -4994,9 +5003,9 @@ static char const doc_utf8_case_insensitive_find_iter[] =                       
     "\n"                                                                                     //
     "Examples:\n"                                                                            //
     "    >>> list(sz.utf8_case_insensitive_find_iter('Hello HELLO hello', 'hello'))\n"       //
-    "    [Str('Hello'), Str('HELLO'), Str('hello')]\n"                                       //
+    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                              //
     "    >>> list(sz.utf8_case_insensitive_find_iter('Straße STRASSE', 'strasse'))\n"        //
-    "    [Str('Straße'), Str('STRASSE')]";
+    "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
 static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObject *const *args,
                                                           Py_ssize_t positional_args_count, PyObject *kwnames) {
@@ -5593,26 +5602,28 @@ static PyMethodDef Str_methods[] = {
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
-static char const doc_Str[] =                                                           //
-    "Str(source)\n"                                                                     //
-    "\n"                                                                                //
-    "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\n"    //
-    "Provides high-performance byte-string operations using modern CPU instructions.\n" //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "  source (str, bytes, bytearray, or buffer): Source data to wrap.\n"               //
-    "\n"                                                                                //
-    "Methods:\n"                                                                        //
-    "  - find(), rfind(): Fast substring search with SIMD acceleration\n"               //
-    "  - count(): Count occurrences with optional overlap support\n"                    //
-    "  - split(), rsplit(): String splitting with various separators\n"                 //
-    "  - contains(): Fast membership testing\n"                                         //
-    "  - translate(): Byte-level translations with lookup tables\n"                     //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "  >>> s = sz.Str('hello world')\n"                                                 //
-    "  >>> s.find('world')  # Returns 6\n"                                              //
-    "  >>> s.count('l')     # Returns 3";
+static char const doc_Str[] =                                                                //
+    "Str(source)\n"                                                                          //
+    "\n"                                                                                     //
+    "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\n"         //
+    "Provides high-performance byte-string operations using modern CPU instructions.\n"      //
+    "\n"                                                                                     //
+    "Args:\n"                                                                                //
+    "  source (str, bytes, bytearray, or buffer): Source data to wrap.\n"                    //
+    "\n"                                                                                     //
+    "Methods:\n"                                                                             //
+    "  - find(), rfind(): Fast substring search with SIMD acceleration\n"                    //
+    "  - count(): Count occurrences with optional overlap support\n"                         //
+    "  - split(), rsplit(): String splitting with various separators\n"                      //
+    "  - contains(): Fast membership testing\n"                                              //
+    "  - translate(): Byte-level translations with lookup tables\n"                          //
+    "\n"                                                                                     //
+    "Example:\n"                                                                             //
+    "  >>> text = sz.Str('the quick brown fox')\n"                                           //
+    "  >>> text.find('brown')        # SIMD-accelerated substring search\n"                  //
+    "  10\n"                                                                                 //
+    "  >>> str(text[10:15])          # slicing returns a zero-copy view, not a new buffer\n" //
+    "  'brown'";
 
 static PyTypeObject StrType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
@@ -5699,27 +5710,30 @@ static PyObject *SplitIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_SplitIterator[] =                                              //
-    "SplitIterator(string, separator, ...)\n"                                        //
-    "\n"                                                                             //
-    "Text-splitting iterator for efficient string processing.\n"                     //
-    "Provides lazy evaluation of string splits without materializing all results.\n" //
-    "\n"                                                                             //
-    "Created by:\n"                                                                  //
-    "  - Str.split_iter()\n"                                                         //
-    "  - Str.rsplit_iter()\n"                                                        //
-    "  - Str.split_byteset_iter()\n"                                                 //
-    "  - Str.rsplit_byteset_iter()\n"                                                //
-    "\n"                                                                             //
-    "Features:\n"                                                                    //
-    "  - Memory-efficient: yields results one at a time\n"                           //
-    "  - Forward and reverse iteration support\n"                                    //
-    "  - Character set and string separator support\n"                               //
-    "\n"                                                                             //
-    "Example:\n"                                                                     //
-    "  >>> s = sz.Str('a,b,c,d')\n"                                                  //
-    "  >>> for part in s.split_iter(','):\n"                                         //
-    "  ...     print(part)";
+static char const doc_SplitIterator[] =                                                   //
+    "SplitIterator(string, separator, ...)\n"                                             //
+    "\n"                                                                                  //
+    "Text-splitting iterator for efficient string processing.\n"                          //
+    "Provides lazy evaluation of string splits without materializing all results.\n"      //
+    "\n"                                                                                  //
+    "Created by:\n"                                                                       //
+    "  - Str.split_iter()\n"                                                              //
+    "  - Str.rsplit_iter()\n"                                                             //
+    "  - Str.split_byteset_iter()\n"                                                      //
+    "  - Str.rsplit_byteset_iter()\n"                                                     //
+    "\n"                                                                                  //
+    "Features:\n"                                                                         //
+    "  - Memory-efficient: yields results one at a time\n"                                //
+    "  - Forward and reverse iteration support\n"                                         //
+    "  - Character set and string separator support\n"                                    //
+    "\n"                                                                                  //
+    "Example:\n"                                                                          //
+    "  >>> # split_iter streams parts lazily - prefer it over split() on large inputs:\n" //
+    "  >>> for field in sz.Str('2024-01-15').split_iter('-'):\n"                          //
+    "  ...     print(field)\n"                                                            //
+    "  2024\n"                                                                            //
+    "  01\n"                                                                              //
+    "  15";
 
 static PyTypeObject SplitIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.SplitIterator",
@@ -5813,30 +5827,30 @@ static PyObject *Utf8SplitLinesIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8SplitLinesIterator[] =                                   //
-    "Utf8SplitLinesIterator(string, ...)\n"                                        //
-    "\n"                                                                           //
-    "UTF-8 aware line-splitting iterator using Unicode newline characters.\n"      //
-    "Provides lazy evaluation of line splits without materializing all results.\n" //
-    "\n"                                                                           //
-    "Created by:\n"                                                                //
-    "  - Str.utf8_splitlines_iter()\n"                                             //
-    "  - sz.utf8_splitlines_iter()\n"                                              //
-    "\n"                                                                           //
-    "Recognized newlines (7 characters + CRLF):\n"                                 //
-    "  - U+000A LINE FEED (\\\\n)\n"                                               //
-    "  - U+000B VERTICAL TAB (\\\\v)\n"                                            //
-    "  - U+000C FORM FEED (\\\\f)\n"                                               //
-    "  - U+000D CARRIAGE RETURN (\\\\r)\n"                                         //
-    "  - U+0085 NEXT LINE\n"                                                       //
-    "  - U+2028 LINE SEPARATOR\n"                                                  //
-    "  - U+2029 PARAGRAPH SEPARATOR\n"                                             //
-    "  - CRLF (\\\\r\\\\n) as single newline\n"                                    //
-    "\n"                                                                           //
-    "Example:\n"                                                                   //
-    "  >>> s = sz.Str('line1\\\\nline2\\\\nline3')\n"                              //
-    "  >>> for line in s.utf8_splitlines_iter():\n"                                //
-    "  ...     print(line)";
+static char const doc_Utf8SplitLinesIterator[] =                                            //
+    "Utf8SplitLinesIterator(string, ...)\n"                                                 //
+    "\n"                                                                                    //
+    "UTF-8 aware line-splitting iterator using Unicode newline characters.\n"               //
+    "Provides lazy evaluation of line splits without materializing all results.\n"          //
+    "\n"                                                                                    //
+    "Created by:\n"                                                                         //
+    "  - Str.utf8_splitlines_iter()\n"                                                      //
+    "  - sz.utf8_splitlines_iter()\n"                                                       //
+    "\n"                                                                                    //
+    "Recognized newlines (7 characters + CRLF):\n"                                          //
+    "  - U+000A LINE FEED (\\\\n)\n"                                                        //
+    "  - U+000B VERTICAL TAB (\\\\v)\n"                                                     //
+    "  - U+000C FORM FEED (\\\\f)\n"                                                        //
+    "  - U+000D CARRIAGE RETURN (\\\\r)\n"                                                  //
+    "  - U+0085 NEXT LINE\n"                                                                //
+    "  - U+2028 LINE SEPARATOR\n"                                                           //
+    "  - U+2029 PARAGRAPH SEPARATOR\n"                                                      //
+    "  - CRLF (\\\\r\\\\n) as single newline\n"                                             //
+    "\n"                                                                                    //
+    "Example:\n"                                                                            //
+    "  >>> # Stream lines lazily (Unicode-aware: 7 newline types + CRLF), no list built:\n" //
+    "  >>> sum(1 for _ in sz.Str('first\\nsecond\\nthird').utf8_splitlines_iter())\n"       //
+    "  3";
 
 static PyTypeObject Utf8SplitLinesIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitLinesIterator",
@@ -5918,26 +5932,26 @@ static PyObject *Utf8SplitWhitespaceIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8SplitWhitespaceIterator[] =                                   //
-    "Utf8SplitWhitespaceIterator(string, ...)\n"                                        //
-    "\n"                                                                                //
-    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\n" //
-    "Provides lazy evaluation similar to Python's str.split() with no separator.\n"     //
-    "\n"                                                                                //
-    "Created by:\n"                                                                     //
-    "  - Str.utf8_split_iter()\n"                                                       //
-    "  - sz.utf8_split_iter()\n"                                                        //
-    "\n"                                                                                //
-    "Recognized whitespace (25 Unicode White_Space characters):\n"                      //
-    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                           //
-    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                          //
-    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\n"                                 //
-    "  - CJK: IDEOGRAPHIC SPACE\n"                                                      //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "  >>> s = sz.Str('hello   world\\\\tfoo')\n"                                       //
-    "  >>> list(s.utf8_split_iter())\n"                                                 //
-    "  ['hello', 'world', 'foo']";
+static char const doc_Utf8SplitWhitespaceIterator[] =                                    //
+    "Utf8SplitWhitespaceIterator(string, ...)\n"                                         //
+    "\n"                                                                                 //
+    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\n"  //
+    "Provides lazy evaluation similar to Python's str.split() with no separator.\n"      //
+    "\n"                                                                                 //
+    "Created by:\n"                                                                      //
+    "  - Str.utf8_split_iter()\n"                                                        //
+    "  - sz.utf8_split_iter()\n"                                                         //
+    "\n"                                                                                 //
+    "Recognized whitespace (25 Unicode White_Space characters):\n"                       //
+    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                            //
+    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                           //
+    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\n"                                  //
+    "  - CJK: IDEOGRAPHIC SPACE\n"                                                       //
+    "\n"                                                                                 //
+    "Example:\n"                                                                         //
+    "  >>> # Lazily tokenize on any of 25 Unicode whitespace characters:\n"              //
+    "  >>> max(len(tok) for tok in sz.Str('hello wonderful world').utf8_split_iter())\n" //
+    "  9";
 
 static PyTypeObject Utf8SplitWhitespaceIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitWhitespaceIterator",
@@ -6038,7 +6052,7 @@ static char const doc_Utf8WordBoundaryIterator[] =                        //
     "  - WB15-WB16: Regional Indicator pairs\n\n"                         //
     "\n"                                                                  //
     "Example:\n"                                                          //
-    "  >>> len(list(sz.Str('Hi there').utf8_word_iter())) >= 2\n"         //
+    "  >>> len(list(sz.utf8_word_iter('Hi there'))) >= 2\n"               //
     "  True";
 
 static PyTypeObject Utf8WordBoundaryIteratorType = {
@@ -6117,7 +6131,7 @@ static char const doc_Utf8CaseInsensitiveFindIterator[] =                       
     "expansions (e.g., German 'ß' matches 'SS').\n"                             //
     "\n"                                                                        //
     "Example:\n"                                                                //
-    "  >>> len(list(sz.Str('aAaA').utf8_case_insensitive_find_iter('a')))\n"    //
+    "  >>> len(list(sz.utf8_case_insensitive_find_iter('aAaA', 'a')))\n"        //
     "  4";
 
 static PyTypeObject Utf8CaseInsensitiveFindIteratorType = {
@@ -6241,7 +6255,7 @@ static char const doc_Hasher[] =                                                
     "  seed (int, optional): 64-bit seed mixed into the initial state. Defaults to 0.\n"          //
     "Example:\n"                                                                                  //
     "  >>> h = sz.Hasher()\n"                                                                     //
-    "  >>> h.update(b'hello').update(b' world')\n"                                                //
+    "  >>> _ = h.update(b'hello').update(b' world')\n"                                            //
     "  >>> h.digest() == sz.hash(b'hello world')\n"                                               //
     "  True";
 
@@ -8092,47 +8106,48 @@ static PyMethodDef Strs_methods[] = {
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
-static char const doc_Strs[] =                                                                 //
-    "Strs(sequence, view=False)\n"                                                             //
-    "\n"                                                                                       //
-    "Space-efficient container for large collections of strings and their slices.\n"           //
-    "Optimized for memory efficiency and bulk operations on string collections.\n"             //
-    "Compatible with StringTape format and Apache Arrow string arrays.\n"                      //
-    "\n"                                                                                       //
-    "Args:\n"                                                                                  //
-    "  sequence (list | tuple | generator | pyarrow.Array): Collection of strings to store.\n" //
-    "  view (bool): If True, create a view into the original data instead of copying it.\n"    //
-    "\n"                                                                                       //
-    "Storage Layouts:\n"                                                                       //
-    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\n"        //
-    "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\n"              //
-    "  - FRAGMENTED: Non-contiguous strings with individual pointers\n"                        //
-    "\n"                                                                                       //
-    "Features:\n"                                                                              //
-    "  - Memory-efficient storage with shared backing buffers\n"                               //
-    "  - Zero-copy slicing and indexing operations\n"                                          //
-    "  - StringTape format compatibility for interoperability\n"                               //
-    "  - Bulk operations: sort(), shuffle(), sample()\n"                                       //
-    "  - Arrow integration: from_arrow() for zero-copy imports\n"                              //
-    "  - GPU kernel compatibility with automatic memory management\n"                          //
-    "  - Fast comparison operations with native containers\n"                                  //
-    "\n"                                                                                       //
-    "Methods:\n"                                                                               //
-    "  - sort(): In-place sorting with custom comparison\n"                                    //
-    "  - argsort(): Get indices for sorted order\n"                                            //
-    "  - shuffle(): Randomize element order\n"                                                 //
-    "  - sample(): Get random subset of elements\n"                                            //
-    "\n"                                                                                       //
-    "Slicing Behavior:\n"                                                                      //
-    "  Slicing creates lightweight views that reference the original data.\n"                  //
-    "  Views are automatically converted to owned layouts when needed for\n"                   //
-    "  GPU operations, maintaining StringTape format compatibility.\n"                         //
-    "\n"                                                                                       //
-    "Example:\n"                                                                               //
-    "  >>> strs = sz.Strs(['apple', 'banana', 'cherry'])\n"                                    //
-    "  >>> subset = strs[1:3]  # Zero-copy slice view\n"                                       //
-    "  >>> strs.sort()\n"                                                                      //
-    "  >>> list(strs)  # ['apple', 'banana', 'cherry']";
+static char const doc_Strs[] =                                                                   //
+    "Strs(sequence, view=False)\n"                                                               //
+    "\n"                                                                                         //
+    "Space-efficient container for large collections of strings and their slices.\n"             //
+    "Optimized for memory efficiency and bulk operations on string collections.\n"               //
+    "Compatible with StringTape format and Apache Arrow string arrays.\n"                        //
+    "\n"                                                                                         //
+    "Args:\n"                                                                                    //
+    "  sequence (list | tuple | generator | pyarrow.Array): Collection of strings to store.\n"   //
+    "  view (bool): If True, create a view into the original data instead of copying it.\n"      //
+    "\n"                                                                                         //
+    "Storage Layouts:\n"                                                                         //
+    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\n"          //
+    "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\n"                //
+    "  - FRAGMENTED: Non-contiguous strings with individual pointers\n"                          //
+    "\n"                                                                                         //
+    "Features:\n"                                                                                //
+    "  - Memory-efficient storage with shared backing buffers\n"                                 //
+    "  - Zero-copy slicing and indexing operations\n"                                            //
+    "  - StringTape format compatibility for interoperability\n"                                 //
+    "  - Bulk operations: sort(), shuffle(), sample()\n"                                         //
+    "  - Arrow integration: from_arrow() for zero-copy imports\n"                                //
+    "  - GPU kernel compatibility with automatic memory management\n"                            //
+    "  - Fast comparison operations with native containers\n"                                    //
+    "\n"                                                                                         //
+    "Methods:\n"                                                                                 //
+    "  - sort(): In-place sorting with custom comparison\n"                                      //
+    "  - argsort(): Get indices for sorted order\n"                                              //
+    "  - shuffle(): Randomize element order\n"                                                   //
+    "  - sample(): Get random subset of elements\n"                                              //
+    "\n"                                                                                         //
+    "Slicing Behavior:\n"                                                                        //
+    "  Slicing creates lightweight views that reference the original data.\n"                    //
+    "  Views are automatically converted to owned layouts when needed for\n"                     //
+    "  GPU operations, maintaining StringTape format compatibility.\n"                           //
+    "\n"                                                                                         //
+    "Example:\n"                                                                                 //
+    "  >>> names = sz.Strs(['banana', 'apple', 'cherry', 'date'])\n"                             //
+    "  >>> [str(x) for x in names.sorted()]      # stable sort over views, no element copies\n"  //
+    "  ['apple', 'banana', 'cherry', 'date']\n"                                                  //
+    "  >>> [str(x) for x in names.sorted(top=2)]  # partial top-k is cheaper than a full sort\n" //
+    "  ['apple', 'banana']";
 
 static PyTypeObject StrsType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Strs",
@@ -8202,7 +8217,7 @@ static char const doc_reset_capabilities[] =                                    
     "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.\n" //
     "\n"                                                                             //
     "Example:\n"                                                                     //
-    "  >>> sz.reset_capabilities('serial')  # restrict dispatch to the scalar backend";
+    "  >>> sz.reset_capabilities(['serial'])  # restrict dispatch to the scalar backend";
 
 static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     PyObject *caps_obj = NULL;
