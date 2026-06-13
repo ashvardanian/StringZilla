@@ -23,119 +23,6 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
-#if SZ_DEBUG
-
-#if !SZ_AVOID_LIBC
-SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_hex_(FILE *stream, sz_cptr_t bytes, sz_size_t length) {
-    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
-        fprintf(stream, "%02X ", (unsigned char)bytes[byte_index]);
-}
-
-SZ_INTERNAL void sz_utf8_case_debug_dump_bytes_c_array_(FILE *stream, char const *name, sz_cptr_t bytes,
-                                                        sz_size_t length) {
-    fprintf(stream, "static unsigned char %s[%zu] = {", name, (size_t)length);
-    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) {
-        if ((byte_index % 16) == 0) fprintf(stream, "\n    ");
-        fprintf(stream, "0x%02X,", (unsigned char)bytes[byte_index]);
-    }
-    fprintf(stream, "\n};\n");
-}
-#endif
-
-/**
- *  @brief Verifies the SIMD result against the serial implementation.
- *         If they differ, dumps diagnostic info and crashes to help debugging.
- */
-SZ_INTERNAL void sz_utf8_case_insensitive_find_assert_and_crash_( //
-    sz_cptr_t result, sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-    sz_utf8_case_insensitive_needle_metadata_t const *needle_metadata, char const *file, int line) {
-
-    sz_size_t serial_matched_length;
-    sz_cptr_t expected = sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, 0,
-                                                              &serial_matched_length);
-
-    if (result == expected) return;
-
-#if !SZ_AVOID_LIBC
-    // Assumes <stdio.h> and <stdlib.h> are included by the user/test suite
-    fprintf(stderr, "--------------------------------------------------------\n");
-    fprintf(stderr, "SIMD Mismatch at %s:%d\n", file, line);
-    fprintf(stderr, "Haystack Length: %zu, Needle Length: %zu\n", haystack_length, needle_length);
-    fprintf(stderr, "Expected: %p, Found: %p\n", (void *)expected, (void *)result);
-
-    if (expected) fprintf(stderr, "Expected Offset: %zu\n", (size_t)(expected - haystack));
-    else fprintf(stderr, "Expected: NULL (Not Found)\n");
-
-    if (result) fprintf(stderr, "Found Offset: %zu\n", (size_t)(result - haystack));
-    else fprintf(stderr, "Found: NULL (Not Found)\n");
-
-    // Print SIMD metadata for debugging
-    if (needle_metadata) {
-        fprintf(stderr, "SIMD Metadata: kernel_id=%u, offset_in_unfolded=%zu, length_in_unfolded=%zu\n",
-                needle_metadata->kernel_id, needle_metadata->offset_in_unfolded, needle_metadata->length_in_unfolded);
-        fprintf(stderr, "SIMD Metadata: folded_slice_length=%u, probe_second=%u, probe_third=%u\n",
-                needle_metadata->folded_slice_length, needle_metadata->probe_second, needle_metadata->probe_third);
-        fprintf(stderr, "SIMD Metadata folded_slice: ");
-        for (sz_size_t byte_index = 0; byte_index < needle_metadata->folded_slice_length && byte_index < 16;
-             ++byte_index)
-            fprintf(stderr, "%02X ", needle_metadata->folded_slice[byte_index]);
-        fprintf(stderr, "\n");
-    }
-
-    // Print full needle and haystack to enable copy-pastable deterministic repros.
-    fprintf(stderr, "Needle (Hex): ");
-    sz_utf8_case_debug_dump_bytes_hex_(stderr, needle, needle_length);
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Haystack (Hex): ");
-    sz_utf8_case_debug_dump_bytes_hex_(stderr, haystack, haystack_length);
-    fprintf(stderr, "\n");
-
-    fprintf(stderr, "Needle (C Array):\n");
-    sz_utf8_case_debug_dump_bytes_c_array_(stderr, "needle_bytes", needle, needle_length);
-    fprintf(stderr, "Haystack (C Array):\n");
-    sz_utf8_case_debug_dump_bytes_c_array_(stderr, "haystack_bytes", haystack, haystack_length);
-
-    // Print Haystack Context (if match found or missed)
-    size_t context_padding = 16;
-    sz_cptr_t context_focus = expected ? expected : (result ? result : haystack);
-    sz_cptr_t context_start = (context_focus - haystack > (sz_ssize_t)context_padding) ? context_focus - context_padding
-                                                                                       : haystack;
-    sz_cptr_t context_end = (context_focus + needle_length + context_padding < haystack + haystack_length)
-                                ? context_focus + needle_length + context_padding
-                                : haystack + haystack_length;
-
-    fprintf(stderr, "Haystack Context (Hex): ");
-    for (sz_cptr_t byte_cursor = context_start; byte_cursor < context_end; ++byte_cursor) {
-        if (byte_cursor == expected) fprintf(stderr, "[EXP] ");
-        if (byte_cursor == result) fprintf(stderr, "[ACT] ");
-        fprintf(stderr, "%02X ", (unsigned char)*byte_cursor);
-    }
-    fprintf(stderr, "\n");
-    fprintf(stderr, "--------------------------------------------------------\n");
-    abort();
-#else
-    sz_unused_(needle_metadata);
-    sz_unused_(haystack);
-    sz_unused_(haystack_length);
-    sz_unused_(needle);
-    sz_unused_(needle_length);
-    sz_unused_(result);
-    sz_unused_(file);
-    sz_unused_(line);
-    // Force crash without LibC
-    *((volatile int *)0) = 0;
-#endif
-}
-
-#define sz_utf8_case_insensitive_find_assert_(result, haystack, haystack_length, needle, needle_length,       \
-                                              needle_metadata)                                                \
-    sz_utf8_case_insensitive_find_assert_and_crash_(result, haystack, haystack_length, needle, needle_length, \
-                                                    needle_metadata, __FILE__, __LINE__)
-
-#else
-#define sz_utf8_case_insensitive_find_assert_(result, haystack, haystack_length, needle, needle_length, needle_metadata)
-#endif
-
 #pragma region ASCII Case-Insensitive Find
 
 /**
@@ -222,11 +109,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_3probe_( //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
-            if (match) {
-                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                      needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
         haystack_ptr += step;
     }
@@ -267,16 +150,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_3probe_( //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
-            if (match) {
-                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                      needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
     }
 
-    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
-                                          needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -365,11 +242,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
-            if (match) {
-                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                      needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
         haystack_ptr += step;
     }
@@ -424,16 +297,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_case_insensitive_find_icelake_ascii_4probe_( //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
                 matched_length);
-            if (match) {
-                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                      needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
     }
 
-    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
-                                          needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -508,7 +375,8 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_icelake_scripted_( //
     sz_rune_t needle_first_safe_folded_rune = 0;
     if (alarm) {
         sz_rune_length_t rune_byte_length;
-        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune, &rune_byte_length);
+        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune,
+                                &rune_byte_length);
     }
 
     sz_u512_vec_t haystack_vec;
@@ -579,11 +447,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_icelake_scripted_( //
                 needle_metadata->offset_in_unfolded,                                     // head
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
                 matched_length);
-            if (match) {
-                sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                      needle_metadata);
-                return match;
-            }
+            if (match) { return match; }
         }
         haystack_ptr += step;
     }
@@ -592,22 +456,16 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_case_insensitive_find_icelake_scripted_( //
     // folded needle window, so a match can still start in the sub-window tail the loop never
     // probes. The tail is shorter than the 16-byte window, so the serial scan costs nothing.
     if (alarm && haystack_ptr < haystack_end) {
-        sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_(  //
-            haystack, haystack_length,                                    //
-            needle, needle_length,                                        //
-            haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr),       // the unprobed tail
-            needle_first_safe_folded_rune,                                // pivot point
-            needle_metadata->offset_in_unfolded,                          // its location in the needle
+        sz_cptr_t match = sz_utf8_case_insensitive_find_in_danger_zone_( //
+            haystack, haystack_length,                                   //
+            needle, needle_length,                                       //
+            haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr),      // the unprobed tail
+            needle_first_safe_folded_rune,                               // pivot point
+            needle_metadata->offset_in_unfolded,                         // its location in the needle
             matched_length);
-        if (match) {
-            sz_utf8_case_insensitive_find_assert_(match, haystack, haystack_length, needle, needle_length,
-                                                  needle_metadata);
-            return match;
-        }
+        if (match) { return match; }
     }
 
-    sz_utf8_case_insensitive_find_assert_(SZ_NULL_CHAR, haystack, haystack_length, needle, needle_length,
-                                          needle_metadata);
     return SZ_NULL_CHAR;
 }
 
@@ -815,8 +673,8 @@ SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_western_europe_alarm
             _mm512_sub_epi8(text_zmm, _mm512_set1_epi8((char)0x96)), _mm512_set1_epi8(0x09));
         __mmask64 ba_pair_mask = pair_mask & is_ba_mask & (is_expanding_third_mask >> 1);
         // E2 84 is dangerous only for thirds AA/AB (Kelvin/Angstrom)
-        __mmask64 is_aa_or_ab_mask = _mm512_cmpeq_epi8_mask(
-            _mm512_and_si512(text_zmm, _mm512_set1_epi8((char)0xFE)), _mm512_set1_epi8((char)0xAA));
+        __mmask64 is_aa_or_ab_mask = _mm512_cmpeq_epi8_mask(_mm512_and_si512(text_zmm, _mm512_set1_epi8((char)0xFE)),
+                                                            _mm512_set1_epi8((char)0xAA));
         __mmask64 kelvin_pair_mask = pair_mask & is_84_mask & (is_aa_or_ab_mask >> 1);
         danger_mask = (pair_mask & ~(is_ba_mask | is_84_mask)) | ba_pair_mask | kelvin_pair_mask;
     }
@@ -950,9 +808,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_central_europe_fold_na
     is_c5_b9_bd &= _mm512_mask_cmple_epu8_mask(is_after_c5_mask, result_zmm, x_bd_zmm);
 
     // Fold: C4 80-B7 even, C4 B9-BD odd, C5 81-87 odd, C5 8A-B6 even, C5 B9-BD odd
-    __mmask64 fold_latext = (is_c4_80_b7 & is_even_mask) | (is_c4_b9_bd & is_odd_mask) |
-                            (is_c5_81_87 & is_odd_mask) | (is_c5_8a_b6 & is_even_mask) |
-                            (is_c5_b9_bd & is_odd_mask);
+    __mmask64 fold_latext = (is_c4_80_b7 & is_even_mask) | (is_c4_b9_bd & is_odd_mask) | (is_c5_81_87 & is_odd_mask) |
+                            (is_c5_8a_b6 & is_even_mask) | (is_c5_b9_bd & is_odd_mask);
 
     result_zmm = _mm512_mask_add_epi8(result_zmm, fold_latext, result_zmm, x_01_zmm);
 
@@ -1350,8 +1207,8 @@ SZ_INTERNAL __m512i sz_utf8_case_insensitive_find_icelake_cyrillic_fold_efficien
 SZ_INTERNAL __mmask64 sz_utf8_case_insensitive_find_icelake_cyrillic_alarm_naively_zmm_(__m512i text_zmm) {
     __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xE1));
     __mmask64 is_b2_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xB2));
-    __mmask64 is_folding_third_mask = _mm512_cmplt_epu8_mask(
-        _mm512_sub_epi8(text_zmm, _mm512_set1_epi8((char)0x80)), _mm512_set1_epi8(0x09));
+    __mmask64 is_folding_third_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_zmm, _mm512_set1_epi8((char)0x80)),
+                                                             _mm512_set1_epi8(0x09));
     return (is_e1_mask << 1) & is_b2_mask & (is_folding_third_mask >> 1);
 }
 

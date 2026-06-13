@@ -1375,7 +1375,8 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
         }
         for (size_t progress_utf8 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++second_length_utf32) {
-            sz_rune_parse_unchecked(second.data() + progress_utf8, second_data_utf32 + second_length_utf32, &rune_length);
+            sz_rune_parse_unchecked(second.data() + progress_utf8, second_data_utf32 + second_length_utf32,
+                                    &rune_length);
             if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
         }
 

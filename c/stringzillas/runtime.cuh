@@ -20,8 +20,8 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
     // Preserve the static capabilities
     static sz_capability_t static_caps = sz_caps_none_k;
     if (static_caps == sz_caps_none_k) {
-        sz_capability_t cpu_caps =
-            (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
+        sz_capability_t cpu_caps = (sz_capability_t)(sz_capabilities_comptime_implementation_() &
+                                                     sz_capabilities_runtime_implementation_());
 #if SZ_USE_CUDA
         sz_capability_t gpu_caps = sz_caps_none_k;
         sz::gpu_specs_t first_gpu_specs;
@@ -79,8 +79,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_
     if (!executor->try_spawn(cpu_cores))
         return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to spawn thread pool");
 
-    auto *scope =
-        new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
+    auto *scope = new (std::nothrow)
+        device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
     if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate CPU device scope");
 
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
@@ -99,8 +99,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, sz
     auto executor_status = executor.try_scheduling(static_cast<int>(gpu_device));
     if (executor_status.status != sz::status_t::success_k) return propagate_error(executor_status, error_message);
 
-    auto *scope =
-        new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
+    auto *scope = new (std::nothrow)
+        device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
     if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate GPU device scope");
     *scope_punned = reinterpret_cast<szs_device_scope_t>(scope);
     return propagate_error(sz::status_t::success_k, error_message);

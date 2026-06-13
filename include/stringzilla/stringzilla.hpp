@@ -838,9 +838,7 @@ class range_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -958,9 +956,7 @@ class range_rsplits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1113,9 +1109,7 @@ class range_utf8_chars {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_), end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -1239,9 +1233,7 @@ class range_utf8_line_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_), end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Copies the lines into a container. */
@@ -1344,9 +1336,7 @@ class range_utf8_whitespace_splits {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_), end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Copies the words into a container. */
@@ -2567,14 +2557,10 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
 
     using split_type = range_splits<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = range_rsplits<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -2589,14 +2575,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -4848,8 +4830,7 @@ std::vector<sorted_idx_t> argsort(container_type_ const &container, std::size_t 
     using string_like_type = typename container_type_::value_type;
     static_assert( //
         std::is_convertible<string_like_type, string_view>::value, "The type must be convertible to string_view.");
-    return argsort(
-        container, [](string_like_type const &s) -> string_view { return s; }, top_count, reverse);
+    return argsort(container, [](string_like_type const &s) -> string_view { return s; }, top_count, reverse);
 }
 
 /**

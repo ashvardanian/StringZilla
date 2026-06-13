@@ -155,10 +155,9 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
         bench_unary(env, "map<sz_order_neon>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
             .log(base_map);
-        auto callable_umap =
-            callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned, hash_from_sz<sz_hash_neon>,
-                                                                equal_to_from_sz<sz_equal_neon>>>(env);
-        bench_unary(env, "unordered_map<sz_hash_neon, sz_equal_neon>::find", callable_no_op_t(), callable_umap,
+        auto callable_umap = callable_for_associative_lookups<std::unordered_map<
+            std::string_view, unsigned, hash_from_sz<sz_hash_neonaes>, equal_to_from_sz<sz_equal_neon>>>(env);
+        bench_unary(env, "unordered_map<sz_hash_neonaes, sz_equal_neon>::find", callable_no_op_t(), callable_umap,
                     callable_umap.preprocessor())
             .log(base_umap);
     }

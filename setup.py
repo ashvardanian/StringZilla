@@ -414,9 +414,9 @@ STRINGZILLAS_CUDA_PROVIDER_STEMS = [
 STRINGZILLAS_CPU_SOURCES = [
     f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
 ]
-STRINGZILLAS_CUDA_SOURCES = [
-    f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS
-] + [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS]
+STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS] + [
+    f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS
+]
 
 ext_modules = []
 entry_points = {}

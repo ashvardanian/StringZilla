@@ -168,8 +168,7 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         for (; group_index < complete_groups; ++group_index)
             roll_groups<1>(text_chunk, group_index, last_states, rolling_minimums, min_counts, passed_progress);
         if (has_incomplete_tail_group_k)
-            roll_tail_group(text_chunk, groups_count_k - 1, last_states, rolling_minimums, min_counts,
-                            passed_progress);
+            roll_tail_group(text_chunk, groups_count_k - 1, last_states, rolling_minimums, min_counts, passed_progress);
 
         // Finally, export the minimum hashes into the smaller representations
         if (min_hashes)
@@ -282,8 +281,8 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
             float64x2_t new_term_vec = vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset]) + 1.0);
-            float64x2_t old_term_vec =
-                vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset - window_width_]) + 1.0);
+            float64x2_t old_term_vec = vdupq_n_f64(
+                static_cast<rolling_state_t>(text_chunk[new_char_offset - window_width_]) + 1.0);
 
             for (unsigned pass = 0; pass < passes_; ++pass) {
                 // A single Barrett reduction handles both the discarded head and the incoming tail symbol.
@@ -349,8 +348,8 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
 
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
             float64x2_t new_term_vec = vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset]) + 1.0);
-            float64x2_t old_term_vec =
-                vdupq_n_f64(static_cast<rolling_state_t>(text_chunk[new_char_offset - window_width_]) + 1.0);
+            float64x2_t old_term_vec = vdupq_n_f64(
+                static_cast<rolling_state_t>(text_chunk[new_char_offset - window_width_]) + 1.0);
 
             last_states_vec.f64x2 = vfmaq_f64(new_term_vec, last_states_vec.f64x2, multipliers_vec);
             last_states_vec.f64x2 = vfmaq_f64(last_states_vec.f64x2, discarding_multipliers_vec, old_term_vec);
@@ -360,8 +359,8 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
             uint64x2_t discard_mask = vcgeq_f64(last_states_vec.f64x2, rolling_minimums_vec.f64x2);
             rolling_minimums_vec.f64x2 = vbslq_f64(found_mask, last_states_vec.f64x2, rolling_minimums_vec.f64x2);
             rolling_counts_vec.u64x2 = vandq_u64(rolling_counts_vec.u64x2, discard_mask);
-            rolling_counts_vec.u64x2 =
-                vbslq_u64(found_mask, vaddq_u64(rolling_counts_vec.u64x2, ones_vec), rolling_counts_vec.u64x2);
+            rolling_counts_vec.u64x2 = vbslq_u64(found_mask, vaddq_u64(rolling_counts_vec.u64x2, ones_vec),
+                                                 rolling_counts_vec.u64x2);
         }
 
         for (size_t word_index = 0; word_index < (dimensions_k - first_dim); ++word_index) {

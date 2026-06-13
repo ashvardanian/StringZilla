@@ -130,7 +130,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *  @endcode
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_icelake, sz_hash_neon, sz_hash_sve2,
+ *  @sa sz_hash_serial, sz_hash_westmere, sz_hash_skylake, sz_hash_icelake, sz_hash_neonaes, sz_hash_sve2aes,
  *      sz_hash_v128, sz_hash_rvv, sz_hash_lasx, sz_hash_powervsx
  *
  *  @note The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
@@ -168,7 +168,7 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *
  *  @note Biggest speedups are for `length <= 64`; above that only the input load is shared.
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake, sz_hash_multiseed_neon
+ *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake, sz_hash_multiseed_neonaes
  */
 SZ_DYNAMIC void sz_hash_multiseed(                //
     sz_cptr_t text, sz_size_t length,             //
@@ -206,7 +206,7 @@ SZ_DYNAMIC void sz_hash_multiseed(                //
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_fill_random_serial, sz_fill_random_westmere, sz_fill_random_skylake, sz_fill_random_icelake,
- *      sz_fill_random_neon, sz_fill_random_sve2, sz_fill_random_v128, sz_fill_random_rvv, sz_fill_random_lasx,
+ *      sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_v128, sz_fill_random_rvv, sz_fill_random_lasx,
  *      sz_fill_random_powervsx
  */
 SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
@@ -450,36 +450,36 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
 #if SZ_USE_NEONAES
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_PUBLIC void sz_hash_multiseed_neon(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                      sz_u64_t *hashes);
+SZ_PUBLIC void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                         sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_PUBLIC void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_neon(sz_hash_state_t *state, sz_u64_t seed);
+SZ_PUBLIC void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_neon(sz_hash_state_t const *state);
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state);
 
 #endif
 
 #if SZ_USE_NEONSHA
 
 /** @copydoc sz_sha256_state_init */
-SZ_PUBLIC void sz_sha256_state_init_neon(sz_sha256_state_t *state);
+SZ_PUBLIC void sz_sha256_state_init_neonsha(sz_sha256_state_t *state);
 
 /** @copydoc sz_sha256_state_update */
-SZ_PUBLIC void sz_sha256_state_update_neon(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+SZ_PUBLIC void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_neon(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+SZ_PUBLIC void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
@@ -500,19 +500,19 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
 #if SZ_USE_SVE2AES
 
 /** @copydoc sz_hash */
-SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_PUBLIC sz_u64_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_PUBLIC void sz_fill_random_sve2aes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed);
+SZ_PUBLIC void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC void sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2(sz_hash_state_t const *state);
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
 
 #endif
 
@@ -604,9 +604,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 #elif SZ_USE_WESTMERE
     return sz_hash_westmere(text, length, seed);
 #elif SZ_USE_SVE2AES
-    return sz_hash_sve2(text, length, seed);
+    return sz_hash_sve2aes(text, length, seed);
 #elif SZ_USE_NEONAES
-    return sz_hash_neon(text, length, seed);
+    return sz_hash_neonaes(text, length, seed);
 #else
     return sz_hash_serial(text, length, seed);
 #endif
@@ -620,7 +620,7 @@ SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             
 #elif SZ_USE_WESTMERE
     sz_hash_multiseed_westmere(text, length, seeds, seeds_count, hashes);
 #elif SZ_USE_NEONAES
-    sz_hash_multiseed_neon(text, length, seeds, seeds_count, hashes);
+    sz_hash_multiseed_neonaes(text, length, seeds, seeds_count, hashes);
 #else
     sz_hash_multiseed_serial(text, length, seeds, seeds_count, hashes);
 #endif
@@ -644,9 +644,9 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
 #elif SZ_USE_WESTMERE
     sz_fill_random_westmere(text, length, nonce);
 #elif SZ_USE_SVE2AES
-    sz_fill_random_sve2(text, length, nonce);
+    sz_fill_random_sve2aes(text, length, nonce);
 #elif SZ_USE_NEONAES
-    sz_fill_random_neon(text, length, nonce);
+    sz_fill_random_neonaes(text, length, nonce);
 #else
     sz_fill_random_serial(text, length, nonce);
 #endif
@@ -670,9 +670,9 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
 #elif SZ_USE_WESTMERE
     sz_hash_state_init_westmere(state, seed);
 #elif SZ_USE_SVE2AES
-    sz_hash_state_init_sve2(state, seed);
+    sz_hash_state_init_sve2aes(state, seed);
 #elif SZ_USE_NEONAES
-    sz_hash_state_init_neon(state, seed);
+    sz_hash_state_init_neonaes(state, seed);
 #else
     sz_hash_state_init_serial(state, seed);
 #endif
@@ -696,9 +696,9 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
 #elif SZ_USE_WESTMERE
     sz_hash_state_update_westmere(state, text, length);
 #elif SZ_USE_SVE2AES
-    sz_hash_state_update_sve2(state, text, length);
+    sz_hash_state_update_sve2aes(state, text, length);
 #elif SZ_USE_NEONAES
-    sz_hash_state_update_neon(state, text, length);
+    sz_hash_state_update_neonaes(state, text, length);
 #else
     sz_hash_state_update_serial(state, text, length);
 #endif
@@ -722,9 +722,9 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 #elif SZ_USE_WESTMERE
     return sz_hash_state_digest_westmere(state);
 #elif SZ_USE_SVE2AES
-    return sz_hash_state_digest_sve2(state);
+    return sz_hash_state_digest_sve2aes(state);
 #elif SZ_USE_NEONAES
-    return sz_hash_state_digest_neon(state);
+    return sz_hash_state_digest_neonaes(state);
 #else
     return sz_hash_state_digest_serial(state);
 #endif
@@ -740,7 +740,7 @@ SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
 #elif SZ_USE_POWERVSX
     sz_sha256_state_init_powervsx(state);
 #elif SZ_USE_NEONSHA
-    sz_sha256_state_init_neon(state);
+    sz_sha256_state_init_neonsha(state);
 #elif SZ_USE_ICELAKE
     sz_sha256_state_init_icelake(state);
 #elif SZ_USE_GOLDMONT
@@ -760,7 +760,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
 #elif SZ_USE_POWERVSX
     sz_sha256_state_update_powervsx(state, data, length);
 #elif SZ_USE_NEONSHA
-    sz_sha256_state_update_neon(state, data, length);
+    sz_sha256_state_update_neonsha(state, data, length);
 #elif SZ_USE_ICELAKE
     sz_sha256_state_update_icelake(state, data, length);
 #elif SZ_USE_GOLDMONT
@@ -780,7 +780,7 @@ SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t d
 #elif SZ_USE_POWERVSX
     sz_sha256_state_digest_powervsx(state, digest);
 #elif SZ_USE_NEONSHA
-    sz_sha256_state_digest_neon(state, digest);
+    sz_sha256_state_digest_neonsha(state, digest);
 #elif SZ_USE_ICELAKE
     sz_sha256_state_digest_icelake(state, digest);
 #elif SZ_USE_GOLDMONT

@@ -614,8 +614,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
  *      resume folding for the next pgram window.
  */
 typedef struct sz_argsort_folded_cursor_t_ {
-    sz_size_t raw_offset;   //!< Raw byte offset, at a source code-point boundary, to resume folding from.
-    sz_size_t folded_skip;  //!< Folded bytes of the code-point at `raw_offset` already emitted in prior windows.
+    sz_size_t raw_offset;  //!< Raw byte offset, at a source code-point boundary, to resume folding from.
+    sz_size_t folded_skip; //!< Folded bytes of the code-point at `raw_offset` already emitted in prior windows.
 } sz_argsort_folded_cursor_t_;
 
 /**
@@ -756,7 +756,8 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;
-    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index) order[sequence_index] = sequence_index;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
     if (count < 2) return sz_success_k;
 
     sz_memory_allocator_t global_alloc;

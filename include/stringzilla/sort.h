@@ -189,7 +189,6 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
 
 #pragma endregion
 
-
 #include "stringzilla/sort/serial.h"
 #include "stringzilla/sort/skylake.h"
 #include "stringzilla/sort/sve.h"
