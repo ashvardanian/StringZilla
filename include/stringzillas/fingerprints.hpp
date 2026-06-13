@@ -12,6 +12,7 @@
  *  @sa fingerprints/serial.hpp
  *  @sa fingerprints/haswell.hpp
  *  @sa fingerprints/skylake.hpp
+ *  @sa fingerprints/neon.hpp
  */
 #ifndef STRINGZILLAS_FINGERPRINTS_HPP_
 #define STRINGZILLAS_FINGERPRINTS_HPP_
@@ -19,5 +20,6 @@
 #include "stringzillas/fingerprints/serial.hpp"  // ISA-agnostic rolling-hash template core + serial aliases
 #include "stringzillas/fingerprints/haswell.hpp" // AVX2 (Haswell) specializations
 #include "stringzillas/fingerprints/skylake.hpp" // AVX-512 (Skylake) specializations
+#include "stringzillas/fingerprints/neon.hpp"    // Arm NEON (AArch64) specializations
 
 #endif // STRINGZILLAS_FINGERPRINTS_HPP_

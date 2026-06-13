@@ -26,9 +26,6 @@ namespace stringzillas {
 #pragma GCC target("avx2", "fma", "bmi", "bmi2")
 #endif
 
-/** @brief Serial fallback combined with the Haswell AVX2 backend, mirroring `sz_caps_sil_k` for Ice Lake. */
-static constexpr sz_capability_t sz_caps_sh_k = (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k);
-
 /**
  *  @brief Helper object optimizing the most expensive part of class-based variable-substitution-cost
  *         alignment methods for Haswell CPUs. It's designed for horizontal layout "walkers", where we
