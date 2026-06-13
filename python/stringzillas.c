@@ -253,7 +253,13 @@ static char const doc_DeviceScope[] =                                           
     "  cpu_cores (int, optional): Number of CPU cores to use, or zero for all cores.\n" //
     "  gpu_device (int, optional): GPU device ID to target.\n"                          //
     "\n"                                                                                //
-    "Note: Cannot specify both cpu_cores and gpu_device.";
+    "Note: Cannot specify both cpu_cores and gpu_device.\n"                             //
+    "\n"                                                                                //
+    "Examples:\n"                                                                       //
+    "  ```python\n"                                                                     //
+    "  import stringzillas as szs\n"                                                    //
+    "  scope = szs.DeviceScope(cpu_cores=4)  # restrict engines to 4 CPU cores\n"       //
+    "  ```";
 
 static PyTypeObject DeviceScopeType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.DeviceScope",
@@ -610,10 +616,15 @@ static char const doc_LevenshteinDistances[] =                                  
     "  distances = engine(strings_a, strings_b, device=gpu_scope)\n"                                       //
     "  ```";
 
+static char const doc_capabilities[] =                                          //
+    "Hardware backends and SIMD capabilities this engine selects at runtime.\n" //
+    "\n"                                                                        //
+    "Returns:\n"                                                                //
+    "  str: The detected CPU/GPU features driving kernel dispatch.";
+
 static PyGetSetDef LevenshteinDistances_getsetters[] = {
-    {"__capabilities__", (getter)LevenshteinDistances_get_capabilities, NULL,
-     "Hardware capabilities used by this engine", NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)LevenshteinDistances_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                             /* Sentinel */
 };
 
 static PyTypeObject LevenshteinDistancesType = {
@@ -890,8 +901,7 @@ static char const doc_LevenshteinDistancesUTF8[] =                              
     "  ```";
 
 static PyGetSetDef LevenshteinDistancesUTF8_getsetters[] = {
-    {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL,
-     "Hardware capabilities used by this engine", NULL},
+    {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL, doc_capabilities, NULL}, //
     {NULL} /* Sentinel */
 };
 
@@ -1210,9 +1220,8 @@ static char const doc_NeedlemanWunsch[] =                                       
     "  ```";
 
 static PyGetSetDef NeedlemanWunsch_getsetters[] = {
-    {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, "Hardware capabilities used by this engine",
-     NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                        /* Sentinel */
 };
 
 static PyTypeObject NeedlemanWunschType = {
@@ -1493,9 +1502,8 @@ static PyObject *SmithWaterman_get_capabilities(SmithWaterman *self, void *closu
 }
 
 static PyGetSetDef SmithWaterman_getsetters[] = {
-    {"__capabilities__", (getter)SmithWaterman_get_capabilities, NULL, "Hardware capabilities used by this engine",
-     NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)SmithWaterman_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                      /* Sentinel */
 };
 
 static char const doc_SmithWaterman[] =                                                                            //
@@ -1841,8 +1849,8 @@ static char const doc_Fingerprints[] =                                          
     "  ```";
 
 static PyGetSetDef Fingerprints_getsetters[] = {
-    {"capabilities", (getter)Fingerprints_get_capabilities, NULL, "computational capabilities", NULL},
-    {NULL} /* Sentinel */
+    {"capabilities", (getter)Fingerprints_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                 /* Sentinel */
 };
 
 static PyTypeObject FingerprintsType = {
@@ -1865,7 +1873,13 @@ static char const doc_reset_capabilities[] =                                    
     "Sets the active SIMD/backend capabilities for this module and updates the\n"       //
     "default hardware capabilities. The provided names are intersected with hardware\n" //
     "capabilities; if the result is empty, falls back to 'serial'.\n\n"                 //
-    "Side effects: updates stringzillas.__capabilities__ and __capabilities_str__.";
+    "Side effects: updates stringzillas.__capabilities__ and __capabilities_str__.\n"   //
+    "\n"                                                                                //
+    "Examples:\n"                                                                       //
+    "  ```python\n"                                                                     //
+    "  import stringzillas as szs\n"                                                    //
+    "  szs.reset_capabilities('serial')  # restrict dispatch to the scalar backend\n"   //
+    "  ```";
 
 static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     PyObject *caps_obj = NULL;
@@ -1902,11 +1916,17 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static char const doc_to_device[] =                                               //
-    "to_device(strs: sz.Strs) -> sz.Strs\n\n"                                     //
-    "Converts a Strs object to use unified/device-accessible memory allocator.\n" //
-    "This function forces the allocator swap that would normally happen during\n" //
-    "GPU kernel execution. Useful for testing slice handling after re-allocation.";
+static char const doc_to_device[] =                                                  //
+    "to_device(strs: sz.Strs) -> sz.Strs\n\n"                                        //
+    "Converts a Strs object to use unified/device-accessible memory allocator.\n"    //
+    "This function forces the allocator swap that would normally happen during\n"    //
+    "GPU kernel execution. Useful for testing slice handling after re-allocation.\n" //
+    "\n"                                                                             //
+    "Examples:\n"                                                                    //
+    "  ```python\n"                                                                  //
+    "  import stringzilla as sz, stringzillas as szs\n"                              //
+    "  device_strs = szs.to_device(sz.Strs(['alpha', 'beta']))\n"                    //
+    "  ```";
 
 static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
     if (!try_swap_to_unified_allocator(strs_obj)) return NULL;

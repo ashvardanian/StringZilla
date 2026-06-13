@@ -1094,18 +1094,18 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
 static PyMethodDef File_methods[] = { //
     {NULL, NULL, 0, NULL}};
 
-static char const doc_File[] =                                                             //
-    "File(path, mode='r')\\n"                                                              //
-    "\\n"                                                                                  //
-    "Memory-mapped file class that exposes the memory range for low-level access.\\n"      //
-    "Provides efficient read-only access to file contents without loading into memory.\\n" //
-    "\\n"                                                                                  //
-    "Args:\\n"                                                                             //
-    "  path (str): Path to the file to memory-map.\\n"                                     //
-    "  mode (str): File access mode (default: 'r' for read-only).\\n"                      //
-    "\\n"                                                                                  //
-    "Example:\\n"                                                                          //
-    "  >>> f = sz.File('data.txt')\\n"                                                     //
+static char const doc_File[] =                                                            //
+    "File(path, mode='r')\n"                                                              //
+    "\n"                                                                                  //
+    "Memory-mapped file class that exposes the memory range for low-level access.\n"      //
+    "Provides efficient read-only access to file contents without loading into memory.\n" //
+    "\n"                                                                                  //
+    "Args:\n"                                                                             //
+    "  path (str): Path to the file to memory-map.\n"                                     //
+    "  mode (str): File access mode (default: 'r' for read-only).\n"                      //
+    "\n"                                                                                  //
+    "Example:\n"                                                                          //
+    "  >>> f = sz.File('data.txt')\n"                                                     //
     "  >>> content = str(f)  # Access file contents as string";
 
 static PyTypeObject FileType = {
@@ -1442,7 +1442,13 @@ static char const doc_fill_random[] =                                           
     "  start (int, optional): Starting index (default 0).\n"                                                   //
     "  end (int, optional): Ending index (default len(buffer)).\n"                                             //
     "Returns:\n"                                                                                               //
-    "  None: Mutates the buffer slice in place.";
+    "  None: Mutates the buffer slice in place.\n"                                                             //
+    "\n"                                                                                                       //
+    "Example:\n"                                                                                               //
+    "  >>> buf = bytearray(16)\n"                                                                              //
+    "  >>> sz.fill_random(buf)\n"                                                                              //
+    "  >>> len(buf)\n"                                                                                         //
+    "  16";
 
 static PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple) {
@@ -1541,10 +1547,14 @@ static PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_
     Py_RETURN_NONE;
 }
 
-static char const doc_random[] =                                                    //
-    "random(length, *, nonce=0, alphabet=None) -> bytes\n\n"                        //
-    "Generate a new random byte string, optionally remapped to a given alphabet.\n" //
-    "If alphabet is provided, each byte is mapped to alphabet[b % len(alphabet)].";
+static char const doc_random[] =                                                     //
+    "random(length, *, nonce=0, alphabet=None) -> bytes\n\n"                         //
+    "Generate a new random byte string, optionally remapped to a given alphabet.\n"  //
+    "If alphabet is provided, each byte is mapped to alphabet[b % len(alphabet)].\n" //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> len(sz.random(16))\n"                                                     //
+    "  16";
 
 static PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple) {
@@ -1624,16 +1634,20 @@ static PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t
     return bytes_obj;
 }
 
-static char const doc_like_bytesum[] =                                                       //
-    "Compute the checksum of individual byte values in a string.\n"                          //
-    "\n"                                                                                     //
-    "This function can be called as a method on a Str object or as a standalone function.\n" //
-    "Args:\n"                                                                                //
-    "  text (Str or str or bytes): The string to hash.\n"                                    //
-    "Returns:\n"                                                                             //
-    "  int: The checksum of individual byte values in a string.\n"                           //
-    "Raises:\n"                                                                              //
-    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+static char const doc_like_bytesum[] =                                                                //
+    "Compute the checksum of individual byte values in a string.\n"                                   //
+    "\n"                                                                                              //
+    "This function can be called as a method on a Str object or as a standalone function.\n"          //
+    "Args:\n"                                                                                         //
+    "  text (Str or str or bytes): The string to hash.\n"                                             //
+    "Returns:\n"                                                                                      //
+    "  int: The checksum of individual byte values in a string.\n"                                    //
+    "Raises:\n"                                                                                       //
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
+    "\n"                                                                                              //
+    "Example:\n"                                                                                      //
+    "  >>> sz.Str('abc').bytesum()\n"                                                                 //
+    "  294";
 
 static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                   PyObject *args_names_tuple) {
@@ -1657,16 +1671,20 @@ static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssiz
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
-static char const doc_like_sha256[] =                                                        //
-    "Compute SHA256 cryptographic hash of the input data.\n"                                 //
-    "\n"                                                                                     //
-    "This function can be called as a method on a Str object or as a standalone function.\n" //
-    "Args:\n"                                                                                //
-    "  text (Str or str or bytes): The input data to hash.\n"                                //
-    "Returns:\n"                                                                             //
-    "  bytes: The 32-byte (256-bit) SHA256 digest.\n"                                        //
-    "Raises:\n"                                                                              //
-    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+static char const doc_like_sha256[] =                                                                 //
+    "Compute SHA256 cryptographic hash of the input data.\n"                                          //
+    "\n"                                                                                              //
+    "This function can be called as a method on a Str object or as a standalone function.\n"          //
+    "Args:\n"                                                                                         //
+    "  text (Str or str or bytes): The input data to hash.\n"                                         //
+    "Returns:\n"                                                                                      //
+    "  bytes: The 32-byte (256-bit) SHA256 digest.\n"                                                 //
+    "Raises:\n"                                                                                       //
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
+    "\n"                                                                                              //
+    "Example:\n"                                                                                      //
+    "  >>> sz.Str('abc').sha256().hex()[:8]\n"                                                        //
+    "  'ba7816bf'";
 
 static PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -1700,16 +1718,20 @@ static PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize
     return PyBytes_FromStringAndSize((char const *)digest, 32);
 }
 
-static char const doc_hmac_sha256[] =                          //
-    "Compute HMAC-SHA256 authentication code.\n"               //
-    "\n"                                                       //
-    "Args:\n"                                                  //
-    "  key (str or bytes): The secret key.\n"                  //
-    "  message (str or bytes): The message to authenticate.\n" //
-    "Returns:\n"                                               //
-    "  bytes: The 32-byte (256-bit) HMAC-SHA256 digest.\n"     //
-    "Raises:\n"                                                //
-    "  TypeError: If arguments are not string-like or incorrect number provided.";
+static char const doc_hmac_sha256[] =                                               //
+    "Compute HMAC-SHA256 authentication code.\n"                                    //
+    "\n"                                                                            //
+    "Args:\n"                                                                       //
+    "  key (str or bytes): The secret key.\n"                                       //
+    "  message (str or bytes): The message to authenticate.\n"                      //
+    "Returns:\n"                                                                    //
+    "  bytes: The 32-byte (256-bit) HMAC-SHA256 digest.\n"                          //
+    "Raises:\n"                                                                     //
+    "  TypeError: If arguments are not string-like or incorrect number provided.\n" //
+    "\n"                                                                            //
+    "Example:\n"                                                                    //
+    "  >>> len(sz.hmac_sha256(b'key', b'message'))\n"                               //
+    "  32";
 
 static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
@@ -1815,17 +1837,21 @@ static PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t p
     return PyBytes_FromStringAndSize((char const *)digest, 32);
 }
 
-static char const doc_like_equal[] =                                                         //
-    "Check if two strings are equal.\n"                                                      //
-    "\n"                                                                                     //
-    "This function can be called as a method on a Str object or as a standalone function.\n" //
-    "Args:\n"                                                                                //
-    "  first (Str or str or bytes): The first string object.\n"                              //
-    "  second (Str or str or bytes): The second string object.\n"                            //
-    "Returns:\n"                                                                             //
-    "  bool: True if the strings are equal, False otherwise.\n"                              //
-    "Raises:\n"                                                                              //
-    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+static char const doc_like_equal[] =                                                                  //
+    "Check if two strings are equal.\n"                                                               //
+    "\n"                                                                                              //
+    "This function can be called as a method on a Str object or as a standalone function.\n"          //
+    "Args:\n"                                                                                         //
+    "  first (Str or str or bytes): The first string object.\n"                                       //
+    "  second (Str or str or bytes): The second string object.\n"                                     //
+    "Returns:\n"                                                                                      //
+    "  bool: True if the strings are equal, False otherwise.\n"                                       //
+    "Raises:\n"                                                                                       //
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
+    "\n"                                                                                              //
+    "Example:\n"                                                                                      //
+    "  >>> sz.Str('abc').equal('abc')\n"                                                              //
+    "  True";
 
 static PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -2500,7 +2526,11 @@ static char const doc_decode[] =                                               /
     "Returns:\n"                                                               //
     "  str: The decoded Unicode string.\n"                                     //
     "Raises:\n"                                                                //
-    "  UnicodeDecodeError: If decoding fails.";
+    "  UnicodeDecodeError: If decoding fails.\n"                               //
+    "\n"                                                                       //
+    "Example:\n"                                                               //
+    "  >>> sz.Str('abc').decode() == 'abc'\n"                                  //
+    "  True";
 
 static PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -2552,7 +2582,10 @@ static char const doc_write_to[] =                       //
     "  text (Str or str or bytes): The string object.\n" //
     "  filename (str): The file path to write to.\n"     //
     "Returns:\n"                                         //
-    "  None.";
+    "  None.\n"                                          //
+    "\n"                                                 //
+    "Example:\n"                                         //
+    "  >>> sz.Str('payload').write_to('/tmp/sz_demo.bin')";
 
 static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
@@ -2631,7 +2664,12 @@ static char const doc_offset_within[] =                                         
     "  text (Str or str or bytes): The substring.\n"                                              //
     "  larger (Str): The larger string to search within.\n"                                       //
     "Returns:\n"                                                                                  //
-    "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.";
+    "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.\n"         //
+    "\n"                                                                                          //
+    "Example:\n"                                                                                  //
+    "  >>> big = sz.Str('hello world')\n"                                                         //
+    "  >>> big[6:].offset_within(big)\n"                                                          //
+    "  6";
 
 static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *args_names_tuple) {
@@ -2807,7 +2845,11 @@ static char const doc_contains[] =                                              
     "  start (int, optional): The starting index (default is 0).\n"             //
     "  end (int, optional): The ending index (default is the string length).\n" //
     "Returns:\n"                                                                //
-    "  bool: True if the substring is found, False otherwise.";
+    "  bool: True if the substring is found, False otherwise.\n"                //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').contains('ell')\n"                                   //
+    "  True";
 
 static PyObject *Str_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *args_names_tuple) {
@@ -2830,7 +2872,11 @@ static char const doc_find[] =                                                  
     "  start (int, optional): The starting index (default is 0).\n"             //
     "  end (int, optional): The ending index (default is the string length).\n" //
     "Returns:\n"                                                                //
-    "  int: The index of the first occurrence, or -1 if not found.";
+    "  int: The index of the first occurrence, or -1 if not found.\n"           //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').find('l')\n"                                         //
+    "  2";
 
 static PyObject *Str_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple) {
@@ -2854,7 +2900,11 @@ static char const doc_index[] =                                                 
     "Returns:\n"                                                                 //
     "  int: The index of the first occurrence.\n"                                //
     "Raises:\n"                                                                  //
-    "  ValueError: If the substring is not found.";
+    "  ValueError: If the substring is not found.\n"                             //
+    "\n"                                                                         //
+    "Example:\n"                                                                 //
+    "  >>> sz.Str('hello').index('l')\n"                                         //
+    "  2";
 
 static PyObject *Str_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -2880,7 +2930,11 @@ static char const doc_rfind[] =                                                 
     "  start (int, optional): The starting index (default is 0).\n"             //
     "  end (int, optional): The ending index (default is the string length).\n" //
     "Returns:\n"                                                                //
-    "  int: The index of the last occurrence, or -1 if not found.";
+    "  int: The index of the last occurrence, or -1 if not found.\n"            //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').rfind('l')\n"                                        //
+    "  3";
 
 static PyObject *Str_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -2904,7 +2958,11 @@ static char const doc_rindex[] =                                                
     "Returns:\n"                                                                //
     "  int: The index of the last occurrence.\n"                                //
     "Raises:\n"                                                                 //
-    "  ValueError: If the substring is not found.";
+    "  ValueError: If the substring is not found.\n"                            //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').rindex('l')\n"                                       //
+    "  3";
 
 static PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -2977,28 +3035,36 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
     return result_tuple;
 }
 
-static char const doc_partition[] =                                                 //
-    "Split the string into a 3-tuple around the first occurrence of a separator.\n" //
-    "\n"                                                                            //
-    "Args:\n"                                                                       //
-    "  text (Str or str or bytes): The string object.\n"                            //
-    "  separator (str): The separator to partition by.\n"                           //
-    "Returns:\n"                                                                    //
-    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').";
+static char const doc_partition[] =                                                                        //
+    "Split the string into a 3-tuple around the first occurrence of a separator.\n"                        //
+    "\n"                                                                                                   //
+    "Args:\n"                                                                                              //
+    "  text (Str or str or bytes): The string object.\n"                                                   //
+    "  separator (str): The separator to partition by.\n"                                                  //
+    "Returns:\n"                                                                                           //
+    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').\n" //
+    "\n"                                                                                                   //
+    "Example:\n"                                                                                           //
+    "  >>> tuple(map(str, sz.Str('a=b=c').partition('=')))\n"                                              //
+    "  ('a', '=', 'b=c')";
 
 static PyObject *Str_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple) {
     return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k);
 }
 
-static char const doc_rpartition[] =                                               //
-    "Split the string into a 3-tuple around the last occurrence of a separator.\n" //
-    "\n"                                                                           //
-    "Args:\n"                                                                      //
-    "  text (Str or str or bytes): The string object.\n"                           //
-    "  separator (str): The separator to partition by.\n"                          //
-    "Returns:\n"                                                                   //
-    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).";
+static char const doc_rpartition[] =                                                                       //
+    "Split the string into a 3-tuple around the last occurrence of a separator.\n"                         //
+    "\n"                                                                                                   //
+    "Args:\n"                                                                                              //
+    "  text (Str or str or bytes): The string object.\n"                                                   //
+    "  separator (str): The separator to partition by.\n"                                                  //
+    "Returns:\n"                                                                                           //
+    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).\n" //
+    "\n"                                                                                                   //
+    "Example:\n"                                                                                           //
+    "  >>> tuple(map(str, sz.Str('a=b=c').rpartition('=')))\n"                                             //
+    "  ('a=b', '=', 'c')";
 
 static PyObject *Str_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple) {
@@ -3015,7 +3081,11 @@ static char const doc_count[] =                                                 
     "  end (int, optional): The ending index (default is the string length).\n"            //
     "  allowoverlap (bool, optional): Count overlapping occurrences (default is False).\n" //
     "Returns:\n"                                                                           //
-    "  int: The number of occurrences of the substring.";
+    "  int: The number of occurrences of the substring.\n"                                 //
+    "\n"                                                                                   //
+    "Example:\n"                                                                           //
+    "  >>> sz.Str('banana').count('a')\n"                                                  //
+    "  3";
 
 static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -3148,7 +3218,11 @@ static char const doc_startswith[] =                                            
     "  start (int, optional): The starting index (default is 0).\n"             //
     "  end (int, optional): The ending index (default is the string length).\n" //
     "Returns:\n"                                                                //
-    "  bool: True if the string starts with the prefix, False otherwise.";
+    "  bool: True if the string starts with the prefix, False otherwise.\n"     //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').startswith('he')\n"                                  //
+    "  True";
 
 static PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple) {
@@ -3256,7 +3330,11 @@ static char const doc_endswith[] =                                              
     "  start (int, optional): The starting index (default is 0).\n"             //
     "  end (int, optional): The ending index (default is the string length).\n" //
     "Returns:\n"                                                                //
-    "  bool: True if the string ends with the suffix, False otherwise.";
+    "  bool: True if the string ends with the suffix, False otherwise.\n"       //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> sz.Str('hello').endswith('lo')\n"                                    //
+    "  True";
 
 static PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                    PyObject *args_names_tuple) {
@@ -3369,7 +3447,11 @@ static char const doc_translate[] =                                             
     "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n" //
     "Raises:\n"                                                                                   //
     "  ValueError: If the table is not 256 bytes long.\n"                                         //
-    "  TypeError: If the table is not a string or dictionary.";
+    "  TypeError: If the table is not a string or dictionary.\n"                                  //
+    "\n"                                                                                          //
+    "Example:\n"                                                                                  //
+    "  >>> sz.Str('abc').translate({ord('a'): ord('A')}) == 'Abc'\n"                              //
+    "  True";
 
 static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple) {
@@ -3878,7 +3960,11 @@ static char const doc_find_first_of[] =                                         
     "  start (int, optional): Starting index (default is 0).\n"                      //
     "  end (int, optional): Ending index (default is the string length).\n"          //
     "Returns:\n"                                                                     //
-    "  int: Index of the first matching character, or -1 if none found.";
+    "  int: Index of the first matching character, or -1 if none found.\n"           //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> sz.Str('hello').find_first_of('aeiou')\n"                                 //
+    "  1";
 
 static PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                         PyObject *args_names_tuple) {
@@ -3891,16 +3977,20 @@ static PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, P
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const doc_find_first_not_of[] =                                 //
-    "Find the index of the first character not in another string.\n"        //
-    "\n"                                                                    //
-    "Args:\n"                                                               //
-    "  text (Str or str or bytes): The string object.\n"                    //
-    "  chars (str): A string containing characters to exclude.\n"           //
-    "  start (int, optional): Starting index (default is 0).\n"             //
-    "  end (int, optional): Ending index (default is the string length).\n" //
-    "Returns:\n"                                                            //
-    "  int: Index of the first non-matching character, or -1 if all match.";
+static char const doc_find_first_not_of[] =                                   //
+    "Find the index of the first character not in another string.\n"          //
+    "\n"                                                                      //
+    "Args:\n"                                                                 //
+    "  text (Str or str or bytes): The string object.\n"                      //
+    "  chars (str): A string containing characters to exclude.\n"             //
+    "  start (int, optional): Starting index (default is 0).\n"               //
+    "  end (int, optional): Ending index (default is the string length).\n"   //
+    "Returns:\n"                                                              //
+    "  int: Index of the first non-matching character, or -1 if all match.\n" //
+    "\n"                                                                      //
+    "Example:\n"                                                              //
+    "  >>> sz.Str('hello').find_first_not_of('he')\n"                         //
+    "  2";
 
 static PyObject *Str_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                             PyObject *args_names_tuple) {
@@ -3922,7 +4012,11 @@ static char const doc_find_last_of[] =                                          
     "  start (int, optional): Starting index (default is 0).\n"                     //
     "  end (int, optional): Ending index (default is the string length).\n"         //
     "Returns:\n"                                                                    //
-    "  int: Index of the last matching character, or -1 if none found.";
+    "  int: Index of the last matching character, or -1 if none found.\n"           //
+    "\n"                                                                            //
+    "Example:\n"                                                                    //
+    "  >>> sz.Str('hello').find_last_of('aeiou')\n"                                 //
+    "  4";
 
 static PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                        PyObject *args_names_tuple) {
@@ -3935,16 +4029,20 @@ static PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const doc_find_last_not_of[] =                                  //
-    "Find the index of the last character not in another string.\n"         //
-    "\n"                                                                    //
-    "Args:\n"                                                               //
-    "  text (Str or str or bytes): The string object.\n"                    //
-    "  chars (str): A string containing characters to exclude.\n"           //
-    "  start (int, optional): Starting index (default is 0).\n"             //
-    "  end (int, optional): Ending index (default is the string length).\n" //
-    "Returns:\n"                                                            //
-    "  int: Index of the last non-matching character, or -1 if all match.";
+static char const doc_find_last_not_of[] =                                   //
+    "Find the index of the last character not in another string.\n"          //
+    "\n"                                                                     //
+    "Args:\n"                                                                //
+    "  text (Str or str or bytes): The string object.\n"                     //
+    "  chars (str): A string containing characters to exclude.\n"            //
+    "  start (int, optional): Starting index (default is 0).\n"              //
+    "  end (int, optional): Ending index (default is the string length).\n"  //
+    "Returns:\n"                                                             //
+    "  int: Index of the last non-matching character, or -1 if all match.\n" //
+    "\n"                                                                     //
+    "Example:\n"                                                             //
+    "  >>> sz.Str('hello').find_last_not_of('lo')\n"                         //
+    "  1";
 
 static PyObject *Str_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                            PyObject *args_names_tuple) {
@@ -3966,7 +4064,11 @@ static char const doc_count_byteset[] =                                     //
     "  start (int, optional): Starting index (default is 0).\n"             //
     "  end (int, optional): Ending index (default is the string length).\n" //
     "Returns:\n"                                                            //
-    "  int: The number of occurrences of any character from the set.";
+    "  int: The number of occurrences of any character from the set.\n"     //
+    "\n"                                                                    //
+    "Example:\n"                                                            //
+    "  >>> sz.Str('hello world').count_byteset('lo')\n"                     //
+    "  5";
 
 static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                         PyObject *args_names_tuple) {
@@ -4408,7 +4510,11 @@ static char const doc_split[] =                                                 
     "Returns:\n"                                                                               //
     "  Strs: A list of strings split by the separator.\n"                                      //
     "Raises:\n"                                                                                //
-    "  ValueError: If the separator is an empty string.";
+    "  ValueError: If the separator is an empty string.\n"                                     //
+    "\n"                                                                                       //
+    "Example:\n"                                                                               //
+    "  >>> list(map(str, sz.Str('a,b,c').split(',')))\n"                                       //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -4427,7 +4533,11 @@ static char const doc_rsplit[] =                                                
     "Returns:\n"                                                                               //
     "  Strs: A list of strings split by the separator.\n"                                      //
     "Raises:\n"                                                                                //
-    "  ValueError: If the separator is an empty string.";
+    "  ValueError: If the separator is an empty string.\n"                                     //
+    "\n"                                                                                       //
+    "Example:\n"                                                                               //
+    "  >>> list(map(str, sz.Str('a,b,c').rsplit(',')))\n"                                      //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -4444,7 +4554,11 @@ static char const doc_split_byteset[] =                                         
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"         //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
     "Returns:\n"                                                                            //
-    "  Strs: A list of strings split by the character set.";
+    "  Strs: A list of strings split by the character set.\n"                               //
+    "\n"                                                                                    //
+    "Example:\n"                                                                            //
+    "  >>> list(map(str, sz.Str('a,b;c').split_byteset(',;')))\n"                           //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                         PyObject *args_names_tuple) {
@@ -4461,7 +4575,11 @@ static char const doc_rsplit_byteset[] =                                        
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"         //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
     "Returns:\n"                                                                            //
-    "  Strs: A list of strings split by the character set.";
+    "  Strs: A list of strings split by the character set.\n"                               //
+    "\n"                                                                                    //
+    "Example:\n"                                                                            //
+    "  >>> list(map(str, sz.Str('a,b;c').rsplit_byteset(',;')))\n"                          //
+    "  ['c', 'b', 'a']";
 
 static PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple) {
@@ -4479,7 +4597,11 @@ static char const doc_split_iter[] =                                            
     "Returns:\n"                                                                           //
     "  iterator: An iterator yielding split substrings.\n"                                 //
     "Raises:\n"                                                                            //
-    "  ValueError: If the separator is an empty string.";
+    "  ValueError: If the separator is an empty string.\n"                                 //
+    "\n"                                                                                   //
+    "Example:\n"                                                                           //
+    "  >>> list(map(str, sz.Str('a,b,c').split_iter(',')))\n"                              //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple) {
@@ -4497,7 +4619,11 @@ static char const doc_rsplit_iter[] =                                           
     "Returns:\n"                                                                           //
     "  iterator: An iterator yielding split substrings in reverse.\n"                      //
     "Raises:\n"                                                                            //
-    "  ValueError: If the separator is an empty string.";
+    "  ValueError: If the separator is an empty string.\n"                                 //
+    "\n"                                                                                   //
+    "Example:\n"                                                                           //
+    "  >>> len(list(sz.Str('a,b,c').rsplit_iter(',')))\n"                                  //
+    "  3";
 
 static PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple) {
@@ -4513,7 +4639,11 @@ static char const doc_split_byteset_iter[] =                                    
     "  separators (str): A string containing separator characters.\n"                       //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
     "Returns:\n"                                                                            //
-    "  iterator: An iterator yielding split substrings.";
+    "  iterator: An iterator yielding split substrings.\n"                                  //
+    "\n"                                                                                    //
+    "Example:\n"                                                                            //
+    "  >>> list(map(str, sz.Str('a,b;c').split_byteset_iter(',;')))\n"                      //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                              PyObject *args_names_tuple) {
@@ -4529,7 +4659,11 @@ static char const doc_rsplit_byteset_iter[] =                                   
     "  separators (str): A string containing separator characters.\n"                                //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n"          //
     "Returns:\n"                                                                                     //
-    "  iterator: An iterator yielding split substrings in reverse.";
+    "  iterator: An iterator yielding split substrings in reverse.\n"                                //
+    "\n"                                                                                             //
+    "Example:\n"                                                                                     //
+    "  >>> len(list(sz.Str('a,b;c').rsplit_byteset_iter(',;')))\n"                                   //
+    "  3";
 
 static PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple) {
@@ -4599,7 +4733,11 @@ static char const doc_utf8_splitlines_iter[] =                                  
     "\n"                                                                                 //
     "Recognized newlines:\n"                                                             //
     "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                          //
-    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)";
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"           //
+    "\n"                                                                                 //
+    "Example:\n"                                                                         //
+    "  >>> list(map(str, sz.Str('a\\nb').utf8_splitlines_iter()))\n"                     //
+    "  ['a', 'b']";
 
 static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                                PyObject *args_names_tuple) {
@@ -4696,7 +4834,11 @@ static char const doc_utf8_split_iter[] =                                       
     "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                              //
     "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                             //
     "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                        //
-    "  CJK: IDEOGRAPHIC SPACE (U+3000)";
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                //
+    "\n"                                                                                 //
+    "Example:\n"                                                                         //
+    "  >>> len(list(sz.Str('foo bar baz').utf8_split_iter()))\n"                         //
+    "  3";
 
 static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                           PyObject *args_names_tuple) {
@@ -4770,7 +4912,11 @@ static char const doc_utf8_word_iter[] =                                        
     "    skip_empty: If True, skip empty segments between consecutive boundaries.\n" //
     "\n"                                                                             //
     "Returns:\n"                                                                     //
-    "    Iterator yielding Str objects for each word.\n";
+    "    Iterator yielding Str objects for each word.\n\n"                           //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> 'world' in [str(w) for w in sz.Str('Hi, world').utf8_word_iter()]\n"      //
+    "  True";
 
 static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *kwnames) {
@@ -4943,7 +5089,11 @@ static char const doc_splitlines[] =                                            
     "  keeplinebreaks (bool, optional): Include line breaks in the results (default is False).\n" //
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"               //
     "Returns:\n"                                                                                  //
-    "  Strs: A list of strings split by line breaks.";
+    "  Strs: A list of strings split by line breaks.\n"                                           //
+    "\n"                                                                                          //
+    "Example:\n"                                                                                  //
+    "  >>> list(map(str, sz.Str('a\\nb\\nc').splitlines()))\n"                                    //
+    "  ['a', 'b', 'c']";
 
 static PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                      PyObject *args_names_tuple) {
@@ -5078,11 +5228,27 @@ static PyNumberMethods Str_as_number = {
     .nb_add = Str_concat,
 };
 
+static char const doc_Str_address[] =                                  //
+    "Memory address of the first byte of the string, as an integer.\n" //
+    "\n"                                                               //
+    "Enables zero-copy interop (e.g. with PyArrow or ctypes).\n"       //
+    "\n"                                                               //
+    "Example:\n"                                                       //
+    "  >>> isinstance(sz.Str('abc').address, int)\n"                   //
+    "  True";
+
+static char const doc_Str_nbytes[] =   //
+    "Length of the string in bytes.\n" //
+    "\n"                               //
+    "Example:\n"                       //
+    "  >>> sz.Str('abc').nbytes\n"     //
+    "  3";
+
 static PyGetSetDef Str_getsetters[] = {
     // Compatibility with PyArrow
-    {"address", (getter)Str_get_address, NULL, "Get the memory address of the first byte of the string", NULL},
-    {"nbytes", (getter)Str_get_nbytes, NULL, "Get the length of the string in bytes", NULL},
-    {NULL} // Sentinel
+    {"address", (getter)Str_get_address, NULL, doc_Str_address, NULL}, //
+    {"nbytes", (getter)Str_get_nbytes, NULL, doc_Str_nbytes, NULL},    //
+    {NULL}                                                             // Sentinel
 };
 
 static char const doc_lstrip[] =                                               //
@@ -5092,7 +5258,11 @@ static char const doc_lstrip[] =                                               /
     "  text (Str or str or bytes): The string object.\n"                       //
     "  chars (str, optional): Characters to remove (default is whitespace).\n" //
     "Returns:\n"                                                               //
-    "  Str: A new string with leading characters removed.";
+    "  Str: A new string with leading characters removed.\n"                   //
+    "\n"                                                                       //
+    "Example:\n"                                                               //
+    "  >>> sz.Str('  hi').lstrip() == 'hi'\n"                                  //
+    "  True";
 
 static PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -5176,7 +5346,11 @@ static char const doc_rstrip[] =                                               /
     "  text (Str or str or bytes): The string object.\n"                       //
     "  chars (str, optional): Characters to remove (default is whitespace).\n" //
     "Returns:\n"                                                               //
-    "  Str: A new string with trailing characters removed.";
+    "  Str: A new string with trailing characters removed.\n"                  //
+    "\n"                                                                       //
+    "Example:\n"                                                               //
+    "  >>> sz.Str('hi  ').rstrip() == 'hi'\n"                                  //
+    "  True";
 
 static PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple) {
@@ -5260,7 +5434,11 @@ static char const doc_strip[] =                                                /
     "  text (Str or str or bytes): The string object.\n"                       //
     "  chars (str, optional): Characters to remove (default is whitespace).\n" //
     "Returns:\n"                                                               //
-    "  Str: A new string with leading and trailing characters removed.";
+    "  Str: A new string with leading and trailing characters removed.\n"      //
+    "\n"                                                                       //
+    "Example:\n"                                                               //
+    "  >>> sz.Str('  hi  ').strip() == 'hi'\n"                                 //
+    "  True";
 
 static PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -5415,25 +5593,25 @@ static PyMethodDef Str_methods[] = {
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
-static char const doc_Str[] =                                                            //
-    "Str(source)\\n"                                                                     //
-    "\\n"                                                                                //
-    "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\\n"    //
-    "Provides high-performance byte-string operations using modern CPU instructions.\\n" //
-    "\\n"                                                                                //
-    "Args:\\n"                                                                           //
-    "  source (str, bytes, bytearray, or buffer): Source data to wrap.\\n"               //
-    "\\n"                                                                                //
-    "Methods:\\n"                                                                        //
-    "  - find(), rfind(): Fast substring search with SIMD acceleration\\n"               //
-    "  - count(): Count occurrences with optional overlap support\\n"                    //
-    "  - split(), rsplit(): String splitting with various separators\\n"                 //
-    "  - contains(): Fast membership testing\\n"                                         //
-    "  - translate(): Byte-level translations with lookup tables\\n"                     //
-    "\\n"                                                                                //
-    "Example:\\n"                                                                        //
-    "  >>> s = sz.Str('hello world')\\n"                                                 //
-    "  >>> s.find('world')  # Returns 6\\n"                                              //
+static char const doc_Str[] =                                                           //
+    "Str(source)\n"                                                                     //
+    "\n"                                                                                //
+    "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\n"    //
+    "Provides high-performance byte-string operations using modern CPU instructions.\n" //
+    "\n"                                                                                //
+    "Args:\n"                                                                           //
+    "  source (str, bytes, bytearray, or buffer): Source data to wrap.\n"               //
+    "\n"                                                                                //
+    "Methods:\n"                                                                        //
+    "  - find(), rfind(): Fast substring search with SIMD acceleration\n"               //
+    "  - count(): Count occurrences with optional overlap support\n"                    //
+    "  - split(), rsplit(): String splitting with various separators\n"                 //
+    "  - contains(): Fast membership testing\n"                                         //
+    "  - translate(): Byte-level translations with lookup tables\n"                     //
+    "\n"                                                                                //
+    "Example:\n"                                                                        //
+    "  >>> s = sz.Str('hello world')\n"                                                 //
+    "  >>> s.find('world')  # Returns 6\n"                                              //
     "  >>> s.count('l')     # Returns 3";
 
 static PyTypeObject StrType = {
@@ -5521,26 +5699,26 @@ static PyObject *SplitIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_SplitIterator[] =                                               //
-    "SplitIterator(string, separator, ...)\\n"                                        //
-    "\\n"                                                                             //
-    "Text-splitting iterator for efficient string processing.\\n"                     //
-    "Provides lazy evaluation of string splits without materializing all results.\\n" //
-    "\\n"                                                                             //
-    "Created by:\\n"                                                                  //
-    "  - Str.split_iter()\\n"                                                         //
-    "  - Str.rsplit_iter()\\n"                                                        //
-    "  - Str.split_byteset_iter()\\n"                                                 //
-    "  - Str.rsplit_byteset_iter()\\n"                                                //
-    "\\n"                                                                             //
-    "Features:\\n"                                                                    //
-    "  - Memory-efficient: yields results one at a time\\n"                           //
-    "  - Forward and reverse iteration support\\n"                                    //
-    "  - Character set and string separator support\\n"                               //
-    "\\n"                                                                             //
-    "Example:\\n"                                                                     //
-    "  >>> s = sz.Str('a,b,c,d')\\n"                                                  //
-    "  >>> for part in s.split_iter(','):\\n"                                         //
+static char const doc_SplitIterator[] =                                              //
+    "SplitIterator(string, separator, ...)\n"                                        //
+    "\n"                                                                             //
+    "Text-splitting iterator for efficient string processing.\n"                     //
+    "Provides lazy evaluation of string splits without materializing all results.\n" //
+    "\n"                                                                             //
+    "Created by:\n"                                                                  //
+    "  - Str.split_iter()\n"                                                         //
+    "  - Str.rsplit_iter()\n"                                                        //
+    "  - Str.split_byteset_iter()\n"                                                 //
+    "  - Str.rsplit_byteset_iter()\n"                                                //
+    "\n"                                                                             //
+    "Features:\n"                                                                    //
+    "  - Memory-efficient: yields results one at a time\n"                           //
+    "  - Forward and reverse iteration support\n"                                    //
+    "  - Character set and string separator support\n"                               //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> s = sz.Str('a,b,c,d')\n"                                                  //
+    "  >>> for part in s.split_iter(','):\n"                                         //
     "  ...     print(part)";
 
 static PyTypeObject SplitIteratorType = {
@@ -5635,29 +5813,29 @@ static PyObject *Utf8SplitLinesIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8SplitLinesIterator[] =                                    //
-    "Utf8SplitLinesIterator(string, ...)\\n"                                        //
-    "\\n"                                                                           //
-    "UTF-8 aware line-splitting iterator using Unicode newline characters.\\n"      //
-    "Provides lazy evaluation of line splits without materializing all results.\\n" //
-    "\\n"                                                                           //
-    "Created by:\\n"                                                                //
-    "  - Str.utf8_splitlines_iter()\\n"                                             //
-    "  - sz.utf8_splitlines_iter()\\n"                                              //
-    "\\n"                                                                           //
-    "Recognized newlines (7 characters + CRLF):\\n"                                 //
-    "  - U+000A LINE FEED (\\\\n)\\n"                                               //
-    "  - U+000B VERTICAL TAB (\\\\v)\\n"                                            //
-    "  - U+000C FORM FEED (\\\\f)\\n"                                               //
-    "  - U+000D CARRIAGE RETURN (\\\\r)\\n"                                         //
-    "  - U+0085 NEXT LINE\\n"                                                       //
-    "  - U+2028 LINE SEPARATOR\\n"                                                  //
-    "  - U+2029 PARAGRAPH SEPARATOR\\n"                                             //
-    "  - CRLF (\\\\r\\\\n) as single newline\\n"                                    //
-    "\\n"                                                                           //
-    "Example:\\n"                                                                   //
-    "  >>> s = sz.Str('line1\\\\nline2\\\\nline3')\\n"                              //
-    "  >>> for line in s.utf8_splitlines_iter():\\n"                                //
+static char const doc_Utf8SplitLinesIterator[] =                                   //
+    "Utf8SplitLinesIterator(string, ...)\n"                                        //
+    "\n"                                                                           //
+    "UTF-8 aware line-splitting iterator using Unicode newline characters.\n"      //
+    "Provides lazy evaluation of line splits without materializing all results.\n" //
+    "\n"                                                                           //
+    "Created by:\n"                                                                //
+    "  - Str.utf8_splitlines_iter()\n"                                             //
+    "  - sz.utf8_splitlines_iter()\n"                                              //
+    "\n"                                                                           //
+    "Recognized newlines (7 characters + CRLF):\n"                                 //
+    "  - U+000A LINE FEED (\\\\n)\n"                                               //
+    "  - U+000B VERTICAL TAB (\\\\v)\n"                                            //
+    "  - U+000C FORM FEED (\\\\f)\n"                                               //
+    "  - U+000D CARRIAGE RETURN (\\\\r)\n"                                         //
+    "  - U+0085 NEXT LINE\n"                                                       //
+    "  - U+2028 LINE SEPARATOR\n"                                                  //
+    "  - U+2029 PARAGRAPH SEPARATOR\n"                                             //
+    "  - CRLF (\\\\r\\\\n) as single newline\n"                                    //
+    "\n"                                                                           //
+    "Example:\n"                                                                   //
+    "  >>> s = sz.Str('line1\\\\nline2\\\\nline3')\n"                              //
+    "  >>> for line in s.utf8_splitlines_iter():\n"                                //
     "  ...     print(line)";
 
 static PyTypeObject Utf8SplitLinesIteratorType = {
@@ -5740,25 +5918,25 @@ static PyObject *Utf8SplitWhitespaceIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8SplitWhitespaceIterator[] =                                    //
-    "Utf8SplitWhitespaceIterator(string, ...)\\n"                                        //
-    "\\n"                                                                                //
-    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\\n" //
-    "Provides lazy evaluation similar to Python's str.split() with no separator.\\n"     //
-    "\\n"                                                                                //
-    "Created by:\\n"                                                                     //
-    "  - Str.utf8_split_iter()\\n"                                                       //
-    "  - sz.utf8_split_iter()\\n"                                                        //
-    "\\n"                                                                                //
-    "Recognized whitespace (25 Unicode White_Space characters):\\n"                      //
-    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\\n"                                           //
-    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\\n"                                          //
-    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\\n"                                 //
-    "  - CJK: IDEOGRAPHIC SPACE\\n"                                                      //
-    "\\n"                                                                                //
-    "Example:\\n"                                                                        //
-    "  >>> s = sz.Str('hello   world\\\\tfoo')\\n"                                       //
-    "  >>> list(s.utf8_split_iter())\\n"                                                 //
+static char const doc_Utf8SplitWhitespaceIterator[] =                                   //
+    "Utf8SplitWhitespaceIterator(string, ...)\n"                                        //
+    "\n"                                                                                //
+    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\n" //
+    "Provides lazy evaluation similar to Python's str.split() with no separator.\n"     //
+    "\n"                                                                                //
+    "Created by:\n"                                                                     //
+    "  - Str.utf8_split_iter()\n"                                                       //
+    "  - sz.utf8_split_iter()\n"                                                        //
+    "\n"                                                                                //
+    "Recognized whitespace (25 Unicode White_Space characters):\n"                      //
+    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                           //
+    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                          //
+    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\n"                                 //
+    "  - CJK: IDEOGRAPHIC SPACE\n"                                                      //
+    "\n"                                                                                //
+    "Example:\n"                                                                        //
+    "  >>> s = sz.Str('hello   world\\\\tfoo')\n"                                       //
+    "  >>> list(s.utf8_split_iter())\n"                                                 //
     "  ['hello', 'world', 'foo']";
 
 static PyTypeObject Utf8SplitWhitespaceIteratorType = {
@@ -5857,7 +6035,11 @@ static char const doc_Utf8WordBoundaryIterator[] =                        //
     "  - WB3: CR x LF (no break)\n"                                       //
     "  - WB4: Ignore Extend/Format/ZWJ\n"                                 //
     "  - WB5-WB13: Letter, number, punctuation rules\n"                   //
-    "  - WB15-WB16: Regional Indicator pairs\n";
+    "  - WB15-WB16: Regional Indicator pairs\n\n"                         //
+    "\n"                                                                  //
+    "Example:\n"                                                          //
+    "  >>> len(list(sz.Str('Hi there').utf8_word_iter())) >= 2\n"         //
+    "  True";
 
 static PyTypeObject Utf8WordBoundaryIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8WordBoundaryIterator",
@@ -5932,7 +6114,11 @@ static char const doc_Utf8CaseInsensitiveFindIterator[] =                       
     "\n"                                                                        //
     "Each iteration yields a Str view of the matched region in the haystack.\n" //
     "The matched length may differ from needle length due to case folding\n"    //
-    "expansions (e.g., German 'ß' matches 'SS').";
+    "expansions (e.g., German 'ß' matches 'SS').\n"                             //
+    "\n"                                                                        //
+    "Example:\n"                                                                //
+    "  >>> len(list(sz.Str('aAaA').utf8_case_insensitive_find_iter('a')))\n"    //
+    "  4";
 
 static PyTypeObject Utf8CaseInsensitiveFindIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8CaseInsensitiveFindIterator",
@@ -6045,16 +6231,78 @@ static PyObject *Hasher_reset(PyObject *self_obj, PyObject *noargs) {
     return self_obj;
 }
 
+static char const doc_Hasher[] =                                                                  //
+    "Hasher(seed=0)\n"                                                                            //
+    "\n"                                                                                          //
+    "Incremental, AES-accelerated hasher producing the same 64-bit value as `sz.hash`.\n"         //
+    "Feed data in chunks with `update()`, read the digest, and reuse the object via `reset()`.\n" //
+    "\n"                                                                                          //
+    "Args:\n"                                                                                     //
+    "  seed (int, optional): 64-bit seed mixed into the initial state. Defaults to 0.\n"          //
+    "Example:\n"                                                                                  //
+    "  >>> h = sz.Hasher()\n"                                                                     //
+    "  >>> h.update(b'hello').update(b' world')\n"                                                //
+    "  >>> h.digest() == sz.hash(b'hello world')\n"                                               //
+    "  True";
+
+static char const doc_Hasher_update[] =                                          //
+    "update(data) -> Hasher\n"                                                   //
+    "\n"                                                                         //
+    "Absorb more bytes into the running hash and return self for chaining.\n"    //
+    "\n"                                                                         //
+    "Args:\n"                                                                    //
+    "  data (str | bytes): Chunk to mix into the state.\n"                       //
+    "Returns:\n"                                                                 //
+    "  Hasher: The same object, enabling `h.update(a).update(b)`.\n"             //
+    "Example:\n"                                                                 //
+    "  >>> sz.Hasher().update(b'ab').update(b'c').digest() == sz.hash(b'abc')\n" //
+    "  True";
+
+static char const doc_Hasher_digest[] =                                                //
+    "digest() -> int\n"                                                                //
+    "\n"                                                                               //
+    "Return the current hash as an unsigned 64-bit integer without consuming state.\n" //
+    "\n"                                                                               //
+    "Returns:\n"                                                                       //
+    "  int: Hash of all data absorbed so far.\n"                                       //
+    "Example:\n"                                                                       //
+    "  >>> isinstance(sz.Hasher().update(b'x').digest(), int)\n"                       //
+    "  True";
+
+static char const doc_Hasher_hexdigest[] =                              //
+    "hexdigest() -> str\n"                                              //
+    "\n"                                                                //
+    "Return the current hash as a 16-character lowercase hex string.\n" //
+    "\n"                                                                //
+    "Returns:\n"                                                        //
+    "  str: Zero-padded 16-digit hex of the 64-bit hash.\n"             //
+    "Example:\n"                                                        //
+    "  >>> len(sz.Hasher().hexdigest())\n"                              //
+    "  16";
+
+static char const doc_Hasher_reset[] =                       //
+    "reset() -> Hasher\n"                                    //
+    "\n"                                                     //
+    "Reset the state to the initial seed and return self.\n" //
+    "\n"                                                     //
+    "Returns:\n"                                             //
+    "  Hasher: The same object, emptied and reusable.\n"     //
+    "Example:\n"                                             //
+    "  >>> h = sz.Hasher().update(b'data').reset()\n"        //
+    "  >>> h.digest() == sz.Hasher().digest()\n"             //
+    "  True";
+
 static PyMethodDef Hasher_methods[] = {
-    {"update", (PyCFunction)Hasher_update, METH_O, "Update with more data; returns self."},
-    {"digest", (PyCFunction)Hasher_digest, METH_NOARGS, "Return current hash as int (does not consume)."},
-    {"hexdigest", (PyCFunction)Hasher_hexdigest, METH_NOARGS, "Return current hash as lowercase hex (16 digits)."},
-    {"reset", (PyCFunction)Hasher_reset, METH_NOARGS, "Reset to initial seed; returns self."},
+    {"update", (PyCFunction)Hasher_update, METH_O, doc_Hasher_update},               //
+    {"digest", (PyCFunction)Hasher_digest, METH_NOARGS, doc_Hasher_digest},          //
+    {"hexdigest", (PyCFunction)Hasher_hexdigest, METH_NOARGS, doc_Hasher_hexdigest}, //
+    {"reset", (PyCFunction)Hasher_reset, METH_NOARGS, doc_Hasher_reset},             //
     {NULL, NULL, 0, NULL},
 };
 
 static PyTypeObject HasherType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Hasher",
+    .tp_doc = doc_Hasher,
     .tp_basicsize = sizeof(Hasher),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT,
@@ -6146,17 +6394,89 @@ static PyObject *Sha256_copy(PyObject *self_obj, PyObject *noargs) {
     return (PyObject *)copy;
 }
 
+static char const doc_Sha256[] =                                                             //
+    "Sha256()\n"                                                                             //
+    "\n"                                                                                     //
+    "Incremental SHA-256 hasher with a hashlib-compatible interface, hardware-accelerated\n" //
+    "where available. Feed data with `update()`, then read `digest()` or `hexdigest()`.\n"   //
+    "\n"                                                                                     //
+    "Example:\n"                                                                             //
+    "  >>> import hashlib\n"                                                                 //
+    "  >>> sz.Sha256().update(b'abc').hexdigest() == hashlib.sha256(b'abc').hexdigest()\n"   //
+    "  True";
+
+static char const doc_Sha256_update[] =                                                //
+    "update(data) -> Sha256\n"                                                         //
+    "\n"                                                                               //
+    "Absorb more bytes into the running SHA-256 state and return self for chaining.\n" //
+    "\n"                                                                               //
+    "Args:\n"                                                                          //
+    "  data (str | bytes): Chunk to mix into the state.\n"                             //
+    "Returns:\n"                                                                       //
+    "  Sha256: The same object, enabling `h.update(a).update(b)`.\n"                   //
+    "Example:\n"                                                                       //
+    "  >>> sz.Sha256().update(b'a').update(b'bc').hexdigest()[:8]\n"                   //
+    "  'ba7816bf'";
+
+static char const doc_Sha256_digest[] =                                    //
+    "digest() -> bytes\n"                                                  //
+    "\n"                                                                   //
+    "Return the current 32-byte SHA-256 digest without consuming state.\n" //
+    "\n"                                                                   //
+    "Returns:\n"                                                           //
+    "  bytes: The 32-byte digest.\n"                                       //
+    "Example:\n"                                                           //
+    "  >>> len(sz.Sha256().update(b'abc').digest())\n"                     //
+    "  32";
+
+static char const doc_Sha256_hexdigest[] =                                                 //
+    "hexdigest() -> str\n"                                                                 //
+    "\n"                                                                                   //
+    "Return the current SHA-256 digest as a 64-character lowercase hex string.\n"          //
+    "\n"                                                                                   //
+    "Returns:\n"                                                                           //
+    "  str: 64-digit hex of the 32-byte digest.\n"                                         //
+    "Example:\n"                                                                           //
+    "  >>> import hashlib\n"                                                               //
+    "  >>> sz.Sha256().update(b'abc').hexdigest() == hashlib.sha256(b'abc').hexdigest()\n" //
+    "  True";
+
+static char const doc_Sha256_reset[] =                                    //
+    "reset() -> Sha256\n"                                                 //
+    "\n"                                                                  //
+    "Reset the state to the initial SHA-256 constants and return self.\n" //
+    "\n"                                                                  //
+    "Returns:\n"                                                          //
+    "  Sha256: The same object, emptied and reusable.\n"                  //
+    "Example:\n"                                                          //
+    "  >>> h = sz.Sha256().update(b'x').reset()\n"                        //
+    "  >>> h.hexdigest() == sz.Sha256().hexdigest()\n"                    //
+    "  True";
+
+static char const doc_Sha256_copy[] =                                                     //
+    "copy() -> Sha256\n"                                                                  //
+    "\n"                                                                                  //
+    "Return an independent copy of the hasher with identical internal state.\n"           //
+    "\n"                                                                                  //
+    "Returns:\n"                                                                          //
+    "  Sha256: A new object that can be advanced separately from the original.\n"         //
+    "Example:\n"                                                                          //
+    "  >>> a = sz.Sha256().update(b'ab')\n"                                               //
+    "  >>> a.copy().update(b'c').hexdigest() == sz.Sha256().update(b'abc').hexdigest()\n" //
+    "  True";
+
 static PyMethodDef Sha256_methods[] = {
-    {"update", (PyCFunction)Sha256_update, METH_O, "Update with more data; returns self."},
-    {"digest", (PyCFunction)Sha256_digest, METH_NOARGS, "Return current hash as bytes (does not consume)."},
-    {"hexdigest", (PyCFunction)Sha256_hexdigest, METH_NOARGS, "Return current hash as lowercase hex (64 digits)."},
-    {"reset", (PyCFunction)Sha256_reset, METH_NOARGS, "Reset to initial state; returns self."},
-    {"copy", (PyCFunction)Sha256_copy, METH_NOARGS, "Return a copy of the hash object."},
+    {"update", (PyCFunction)Sha256_update, METH_O, doc_Sha256_update},               //
+    {"digest", (PyCFunction)Sha256_digest, METH_NOARGS, doc_Sha256_digest},          //
+    {"hexdigest", (PyCFunction)Sha256_hexdigest, METH_NOARGS, doc_Sha256_hexdigest}, //
+    {"reset", (PyCFunction)Sha256_reset, METH_NOARGS, doc_Sha256_reset},             //
+    {"copy", (PyCFunction)Sha256_copy, METH_NOARGS, doc_Sha256_copy},                //
     {NULL, NULL, 0, NULL},
 };
 
 static PyTypeObject Sha256Type = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Sha256",
+    .tp_doc = doc_Sha256,
     .tp_basicsize = sizeof(Sha256),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT,
@@ -6379,7 +6699,11 @@ static sz_status_t Strs_run_argsort_(sz_bool_t case_insensitive, sz_sequence_t c
 static char const doc_sorted[] =                                                            //
     "sorted(*, reverse=False, case_insensitive=False, top=None) -> Strs\n"                  //
     "Return a new, stably sorted Strs. `case_insensitive` orders by Unicode case-folding; " //
-    "`top=k` returns only the k smallest (or largest, if reversed) elements.";
+    "`top=k` returns only the k smallest (or largest, if reversed) elements.\n"             //
+    "\n"                                                                                    //
+    "Example:\n"                                                                            //
+    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"               //
+    "  ['apple', 'banana', 'cherry']";
 
 static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
@@ -6504,7 +6828,11 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 static char const doc_argsort[] =                                                                 //
     "argsort(*, reverse=False, case_insensitive=False, top=None) -> tuple[int, ...]\n"            //
     "Return the stable permutation of indices that sorts the Strs. `case_insensitive` orders by " //
-    "Unicode case-folding; `top=k` returns only the k leading indices.";
+    "Unicode case-folding; `top=k` returns only the k leading indices.\n"                         //
+    "\n"                                                                                          //
+    "Example:\n"                                                                                  //
+    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                    //
+    "  (1, 0, 2)";
 
 /**
  *  @brief Returns the tuple of indices permuting a `Strs` object into sorted order.
@@ -6944,17 +7272,40 @@ static PyMappingMethods Strs_as_mapping = {
     .mp_subscript = Strs_subscript, // Is used to implement slices in Python
 };
 
+static char const doc_Strs_tape[] =                                                         //
+    "In-place transform the internal representation into the Apache Arrow string layout.\n" //
+    "\n"                                                                                    //
+    "Compacts fragmented strings into a single contiguous buffer with an offsets array,\n"  //
+    "enabling zero-copy export to Arrow/StringTape consumers.";
+
+static char const doc_Strs_tape_address[] = //
+    "Memory address of the first byte of the contiguous tape buffer, as an integer.";
+
+static char const doc_Strs_tape_nbytes[] = //
+    "Total length of the tape (all string bytes) in bytes.";
+
+static char const doc_Strs_offsets_address[] = //
+    "Memory address of the first byte of the offsets array, as an integer.";
+
+static char const doc_Strs_offsets_nbytes[] = //
+    "Length of the offsets array in bytes.";
+
+static char const doc_Strs_offsets_are_large[] = //
+    "True if 64-bit offsets are needed to address the tape (vs. 32-bit) for Arrow export.";
+
+static char const doc_Strs_layout[] = //
+    "Debug string describing the internal storage layout (TAPE, TAPE_VIEW, or FRAGMENTED).";
+
 static PyGetSetDef Strs_getsetters[] = {
     // Compatibility with PyArrow
-    {"tape", (getter)Strs_get_tape, NULL, "In-place transforms the string representation to match Apache Arrow", NULL},
-    {"tape_address", (getter)Strs_get_tape_address, NULL, "Address of the first byte of the first string", NULL},
-    {"tape_nbytes", (getter)Strs_get_tape_nbytes, NULL, "Length of the entire tape of strings in bytes", NULL},
-    {"offsets_address", (getter)Strs_get_offsets_address, NULL, "Address of the first byte of offsets array", NULL},
-    {"offsets_nbytes", (getter)Strs_get_offsets_nbytes, NULL, "Get teh length of offsets array in bytes", NULL},
-    {"offsets_are_large", (getter)Strs_get_offsets_are_large, NULL,
-     "Checks if 64-bit addressing should be used to convert to Arrow", NULL},
-    {"__layout__", (getter)Strs_get_layout, NULL, "Debug information about the internal layout", NULL},
-    {NULL} // Sentinel
+    {"tape", (getter)Strs_get_tape, NULL, doc_Strs_tape, NULL},                                        //
+    {"tape_address", (getter)Strs_get_tape_address, NULL, doc_Strs_tape_address, NULL},                //
+    {"tape_nbytes", (getter)Strs_get_tape_nbytes, NULL, doc_Strs_tape_nbytes, NULL},                   //
+    {"offsets_address", (getter)Strs_get_offsets_address, NULL, doc_Strs_offsets_address, NULL},       //
+    {"offsets_nbytes", (getter)Strs_get_offsets_nbytes, NULL, doc_Strs_offsets_nbytes, NULL},          //
+    {"offsets_are_large", (getter)Strs_get_offsets_are_large, NULL, doc_Strs_offsets_are_large, NULL}, //
+    {"__layout__", (getter)Strs_get_layout, NULL, doc_Strs_layout, NULL},                              //
+    {NULL}                                                                                             // Sentinel
 };
 
 // The efficient `Strs_init` path initializing from PyArrow array capsules.
@@ -7705,55 +8056,82 @@ static void Strs_dealloc(Strs *self) {
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
+static char const doc_Strs_shuffled[] =                                                     //
+    "shuffled(seed=None) -> Strs\n"                                                         //
+    "\n"                                                                                    //
+    "Return a new Strs with the elements randomly permuted; the original is unchanged.\n"   //
+    "\n"                                                                                    //
+    "Args:\n"                                                                               //
+    "  seed (int, optional): Seed for reproducible shuffling. Defaults to a random seed.\n" //
+    "Returns:\n"                                                                            //
+    "  Strs: A new shuffled collection.\n"                                                  //
+    "Example:\n"                                                                            //
+    "  >>> sorted(sz.Strs(['a', 'b', 'c']).shuffled(seed=42)) == ['a', 'b', 'c']\n"         //
+    "  True";
+
+static char const doc_Strs_sample[] =                                                      //
+    "sample(size, seed=None) -> Strs\n"                                                    //
+    "\n"                                                                                   //
+    "Return a new Strs with `size` elements drawn at random (with replacement).\n"         //
+    "\n"                                                                                   //
+    "Args:\n"                                                                              //
+    "  size (int): Number of elements to draw.\n"                                          //
+    "  seed (int, optional): Seed for reproducible sampling. Defaults to a random seed.\n" //
+    "Returns:\n"                                                                           //
+    "  Strs: A new collection of the sampled elements.\n"                                  //
+    "Example:\n"                                                                           //
+    "  >>> len(sz.Strs(['a', 'b', 'c', 'd']).sample(2))\n"                                 //
+    "  2";
+
 static PyMethodDef Strs_methods[] = {
-    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."}, //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, doc_sorted},                                     //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},                                  //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},    //
+    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, doc_Strs_shuffled}, //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, doc_sorted},            //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},         //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},       //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
-static char const doc_Strs[] =                                                                  //
-    "Strs(sequence, view=False)\\n"                                                             //
-    "\\n"                                                                                       //
-    "Space-efficient container for large collections of strings and their slices.\\n"           //
-    "Optimized for memory efficiency and bulk operations on string collections.\\n"             //
-    "Compatible with StringTape format and Apache Arrow string arrays.\\n"                      //
-    "\\n"                                                                                       //
-    "Args:\\n"                                                                                  //
-    "  sequence (list | tuple | generator | pyarrow.Array): Collection of strings to store.\\n" //
-    "  view (bool): If True, create a view into the original data instead of copying it.\\n"    //
-    "\\n"                                                                                       //
-    "Storage Layouts:\\n"                                                                       //
-    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\\n"        //
-    "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\\n"              //
-    "  - FRAGMENTED: Non-contiguous strings with individual pointers\\n"                        //
-    "\\n"                                                                                       //
-    "Features:\\n"                                                                              //
-    "  - Memory-efficient storage with shared backing buffers\\n"                               //
-    "  - Zero-copy slicing and indexing operations\\n"                                          //
-    "  - StringTape format compatibility for interoperability\\n"                               //
-    "  - Bulk operations: sort(), shuffle(), sample()\\n"                                       //
-    "  - Arrow integration: from_arrow() for zero-copy imports\\n"                              //
-    "  - GPU kernel compatibility with automatic memory management\\n"                          //
-    "  - Fast comparison operations with native containers\\n"                                  //
-    "\\n"                                                                                       //
-    "Methods:\\n"                                                                               //
-    "  - sort(): In-place sorting with custom comparison\\n"                                    //
-    "  - argsort(): Get indices for sorted order\\n"                                            //
-    "  - shuffle(): Randomize element order\\n"                                                 //
-    "  - sample(): Get random subset of elements\\n"                                            //
-    "\\n"                                                                                       //
-    "Slicing Behavior:\\n"                                                                      //
-    "  Slicing creates lightweight views that reference the original data.\\n"                  //
-    "  Views are automatically converted to owned layouts when needed for\\n"                   //
-    "  GPU operations, maintaining StringTape format compatibility.\\n"                         //
-    "\\n"                                                                                       //
-    "Example:\\n"                                                                               //
-    "  >>> strs = sz.Strs(['apple', 'banana', 'cherry'])\\n"                                    //
-    "  >>> subset = strs[1:3]  # Zero-copy slice view\\n"                                       //
-    "  >>> strs.sort()\\n"                                                                      //
+static char const doc_Strs[] =                                                                 //
+    "Strs(sequence, view=False)\n"                                                             //
+    "\n"                                                                                       //
+    "Space-efficient container for large collections of strings and their slices.\n"           //
+    "Optimized for memory efficiency and bulk operations on string collections.\n"             //
+    "Compatible with StringTape format and Apache Arrow string arrays.\n"                      //
+    "\n"                                                                                       //
+    "Args:\n"                                                                                  //
+    "  sequence (list | tuple | generator | pyarrow.Array): Collection of strings to store.\n" //
+    "  view (bool): If True, create a view into the original data instead of copying it.\n"    //
+    "\n"                                                                                       //
+    "Storage Layouts:\n"                                                                       //
+    "  - TAPE: Owns contiguous data buffer with offset array (StringTape compatible)\n"        //
+    "  - TAPE_VIEW: Zero-copy view into existing data (Arrow/StringTape slice)\n"              //
+    "  - FRAGMENTED: Non-contiguous strings with individual pointers\n"                        //
+    "\n"                                                                                       //
+    "Features:\n"                                                                              //
+    "  - Memory-efficient storage with shared backing buffers\n"                               //
+    "  - Zero-copy slicing and indexing operations\n"                                          //
+    "  - StringTape format compatibility for interoperability\n"                               //
+    "  - Bulk operations: sort(), shuffle(), sample()\n"                                       //
+    "  - Arrow integration: from_arrow() for zero-copy imports\n"                              //
+    "  - GPU kernel compatibility with automatic memory management\n"                          //
+    "  - Fast comparison operations with native containers\n"                                  //
+    "\n"                                                                                       //
+    "Methods:\n"                                                                               //
+    "  - sort(): In-place sorting with custom comparison\n"                                    //
+    "  - argsort(): Get indices for sorted order\n"                                            //
+    "  - shuffle(): Randomize element order\n"                                                 //
+    "  - sample(): Get random subset of elements\n"                                            //
+    "\n"                                                                                       //
+    "Slicing Behavior:\n"                                                                      //
+    "  Slicing creates lightweight views that reference the original data.\n"                  //
+    "  Views are automatically converted to owned layouts when needed for\n"                   //
+    "  GPU operations, maintaining StringTape format compatibility.\n"                         //
+    "\n"                                                                                       //
+    "Example:\n"                                                                               //
+    "  >>> strs = sz.Strs(['apple', 'banana', 'cherry'])\n"                                    //
+    "  >>> subset = strs[1:3]  # Zero-copy slice view\n"                                       //
+    "  >>> strs.sort()\n"                                                                      //
     "  >>> list(strs)  # ['apple', 'banana', 'cherry']";
 
 static PyTypeObject StrsType = {
@@ -7816,12 +8194,15 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
     return 0;
 }
 
-static char const doc_reset_capabilities[] =                                      //
-    "reset_capabilities(names) -> None\n\n"                                       //
-    "Sets the active SIMD/backend capabilities for this module and updates the\n" //
-    "runtime dispatch table. The provided names are intersected with hardware\n"  //
-    "capabilities; if the result is empty, falls back to 'serial'.\n\n"           //
-    "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.";
+static char const doc_reset_capabilities[] =                                         //
+    "reset_capabilities(names) -> None\n\n"                                          //
+    "Sets the active SIMD/backend capabilities for this module and updates the\n"    //
+    "runtime dispatch table. The provided names are intersected with hardware\n"     //
+    "capabilities; if the result is empty, falls back to 'serial'.\n\n"              //
+    "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.\n" //
+    "\n"                                                                             //
+    "Example:\n"                                                                     //
+    "  >>> sz.reset_capabilities('serial')  # restrict dispatch to the scalar backend";
 
 static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     PyObject *caps_obj = NULL;
