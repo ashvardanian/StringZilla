@@ -349,7 +349,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
  *   2) Vectorized local boundary decision. For positions whose previous and following effective
  *      properties are both "plain" (Other/CR/LF/Newline/ALetter/Hebrew/Numeric/Katakana/ExtendNumLet)
  *      the boundary is fully determined by the immediate pair via rules WB3/3a/3b/5/8/9/10/13/13a/13b
- *      (encoded in `sz_wb_pair_decision_`). These are resolved without any look-around.
+ *      (encoded in `sz_utf8_word_break_pair_decision_`). These are resolved without any look-around.
  *
  *  Every position that could be governed by a stateful rule -- WB4 (Extend/Format/ZWJ skipping),
  *  WB6/WB7 (MidLetter look-around), WB7a, WB11/WB12 (MidNum look-around), WB15/WB16 (Regional
@@ -361,18 +361,30 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
 
 /* Per-byte Word_Break property of ASCII codepoints, laid out as eight 16-entry rows indexed by the
  * low nibble; row R serves high nibble R (covering bytes 0x00-0x7F). */
-SZ_INTERNAL __m256i sz_wb_classify_ascii_haswell_(__m256i bytes) {
-    // Eight rows of the ASCII Word_Break property table (high nibble -> 16 low-nibble entries).
-    // clang-format off
-    __m256i row0 = _mm256_setr_epi8(0,0,0,0,0,0,0,0,0,0,2,3,3,1,0,0, 0,0,0,0,0,0,0,0,0,0,2,3,3,1,0,0);
+SZ_INTERNAL __m256i sz_utf8_word_break_classify_ascii_haswell_(__m256i bytes) {
+    // Eight rows of the ASCII Word_Break property table (high nibble → 16 low-nibble entries).
+    __m256i row0 = _mm256_setr_epi8(                    //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 1, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 1, 0, 0);
     __m256i row1 = _mm256_setzero_si256();
-    __m256i row2 = _mm256_setr_epi8(0,0,15,0,0,0,0,15,0,0,0,0,14,0,15,0, 0,0,15,0,0,0,0,15,0,0,0,0,14,0,15,0);
-    __m256i row3 = _mm256_setr_epi8(10,10,10,10,10,10,10,10,10,10,13,14,0,0,0,0, 10,10,10,10,10,10,10,10,10,10,13,14,0,0,0,0);
-    __m256i row4 = _mm256_setr_epi8(0,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8, 0,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8);
-    __m256i row5 = _mm256_setr_epi8(8,8,8,8,8,8,8,8,8,8,8,0,0,0,0,12, 8,8,8,8,8,8,8,8,8,8,8,0,0,0,0,12);
-    __m256i row6 = _mm256_setr_epi8(0,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8, 0,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8);
-    __m256i row7 = _mm256_setr_epi8(8,8,8,8,8,8,8,8,8,8,8,0,0,0,0,0, 8,8,8,8,8,8,8,8,8,8,8,0,0,0,0,0);
-    // clang-format on
+    __m256i row2 = _mm256_setr_epi8(                        //
+        0, 0, 15, 0, 0, 0, 0, 15, 0, 0, 0, 0, 14, 0, 15, 0, //
+        0, 0, 15, 0, 0, 0, 0, 15, 0, 0, 0, 0, 14, 0, 15, 0);
+    __m256i row3 = _mm256_setr_epi8(                                //
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 13, 14, 0, 0, 0, 0, //
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 13, 14, 0, 0, 0, 0);
+    __m256i row4 = _mm256_setr_epi8(                    //
+        0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, //
+        0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8);
+    __m256i row5 = _mm256_setr_epi8(                     //
+        8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 12, //
+        8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 12);
+    __m256i row6 = _mm256_setr_epi8(                    //
+        0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, //
+        0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8);
+    __m256i row7 = _mm256_setr_epi8(                    //
+        8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, //
+        8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0);
 
     __m256i lo_nibble = _mm256_and_si256(bytes, _mm256_set1_epi8(0x0F));
     __m256i hi_nibble = _mm256_and_si256(_mm256_srli_epi16(bytes, 4), _mm256_set1_epi8(0x0F));
@@ -398,43 +410,27 @@ SZ_INTERNAL __m256i sz_wb_classify_ascii_haswell_(__m256i bytes) {
     return result;
 }
 
-/* Pairwise boundary decision for "plain" Word_Break property pairs.
- * Index: (prev_prop << 4) | after_prop. Value: 0 = no break, 1 = break, 2 = defer to serial. */
-static const sz_u8_t sz_wb_pair_decision_[256] = {
-    1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 2, 2, 2, //
-    1, 1, 0, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 1, 0, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 1, 0, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 1, 0, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 0, 0, 2, 2, 2, //
-    1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 0, 0, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
-};
+/* Per-class lane mask: bit i set where lane i has Word_Break property `value`. */
+SZ_INTERNAL sz_u32_t sz_utf8_word_break_class_mask_haswell_(__m256i classes, int value) {
+    return (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(classes, _mm256_set1_epi8((char)value)));
+}
 
-/* Sentinel marking a byte whose property must be resolved by the scalar fallback
- * (continuation byte or non-ASCII lead byte). */
-enum { sz_wb_prop_sentinel_k = 0x80 };
-#define SZ_WB_PROP_SENTINEL_ ((sz_u8_t)sz_wb_prop_sentinel_k)
-
-/* Classify a window of up to 32 bytes into per-byte Word_Break properties.
- * ASCII bytes get their exact property; every other byte gets SZ_WB_PROP_SENTINEL_. */
-SZ_INTERNAL void sz_wb_classify_window_haswell_(sz_cptr_t window, sz_size_t valid, sz_u8_t *props_out) {
-    __m256i bytes = _mm256_loadu_si256((__m256i const *)window);
-    __m256i is_ascii = _mm256_cmpgt_epi8(bytes, _mm256_set1_epi8(-1)); // top bit clear -> non-negative
-    __m256i ascii_props = sz_wb_classify_ascii_haswell_(bytes);
-    __m256i sentinel = _mm256_set1_epi8((char)SZ_WB_PROP_SENTINEL_);
-    __m256i classified = _mm256_blendv_epi8(sentinel, ascii_props, is_ascii);
-    _mm256_storeu_si256((__m256i *)props_out, classified);
-    // Mark trailing (invalid) lanes as sentinel so they are never trusted.
-    for (sz_size_t i = valid; i < 32; ++i) props_out[i] = SZ_WB_PROP_SENTINEL_;
+/* 32-bit "joined" (guaranteed non-boundary) mask for an all-ASCII 32-byte window: bit i set => the boundary
+ * before lane i is suppressed by a UAX-29 no-break rule. ASCII has no Extend/Format/ZWJ/Regional_Indicator/
+ * Hebrew/Katakana, so WB4 and WB15/16 never apply and WB6/7/11/12 reduce to neighbour bit-shifts (`<< 1` =
+ * previous lane, `>> 1` = next, `<< 2` = two back). Exact for lanes whose i-2 and i+1 neighbours are in-window. */
+SZ_INTERNAL sz_u32_t sz_utf8_word_break_join_mask_ascii_haswell_(__m256i classes) {
+    // Reduce each class to a 32-lane bitmask and defer the rule logic to the shared portable routine; the
+    // caller restricts the result to its trusted lane window, so the wider u64 math is harmless.
+    return (sz_u32_t)sz_utf8_word_break_join_from_class_masks_(
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_aletter_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_numeric_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_extendnumlet_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_midletter_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_midnum_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_mid_quotes_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_cr_k),
+        sz_utf8_word_break_class_mask_haswell_(classes, sz_tr29_word_break_lf_k));
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
@@ -451,42 +447,36 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Skip first codepoint (position 0 is always a boundary), matching the serial reference.
-    sz_size_t position = sz_utf8_char_length_(text_u8[0]);
-
-    // Window of classified properties covering [base, base+32).
-    sz_u8_t props[32];
-    sz_size_t base = (sz_size_t)-1; // No window loaded yet.
+    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
 
     while (position < length) {
-        // (Re)load the property window if the byte at `position` and its immediate predecessor are covered.
-        // We need props[position-base] (after) and props[position-1-base] (prev byte) to be valid.
-        if (base == (sz_size_t)-1 || position < base + 1 || position >= base + 32) {
-            base = (position > 0) ? (position - 1) : 0;
-            if (base + 32 <= length) { sz_wb_classify_window_haswell_(text + base, 32, props); }
-            else {
-                sz_size_t valid = length - base;
-                sz_u8_t window_scratch[32];
-                for (sz_size_t i = 0; i < valid; ++i) window_scratch[i] = text_u8[base + i];
-                for (sz_size_t i = valid; i < 32; ++i) window_scratch[i] = 0;
-                sz_wb_classify_window_haswell_((sz_cptr_t)window_scratch, valid, props);
+        // Oracle-free fast path: a window [position-2, position+30) gives lanes [2,30] full +/-2 context, so an
+        // all-ASCII window resolves boundaries at positions [position, position+28] directly from the mask.
+        if (position >= 2 && position + 30 <= length) {
+            __m256i window = _mm256_loadu_si256(
+                (__m256i const *)(text_u8 + position - 2)); // lane j = byte position-2+j
+            if (_mm256_movemask_epi8(window) == 0) {        // all ASCII
+                __m256i classes = sz_utf8_word_break_classify_ascii_haswell_(window);
+                sz_u32_t join = sz_utf8_word_break_join_mask_ascii_haswell_(classes);
+                sz_u32_t boundary = (~join) & 0x7FFFFFFCu; // trusted lanes [2,30]
+                while (boundary) {
+                    sz_size_t boundary_position = position - 2 + (sz_size_t)sz_u32_ctz(boundary);
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
+                    }
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
+                    boundary &= boundary - 1;
+                }
+                position += 29; // Resolved [position, position+28]; next unresolved boundary is at position+29.
+                continue;
             }
         }
-
-        sz_u8_t after_prop = props[position - base];
-        sz_u8_t prev_byte_prop = props[position - 1 - base];
-        // The byte before `position` must itself be a lead byte (not a continuation) for `prev_byte_prop`
-        // to be the immediate previous codepoint's property. We approximate the serial `prev_prop`
-        // (which skips ignorables) only when both sides are plain ASCII; otherwise defer.
-        sz_u8_t decision = 2;
-        if (after_prop != SZ_WB_PROP_SENTINEL_ && prev_byte_prop != SZ_WB_PROP_SENTINEL_) {
-            decision = sz_wb_pair_decision_[((sz_size_t)prev_byte_prop << 4) | after_prop];
-        }
-
-        sz_bool_t is_boundary;
-        if (decision != 2) { is_boundary = (sz_bool_t)decision; }
-        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
-
-        if (is_boundary) {
+        // Scalar step (non-ASCII window, or near the leading/trailing edges).
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
                 return words;
@@ -496,7 +486,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
             ++words;
             word_start = position;
         }
-        position += sz_utf8_char_length_(text_u8[position]);
+        position += sz_utf8_codepoint_length_(text_u8[position]);
     }
 
     if (words == words_capacity) {
@@ -526,34 +516,35 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell( //
     sz_size_t position = length - 1;
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
-    sz_u8_t props[32];
-    sz_size_t base = (sz_size_t)-1;
-
     while (position > 0) {
-        if (base == (sz_size_t)-1 || position < base + 1 || position >= base + 32) {
-            base = position - 1;
-            if (base + 32 <= length) { sz_wb_classify_window_haswell_(text + base, 32, props); }
-            else {
-                sz_size_t valid = length - base;
-                sz_u8_t window_scratch[32];
-                for (sz_size_t i = 0; i < valid; ++i) window_scratch[i] = text_u8[base + i];
-                for (sz_size_t i = valid; i < 32; ++i) window_scratch[i] = 0;
-                sz_wb_classify_window_haswell_((sz_cptr_t)window_scratch, valid, props);
+        // Oracle-free fast path: a window [position-30, position+2) gives lanes [2,30] full +/-2 context,
+        // resolving boundaries at positions [position-28, position]; emit them high-to-low.
+        if (position >= 30 && position + 2 <= length) {
+            sz_size_t base = position - 30; // lane j = byte base+j; trusted lanes [2,30] → [position-28, position]
+            __m256i window = _mm256_loadu_si256((__m256i const *)(text_u8 + base));
+            if (_mm256_movemask_epi8(window) == 0) {
+                __m256i classes = sz_utf8_word_break_classify_ascii_haswell_(window);
+                sz_u32_t join = sz_utf8_word_break_join_mask_ascii_haswell_(classes);
+                sz_u32_t boundary = (~join) & 0x7FFFFFFCu; // trusted lanes [2,30]
+                // Emit high-to-low: clear from the most-significant set bit downward.
+                while (boundary) {
+                    int lane = 31 - sz_u32_clz(boundary);
+                    sz_size_t boundary_position = base + (sz_size_t)lane;
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
+                    }
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
+                    boundary &= ~((sz_u32_t)1 << lane);
+                }
+                position = base + 1; // Resolved down to position-28; next unresolved boundary is at position-29.
+                continue;
             }
         }
-
-        sz_u8_t after_prop = props[position - base];
-        sz_u8_t prev_byte_prop = props[position - 1 - base];
-        sz_u8_t decision = 2;
-        if (after_prop != SZ_WB_PROP_SENTINEL_ && prev_byte_prop != SZ_WB_PROP_SENTINEL_) {
-            decision = sz_wb_pair_decision_[((sz_size_t)prev_byte_prop << 4) | after_prop];
-        }
-
-        sz_bool_t is_boundary;
-        if (decision != 2) { is_boundary = (sz_bool_t)decision; }
-        else { is_boundary = sz_utf8_is_word_boundary_serial(text, length, position); }
-
-        if (is_boundary) {
+        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_end;
                 return words;
