@@ -2277,6 +2277,15 @@ def test_utf8_word_iter_basic():
     assert result == ["a"]
 
 
+def test_utf8_word_iter_reverse():
+    """Reverse iteration must yield the forward word list in reverse order."""
+    for text in ["", "a", "hello world", "don't", "3,14", "Größe привет мир 你好 42", "the quick brown fox, really!"]:
+        forward = [str(w) for w in sz.utf8_word_iter(text)]
+        reverse = [str(w) for w in sz.utf8_word_iter(text, reverse=True)]
+        assert reverse == list(reversed(forward))
+        assert "".join(forward) == text  # Words tile the input contiguously.
+
+
 def test_utf8_word_iter_skip_empty():
     """Test skip_empty parameter."""
     result = [str(w) for w in sz.utf8_word_iter("hello  world", skip_empty=True)]

@@ -4475,6 +4475,55 @@ void test_utf8_words() {
         assert(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
         assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
     }
+
+    // Segment `text` into UAX-29 words through one of the plural kernels (forward or reverse variant).
+    using word_boundaries_t = sz_size_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
+    auto uax29_segments = [](word_boundaries_t boundaries, sz::string_view text) {
+        std::vector<sz_size_t> starts(text.size() + 1), lengths(text.size() + 1);
+        sz_size_t consumed = 0;
+        sz_size_t count = boundaries(text.data(), text.size(), starts.data(), lengths.data(), text.size() + 1,
+                                     &consumed);
+        std::vector<std::string> words;
+        for (sz_size_t i = 0; i != count; ++i) words.emplace_back(text.data() + starts[i], lengths[i]);
+        return words;
+    };
+    auto words = [&](sz::string_view text) { return uax29_segments(sz_utf8_word_find_boundaries, text); };
+
+    // Forward segmentation against hand-checked UAX-29 expectations.
+    let_assert(auto w = words(""), w.empty());
+    let_assert(auto w = words("a"), w.size() == 1 && w[0] == "a");
+    let_assert(auto w = words("Hello, world!"),
+               w.size() == 5 && w[0] == "Hello" && w[1] == "," && w[2] == " " && w[3] == "world" && w[4] == "!");
+    let_assert(auto w = words("don't"), w.size() == 1 && w[0] == "don't"); // WB6/WB7: apostrophe between letters
+    let_assert(auto w = words("3,14"), w.size() == 1 && w[0] == "3,14");   // WB11/WB12: comma between digits
+    let_assert(auto w = words("3,"), w.size() == 2 && w[0] == "3" && w[1] == ","); // digit then non-digit → break
+    let_assert(auto w = words("can't_stop"), w.size() == 1);               // underscore is ExtendNumLet (WB13a/b)
+    let_assert(auto w = words("a\r\nb"), w.size() == 3 && w[1] == "\r\n"); // WB3: CR × LF stay together
+    let_assert(auto w = words("你好"), w.size() == 2 && w[0] == "你" && w[1] == "好"); // CJK: each is its own word
+
+    // For each input the active backend, the serial reference, and the forward & reverse C++ ranges must agree.
+    auto check_consistency = [&](sz::string_view text) {
+        auto forward = uax29_segments(sz_utf8_word_find_boundaries, text);
+        std::vector<std::string> reversed(forward.rbegin(), forward.rend());
+        assert(uax29_segments(sz_utf8_word_find_boundaries_serial, text) == forward && "backend ≠ serial reference");
+        assert(uax29_segments(sz_utf8_word_rfind_boundaries, text) == reversed &&
+               "reverse pass ≠ reversed forward list");
+        assert(text.utf8_split_words().template to<std::vector<std::string>>() == forward &&
+               "utf8_split_words ≠ kernel");
+        assert(text.utf8_rsplit_words().template to<std::vector<std::string>>() == reversed &&
+               "utf8_rsplit_words ≠ kernel");
+    };
+    for (sz::string_view text : {"", "a", "Hello, world!", "don't", "l'avion", "3,14", "1,2,3", "3,", "can't_stop",
+                                 "a\r\nb", "Größe привет мир 你好 42", "the quick brown fox, really!"})
+        check_consistency(text);
+
+    // A long mixed string exercises the wide SIMD windows and their tails.
+    scope_assert(
+        std::string big,
+        [&] {
+            for (int i = 0; i != 200; ++i) big += "hello world, foo_bar 42 don't ";
+        }(),
+        uax29_segments(sz_utf8_word_find_boundaries, big) == uax29_segments(sz_utf8_word_find_boundaries_serial, big));
 }
 
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
@@ -5050,6 +5099,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_comparisons", test_comparisons);
     failures += run_test("test_search", test_search);
     failures += run_test("test_utf8", test_utf8);
+    failures += run_test("test_utf8_words", test_utf8_words);
     failures += run_test("test_utf8_case", test_utf8_case);
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.

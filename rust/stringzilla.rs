@@ -470,6 +470,26 @@ extern "C" {
         b_length: usize,
     ) -> i32;
 
+    pub(crate) fn sz_utf8_word_find_boundaries(
+        text: *const c_void,
+        length: usize,
+        word_starts: *mut usize,
+        word_lengths: *mut usize,
+        words_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_word_rfind_boundaries(
+        text: *const c_void,
+        length: usize,
+        word_starts: *mut usize,
+        word_lengths: *mut usize,
+        words_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
+
+    pub(crate) fn sz_equal(a: *const c_void, b: *const c_void, length: usize) -> i32;
+    pub(crate) fn sz_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
+
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
     pub(crate) fn sz_hash_multiseed(
@@ -1223,6 +1243,69 @@ where
         0 => Ordering::Equal,
         _ => Ordering::Greater,
     }
+}
+
+/// Lexicographic (byte-order) comparison of two strings, SIMD-accelerated.
+///
+/// Mirrors `Ord` on `&[u8]` but uses StringZilla's vectorized `sz_order`.
+///
+/// # Examples
+///
+/// ```
+/// use std::cmp::Ordering;
+/// use stringzilla::stringzilla as sz;
+///
+/// assert_eq!(sz::order("apple", "banana"), Ordering::Less);
+/// assert_eq!(sz::order("abc", "abc"), Ordering::Equal);
+/// ```
+pub fn order<A, B>(a: A, b: B) -> Ordering
+where
+    A: AsRef<[u8]>,
+    B: AsRef<[u8]>,
+{
+    let a_ref = a.as_ref();
+    let b_ref = b.as_ref();
+    let result = unsafe {
+        sz_order(
+            a_ref.as_ptr() as *const c_void,
+            a_ref.len(),
+            b_ref.as_ptr() as *const c_void,
+            b_ref.len(),
+        )
+    };
+    match result {
+        x if x < 0 => Ordering::Less,
+        0 => Ordering::Equal,
+        _ => Ordering::Greater,
+    }
+}
+
+/// Byte-level equality of two strings, SIMD-accelerated via `sz_equal`.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// assert!(sz::equal("abc", "abc"));
+/// assert!(!sz::equal("abc", "abd"));
+/// ```
+pub fn equal<A, B>(a: A, b: B) -> bool
+where
+    A: AsRef<[u8]>,
+    B: AsRef<[u8]>,
+{
+    let a_ref = a.as_ref();
+    let b_ref = b.as_ref();
+    // `sz_equal` assumes equal lengths; differing lengths can never be byte-equal.
+    a_ref.len() == b_ref.len()
+        && unsafe {
+            sz_equal(
+                a_ref.as_ptr() as *const c_void,
+                b_ref.as_ptr() as *const c_void,
+                a_ref.len(),
+            ) != 0
+        }
 }
 
 /// Unpacks a UTF-8 byte sequence into UTF-32 codepoints.
@@ -2934,6 +3017,158 @@ impl<'a> Iterator for RangeUtf8WhitespaceSplits<'a> {
 #[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8WhitespaceSplits")]
 pub type RangeWhitespaceUtf8Splits<'a> = RangeUtf8WhitespaceSplits<'a>;
 
+/// Default batch size for buffering `sz_utf8_word_*_boundaries` output, mirroring the core
+/// `sz_utf8_word_boundaries_batch_k` enum in `include/stringzilla/utf8_iterate.h`. Buffering this many
+/// boundaries per call amortizes the per-word dispatch/FFI overhead without an unbounded buffer; the
+/// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
+const WORD_BOUNDARIES_BATCH: usize = 16;
+
+/// An iterator over UAX-29 words in UTF-8 text, in order.
+///
+/// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
+/// consecutive words are contiguous and no empty slices are produced. Follows the Unicode TR29 rules.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8WordSplits;
+///
+/// let words: Vec<&[u8]> = RangeUtf8WordSplits::new(b"Hi, world").collect();
+/// assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
+/// ```
+pub struct RangeUtf8WordSplits<'a> {
+    text: &'a [u8],
+    suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
+    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets, relative to `suffix`
+    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    count: usize,  // Number of buffered words (0 once exhausted)
+    index: usize,  // Index of the next word to yield from the buffer
+}
+
+impl<'a> RangeUtf8WordSplits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; WORD_BOUNDARIES_BATCH],
+            lengths: [0; WORD_BOUNDARIES_BATCH],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_word_find_boundaries(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                self.text.len() - self.suffix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                WORD_BOUNDARIES_BATCH,
+                &mut consumed,
+            )
+        };
+        self.index = 0;
+    }
+}
+
+impl<'a> Iterator for RangeUtf8WordSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            if self.count == 0 {
+                return None; // Empty input or fully drained.
+            }
+            // Batch drained: advance past the last word (a TR29 boundary) and refill from the remaining suffix.
+            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
+            self.fill();
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let begin = self.suffix + self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-29 words in UTF-8 text, from the end of the text backward (last word first).
+///
+/// Yields the same words as [`RangeUtf8WordSplits`], in reverse order.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8WordRSplits;
+///
+/// let words: Vec<&[u8]> = RangeUtf8WordRSplits::new(b"Hi, world").collect();
+/// assert_eq!(words, vec![&b"world"[..], &b" "[..], &b","[..], &b"Hi"[..]]);
+/// ```
+pub struct RangeUtf8WordRSplits<'a> {
+    text: &'a [u8],
+    prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
+    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets from the text start, last word first
+    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    count: usize,  // Number of buffered words (0 once exhausted)
+    index: usize,  // Index of the next word to yield from the buffer
+}
+
+impl<'a> RangeUtf8WordRSplits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            prefix: text.len(),
+            starts: [0; WORD_BOUNDARIES_BATCH],
+            lengths: [0; WORD_BOUNDARIES_BATCH],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the remaining prefix; `count` becomes 0 once the prefix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_word_rfind_boundaries(
+                self.text.as_ptr() as *const c_void,
+                self.prefix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                WORD_BOUNDARIES_BATCH,
+                &mut consumed,
+            )
+        };
+        self.prefix = consumed; // Earliest boundary still segmented; 0 once the prefix is exhausted.
+        self.index = 0;
+    }
+}
+
+impl<'a> Iterator for RangeUtf8WordRSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            self.fill(); // Refill from the remaining prefix; `count` stays 0 once nothing is left.
+            if self.count == 0 {
+                return None;
+            }
+        }
+        // Offsets are relative to the text start; the buffer runs last word → first.
+        let begin = self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
 /// An iterator over case-insensitive matches of a UTF-8 pattern in a string.
 ///
 /// This iterator yields `IndexSpan` values representing the byte offset and length
@@ -3179,6 +3414,12 @@ pub trait StringZillableUnary {
     /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
     /// ```
     fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_>;
+
+    /// Returns an iterator over UAX-29 words (Unicode TR29), in order. Words tile the input contiguously.
+    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_>;
+
+    /// Returns an iterator over UAX-29 words from the end of the text backward (last word first).
+    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -3445,6 +3686,14 @@ where
 
     fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_> {
         RangeUtf8WhitespaceSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_> {
+        RangeUtf8WordSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_> {
+        RangeUtf8WordRSplits::new(self.as_ref())
     }
 }
 
