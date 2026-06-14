@@ -359,7 +359,8 @@ inline cuda_status_t resolve_kernel_shape(kernel_shape_t &shape, void const *ker
  */
 struct cuda_launch_t {
     CUlaunchConfig config_ {};
-    CUlaunchAttribute cooperative_attribute_ {};
+    CUlaunchAttribute attributes_[2] {}; // up to two of {cooperative, cluster-dimension}; must outlive `launch()`
+    unsigned num_attributes_ = 0;
 
     cuda_launch_t() noexcept {
         config_.gridDimY = config_.gridDimZ = 1;
@@ -367,6 +368,11 @@ struct cuda_launch_t {
     }
     inline cuda_launch_t &grid(unsigned blocks) noexcept {
         config_.gridDimX = blocks;
+        return *this;
+    }
+    inline cuda_launch_t &grid(unsigned blocks_x, unsigned blocks_y) noexcept {
+        config_.gridDimX = blocks_x;
+        config_.gridDimY = blocks_y; // cross-pair batching: `blockIdx.y` selects one (shorter, longer) pair
         return *this;
     }
     inline cuda_launch_t &block(unsigned threads) noexcept {
@@ -382,10 +388,18 @@ struct cuda_launch_t {
         return *this;
     }
     inline cuda_launch_t &cooperative() noexcept {
-        cooperative_attribute_.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
-        cooperative_attribute_.value.cooperative = 1;
-        config_.attrs = &cooperative_attribute_;
-        config_.numAttrs = 1;
+        CUlaunchAttribute &a = attributes_[num_attributes_++];
+        a.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
+        a.value.cooperative = 1;
+        config_.attrs = attributes_, config_.numAttrs = num_attributes_;
+        return *this;
+    }
+    /** @brief Hopper thread-block clusters: `gridDimX` must be a multiple of `x` (each cluster spans `x` blocks). */
+    inline cuda_launch_t &cluster(unsigned x, unsigned y = 1, unsigned z = 1) noexcept {
+        CUlaunchAttribute &a = attributes_[num_attributes_++];
+        a.id = CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION;
+        a.value.clusterDim.x = x, a.value.clusterDim.y = y, a.value.clusterDim.z = z;
+        config_.attrs = attributes_, config_.numAttrs = num_attributes_;
         return *this;
     }
     inline CUresult launch(cudaFunction_t function, void **arguments) noexcept {
@@ -553,9 +567,13 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     // but we our high-level goal isn't maximum utilization of the GPU, but rather
     // the fastest execution time. And assuming the scheduling & synchronization
     // costs, we may want to combine consecutive groups of tasks to ensure they are large enough.
-    size_t tasks_remaining = result.warp_level_tasks.size() - device_level_tasks;
+    // `tasks_remaining` counts only the WARP-level tasks; `first_task_index` is then an ABSOLUTE index into `tasks`,
+    // offset past the device-level tasks that occupy the front of the array. (The earlier form subtracted
+    // `device_level_tasks` from the warp count and omitted the offset, which is correct only when there are no
+    // device-level tasks - otherwise it underflows to `SIZE_MAX` and spins forever the moment a device task exists.)
+    size_t tasks_remaining = result.warp_level_tasks.size();
     while (tasks_remaining > 1) { // 1 task or less ~ nothing to merge
-        size_t const first_task_index = result.warp_level_tasks.size() - tasks_remaining;
+        size_t const first_task_index = device_level_tasks + (result.warp_level_tasks.size() - tasks_remaining);
         task_t &indicative_task = tasks[first_task_index];
         size_t const tasks_with_same_density = //
             std::find_if(&indicative_task, result.warp_level_tasks.end(),
