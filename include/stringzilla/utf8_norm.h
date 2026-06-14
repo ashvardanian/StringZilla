@@ -63,6 +63,26 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_serial( //
 SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_serial( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 
+#if SZ_USE_SKYLAKE
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_skylake( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_skylake( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_ICELAKE
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_icelake( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_icelake( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_norm */
 SZ_PUBLIC sz_size_t sz_utf8_norm_neon( //
@@ -78,6 +98,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon( //
 #pragma region Backends
 
 #include "stringzilla/utf8_norm/serial.h"
+#include "stringzilla/utf8_norm/skylake.h"
+#include "stringzilla/utf8_norm/icelake.h" // includes skylake.h; the guard makes the double-include safe
 #include "stringzilla/utf8_norm/neon.h"
 
 #pragma endregion // Backends
@@ -87,7 +109,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon( //
 #if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
-#if SZ_USE_NEON
+#if SZ_USE_ICELAKE
+    return sz_utf8_norm_icelake(source, length, form, destination);
+#elif SZ_USE_SKYLAKE
+    return sz_utf8_norm_skylake(source, length, form, destination);
+#elif SZ_USE_NEON
     return sz_utf8_norm_neon(source, length, form, destination);
 #else
     return sz_utf8_norm_serial(source, length, form, destination);
@@ -95,7 +121,11 @@ SZ_DYNAMIC sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_
 }
 
 SZ_DYNAMIC sz_cptr_t sz_utf8_norm_violation(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-#if SZ_USE_NEON
+#if SZ_USE_ICELAKE
+    return sz_utf8_norm_violation_icelake(source, length, form);
+#elif SZ_USE_SKYLAKE
+    return sz_utf8_norm_violation_skylake(source, length, form);
+#elif SZ_USE_NEON
     return sz_utf8_norm_violation_neon(source, length, form);
 #else
     return sz_utf8_norm_violation_serial(source, length, form);

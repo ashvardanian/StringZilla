@@ -17,6 +17,18 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps) {
     impl->utf8_norm = sz_utf8_norm_serial;
     impl->utf8_norm_violation = sz_utf8_norm_violation_serial;
 
+#if SZ_USE_SKYLAKE
+    if (caps & sz_cap_skylake_k) {
+        impl->utf8_norm = sz_utf8_norm_skylake;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_skylake;
+    }
+#endif
+#if SZ_USE_ICELAKE
+    if (caps & sz_cap_icelake_k) { // an Ice Lake CPU also reports skylake_k; this later block wins
+        impl->utf8_norm = sz_utf8_norm_icelake;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_icelake;
+    }
+#endif
 #if SZ_USE_NEON
     if (caps & sz_cap_neon_k) {
         impl->utf8_norm = sz_utf8_norm_neon;

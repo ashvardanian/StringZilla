@@ -351,6 +351,71 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t le
     return SZ_NULL_CHAR;
 }
 
+/** @brief Map a normalization form to its hot-path `SZ_UTF8_NORM_QUICK_CHECK_*` flag bit. */
+SZ_INTERNAL sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
+    switch (form) {
+    case sz_normal_form_nfc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFC_;
+    case sz_normal_form_nfkc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFKC_;
+    case sz_normal_form_nfd_k: return SZ_UTF8_NORM_QUICK_CHECK_NFD_;
+    default: return SZ_UTF8_NORM_QUICK_CHECK_NFKD_;
+    }
+}
+
+/**
+ *  @brief Cold per-codepoint verify shared by every vector scanner: walk `[*position_io, block_end)`
+ *  and return the first byte that begins a non-inert codepoint for @p form_flag (a canonical-ordering
+ *  violation or a quick-check No/Maybe), else @b SZ_NULL_CHAR. Updates `*position_io` to where it
+ *  stopped and carries `*previous_canonical_combining_class_io` across SIMD-block boundaries.
+ *
+ *  ASCII resets the combining class; 2-byte runes use the flat `sz_utf8_norm_twobyte_` table (one load,
+ *  no general parse); 3-/4-byte runes parse and read `sz_utf8_norm_value_`. This is the exact body the
+ *  NEON backend ran inline, lifted here so all backends share one copy of the carry-sensitive logic.
+ */
+SZ_INTERNAL sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
+                                                 sz_u8_t const *end, sz_u8_t form_flag,
+                                                 sz_u8_t *previous_canonical_combining_class_io) {
+    sz_u8_t const *position = *position_io;
+    sz_u8_t previous_canonical_combining_class = *previous_canonical_combining_class_io;
+    while (position < block_end) {
+        sz_u8_t const *codepoint_start = position;
+        sz_u8_t lead = *position;
+        sz_u16_t value;
+        if (lead < 0x80) {
+            previous_canonical_combining_class = 0, ++position;
+            continue;
+        }
+        else if (lead >= 0xE0) { // 3-/4-byte: general parse + props trie
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)position, (sz_cptr_t)end, &rune, &rune_length);
+            value = sz_utf8_norm_value_(rune);
+            position += rune_length;
+        }
+        else if (position + 2 <= end) { // 2-byte: inlined decode + flat lookup (one load, no parse)
+            value = sz_utf8_norm_twobyte_[((sz_rune_t)(lead & 0x1Fu) << 6) | (position[1] & 0x3Fu)];
+            position += 2;
+        }
+        else { // truncated 2-byte at the buffer end: defer to the bounds-safe parser
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)position, (sz_cptr_t)end, &rune, &rune_length);
+            value = sz_utf8_norm_value_(rune);
+            position += rune_length;
+        }
+        sz_u8_t canonical_combining_class = (sz_u8_t)(value & 0xFFu);
+        if ((canonical_combining_class != 0 && canonical_combining_class < previous_canonical_combining_class) ||
+            ((sz_u8_t)(value >> 8) & form_flag)) {
+            *position_io = position;
+            *previous_canonical_combining_class_io = previous_canonical_combining_class;
+            return (sz_cptr_t)codepoint_start;
+        }
+        previous_canonical_combining_class = canonical_combining_class;
+    }
+    *position_io = position;
+    *previous_canonical_combining_class_io = previous_canonical_combining_class;
+    return SZ_NULL_CHAR;
+}
+
 /**
  *  @brief A scan primitive: returns the first non-inert byte for @p form, or @b SZ_NULL_CHAR if the
  *  span is provably already normalized. The single ISA-specific point both engines force-inline.
