@@ -21,13 +21,25 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let mut flags = HashMap::<String, bool>::new();
     let mut build = cc::Build::new();
     build
-        .file("c/stringzilla.c")
+        .files([
+            "c/stringzilla/runtime.c",
+            "c/stringzilla/compare.c",
+            "c/stringzilla/memory.c",
+            "c/stringzilla/hash.c",
+            "c/stringzilla/find.c",
+            "c/stringzilla/sort.c",
+            "c/stringzilla/intersect.c",
+            "c/stringzilla/utf8_iterate.c",
+            "c/stringzilla/utf8_case_fold.c",
+            "c/stringzilla/utf8_norm.c",
+            "c/stringzilla/utf8_case_insensitive.c",
+        ])
         .include("include")
+        .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        .flag("-O2")
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
@@ -70,21 +82,24 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let flags_to_try = match target_arch.as_str() {
         "arm" | "aarch64" => vec![
             //
-            "SZ_USE_SVE2_AES",
+            "SZ_USE_SVE2AES",
             "SZ_USE_SVE2",
             "SZ_USE_SVE",
-            "SZ_USE_NEON_SHA",
-            "SZ_USE_NEON_AES",
+            "SZ_USE_NEONSHA",
+            "SZ_USE_NEONAES",
             "SZ_USE_NEON",
         ],
         "x86_64" => vec![
             //
-            "SZ_USE_ICE",
+            "SZ_USE_ICELAKE",
             "SZ_USE_SKYLAKE",
             "SZ_USE_HASWELL",
             "SZ_USE_GOLDMONT",
             "SZ_USE_WESTMERE",
         ],
+        "riscv64" => vec!["SZ_USE_RVV"],
+        "loongarch64" => vec!["SZ_USE_LASX"],
+        "powerpc64" => vec!["SZ_USE_POWERVSX"],
         _ => vec![],
     };
 
@@ -125,21 +140,10 @@ fn build_stringzilla() -> HashMap<String, bool> {
         }
     }
 
-    println!("cargo:rerun-if-changed=c/stringzilla.c");
-    println!("cargo:rerun-if-changed=rust/stringzilla.rs");
-    println!("cargo:rerun-if-changed=include/stringzilla/stringzilla.h");
-
-    // Constituent parts:
-    println!("cargo:rerun-if-changed=include/stringzilla/find.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/hash.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/utf8.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/utf8_unpack.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/types.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/memory.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/compare.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/similarities.h");
-    println!("cargo:rerun-if-changed=include/stringzilla/small_string.h");
+    // Only re-run the C build when the C sources or headers change. The Rust source (`rust/stringzilla.rs`)
+    // does not feed this compilation, so listing it here forced a full ~55s C rebuild on every Rust-only edit.
+    println!("cargo:rerun-if-changed=c/stringzilla");
+    println!("cargo:rerun-if-changed=include/stringzilla");
 
     // Rerun if SIMD backend environment variables change
     for flag in flags_to_try.iter() {
@@ -162,22 +166,55 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        .flag("-O2");
+        // The per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so the
+        // build does not require libnuma (matches the `stringzillas.cuh` default and the CMake build).
+        .define("FU_ENABLE_NUMA", "0");
 
     // Nvidia GPU backend
     if is_cuda {
         build.cuda(true);
-        build.file("c/stringzillas.cu");
+        // nvcc rejects host compilers newer than the version it supports (CUDA 12.x caps out at GCC 14). Honor the
+        // standard CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake's
+        // CMAKE_CUDA_HOST_COMPILER. Example: `CUDAHOSTCXX=g++-14 cargo build --features cuda`.
+        if let Ok(host_cxx) = env::var("CUDAHOSTCXX") {
+            build.flag("-ccbin");
+            build.flag(&host_cxx);
+        }
+        build.files([
+            // C-API entry translation units.
+            "c/stringzillas/runtime.cu",
+            "c/stringzillas/levenshtein.cu",
+            "c/stringzillas/needleman_wunsch.cu",
+            "c/stringzillas/smith_waterman.cu",
+            "c/stringzillas/fingerprints.cu",
+            // Per-capability providers that emit each tier's kernels once (the entry TUs above only declare them).
+            "c/stringzillas/levenshtein_cuda.cu",
+            "c/stringzillas/levenshtein_kepler.cu",
+            "c/stringzillas/levenshtein_hopper.cu",
+            "c/stringzillas/needleman_wunsch_cuda.cu",
+            "c/stringzillas/needleman_wunsch_hopper.cu",
+            "c/stringzillas/smith_waterman_cuda.cu",
+            "c/stringzillas/smith_waterman_hopper.cu",
+        ]);
         build.define("SZ_USE_CUDA", "1");
         build.define("SZ_USE_ROCM", "0");
         build.flag("-std=c++20");
         build.flag("--expt-relaxed-constexpr");
         build.flag("-arch=sm_90a");
+        // The kernels use the CUDA driver API (cuLaunchKernel, cuEventElapsedTime, cuFuncSetAttribute), so a binary
+        // linking this crate needs libcuda in addition to the cudart that `build.cuda(true)` already links.
+        println!("cargo:rustc-link-lib=dylib=cuda");
     }
     // AMD GPU backend
     else if is_rocm {
         build.cpp(true);
-        build.file("c/stringzillas.cu");
+        build.files([
+            "c/stringzillas/runtime.cu",
+            "c/stringzillas/levenshtein.cu",
+            "c/stringzillas/needleman_wunsch.cu",
+            "c/stringzillas/smith_waterman.cu",
+            "c/stringzillas/fingerprints.cu",
+        ]);
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "1");
         build.flag("-std=c++20");
@@ -186,7 +223,26 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     // Multi-core CPU backend
     else if is_cpus {
         build.cpp(true);
-        build.file("c/stringzillas.cpp");
+        build.files([
+            // C-API entry translation units.
+            "c/stringzillas/runtime.cpp",
+            "c/stringzillas/levenshtein.cpp",
+            "c/stringzillas/needleman_wunsch.cpp",
+            "c/stringzillas/smith_waterman.cpp",
+            "c/stringzillas/fingerprints.cpp",
+            // Per-capability providers that emit each ISA's single-pair SIMD core once (the entry TUs above only
+            // declare them). The off-platform files compile to empty objects via their internal SZ_USE_* guards.
+            "c/stringzillas/levenshtein_serial.cpp",
+            "c/stringzillas/levenshtein_icelake.cpp",
+            "c/stringzillas/needleman_wunsch_serial.cpp",
+            "c/stringzillas/needleman_wunsch_icelake.cpp",
+            "c/stringzillas/needleman_wunsch_haswell.cpp",
+            "c/stringzillas/needleman_wunsch_neon.cpp",
+            "c/stringzillas/smith_waterman_serial.cpp",
+            "c/stringzillas/smith_waterman_icelake.cpp",
+            "c/stringzillas/smith_waterman_haswell.cpp",
+            "c/stringzillas/smith_waterman_neon.cpp",
+        ]);
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "0");
         build.flag("-std=c++20");
@@ -219,12 +275,7 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     }
 
     // StringZillas-specific rerun triggers
-    println!("cargo:rerun-if-changed=c/stringzillas.cu");
-    println!("cargo:rerun-if-changed=c/stringzillas.cuh");
-    println!("cargo:rerun-if-changed=include/stringzillas/stringzillas.h");
-    println!("cargo:rerun-if-changed=include/stringzillas/fingerprints.hpp");
-    println!("cargo:rerun-if-changed=include/stringzillas/fingerprints.cuh");
-    println!("cargo:rerun-if-changed=include/stringzillas/similarities.hpp");
-    println!("cargo:rerun-if-changed=include/stringzillas/similarities.cuh");
+    println!("cargo:rerun-if-changed=c/stringzillas");
+    println!("cargo:rerun-if-changed=include/stringzillas");
     println!("cargo:rerun-if-changed=fork_union/include/fork_union.hpp");
 }

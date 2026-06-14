@@ -1,9 +1,9 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
- *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @brief Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_fingerprints.cuh
- *  @author  Ash Vardanian
+ *  @file scripts/test_fingerprints.cuh
+ *  @author Ash Vardanian
  */
 #include <cstring> // `std::memcmp`
 #include <thread>  // `std::thread::hardware_concurrency`
@@ -27,6 +27,7 @@
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
+
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::basic_rolling_hashers;
 using ashvardanian::stringzillas::buz_rolling_hasher;
@@ -34,8 +35,9 @@ using ashvardanian::stringzillas::floating_rolling_hasher;
 using ashvardanian::stringzillas::floating_rolling_hashers;
 using ashvardanian::stringzillas::multiplying_rolling_hasher;
 using ashvardanian::stringzillas::rabin_karp_rolling_hasher;
-#if SZ_USE_CUDA
+
 // StringZillas library symbols provided only by the CUDA backend:
+#if SZ_USE_CUDA
 using ashvardanian::stringzillas::unified_alloc;
 #endif
 
@@ -44,7 +46,7 @@ using namespace stringzilla;
 using namespace stringzilla::scripts;
 
 template <typename hasher_type_>
-void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &strs) {
+void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &strs) {
 
     using hasher_t = typename std::decay<hasher_type_>::type;
     using state_t = typename hasher_t::state_t;
@@ -57,8 +59,8 @@ void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice
-        std::size_t count_hashes = str.size() - window_width + 1;
+        // Verify every rolled position of the input; the input size itself is bounded where `strs` is produced.
+        std::size_t const count_hashes = str.size() - window_width + 1;
         std::vector<hash_t> hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
             state_t slice_state = 0;
@@ -72,8 +74,9 @@ void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &
         hash_t rolling_hash = hasher.digest(rolling_state);
         sz_assert_(rolling_hash == hashes[0]);
 
-        // Now compute the rolling hash and compare it to the slice hashes
-        for (std::size_t j = window_width; j < str.size(); ++j) {
+        // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
+        std::size_t const rolling_end = window_width + count_hashes - 1;
+        for (std::size_t j = window_width; j < rolling_end; ++j) {
             rolling_state = hasher.roll(rolling_state, str[j - window_width], str[j]);
             rolling_hash = hasher.digest(rolling_state);
             sz_assert_(rolling_hash == hashes[j - window_width + 1]);
@@ -82,8 +85,8 @@ void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &
 }
 
 template <typename hasher_type_, typename baseline_hasher_type_>
-void test_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline_hasher,
-                         std::vector<std::string> const &strs) {
+void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline_hasher,
+                          std::vector<std::string> const &strs) {
 
     using hasher_t = typename std::decay<hasher_type_>::type;
     using state_t = typename hasher_t::state_t;
@@ -100,8 +103,8 @@ void test_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline
         auto const &str = strs[i];
         if (str.size() <= window_width) continue; // Skip very short inputs
 
-        // Compute the hash of the slice
-        std::size_t count_hashes = str.size() - window_width + 1;
+        // Verify every rolled position of the input; the input size itself is bounded where `strs` is produced.
+        std::size_t const count_hashes = str.size() - window_width + 1;
         std::vector<hash_t> hashes(count_hashes);
         std::vector<baseline_hash_t> baseline_hashes(count_hashes);
         for (std::size_t j = 0; j < count_hashes; ++j) {
@@ -127,8 +130,9 @@ void test_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline
         baseline_hash_t baseline_rolling_hash = baseline_hasher.digest(baseline_rolling_state);
         sz_assert_(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline hashes");
 
-        // Now compute the rolling hash and compare it to the slice hashes
-        for (std::size_t j = window_width; j < str.size(); ++j) {
+        // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
+        std::size_t const rolling_end = window_width + count_hashes - 1;
+        for (std::size_t j = window_width; j < rolling_end; ++j) {
             rolling_state = hasher.roll(rolling_state, str[j - window_width], str[j]);
             rolling_hash = hasher.digest(rolling_state);
 
@@ -177,28 +181,28 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     strings.emplace_back("€100"), strings.emplace_back("EUR 100");                  // currency symbol vs abbreviation
 
     // Try longer strings that will trigger some loop-unrolled optimizations
-    strings.emplace_back( //
-        "This is a longer string that will be used to test the rolling hasher. "
-        "It should be long enough to cover multiple windows and provide a good test case for the "
+    strings.emplace_back(                                                                          //
+        "This is a longer string that will be used to test the rolling hasher. "                   //
+        "It should be long enough to cover multiple windows and provide a good test case for the " //
         "rolling hasher implementation. Let's see how it performs with this longer input string.");
 
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_dna_like_inputs() {
+std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
     fuzzy_config_t config;
     config.alphabet = "ACGT";
     config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
-    config.max_string_length = 100 * 1024;
+    config.max_string_length = max_len;
 
     randomize_strings(config, strings);
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_inconvenient_inputs() {
+std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
     static std::uint8_t const inconvenient_chars[4] = {0x00, 0x01, 0x7F, 0xFF};
@@ -207,7 +211,7 @@ std::vector<std::string> rolling_hasher_inconvenient_inputs() {
     config.alphabet = {reinterpret_cast<char const *>(&inconvenient_chars[0]), 4};
     config.batch_size = scale_iterations(100);
     config.min_string_length = 100;
-    config.max_string_length = 100 * 1024;
+    config.max_string_length = max_len;
 
     randomize_strings(config, strings);
     return strings;
@@ -230,17 +234,17 @@ void test_rolling_hasher() {
     using f32u32_hasher_t = floating_rolling_hasher<float>;
     using f64u64_hasher_t = floating_rolling_hasher<f64_t>;
 
-    test_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), unit_strings);
-    test_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), dna_like_strings);
-    test_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), inconvenient_strings);
+    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), unit_strings);
+    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), dna_like_strings);
+    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), inconvenient_strings);
 
     std::vector<u16u32_hasher_t> u16u32_hashers;
     u16u32_hashers.emplace_back(3, 31, 65521);
     u16u32_hashers.emplace_back(5, 31, 65521);
     u16u32_hashers.emplace_back(7, 31, 65521);
     for (auto hasher : u16u32_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32u64_hasher_t> u32u64_hashers;
     u32u64_hashers.emplace_back(3, 31, 65521);
@@ -248,8 +252,8 @@ void test_rolling_hasher() {
     u32u64_hashers.emplace_back(4, 257, SZ_U32_MAX_PRIME);
     u32u64_hashers.emplace_back(7, 257, SZ_U32_MAX_PRIME);
     for (auto hasher : u32u64_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32mul_hasher_t> u32mul_hashers;
     u32mul_hashers.emplace_back(3);
@@ -261,8 +265,8 @@ void test_rolling_hasher() {
     u32mul_hashers.emplace_back(4, 257);
     u32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : u32mul_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<i32mul_hasher_t> i32mul_hashers;
     i32mul_hashers.emplace_back(3);
@@ -274,8 +278,8 @@ void test_rolling_hasher() {
     i32mul_hashers.emplace_back(4, 257);
     i32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : i32mul_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u64mul_hasher_t> u64mul_hashers;
     u64mul_hashers.emplace_back(3, 31);
@@ -288,8 +292,8 @@ void test_rolling_hasher() {
     u64mul_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64mul_hashers.emplace_back(32, 257);
     for (auto hasher : u64mul_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32buz_hasher_t> u32buz_hashers;
     u32buz_hashers.emplace_back(3);
@@ -301,8 +305,8 @@ void test_rolling_hasher() {
     u32buz_hashers.emplace_back(4, 257);
     u32buz_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : u32buz_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u64buz_hasher_t> u64buz_hashers;
     u64buz_hashers.emplace_back(3, 31);
@@ -315,8 +319,8 @@ void test_rolling_hasher() {
     u64buz_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64buz_hashers.emplace_back(32, 257);
     for (auto hasher : u64buz_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<f32u32_hasher_t> f32u32_hashers;
     f32u32_hashers.emplace_back(3, 31);
@@ -333,8 +337,8 @@ void test_rolling_hasher() {
     f32u32_hashers.emplace_back(1000);  // Super-wide window
     f32u32_hashers.emplace_back(30000); // Super-wide window
     for (auto hasher : f32u32_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<f64u64_hasher_t> f64u64_hashers;
     f64u64_hashers.emplace_back(3, 31);
@@ -351,14 +355,14 @@ void test_rolling_hasher() {
     f64u64_hashers.emplace_back(1000);  // Super-wide window
     f64u64_hashers.emplace_back(30000); // Super-wide window
     for (auto hasher : f64u64_hashers)
-        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
-            test_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
+            check_rolling_hasher(hasher, inconvenient_strings);
 }
 
 template <std::size_t dims_, typename texts_type_, typename baseline_hasher_type_, typename accelerated_hasher_type_>
-void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
-                                                       baseline_hasher_type_ const &baseline_hasher,
-                                                       accelerated_hasher_type_ const &accelerated_hasher) {
+void test_rolling_hashers_equivalence_against_baseline( //
+    texts_type_ const &texts, baseline_hasher_type_ &baseline_hasher, accelerated_hasher_type_ &accelerated_hasher) {
+
     constexpr std::size_t dims_k = dims_;
     using min_hashes_t = safe_array<u32_t, dims_k>;
     using min_counts_t = safe_array<u32_t, dims_k>;
@@ -436,7 +440,10 @@ void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
  *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<f64_t>, ..., u32_t>`.
  */
 template <std::size_t window_width_, std::size_t dims_>
-void test_rolling_hashers_equivalence_for_width() {
+void test_rolling_hashers_equivalence_for_width(      //
+    std::vector<std::string> const &unit_strings,     //
+    std::vector<std::string> const &dna_like_strings, //
+    std::vector<std::string> const &inconvenient_strings) {
 
     constexpr std::size_t window_width_k = window_width_;
     constexpr std::size_t dims_k = dims_;
@@ -445,11 +452,6 @@ void test_rolling_hashers_equivalence_for_width() {
     using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t>;
     rolling_f64_t rolling_f64;
     sz_assert_(rolling_f64.try_extend(window_width_k, dims_k) == status_t::success_k);
-
-    // Test on each individual dataset
-    auto unit_strings = rolling_hasher_basic_inputs();
-    auto dna_like_strings = rolling_hasher_dna_like_inputs();
-    auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
 
     using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, dims_k>;
     rolling_serial_t rolling_serial;
@@ -487,21 +489,29 @@ void test_rolling_hashers_equivalence_for_width() {
 }
 
 void test_rolling_hashers_equivalence() {
+    // AoS-vs-SoA agreement is deterministic per character, so a few KB per string already exercises every
+    // window width tested here (<= 64) across the unrolled paths. Generate the fuzz inputs once with a small
+    // cap and reuse them across all widths - the 100 KB strings are reserved for `test_rolling_hasher`, which
+    // needs them for its super-wide windows.
+    auto const unit = rolling_hasher_basic_inputs();
+    auto const dna = rolling_hasher_dna_like_inputs(4 * 1024);
+    auto const bad = rolling_hasher_inconvenient_inputs(4 * 1024);
+
     // Just 2 hashes per input
-    // test_rolling_hashers_equivalence_for_width<3, 2>();
-    test_rolling_hashers_equivalence_for_width<7, 2>();
+    // test_rolling_hashers_equivalence_for_width<3, 2>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<7, 2>(unit, dna, bad);
 
     // 32 hashes per input
-    test_rolling_hashers_equivalence_for_width<3, 32>();
-    test_rolling_hashers_equivalence_for_width<7, 32>();
-    test_rolling_hashers_equivalence_for_width<33, 32>();
-    test_rolling_hashers_equivalence_for_width<64, 32>();
+    test_rolling_hashers_equivalence_for_width<3, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<7, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<33, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<64, 32>(unit, dna, bad);
 
     // 32 hashes per input with windows divisible by 4
-    test_rolling_hashers_equivalence_for_width<4, 32>();
-    test_rolling_hashers_equivalence_for_width<8, 32>();
-    test_rolling_hashers_equivalence_for_width<12, 32>();
-    test_rolling_hashers_equivalence_for_width<16, 32>();
+    test_rolling_hashers_equivalence_for_width<4, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<8, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<12, 32>(unit, dna, bad);
+    test_rolling_hashers_equivalence_for_width<16, 32>(unit, dna, bad);
 }
 
 } // namespace scripts

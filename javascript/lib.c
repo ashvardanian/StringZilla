@@ -22,8 +22,7 @@ static napi_value makeFindResultObject(napi_env env, int64_t index, uint64_t len
 
     napi_value js_index;
     if (index < 0) napi_create_bigint_int64(env, -1, &js_index);
-    else
-        napi_create_bigint_uint64(env, (uint64_t)index, &js_index);
+    else napi_create_bigint_uint64(env, (uint64_t)index, &js_index);
 
     napi_value js_length;
     napi_create_bigint_uint64(env, (uint64_t)length, &js_length);
@@ -253,9 +252,9 @@ napi_value utf8CaseInsensitiveNeedleFindIn(napi_env env, napi_callback_info info
     }
 
     sz_size_t matched_length = 0;
-    sz_cptr_t match =
-        sz_utf8_case_insensitive_find((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle->needle_data,
-                                      needle->needle_length, &needle->metadata, &matched_length);
+    sz_cptr_t match = sz_utf8_case_insensitive_find((sz_cptr_t)haystack_data, haystack_length,
+                                                    (sz_cptr_t)needle->needle_data, needle->needle_length,
+                                                    &needle->metadata, &matched_length);
     if (!match) return makeFindResultObject(env, -1, 0);
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
 }

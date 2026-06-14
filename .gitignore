@@ -43,3 +43,6 @@ node_modules/
 
 # Claude Code per-project settings (locally tracked in ~/.claude, not in repo)
 .claude/
+
+# Local refactor planning notes
+/SPLIT.md

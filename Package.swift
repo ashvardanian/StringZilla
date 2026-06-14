@@ -20,14 +20,27 @@ let package = Package(
     targets: [
         .target(
             name: "StringZillaC",
-            path: "include/stringzilla",
-            sources: ["../../c/stringzilla.c"],
+            path: "include",
+            sources: [
+                "../c/stringzilla/runtime.c",
+                "../c/stringzilla/compare.c",
+                "../c/stringzilla/memory.c",
+                "../c/stringzilla/hash.c",
+                "../c/stringzilla/find.c",
+                "../c/stringzilla/sort.c",
+                "../c/stringzilla/intersect.c",
+                "../c/stringzilla/utf8_norm.c",
+                "../c/stringzilla/utf8_iterate.c",
+                "../c/stringzilla/utf8_case_fold.c",
+                "../c/stringzilla/utf8_case_insensitive.c",
+            ],
+            // `include/` is the module header root, so the `module.modulemap` umbrella and the
+            // `#include "stringzilla/<...>.h"` chain resolve exactly as in the CMake/Rust/Python builds (`-I include`).
             publicHeadersPath: ".",
             cSettings: [
                 .define("SZ_DYNAMIC_DISPATCH", to: "1"),
                 .define("SZ_AVOID_LIBC", to: "0"),
                 .define("SZ_DEBUG", to: "0"),
-                .headerSearchPath("include/stringzilla"),
                 .unsafeFlags(["-Wall"]),
             ]
         ),

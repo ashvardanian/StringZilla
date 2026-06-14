@@ -124,7 +124,7 @@ def log_test_environment():
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
     if is_qemu:
-        sve_like = {"sve", "sve2", "sve2+aes"}
+        sve_like = {"sve", "sve2", "sve2aes"}
         current = list(getattr(sz, "__capabilities__", ()))
         desired = tuple(c for c in current if c.lower() not in sve_like)
         if len(desired) != len(current):
@@ -562,6 +562,24 @@ def test_unit_strs_sequence():
     assert [2, 1, 0] == list(lines_sorted.argsort(reverse=True))
     lines_sorted_reverse = lines.sorted(reverse=True)
     assert ["p3", "p2", "p1"] == list(lines_sorted_reverse)
+
+    # Top-K partial sort: only the leading `top` elements are returned.
+    assert ["p1", "p2"] == list(lines.sorted(top=2))
+    assert [0, 1] == list(lines.argsort(top=2, reverse=True))  # two largest: p3, p2
+    assert list(lines.sorted()) == list(lines.sorted(top=999))  # `top` beyond the count sorts everything
+
+    # Case-insensitive, stable ordering (fold-equal strings keep input order).
+    mixed = Str("Banana\napple\nBANANA\nApple").splitlines()
+    assert ["apple", "Apple", "Banana", "BANANA"] == list(mixed.sorted(case_insensitive=True))
+    assert [1, 3, 0, 2] == list(mixed.argsort(case_insensitive=True))
+    assert ["Banana", "BANANA", "apple", "Apple"] == list(mixed.sorted(case_insensitive=True, reverse=True))
+
+    # Keyword-only: positional arguments are rejected.
+    try:
+        lines.sorted(True)
+        assert False, "sorted() should reject positional arguments"
+    except TypeError:
+        pass
 
     # Sampling an array
     sampled = lines.sample(100, seed=42)
@@ -1044,6 +1062,36 @@ def test_hasher_reset_and_hexdigest(seed_value: int):
     assert streamed_hex == re_streamed_hex
 
 
+@pytest.mark.parametrize("body", ["", "x", "hello", "abcdefg", "a" * 17, "a" * 32, "a" * 64, "a" * 100])
+def test_hash_multiseed_equivalence(body: str):
+    from array import array
+
+    seeds_list = [0, 1, 42, 314159, 7, 8, 9, 10, 11]  # > 4 to exercise the 4-wide tail handling
+    seeds = array("Q", seeds_list)
+    expected = tuple(sz.hash(body, s) for s in seeds_list)
+
+    # Tuple-returning form, standalone and as a member of `Str`
+    assert sz.hash_multiseed(body, seeds) == expected
+    assert sz.Str(body).hash_multiseed(seeds) == expected
+
+    # Output-buffer form fills in place and returns None
+    out = array("Q", [0] * len(seeds))
+    assert sz.hash_multiseed(body, seeds, out=out) is None
+    assert tuple(out) == expected
+
+
+def test_hash_multiseed_errors():
+    from array import array
+
+    seeds = array("Q", [1, 2, 3])
+    with pytest.raises(TypeError):  # A plain list of ints is not a uint64 buffer
+        sz.hash_multiseed("x", [1, 2, 3])
+    with pytest.raises(TypeError):  # Wrong item size (32-bit) is rejected
+        sz.hash_multiseed("x", array("I", [1, 2, 3]))
+    with pytest.raises(ValueError):  # Output buffer too small for the seed count
+        sz.hash_multiseed("x", seeds, out=array("Q", [0]))
+
+
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_bytesum_random(length: int, seed_value: int):
@@ -1231,7 +1279,9 @@ def test_strs_to_pyarrow_conversion():
 
     # Calculate expected tape size (sum of all string lengths)
     expected_tape_nbytes = sum(len(s) for s in native_list)
-    assert strs.tape_nbytes == expected_tape_nbytes, f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+    assert (
+        strs.tape_nbytes == expected_tape_nbytes
+    ), f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
 
     # For 5 strings, we should have 6 offsets (N+1 format)
     # Offsets should be either 4 bytes (u32) or 8 bytes (u64) each
@@ -1240,8 +1290,9 @@ def test_strs_to_pyarrow_conversion():
         expected_offsets_nbytes = expected_offsets_count * 8
     else:
         expected_offsets_nbytes = expected_offsets_count * 4
-    assert strs.offsets_nbytes == expected_offsets_nbytes, \
-        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+    assert (
+        strs.offsets_nbytes == expected_offsets_nbytes
+    ), f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
 
     # Create PyArrow buffers from the properties
     tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
@@ -1253,17 +1304,9 @@ def test_strs_to_pyarrow_conversion():
 
     # Create an Arrow array from the buffers
     if strs.offsets_are_large:
-        arrow_array = pa.Array.from_buffers(
-            pa.large_string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
-        arrow_array = pa.Array.from_buffers(
-            pa.string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
 
     # Verify the Arrow array matches the original data
     assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
@@ -1313,17 +1356,9 @@ def test_strs_pyarrow_large_strings():
     offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
 
     if strs.offsets_are_large:
-        arrow_array = pa.Array.from_buffers(
-            pa.large_string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
-        arrow_array = pa.Array.from_buffers(
-            pa.string(),
-            len(native_list),
-            [None, offsets_buffer, tape_buffer]
-        )
+        arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
 
     assert arrow_array.to_pylist() == native_list, "Arrow array should match original list"
 
@@ -1360,11 +1395,7 @@ def test_strs_pyarrow_fragmented_conversion():
     tape_buffer = pa.foreign_buffer(fragmented_strs.tape_address, fragmented_strs.tape_nbytes, fragmented_strs)
     offsets_buffer = pa.foreign_buffer(fragmented_strs.offsets_address, fragmented_strs.offsets_nbytes, fragmented_strs)
 
-    arrow_array = pa.Array.from_buffers(
-        pa.string(),
-        len(fragmented_strs),
-        [None, offsets_buffer, tape_buffer]
-    )
+    arrow_array = pa.Array.from_buffers(pa.string(), len(fragmented_strs), [None, offsets_buffer, tape_buffer])
 
     # The data should match (order is shuffled)
     arrow_list = arrow_array.to_pylist()
@@ -1771,6 +1802,63 @@ def test_utf8_case_fold_all_codepoints():
     )
 
 
+def _reference_case_insensitive_find(haystack_bytes: bytes, needle_folded: bytes, unicode_folds: dict) -> int:
+    """Reference case-insensitive find from UCD rules: byte offset of the first
+    haystack position whose codepoint folds concatenate to exactly `needle_folded`."""
+    if not needle_folded:
+        return 0
+    text = haystack_bytes.decode("utf-8")
+    codepoint_byte_offsets = []
+    codepoint_folds = []
+    byte_offset = 0
+    for char in text:
+        char_bytes = char.encode("utf-8")
+        codepoint_byte_offsets.append(byte_offset)
+        codepoint_folds.append(unicode_folds.get(ord(char), char_bytes))
+        byte_offset += len(char_bytes)
+    for start in range(len(text)):
+        accumulated = b""
+        for index in range(start, len(text)):
+            accumulated += codepoint_folds[index]
+            if len(accumulated) >= len(needle_folded):
+                break
+        if accumulated == needle_folded:
+            return codepoint_byte_offsets[start]
+    return -1
+
+
+def test_utf8_case_insensitive_find_preimages():
+    """Adversarial probes from Unicode 17.0 CaseFolding.txt: for every codepoint whose
+    fold differs from itself, the fold OUTPUT is what a user types as the needle — and
+    the PREIMAGE is what hides in the haystack, placed at chunk-boundary offsets.
+    """
+    # Load Unicode 17.0 case folding rules (downloads and caches automatically)
+    try:
+        unicode_folds = _get_case_folding_rules("17.0.0")
+    except UnicodeDataDownloadError as e:
+        pytest.skip(f"Skipping due to network issue: {e}")
+
+    mismatches = []
+    for codepoint in sorted(unicode_folds):
+        if 0xD800 <= codepoint <= 0xDFFF:
+            continue
+        preimage_bytes = chr(codepoint).encode("utf-8")
+        folded_bytes = unicode_folds[codepoint]
+        if preimage_bytes == folded_bytes:
+            continue  # Identity folds carry no signal here
+        for offset in (0, 30, 62, 63, 64):
+            haystack = b"y" * offset + preimage_bytes + b"tail"
+            expected = _reference_case_insensitive_find(haystack, folded_bytes, unicode_folds)
+            actual = sz.utf8_case_insensitive_find(haystack, folded_bytes)
+            if actual != expected:
+                mismatches.append((f"U+{codepoint:04X}", offset, expected, actual))
+
+    assert not mismatches, (
+        f"{len(mismatches)} case-insensitive find mismatches vs Unicode 17.0 reference. "
+        f"First 10 (codepoint, offset, expected, actual): {mismatches[:10]}"
+    )
+
+
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_utf8_case_fold_random_strings(seed_value: int):
     """Test case folding on random multi-codepoint strings."""
@@ -2174,7 +2262,6 @@ def test_utf8_split_iter_matches_python(text):
     assert sz_result == py_result
 
 
-
 def test_utf8_word_iter_basic():
     """Test basic word iteration."""
     # Simple two words
@@ -2188,6 +2275,15 @@ def test_utf8_word_iter_basic():
     # Single character
     result = [str(w) for w in sz.utf8_word_iter("a")]
     assert result == ["a"]
+
+
+def test_utf8_word_iter_reverse():
+    """Reverse iteration must yield the forward word list in reverse order."""
+    for text in ["", "a", "hello world", "don't", "3,14", "Größe привет мир 你好 42", "the quick brown fox, really!"]:
+        forward = [str(w) for w in sz.utf8_word_iter(text)]
+        reverse = [str(w) for w in sz.utf8_word_iter(text, reverse=True)]
+        assert reverse == list(reversed(forward))
+        assert "".join(forward) == text  # Words tile the input contiguously.
 
 
 def test_utf8_word_iter_skip_empty():
@@ -2269,14 +2365,14 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
 
     # Generate random test strings
     test_chars = (
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789"
-        " \t\n"
-        ".,;:!?'"
-        "äöüß"
-        "αβγδ"
-        "абвг"
+        "abcdefghijklmnopqrstuvwxyz"  #
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  #
+        "0123456789"  #
+        " \t\n"  #
+        ".,;:!?'"  #
+        "äöüß"  #
+        "αβγδ"  #
+        "абвг"  #
     )
 
     for _ in range(50):

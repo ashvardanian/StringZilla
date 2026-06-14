@@ -1,8 +1,8 @@
 /**
- *  @brief  StringZillas is a collection of advanced string algorithms, designed to be used in Big Data applications.
- *          It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
- *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
- *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
+ *  @brief StringZillas is a collection of advanced string algorithms, designed to be used in Big Data applications.
+ *         It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
+ *         On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
+ *         On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
  *
  *  Unlike traditional StringZilla interfaces, all of the functions:
  *  - operators are stateful, and should be reused between calls;
@@ -17,7 +17,7 @@
  *  Those templates also reuse the same pre-configured operators for different thread-pool & executor types,
  *  hardware capability levels.
  *
- *  @file   stringzillas.h
+ *  @file include/stringzillas/stringzillas.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLAS_H_
@@ -319,9 +319,10 @@ typedef void *szs_smith_waterman_scores_t;
  *  @brief Initialize Needleman-Wunsch global alignment scorer.
  *
  *  Creates an engine for computing global alignment scores between sequences using
- *  the Needleman-Wunsch algorithm with configurable substitution matrix and gap costs.
+ *  the Needleman-Wunsch algorithm with a compact, class-based substitution matrix and gap costs.
  *
- *  @param[in] subs 256x256 substitution matrix for scoring character pairs.
+ *  @param[in] byte_to_class Array of 256 bytes mapping each input byte to one of 32 character classes.
+ *  @param[in] class_substitution_costs Row-major 32x32 matrix of signed costs between character classes.
  *  @param[in] open Cost for opening a gap (typically positive).
  *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
  *  @param[in] alloc Memory allocator (NULL for default).
@@ -329,9 +330,10 @@ typedef void *szs_smith_waterman_scores_t;
  *  @param[out] engine Pointer to initialized engine handle.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       //
-    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                           //
+    sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
+    sz_error_cost_t open, sz_error_cost_t extend,                                  //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
     szs_needleman_wunsch_scores_t *engine, char const **error_message);
 
 /**
@@ -392,9 +394,10 @@ SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t e
  *  @brief Initialize Smith-Waterman local alignment scorer.
  *
  *  Creates an engine for computing local alignment scores between sequences using
- *  the Smith-Waterman algorithm with configurable substitution matrix and gap costs.
+ *  the Smith-Waterman algorithm with a compact, class-based substitution matrix and gap costs.
  *
- *  @param[in] subs 256x256 substitution matrix for scoring character pairs.
+ *  @param[in] byte_to_class Array of 256 bytes mapping each input byte to one of 32 character classes.
+ *  @param[in] class_substitution_costs Row-major 32x32 matrix of signed costs between character classes.
  *  @param[in] open Cost for opening a gap (typically positive).
  *  @param[in] extend Cost for extending an existing gap (typically smaller than open).
  *  @param[in] alloc Memory allocator (NULL for default).
@@ -402,9 +405,10 @@ SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t e
  *  @param[out] engine Pointer to initialized engine handle.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         //
-    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                             //
+    sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
+    sz_error_cost_t open, sz_error_cost_t extend,                                  //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
     szs_smith_waterman_scores_t *engine, char const **error_message);
 
 /**
@@ -496,16 +500,17 @@ typedef void *szs_fingerprints_utf8_t;
  *  @param[in] alphabet_size Size of the alphabet (256 for binary, 128 for ASCII, 4 for DNA, 22 for protein).
  *  @param[in] window_widths Array of window widths (NULL for defaults like [3, 4, 5, 7, 9, 11, 15, 31]).
  *  @param[in] window_widths_count Number of window widths in array (0 for defaults).
+ *  @param[in] seed Reproducibility seed; every value derives independent per-dimension multipliers.
  *  @param[in] alloc Memory allocator (NULL for default).
  *  @param[in] capabilities Hardware capabilities mask.
  *  @param[out] engine Pointer to initialized engine handle.
  *  @param[out] error_message Optional output pointer for detailed error information.
  *  @note If alphabet_size is 0, defaults to 256. If window_widths is NULL, uses default widths.
  */
-SZ_DYNAMIC sz_status_t szs_fingerprints_init(                         //
-    sz_size_t dimensions, sz_size_t alphabet_size,                    //
-    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                     //
+    sz_size_t dimensions, sz_size_t alphabet_size,                                //
+    sz_size_t const *window_widths, sz_size_t window_widths_count, sz_u64_t seed, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,             //
     szs_fingerprints_t *engine, char const **error_message);
 
 /**

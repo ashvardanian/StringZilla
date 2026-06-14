@@ -124,13 +124,19 @@ class CudaBuildExtension(NumpyBuildExt):
                 "--compiler-options",
                 "-fPIC",
                 "-std=c++17",
-                "-O3",
+                "-O2",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
                 "-arch=sm_90a",  # Default to Hopper
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
             ]
+
+            # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
+            # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
+            host_cxx = os.environ.get("CUDAHOSTCXX")
+            if host_cxx:
+                nvcc_cmd.extend(["-ccbin", host_cxx])
 
             # Add include directories
             for inc_dir in ext.include_dirs:
@@ -245,13 +251,13 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE2AES", "1" if is_64bit_arm() else "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -301,10 +307,10 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         ("SZ_USE_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
-        ("SZ_USE_ICE", "0"),
+        ("SZ_USE_ICELAKE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -333,10 +339,10 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -366,6 +372,53 @@ elif sys.platform == "win32":
 else:
     compile_args, link_args, macros_args = [], [], []
 
+# The compiled C shims are split into one translation unit per domain (single-CPU) and per
+# algorithm (parallel); each binding lists the full set. See c/stringzilla/ and c/stringzillas/.
+STRINGZILLA_CORE_SOURCES = [
+    "c/stringzilla/runtime.c",
+    "c/stringzilla/compare.c",
+    "c/stringzilla/memory.c",
+    "c/stringzilla/hash.c",
+    "c/stringzilla/find.c",
+    "c/stringzilla/sort.c",
+    "c/stringzilla/intersect.c",
+    "c/stringzilla/utf8_norm.c",
+    "c/stringzilla/utf8_iterate.c",
+    "c/stringzilla/utf8_case_fold.c",
+    "c/stringzilla/utf8_case_insensitive.c",
+]
+STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
+# Per-capability instantiation units: each emits one ISA's (CPU) or tier's (CUDA) heavy engine code exactly once, so
+# the algorithm entry TUs above only declare them `extern` and link against them. Off-platform files compile to empty
+# objects via their internal SZ_USE_* guards. These lists mirror the CMake STRINGZILLAS_*_SOURCES.
+STRINGZILLAS_CPU_PROVIDER_STEMS = [
+    "levenshtein_serial",
+    "levenshtein_icelake",
+    "needleman_wunsch_serial",
+    "needleman_wunsch_icelake",
+    "needleman_wunsch_haswell",
+    "needleman_wunsch_neon",
+    "smith_waterman_serial",
+    "smith_waterman_icelake",
+    "smith_waterman_haswell",
+    "smith_waterman_neon",
+]
+STRINGZILLAS_CUDA_PROVIDER_STEMS = [
+    "levenshtein_cuda",
+    "levenshtein_kepler",
+    "levenshtein_hopper",
+    "needleman_wunsch_cuda",
+    "needleman_wunsch_hopper",
+    "smith_waterman_cuda",
+    "smith_waterman_hopper",
+]
+STRINGZILLAS_CPU_SOURCES = [
+    f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
+]
+STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS] + [
+    f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS
+]
+
 ext_modules = []
 entry_points = {}
 command_class = {}
@@ -375,8 +428,8 @@ if sz_target == "stringzilla":
     ext_modules = [
         Extension(
             "stringzilla",
-            ["python/stringzilla.c", "c/stringzilla.c"],
-            include_dirs=["include"],
+            ["python/stringzilla.c"] + STRINGZILLA_CORE_SOURCES,
+            include_dirs=["include", "c/stringzilla"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
@@ -393,11 +446,11 @@ elif sz_target == "stringzillas-cpus":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cpp"],
-            include_dirs=["include", "c", "fork_union/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CPU_SOURCES,
+            include_dirs=["include", "c/stringzillas", "fork_union/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_ENABLE_NUMA", "0")] + macros_args,
         ),
     ]
     command_class = {"build_ext": NumpyBuildExt}
@@ -406,11 +459,11 @@ elif sz_target == "stringzillas-cuda":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cu"],
-            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
+            include_dirs=["include", "c/stringzillas", "fork_union/include", "/usr/local/cuda/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lstdc++"],
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),
     ]

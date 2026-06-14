@@ -1,6 +1,6 @@
 /**
- *  @brief  Shared definitions for the StringZilla CUDA library.
- *  @file   types.cuh
+ *  @brief Shared definitions for the StringZilla CUDA library.
+ *  @file include/stringzillas/types.cuh
  *  @author Ash Vardanian
  *
  *  The goal for this header is to provide absolutely-minimal set of types and forward-declarations for
@@ -15,6 +15,7 @@
 
 #include "stringzilla/types.hpp"
 
+#include <cuda.h>         // `CUresult`, `cuLaunchKernelEx`, `cuFuncSetAttribute`, `cuGetErrorName`
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
 
 #include <optional>  // `std::optional`
@@ -26,14 +27,14 @@ namespace stringzillas {
 using namespace stringzilla;
 
 /**
- *  @brief  A custom allocator that uses CUDA Unified Memory for allocation.
+ *  @brief A custom allocator that uses CUDA Unified Memory for allocation.
  */
 template <typename value_type_>
 struct unified_alloc {
     using value_type = value_type_;
     using pointer = value_type *;
-    using size_type = sz_size_t;
-    using difference_type = sz_ssize_t;
+    using size_type = size_t;
+    using difference_type = ssize_t;
 
     /*  Those are needed for compatibility with our custom containers.
      *  @see https://en.cppreference.com/w/cpp/memory/allocator_traits
@@ -80,25 +81,83 @@ using unified_alloc_t = unified_alloc<char>;
 /** @brief Returns `true` if the pointer refers to device-accessible memory (Device or Managed/Unified). */
 inline bool is_device_accessible_memory(void const *ptr) noexcept {
     if (!ptr) return true;
-    cudaPointerAttributes attr;
-    cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
-    if (err != cudaSuccess) return false;
-#if defined(CUDART_VERSION) && (CUDART_VERSION >= 10000) // Modern CUDA: use `type`
-    return attr.type == cudaMemoryTypeDevice || attr.type == cudaMemoryTypeManaged;
-#else // Legacy CUDA: `memoryType` and `isManaged`
-    return attr.memoryType == cudaMemoryTypeDevice || attr.isManaged;
-#endif
+    // Driver query: `CU_POINTER_ATTRIBUTE_MEMORY_TYPE` collapses both device and managed/unified memory onto
+    // `CU_MEMORYTYPE_DEVICE` - exactly the two the runtime path accepted (`cudaMemoryTypeDevice`/`Managed`) - and
+    // returns an error for unregistered host pointers, so a successful `CU_MEMORYTYPE_DEVICE` is the accept
+    // decision and everything else (host memory, unregistered pointers, errors) is rejected.
+    CUmemorytype memory_type = static_cast<CUmemorytype>(0);
+    CUresult error = cuPointerGetAttribute(&memory_type, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)ptr);
+    if (error != CUDA_SUCCESS) return false;
+    return memory_type == CU_MEMORYTYPE_DEVICE;
 }
 
 struct cuda_status_t {
     status_t status = status_t::success_k;
     cudaError_t cuda_error = cudaSuccess;
+    CUresult driver_error = CUDA_SUCCESS;
     float elapsed_milliseconds = 0.0;
 
     inline operator status_t() const noexcept { return status; }
 };
 
+/**
+ *  @brief Maps a CUDA runtime error into a first-class `cuda_status_t`, always carrying the `cudaError_t`.
+ *
+ *  Launch-configuration faults (too much shared memory, oversized grid, bad block geometry, etc.) used to
+ *  collapse into an opaque `status_t::unknown_k`, which made misconfigured launches indistinguishable from
+ *  genuine internal failures. We classify the common configuration faults into actionable statuses, while
+ *  forwarding the raw `cudaError_t` so the caller can always print `cudaGetErrorName`/`cudaGetErrorString`.
+ */
+inline cuda_status_t make_cuda_status(cudaError_t cuda_error) noexcept {
+    if (cuda_error == cudaSuccess) return {status_t::success_k, cudaSuccess};
+    status_t status = status_t::unknown_k;
+    switch (cuda_error) {
+        // Out-of-resource faults map onto allocation failures: the launch asked for more registers,
+        // shared memory, or device memory than the multiprocessor (or the device) can provide.
+    case cudaErrorMemoryAllocation:
+    case cudaErrorLaunchOutOfResources:
+        status = status_t::bad_alloc_k;
+        break;
+        // Bad launch geometry (grid/block dimensions, shared-memory size, cooperative co-residency) is a
+        // dimension/configuration problem, distinct from a generic unknown failure.
+    case cudaErrorInvalidValue:
+    case cudaErrorInvalidConfiguration: status = status_t::unexpected_dimensions_k; break;
+    default: status = status_t::unknown_k; break;
+    }
+    return {status, cuda_error};
+}
+
+/**
+ *  @brief Maps a CUDA @b driver error (`CUresult`) into a first-class `cuda_status_t`, carrying the `CUresult`.
+ *
+ *  The driver launch entry points (`cuLaunchKernelEx`, `cuFuncSetAttribute`) return `CUresult` rather than the
+ *  runtime `cudaError_t`. We classify the common launch-configuration faults into actionable statuses, mirroring
+ *  the `make_cuda_status(cudaError_t)` mapping, while forwarding the raw `CUresult` so the caller can always
+ *  print `cuGetErrorName`/`cuGetErrorString`.
+ */
+inline cuda_status_t make_cuda_status(CUresult driver_error) noexcept {
+    if (driver_error == CUDA_SUCCESS) return {status_t::success_k, cudaSuccess, CUDA_SUCCESS};
+    status_t status = status_t::unknown_k;
+    switch (driver_error) {
+        // An out-of-memory fault maps onto an allocation failure, just like the runtime path.
+    case CUDA_ERROR_OUT_OF_MEMORY:
+        status = status_t::bad_alloc_k;
+        break;
+        // Bad launch geometry (oversized grid/block, shared-memory overflow, malformed image) is a
+        // dimension/configuration problem, distinct from a generic unknown failure.
+    case CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES:
+    case CUDA_ERROR_INVALID_VALUE:
+    case CUDA_ERROR_INVALID_IMAGE: status = status_t::unexpected_dimensions_k; break;
+    default: status = status_t::unknown_k; break;
+    }
+    return {status, cudaSuccess, driver_error};
+}
+
 inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
+    // Runtime API by design: this is a one-time startup bulk query of ~9 device properties. The driver
+    // equivalent is one `cuDeviceGetAttribute` per field for no benefit - the runtime (`cudart`) is already a
+    // hard dependency via `cudaGetFuncBySymbol` (the only bridge from a registered `__global__` to a
+    // `CUfunction`), so the whole launch/sync hot path is CU* while these cold setup calls stay runtime.
     cudaDeviceProp prop;
     cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device_id);
 
@@ -134,15 +193,39 @@ class cuda_executor_t {
 
   public:
     constexpr cuda_executor_t() noexcept = default;
-    constexpr cuda_executor_t(cuda_executor_t const &) noexcept = default;
-    constexpr cuda_executor_t &operator=(cuda_executor_t const &) noexcept = default;
+
+    // The executor owns its `cudaStream_t`. Copying would alias a single stream handle across instances and let
+    // one copy's destructor tear down a stream the others still reference, so the executor is move-only: callers
+    // hold one owner and hand it to the engines by `const &`.
+    cuda_executor_t(cuda_executor_t const &) = delete;
+    cuda_executor_t &operator=(cuda_executor_t const &) = delete;
+    cuda_executor_t(cuda_executor_t &&other) noexcept : stream_(other.stream_), device_id_(other.device_id_) {
+        other.stream_ = 0;
+        other.device_id_ = 0;
+    }
+    cuda_executor_t &operator=(cuda_executor_t &&other) noexcept {
+        if (this != &other) {
+            if (stream_) cuStreamDestroy((CUstream)stream_);
+            stream_ = other.stream_;
+            device_id_ = other.device_id_;
+            other.stream_ = 0;
+            other.device_id_ = 0;
+        }
+        return *this;
+    }
+    ~cuda_executor_t() noexcept {
+        if (stream_) cuStreamDestroy((CUstream)stream_);
+    }
 
     cuda_status_t try_scheduling(int device_id) noexcept {
         device_id_ = -1; // ? Invalid device ID
+        // `cudaSetDevice` selects the device and makes its primary context current on this thread - the same
+        // context the runtime registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves
+        // against. The stream itself is then created through the driver so the whole launch/sync path is CU*.
         cudaError_t switching_error = cudaSetDevice(device_id);
         if (switching_error != cudaSuccess) return {status_t::unknown_k, switching_error};
-        cudaError_t creation_error = cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking);
-        if (creation_error != cudaSuccess) return {status_t::unknown_k, creation_error};
+        CUresult creation_error = cuStreamCreate((CUstream *)&stream_, CU_STREAM_NON_BLOCKING);
+        if (creation_error != CUDA_SUCCESS) return make_cuda_status(creation_error);
         device_id_ = device_id;
         return {status_t::success_k, cudaSuccess};
     }
@@ -153,23 +236,181 @@ class cuda_executor_t {
 };
 
 /**
- *  @brief  Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
- *  @see    https://stackoverflow.com/a/40198552/2766161
+ *  @brief Pair of CUDA driver events timing a launch; created once on first use and reused across calls.
+ *
+ *  Events need a current context, so they are created lazily inside the first `operator()` (via `ensure_created`)
+ *  rather than at construction. `CU_EVENT_BLOCKING_SYNC` lets the drain sleep the host thread instead of spinning.
  */
-__forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
+struct cuda_timer_t {
+    CUevent start_event = nullptr;
+    CUevent stop_event = nullptr;
+
+    cuda_timer_t() noexcept = default;
+    ~cuda_timer_t() noexcept {
+        if (start_event) cuEventDestroy(start_event);
+        if (stop_event) cuEventDestroy(stop_event);
+    }
+    cuda_timer_t(cuda_timer_t const &) = delete;
+    cuda_timer_t &operator=(cuda_timer_t const &) = delete;
+    cuda_timer_t(cuda_timer_t &&other) noexcept : start_event(other.start_event), stop_event(other.stop_event) {
+        other.start_event = nullptr, other.stop_event = nullptr;
+    }
+    cuda_timer_t &operator=(cuda_timer_t &&other) noexcept {
+        if (this != &other) {
+            if (start_event) cuEventDestroy(start_event);
+            if (stop_event) cuEventDestroy(stop_event);
+            start_event = other.start_event, stop_event = other.stop_event;
+            other.start_event = nullptr, other.stop_event = nullptr;
+        }
+        return *this;
+    }
+
+    /** @brief Creates the two events on first use; a no-op on every later call. */
+    inline CUresult ensure_created() noexcept {
+        if (start_event) return CUDA_SUCCESS;
+        CUresult start_error = cuEventCreate(&start_event, CU_EVENT_BLOCKING_SYNC);
+        if (start_error != CUDA_SUCCESS) return start_error;
+        return cuEventCreate(&stop_event, CU_EVENT_BLOCKING_SYNC);
+    }
+
+    inline CUresult record_start(cudaStream_t stream) noexcept { return cuEventRecord(start_event, (CUstream)stream); }
+    inline CUresult record_stop(cudaStream_t stream) noexcept { return cuEventRecord(stop_event, (CUstream)stream); }
+    inline CUresult synchronize(cudaStream_t stream) noexcept { return cuStreamSynchronize((CUstream)stream); }
+    inline float elapsed_milliseconds() noexcept {
+        float milliseconds = 0;
+        cuEventElapsedTime(&milliseconds, start_event, stop_event);
+        return milliseconds;
+    }
+};
+
+/**
+ *  @brief Sizes a grid for an already-resolved `CUfunction` via the driver occupancy query.
+ *
+ *  The warp tier's shared memory varies with the data, so its grid is sized per launch even though the handle was
+ *  resolved up front; the driver query takes the `CUfunction` directly (the runtime query needs the host symbol).
+ */
+inline cuda_status_t occupancy_grid_for(unsigned &blocks_per_grid, CUfunction function, unsigned threads_per_block,
+                                        unsigned shared_memory_bytes, gpu_specs_t const &specs) noexcept {
+    int blocks_per_multiprocessor = 0;
+    CUresult occupancy_error = cuOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_multiprocessor, function,
+                                                                           static_cast<int>(threads_per_block),
+                                                                           static_cast<size_t>(shared_memory_bytes));
+    if (occupancy_error != CUDA_SUCCESS) return make_cuda_status(occupancy_error);
+    if (blocks_per_multiprocessor < 1) blocks_per_multiprocessor = 1;
+    blocks_per_grid = static_cast<unsigned>(blocks_per_multiprocessor) * specs.streaming_multiprocessors;
+    return {status_t::success_k, cudaSuccess};
+}
+
+/**
+ *  @brief A resolved launch shape: a kernel's driver handle plus its co-resident block count.
+ *
+ *  Bridging a runtime `__global__` symbol to a `CUfunction`, raising its shared-memory ceiling, and querying its
+ *  occupancy are invariant for a given (capability, kernel-shape, device). Each engine resolves its kernels once
+ *  into a `kernel_table` and reads the handles back on every later launch - mirroring `sz_dispatch_table_*`.
+ */
+struct kernel_shape_t {
+    CUfunction function = nullptr;
+    unsigned blocks_per_multiprocessor = 0; // ? 0 when the grid depends on per-launch shared memory (warp tier)
+};
+
+/**
+ *  @brief Resolves one kernel symbol into a `kernel_shape_t`: its `CUfunction`, an optionally-raised shared-memory
+ *         ceiling, and - when @p precompute_occupancy - its co-resident block count for fixed-shape kernels.
+ */
+inline cuda_status_t resolve_kernel_shape(kernel_shape_t &shape, void const *kernel_symbol, unsigned threads_per_block,
+                                          unsigned shared_memory_ceiling, bool precompute_occupancy) noexcept {
+    cudaFunction_t function = nullptr;
+    // Runtime-only bridge: maps a runtime-registered `__global__` host symbol to a `CUfunction`. The driver API
+    // has no equivalent for runtime-compiled/fatbin-registered kernels, so the rest of the path stays CU*.
+    cudaError_t function_error = cudaGetFuncBySymbol(&function, kernel_symbol);
+    if (function_error != cudaSuccess) return make_cuda_status(function_error);
+    shape.function = function;
+    if (shared_memory_ceiling) {
+        // The opt-in limit covers static + dynamic shared memory, so the dynamic ceiling we may raise is the
+        // device opt-in maximum minus the kernel's own static shared usage (e.g. a substitution-cost table).
+        int static_shared = 0;
+        cuFuncGetAttribute(&static_shared, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, (CUfunction)function);
+        unsigned const dynamic_ceiling = shared_memory_ceiling > (unsigned)static_shared
+                                             ? shared_memory_ceiling - (unsigned)static_shared
+                                             : 0u;
+        CUresult attribute_error = cuFuncSetAttribute((CUfunction)function,
+                                                      CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, dynamic_ceiling);
+        if (attribute_error != CUDA_SUCCESS) return make_cuda_status(attribute_error);
+    }
+    if (precompute_occupancy) {
+        int blocks_per_multiprocessor = 0;
+        // The driver query takes the already-resolved `CUfunction`, matching the rest of the launch path.
+        CUresult occupancy_error = cuOccupancyMaxActiveBlocksPerMultiprocessor(
+            &blocks_per_multiprocessor, (CUfunction)function, static_cast<int>(threads_per_block),
+            static_cast<size_t>(shared_memory_ceiling));
+        if (occupancy_error != CUDA_SUCCESS) return make_cuda_status(occupancy_error);
+        if (blocks_per_multiprocessor < 1) blocks_per_multiprocessor = 1;
+        shape.blocks_per_multiprocessor = static_cast<unsigned>(blocks_per_multiprocessor);
+    }
+    return {status_t::success_k, cudaSuccess};
+}
+
+/**
+ *  @brief Fluent builder over `CUlaunchConfig` + `cuLaunchKernelEx`, optionally cooperative.
+ *
+ *  Collapses the verbose `CUlaunchConfig{}` field-by-field setup (and the separate `CU_LAUNCH_ATTRIBUTE_COOPERATIVE`
+ *  attribute block) into a single expression. The cooperative attribute lives inside the builder, so the temporary
+ *  must outlive the `launch()` call - which it does, since both happen within the same full expression.
+ */
+struct cuda_launch_t {
+    CUlaunchConfig config_ {};
+    CUlaunchAttribute cooperative_attribute_ {};
+
+    cuda_launch_t() noexcept {
+        config_.gridDimY = config_.gridDimZ = 1;
+        config_.blockDimY = config_.blockDimZ = 1;
+    }
+    inline cuda_launch_t &grid(unsigned blocks) noexcept {
+        config_.gridDimX = blocks;
+        return *this;
+    }
+    inline cuda_launch_t &block(unsigned threads) noexcept {
+        config_.blockDimX = threads;
+        return *this;
+    }
+    inline cuda_launch_t &shared(unsigned bytes) noexcept {
+        config_.sharedMemBytes = bytes;
+        return *this;
+    }
+    inline cuda_launch_t &stream(cudaStream_t stream) noexcept {
+        config_.hStream = (CUstream)stream;
+        return *this;
+    }
+    inline cuda_launch_t &cooperative() noexcept {
+        cooperative_attribute_.id = CU_LAUNCH_ATTRIBUTE_COOPERATIVE;
+        cooperative_attribute_.value.cooperative = 1;
+        config_.attrs = &cooperative_attribute_;
+        config_.numAttrs = 1;
+        return *this;
+    }
+    inline CUresult launch(cudaFunction_t function, void **arguments) noexcept {
+        return cuLaunchKernelEx(&config_, function, arguments, nullptr);
+    }
+};
+
+/**
+ *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
+ *  @see https://stackoverflow.com/a/40198552/2766161
+ */
+__forceinline__ __device__ u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
     // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
     // four consecutive bytes into a 32-bit register.
-    sz_u32_vec_t result;
-    asm("{\n\t"
-        "   .reg .b64    aligned_ptr;\n\t"
-        "   .reg .b32    low, high, alignment;\n\t"
-        "   and.b64      aligned_ptr, %1, 0xfffffffffffffffc;\n\t"
-        "   ld.u32       low, [aligned_ptr];\n\t"
-        "   ld.u32       high, [aligned_ptr+4];\n\t"
-        "   cvt.u32.u64  alignment, %1;\n\t"
-        "   prmt.b32.f4e %0, low, high, alignment;\n\t"
-        "}"
-        : "=r"(result.u32)
+    u32_vec_t result;
+    asm("{\n\t"                                                    //
+        "   .reg .b64    aligned_ptr;\n\t"                         //
+        "   .reg .b32    low, high, alignment;\n\t"                //
+        "   and.b64      aligned_ptr, %1, 0xfffffffffffffffc;\n\t" //
+        "   ld.u32       low, [aligned_ptr];\n\t"                  //
+        "   ld.u32       high, [aligned_ptr+4];\n\t"               //
+        "   cvt.u32.u64  alignment, %1;\n\t"                       //
+        "   prmt.b32.f4e %0, low, high, alignment;\n\t"            //
+        "}"                                                        //
+        : "=r"(result.u32)                                         //
         : "l"(ptr));
     return result;
 }
@@ -181,9 +422,9 @@ enum warp_size_t : unsigned {
 };
 
 /**
- *  @brief  Defines the upper bound on the number of warps per multi processor we may theoretically
- *          be able to run as part of one or many blocks. Generally this number depends on the amount
- *          of shared memory available on the device, and the amount of reserved memory per block.
+ *  @brief Defines the upper bound on the number of warps per multi processor we may theoretically
+ *         be able to run as part of one or many blocks. Generally this number depends on the amount
+ *         of shared memory available on the device, and the amount of reserved memory per block.
  */
 enum warp_tasks_density_t : unsigned {
     warps_working_together_k = 0,
@@ -219,9 +460,9 @@ struct speculative_warp_tasks_density_t {
 };
 
 /**
- *  @brief  Multiple warps can run concurrently on the same multiprocessor, which helps hide the latency
- *          of memory operations. It only happens, if we have enough shared memory, so we may want to reduce
- *          the density of the tasks proportional to the current GPU's speculative factor.
+ *  @brief Multiple warps can run concurrently on the same multiprocessor, which helps hide the latency
+ *         of memory operations. It only happens, if we have enough shared memory, so we may want to reduce
+ *         the density of the tasks proportional to the current GPU's speculative factor.
  */
 inline speculative_warp_tasks_density_t speculation_friendly_density(warp_tasks_density_t maximum_density) noexcept {
     // if (maximum_density >= 16) return {static_cast<warp_tasks_density_t>(maximum_density / 16), 16};
@@ -285,14 +526,14 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     warp_tasks_groups<task_t> result;
 
     // Determine if there are tasks that require the whole device memory.
-    size_t const device_level_tasks =
+    size_t const device_level_tasks = //
         std::partition(tasks.begin(), tasks.end(),
                        [](task_t const &task) { return task.density == warps_working_together_k; }) -
         tasks.begin();
 
     // Determine the number of empty tasks and put them aside.
     auto const warp_tasks_begin = tasks.begin() + device_level_tasks;
-    size_t const non_empty_tasks =
+    size_t const non_empty_tasks = //
         std::partition(warp_tasks_begin, tasks.end(),
                        [](task_t const &task) { return task.density != infinite_warps_per_multiprocessor_k; }) -
         warp_tasks_begin;
@@ -316,7 +557,7 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     while (tasks_remaining > 1) { // 1 task or less ~ nothing to merge
         size_t const first_task_index = result.warp_level_tasks.size() - tasks_remaining;
         task_t &indicative_task = tasks[first_task_index];
-        size_t const tasks_with_same_density =
+        size_t const tasks_with_same_density = //
             std::find_if(&indicative_task, result.warp_level_tasks.end(),
                          [&](task_t const &task) {
                              return task.bytes_per_cell != indicative_task.bytes_per_cell ||

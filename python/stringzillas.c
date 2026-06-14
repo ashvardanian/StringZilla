@@ -142,9 +142,10 @@ static inline sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
 
     if (!success) {
         // Always fatal: GPU kernels require unified/device-accessible memory
-        PyErr_SetString(PyExc_RuntimeError,
-                        "Device memory mismatch: GPU kernels require unified/device-accessible memory. "
-                        "Consider reducing input size, freeing memory, or using CPU capabilities.");
+        PyErr_SetString( //
+            PyExc_RuntimeError,
+            "Device memory mismatch: GPU kernels require unified/device-accessible memory. " //
+            "Consider reducing input size, freeing memory, or using CPU capabilities.");
         return sz_false_k;
     }
     return sz_true_k;
@@ -243,16 +244,20 @@ static PyObject *DeviceScope_repr(DeviceScope *self) {
     return PyUnicode_FromFormat("DeviceScope(%s)", self->description);
 }
 
-static char const doc_DeviceScope[] = //
-    "DeviceScope(cpu_cores=None, gpu_device=None)\n"
-    "\n"
-    "Context for controlling execution on CPU cores or GPU devices.\n"
-    "\n"
-    "Args:\n"
-    "  cpu_cores (int, optional): Number of CPU cores to use, or zero for all cores.\n"
-    "  gpu_device (int, optional): GPU device ID to target.\n"
-    "\n"
-    "Note: Cannot specify both cpu_cores and gpu_device.";
+static char const doc_DeviceScope[] =                                                   //
+    "DeviceScope(cpu_cores=None, gpu_device=None)\n"                                    //
+    "\n"                                                                                //
+    "Context for controlling execution on CPU cores or GPU devices.\n"                  //
+    "\n"                                                                                //
+    "Args:\n"                                                                           //
+    "  cpu_cores (int, optional): Number of CPU cores to use, or zero for all cores.\n" //
+    "  gpu_device (int, optional): GPU device ID to target.\n"                          //
+    "\n"                                                                                //
+    "Note: Cannot specify both cpu_cores and gpu_device.\n"                             //
+    "\n"                                                                                //
+    "Examples:\n"                                                                       //
+    "  >>> import stringzillas as szs\n"                                                //
+    "  >>> scope = szs.DeviceScope(cpu_cores=4)  # restrict engines to 4 CPU cores";
 
 static PyTypeObject DeviceScopeType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.DeviceScope",
@@ -409,8 +414,8 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
     }
 
     char const *error_detail = NULL;
-    sz_status_t status =
-        szs_levenshtein_distances_init(match, mismatch, open, extend, NULL, capabilities, &self->handle, &error_detail);
+    sz_status_t status = szs_levenshtein_distances_init(match, mismatch, open, extend, NULL, capabilities,
+                                                        &self->handle, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Levenshtein distances initialization");
@@ -510,10 +515,11 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(PyExc_TypeError,
-                     "Expected stringzilla.Strs objects, got %s and %s. "
-                     "Convert using: stringzilla.Strs(your_string_list)",
-                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
+        PyErr_Format( //
+            PyExc_TypeError,
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
+            Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -573,45 +579,49 @@ cleanup:
     return NULL;
 }
 
-static char const doc_LevenshteinDistances[] = //
-    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"
-    "\n"
-    "Compute Levenshtein edit distances between pairs of binary strings.\n"
-    "\n"
-    "Args:\n"
-    "  match (int): Cost for matching characters (default: 0).\n"
-    "  mismatch (int): Cost for mismatched characters (default: 1).\n"
-    "  open (int): Cost for opening a gap (default: 1).\n"
-    "  extend (int): Cost for extending a gap (default: 1).\n"
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
-    "                                       or a DeviceScope for automatic capability inference.\n"
-    "\n"
-    "Call with:\n"
-    "  a (sequence): First sequence of strings.\n"
-    "  b (sequence): Second sequence of strings.\n"
-    "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.\n"
-    "\n"
-    "Examples:\n"
-    "  ```python\n"
-    "  # Minimal CPU example with auto-inferred capabilities\n"
-    "  import stringzilla as sz, stringzillas as szs\n"
-    "  engine = szs.LevenshteinDistances()\n"
-    "  strings_a = sz.Strs(['hello', 'world'])\n"
-    "  strings_b = sz.Strs(['hallo', 'word'])\n"
-    "  distances = engine(strings_a, strings_b)\n"
-    "  \n"
-    "  # GPU example with custom costs and auto-inferred capabilities\n"
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.LevenshteinDistances(match=0, mismatch=2, open=3, extend=1, capabilities=gpu_scope)\n"
-    "  distances = engine(strings_a, strings_b, device=gpu_scope)\n"
-    "  ```";
+static char const doc_LevenshteinDistances[] =                                                          //
+    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"                  //
+    "\n"                                                                                                //
+    "Compute Levenshtein edit distances between pairs of binary strings.\n"                             //
+    "\n"                                                                                                //
+    "Args:\n"                                                                                           //
+    "  match (int): Cost for matching characters (default: 0).\n"                                       //
+    "  mismatch (int): Cost for mismatched characters (default: 1).\n"                                  //
+    "  open (int): Cost for opening a gap (default: 1).\n"                                              //
+    "  extend (int): Cost for extending a gap (default: 1).\n"                                          //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"             //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n" //
+    "                                       or a DeviceScope for automatic capability inference.\n"     //
+    "\n"                                                                                                //
+    "Call with:\n"                                                                                      //
+    "  a (sequence): First sequence of strings.\n"                                                      //
+    "  b (sequence): Second sequence of strings.\n"                                                     //
+    "  device (DeviceScope, optional): Device execution context.\n"                                     //
+    "  out (array, optional): Output buffer for results.\n"                                             //
+    "\n"                                                                                                //
+    "Examples:\n"                                                                                       //
+    "  >>> # Minimal CPU example with auto-inferred capabilities\n"                                     //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                             //
+    "  >>> engine = szs.LevenshteinDistances()\n"                                                       //
+    "  >>> strings_a = sz.Strs(['hello', 'world'])\n"                                                   //
+    "  >>> strings_b = sz.Strs(['hallo', 'word'])\n"                                                    //
+    "  >>> distances = engine(strings_a, strings_b)\n"                                                  //
+    "  >>> # GPU example with custom costs and auto-inferred capabilities\n"                            //
+    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                               //
+    "  >>> engine = szs.LevenshteinDistances(match=0, mismatch=2, open=3, extend=1, capabilities=gpu_scope)  # " "docte"
+                                                                                                                 "st: "
+                                                                                                                 "+SKIP"
+                                                                                                                 "\n" //
+    "  >>> distances = engine(strings_a, strings_b, device=gpu_scope)  # doctest: +SKIP";
+static char const doc_capabilities[] =                                          //
+    "Hardware backends and SIMD capabilities this engine selects at runtime.\n" //
+    "\n"                                                                        //
+    "Returns:\n"                                                                //
+    "  str: The detected CPU/GPU features driving kernel dispatch.";
 
 static PyGetSetDef LevenshteinDistances_getsetters[] = {
-    {"__capabilities__", (getter)LevenshteinDistances_get_capabilities, NULL,
-     "Hardware capabilities used by this engine", NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)LevenshteinDistances_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                             /* Sentinel */
 };
 
 static PyTypeObject LevenshteinDistancesType = {
@@ -787,10 +797,11 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(PyExc_TypeError,
-                     "Expected stringzilla.Strs objects, got %s and %s. "
-                     "Convert using: stringzilla.Strs(your_string_list)",
-                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
+        PyErr_Format( //
+            PyExc_TypeError,
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
+            Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -850,45 +861,40 @@ cleanup:
     return NULL;
 }
 
-static char const doc_LevenshteinDistancesUTF8[] = //
-    "LevenshteinDistancesUTF8(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"
-    "\n"
-    "Vectorized UTF-8 Levenshtein distance calculator with affine gap penalties.\n"
-    "Computes edit distances between pairs of UTF-8 encoded strings.\n"
-    "\n"
-    "Args:\n"
-    "  match (int): Cost of matching characters (default 0).\n"
-    "  mismatch (int): Cost of mismatched characters (default 1).\n"
-    "  open (int): Cost of opening a gap (default 1).\n"
-    "  extend (int): Cost of extending a gap (default 1).\n"
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
-    "                                       or a DeviceScope for automatic capability inference.\n"
-    "\n"
-    "Call with:\n"
-    "  a (sequence): First sequence of UTF-8 strings.\n"
-    "  b (sequence): Second sequence of UTF-8 strings.\n"
-    "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.\n"
-    "\n"
-    "Examples:\n"
-    "  ```python\n"
-    "  # Minimal CPU example with Unicode strings\n"
-    "  import stringzilla as sz, stringzillas as szs\n"
-    "  engine = szs.LevenshteinDistancesUTF8()\n"
-    "  strings_a = sz.Strs(['café', 'naïve'])\n"
-    "  strings_b = sz.Strs(['caffe', 'naive'])\n"
-    "  distances = engine(strings_a, strings_b)\n"
-    "  \n"
-    "  # GPU example with high mismatch penalty\n"
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.LevenshteinDistancesUTF8(mismatch=5, capabilities=gpu_scope)\n"
-    "  distances = engine(strings_a, strings_b, device=gpu_scope)\n"
-    "  ```";
-
+static char const doc_LevenshteinDistancesUTF8[] =                                                        //
+    "LevenshteinDistancesUTF8(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"                //
+    "\n"                                                                                                  //
+    "Vectorized UTF-8 Levenshtein distance calculator with affine gap penalties.\n"                       //
+    "Computes edit distances between pairs of UTF-8 encoded strings.\n"                                   //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  match (int): Cost of matching characters (default 0).\n"                                           //
+    "  mismatch (int): Cost of mismatched characters (default 1).\n"                                      //
+    "  open (int): Cost of opening a gap (default 1).\n"                                                  //
+    "  extend (int): Cost of extending a gap (default 1).\n"                                              //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"               //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"   //
+    "                                       or a DeviceScope for automatic capability inference.\n"       //
+    "\n"                                                                                                  //
+    "Call with:\n"                                                                                        //
+    "  a (sequence): First sequence of UTF-8 strings.\n"                                                  //
+    "  b (sequence): Second sequence of UTF-8 strings.\n"                                                 //
+    "  device (DeviceScope, optional): Device execution context.\n"                                       //
+    "  out (array, optional): Output buffer for results.\n"                                               //
+    "\n"                                                                                                  //
+    "Examples:\n"                                                                                         //
+    "  >>> # Minimal CPU example with Unicode strings\n"                                                  //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                               //
+    "  >>> engine = szs.LevenshteinDistancesUTF8()\n"                                                     //
+    "  >>> strings_a = sz.Strs(['café', 'naïve'])\n"                                                      //
+    "  >>> strings_b = sz.Strs(['caffe', 'naive'])\n"                                                     //
+    "  >>> distances = engine(strings_a, strings_b)\n"                                                    //
+    "  >>> # GPU example with high mismatch penalty\n"                                                    //
+    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                 //
+    "  >>> engine = szs.LevenshteinDistancesUTF8(mismatch=5, capabilities=gpu_scope)  # doctest: +SKIP\n" //
+    "  >>> distances = engine(strings_a, strings_b, device=gpu_scope)  # doctest: +SKIP";
 static PyGetSetDef LevenshteinDistancesUTF8_getsetters[] = {
-    {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL,
-     "Hardware capabilities used by this engine", NULL},
+    {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL, doc_capabilities, NULL}, //
     {NULL} /* Sentinel */
 };
 
@@ -938,38 +944,57 @@ static PyObject *NeedlemanWunsch_new(PyTypeObject *type, PyObject *args, PyObjec
 }
 
 static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject *kwargs) {
-    PyObject *substitution_matrix_obj = NULL;
+    PyObject *byte_to_class_obj = NULL;
+    PyObject *class_substitution_costs_obj = NULL;
     sz_error_cost_t open = -1, extend = -1;
     PyObject *capabilities_tuple = NULL;
     sz_capability_t capabilities = default_hardware_capabilities;
 
-    // Parse arguments: substitution_matrix, open, extend, capabilities
-    static char *kwlist[] = {"substitution_matrix", "open", "extend", "capabilities", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|iiO", kwlist, &substitution_matrix_obj, &open, &extend,
-                                     &capabilities_tuple))
+    // Parse arguments: byte_to_class, class_substitution_costs, open, extend, capabilities
+    static char *kwlist[] = {"byte_to_class", "class_substitution_costs", "open", "extend", "capabilities", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iiO", kwlist, &byte_to_class_obj, &class_substitution_costs_obj,
+                                     &open, &extend, &capabilities_tuple))
         return -1;
 
-    // Validate substitution matrix (should be a 256x256 numpy array)
-    if (!numpy_available || !PyArray_Check(substitution_matrix_obj)) {
-        PyErr_SetString(PyExc_TypeError, "substitution_matrix must be a NumPy array");
-        return -1;
-    }
-
-    PyArrayObject *subs_array = (PyArrayObject *)substitution_matrix_obj;
-    if (PyArray_NDIM(subs_array) != 2 || PyArray_DIM(subs_array, 0) != 256 || PyArray_DIM(subs_array, 1) != 256) {
-        PyErr_SetString(PyExc_ValueError, "substitution_matrix must be a 256x256 array");
+    // Validate byte-to-class map (should be a 256-element uint8 numpy array)
+    if (!numpy_available || !PyArray_Check(byte_to_class_obj)) {
+        PyErr_SetString(PyExc_TypeError, "byte_to_class must be a NumPy array");
         return -1;
     }
-
-    if (PyArray_TYPE(subs_array) != NPY_INT8) {
-        PyErr_SetString(PyExc_TypeError, "substitution_matrix must have int8 dtype");
+    PyArrayObject *byte_to_class_array = (PyArrayObject *)byte_to_class_obj;
+    if (PyArray_NDIM(byte_to_class_array) != 1 || PyArray_DIM(byte_to_class_array, 0) != 256) {
+        PyErr_SetString(PyExc_ValueError, "byte_to_class must be a 256-element array");
         return -1;
     }
-
-    // Check that array is C-contiguous for safe memory access
-    if (!PyArray_IS_C_CONTIGUOUS(subs_array)) {
+    if (PyArray_TYPE(byte_to_class_array) != NPY_UINT8) {
+        PyErr_SetString(PyExc_TypeError, "byte_to_class must have uint8 dtype");
+        return -1;
+    }
+    if (!PyArray_IS_C_CONTIGUOUS(byte_to_class_array)) {
         PyErr_SetString(PyExc_ValueError,
-                        "substitution_matrix must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
+                        "byte_to_class must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
+        return -1;
+    }
+
+    // Validate class substitution costs (should be a 32x32 int8 numpy array)
+    if (!PyArray_Check(class_substitution_costs_obj)) {
+        PyErr_SetString(PyExc_TypeError, "class_substitution_costs must be a NumPy array");
+        return -1;
+    }
+    PyArrayObject *class_costs_array = (PyArrayObject *)class_substitution_costs_obj;
+    if (PyArray_NDIM(class_costs_array) != 2 || PyArray_DIM(class_costs_array, 0) != 32 ||
+        PyArray_DIM(class_costs_array, 1) != 32) {
+        PyErr_SetString(PyExc_ValueError, "class_substitution_costs must be a 32x32 array");
+        return -1;
+    }
+    if (PyArray_TYPE(class_costs_array) != NPY_INT8) {
+        PyErr_SetString(PyExc_TypeError, "class_substitution_costs must have int8 dtype");
+        return -1;
+    }
+    if (!PyArray_IS_C_CONTIGUOUS(class_costs_array)) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            "class_substitution_costs must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
         return -1;
     }
 
@@ -979,16 +1004,16 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
     }
 
     // Initialize the engine
-    sz_error_cost_t *subs_data = (sz_error_cost_t *)PyArray_DATA(subs_array);
+    sz_u8_t *byte_to_class_data = (sz_u8_t *)PyArray_DATA(byte_to_class_array);
+    sz_error_cost_t *class_costs_data = (sz_error_cost_t *)PyArray_DATA(class_costs_array);
 
-    // Create a simple checksum of the substitution matrix for the description
+    // Create a simple checksum of the class cost matrix for the description
     sz_u32_t subs_checksum = 0;
-    for (int i = 0; i < 256; i += 16)                      // Sample every 16th element
-        subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
+    for (int i = 0; i < 32; ++i) subs_checksum += (sz_u32_t)class_costs_data[i * 32 + i]; // Diagonal elements
 
     char const *error_detail = NULL;
-    sz_status_t status =
-        szs_needleman_wunsch_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle, &error_detail);
+    sz_status_t status = szs_needleman_wunsch_scores_init(byte_to_class_data, class_costs_data, open, extend, NULL,
+                                                          capabilities, &self->handle, &error_detail);
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "NeedlemanWunsch initialization");
         return -1;
@@ -1084,10 +1109,11 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(PyExc_TypeError,
-                     "Expected stringzilla.Strs objects, got %s and %s. "
-                     "Convert using: stringzilla.Strs(your_string_list)",
-                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
+        PyErr_Format( //
+            PyExc_TypeError,
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
+            Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -1149,45 +1175,42 @@ cleanup:
     return NULL;
 }
 
-static char const doc_NeedlemanWunsch[] = //
-    "NeedlemanWunschScores(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
-    "\n"
-    "Needleman-Wunsch global alignment scoring engine.\n"
-    "\n"
-    "Args:\n"
-    "  substitution_matrix (np.ndarray): 256x256 int8 substitution matrix.\n"
-    "  open (int): Cost for opening a gap (default: -1).\n"
-    "  extend (int): Cost for extending a gap (default: -1).\n"
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
-    "                                       or a DeviceScope for automatic capability inference.\n"
-    "\n"
-    "Call with:\n"
-    "  a (sequence): First sequence of strings.\n"
-    "  b (sequence): Second sequence of strings.\n"
-    "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.\n"
-    "\n"
-    "Examples:\n"
-    "  ```python\n"
-    "  # Minimal CPU example with BLOSUM62 matrix\n"
-    "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
-    "  matrix = np.zeros((256, 256), dtype=np.int8)\n"
-    "  engine = szs.NeedlemanWunschScores(substitution_matrix=matrix)\n"
-    "  proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"
-    "  proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"
-    "  scores = engine(proteins_a, proteins_b)\n"
-    "  \n"
-    "  # GPU example with custom gap penalties\n"
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.NeedlemanWunschScores(substitution_matrix=matrix, open=-2, extend=-1, capabilities=gpu_scope)\n"
-    "  scores = engine(proteins_a, proteins_b, device=gpu_scope)\n"
-    "  ```";
-
+static char const doc_NeedlemanWunsch[] =                                                                     //
+    "NeedlemanWunschScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n" //
+    "\n"                                                                                                      //
+    "Needleman-Wunsch global alignment scoring engine.\n"                                                     //
+    "\n"                                                                                                      //
+    "Args:\n"                                                                                                 //
+    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"              //
+    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                  //
+    "  open (int): Cost for opening a gap (default: -1).\n"                                                   //
+    "  extend (int): Cost for extending a gap (default: -1).\n"                                               //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                   //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"       //
+    "                                       or a DeviceScope for automatic capability inference.\n"           //
+    "\n"                                                                                                      //
+    "Call with:\n"                                                                                            //
+    "  a (sequence): First sequence of strings.\n"                                                            //
+    "  b (sequence): Second sequence of strings.\n"                                                           //
+    "  device (DeviceScope, optional): Device execution context.\n"                                           //
+    "  out (array, optional): Output buffer for results.\n"                                                   //
+    "\n"                                                                                                      //
+    "Examples:\n"                                                                                             //
+    "  >>> # Minimal CPU example mapping every byte to its own class modulo 32\n"                             //
+    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                      //
+    "  >>> byte_to_class = (np.arange(256) % 32).astype(np.uint8)\n"                                          //
+    "  >>> class_costs = np.zeros((32, 32), dtype=np.int8)\n"                                                 //
+    "  >>> engine = szs.NeedlemanWunschScores(byte_to_class, class_costs)\n"                                  //
+    "  >>> proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"                                                          //
+    "  >>> proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"                                                          //
+    "  >>> scores = engine(proteins_a, proteins_b)\n"                                                         //
+    "  >>> # GPU example with custom gap penalties\n"                                                         //
+    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                     //
+    "  >>> engine = szs.NeedlemanWunschScores(byte_to_class, class_costs, open=-2, extend=-1, capabilities=gpu_scope)  " "# doctest: +SKIP\n" //
+    "  >>> scores = engine(proteins_a, proteins_b, device=gpu_scope)  # doctest: +SKIP";
 static PyGetSetDef NeedlemanWunsch_getsetters[] = {
-    {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, "Hardware capabilities used by this engine",
-     NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                        /* Sentinel */
 };
 
 static PyTypeObject NeedlemanWunschType = {
@@ -1236,38 +1259,57 @@ static PyObject *SmithWaterman_new(PyTypeObject *type, PyObject *args, PyObject 
 }
 
 static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwargs) {
-    PyObject *substitution_matrix_obj = NULL;
+    PyObject *byte_to_class_obj = NULL;
+    PyObject *class_substitution_costs_obj = NULL;
     sz_error_cost_t open = -1, extend = -1;
     PyObject *capabilities_tuple = NULL;
     sz_capability_t capabilities = default_hardware_capabilities;
 
-    // Parse arguments: substitution_matrix, open, extend, capabilities
-    static char *kwlist[] = {"substitution_matrix", "open", "extend", "capabilities", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|iiO", kwlist, &substitution_matrix_obj, &open, &extend,
-                                     &capabilities_tuple))
+    // Parse arguments: byte_to_class, class_substitution_costs, open, extend, capabilities
+    static char *kwlist[] = {"byte_to_class", "class_substitution_costs", "open", "extend", "capabilities", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iiO", kwlist, &byte_to_class_obj, &class_substitution_costs_obj,
+                                     &open, &extend, &capabilities_tuple))
         return -1;
 
-    // Validate substitution matrix (should be a 256x256 numpy array)
-    if (!numpy_available || !PyArray_Check(substitution_matrix_obj)) {
-        PyErr_SetString(PyExc_TypeError, "substitution_matrix must be a NumPy array");
-        return -1;
-    }
-
-    PyArrayObject *subs_array = (PyArrayObject *)substitution_matrix_obj;
-    if (PyArray_NDIM(subs_array) != 2 || PyArray_DIM(subs_array, 0) != 256 || PyArray_DIM(subs_array, 1) != 256) {
-        PyErr_SetString(PyExc_ValueError, "substitution_matrix must be a 256x256 array");
+    // Validate byte-to-class map (should be a 256-element uint8 numpy array)
+    if (!numpy_available || !PyArray_Check(byte_to_class_obj)) {
+        PyErr_SetString(PyExc_TypeError, "byte_to_class must be a NumPy array");
         return -1;
     }
-
-    if (PyArray_TYPE(subs_array) != NPY_INT8) {
-        PyErr_SetString(PyExc_TypeError, "substitution_matrix must have int8 dtype");
+    PyArrayObject *byte_to_class_array = (PyArrayObject *)byte_to_class_obj;
+    if (PyArray_NDIM(byte_to_class_array) != 1 || PyArray_DIM(byte_to_class_array, 0) != 256) {
+        PyErr_SetString(PyExc_ValueError, "byte_to_class must be a 256-element array");
         return -1;
     }
-
-    // Check that array is C-contiguous for safe memory access
-    if (!PyArray_IS_C_CONTIGUOUS(subs_array)) {
+    if (PyArray_TYPE(byte_to_class_array) != NPY_UINT8) {
+        PyErr_SetString(PyExc_TypeError, "byte_to_class must have uint8 dtype");
+        return -1;
+    }
+    if (!PyArray_IS_C_CONTIGUOUS(byte_to_class_array)) {
         PyErr_SetString(PyExc_ValueError,
-                        "substitution_matrix must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
+                        "byte_to_class must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
+        return -1;
+    }
+
+    // Validate class substitution costs (should be a 32x32 int8 numpy array)
+    if (!PyArray_Check(class_substitution_costs_obj)) {
+        PyErr_SetString(PyExc_TypeError, "class_substitution_costs must be a NumPy array");
+        return -1;
+    }
+    PyArrayObject *class_costs_array = (PyArrayObject *)class_substitution_costs_obj;
+    if (PyArray_NDIM(class_costs_array) != 2 || PyArray_DIM(class_costs_array, 0) != 32 ||
+        PyArray_DIM(class_costs_array, 1) != 32) {
+        PyErr_SetString(PyExc_ValueError, "class_substitution_costs must be a 32x32 array");
+        return -1;
+    }
+    if (PyArray_TYPE(class_costs_array) != NPY_INT8) {
+        PyErr_SetString(PyExc_TypeError, "class_substitution_costs must have int8 dtype");
+        return -1;
+    }
+    if (!PyArray_IS_C_CONTIGUOUS(class_costs_array)) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            "class_substitution_costs must be a C-contiguous array. Use np.ascontiguousarray() to convert.");
         return -1;
     }
 
@@ -1277,20 +1319,20 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
     }
 
     // Initialize the engine
-    sz_error_cost_t *subs_data = (sz_error_cost_t *)PyArray_DATA(subs_array);
+    sz_u8_t *byte_to_class_data = (sz_u8_t *)PyArray_DATA(byte_to_class_array);
+    sz_error_cost_t *class_costs_data = (sz_error_cost_t *)PyArray_DATA(class_costs_array);
     char const *error_detail = NULL;
-    sz_status_t status =
-        szs_smith_waterman_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle, &error_detail);
+    sz_status_t status = szs_smith_waterman_scores_init(byte_to_class_data, class_costs_data, open, extend, NULL,
+                                                        capabilities, &self->handle, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "SmithWaterman initialization");
         return -1;
     }
 
-    // Create a simple checksum of the substitution matrix for the description
+    // Create a simple checksum of the class cost matrix for the description
     sz_u32_t subs_checksum = 0;
-    for (int i = 0; i < 256; i += 16)                      // Sample every 16th element
-        subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
+    for (int i = 0; i < 32; ++i) subs_checksum += (sz_u32_t)class_costs_data[i * 32 + i]; // Diagonal elements
 
     snprintf(self->description, sizeof(self->description), "%X,%d,%d", subs_checksum & 0xFFFF, open, extend);
     self->capabilities = capabilities;
@@ -1374,10 +1416,11 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(PyExc_TypeError,
-                     "Expected stringzilla.Strs objects, got %s and %s. "
-                     "Convert using: stringzilla.Strs(your_string_list)",
-                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
+        PyErr_Format( //
+            PyExc_TypeError,
+            "Expected stringzilla.Strs objects, got %s and %s. " //
+            "Convert using: stringzilla.Strs(your_string_list)",
+            Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -1448,46 +1491,43 @@ static PyObject *SmithWaterman_get_capabilities(SmithWaterman *self, void *closu
 }
 
 static PyGetSetDef SmithWaterman_getsetters[] = {
-    {"__capabilities__", (getter)SmithWaterman_get_capabilities, NULL, "Hardware capabilities used by this engine",
-     NULL},
-    {NULL} /* Sentinel */
+    {"__capabilities__", (getter)SmithWaterman_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                      /* Sentinel */
 };
 
-static char const doc_SmithWaterman[] = //
-    "SmithWatermanScores(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
-    "\n"
-    "Smith-Waterman local alignment scoring engine.\n"
-    "\n"
-    "Args:\n"
-    "  substitution_matrix (np.ndarray): 256x256 int8 substitution matrix.\n"
-    "  open (int): Cost for opening a gap (default: -1).\n"
-    "  extend (int): Cost for extending a gap (default: -1).\n"
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
-    "                                       or a DeviceScope for automatic capability inference.\n"
-    "\n"
-    "Call with:\n"
-    "  a (sequence): First sequence of strings.\n"
-    "  b (sequence): Second sequence of strings.\n"
-    "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.\n"
-    "\n"
-    "Examples:\n"
-    "  ```python\n"
-    "  # Minimal CPU example for local alignment\n"
-    "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
-    "  matrix = np.eye(256, dtype=np.int8)  # Identity matrix\n"
-    "  engine = szs.SmithWatermanScores(substitution_matrix=matrix)\n"
-    "  seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"
-    "  seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"
-    "  scores = engine(seqs_a, seqs_b)\n"
-    "  \n"
-    "  # GPU example with different gap costs\n"
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.SmithWatermanScores(substitution_matrix=matrix, open=-3, extend=-1, capabilities=gpu_scope)\n"
-    "  scores = engine(seqs_a, seqs_b, device=gpu_scope)\n"
-    "  ```";
-
+static char const doc_SmithWaterman[] =                                                                     //
+    "SmithWatermanScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n" //
+    "\n"                                                                                                    //
+    "Smith-Waterman local alignment scoring engine.\n"                                                      //
+    "\n"                                                                                                    //
+    "Args:\n"                                                                                               //
+    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"            //
+    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                //
+    "  open (int): Cost for opening a gap (default: -1).\n"                                                 //
+    "  extend (int): Cost for extending a gap (default: -1).\n"                                             //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                 //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"     //
+    "                                       or a DeviceScope for automatic capability inference.\n"         //
+    "\n"                                                                                                    //
+    "Call with:\n"                                                                                          //
+    "  a (sequence): First sequence of strings.\n"                                                          //
+    "  b (sequence): Second sequence of strings.\n"                                                         //
+    "  device (DeviceScope, optional): Device execution context.\n"                                         //
+    "  out (array, optional): Output buffer for results.\n"                                                 //
+    "\n"                                                                                                    //
+    "Examples:\n"                                                                                           //
+    "  >>> # Minimal CPU example for local alignment\n"                                                     //
+    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                    //
+    "  >>> byte_to_class = (np.arange(256) % 32).astype(np.uint8)\n"                                        //
+    "  >>> class_costs = np.eye(32, dtype=np.int8)  # Identity matrix\n"                                    //
+    "  >>> engine = szs.SmithWatermanScores(byte_to_class, class_costs)\n"                                  //
+    "  >>> seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"                                                    //
+    "  >>> seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"                                                    //
+    "  >>> scores = engine(seqs_a, seqs_b)\n"                                                               //
+    "  >>> # GPU example with different gap costs\n"                                                        //
+    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                   //
+    "  >>> engine = szs.SmithWatermanScores(byte_to_class, class_costs, open=-3, extend=-1, capabilities=gpu_scope)  # " "doctest: +SKIP\n" //
+    "  >>> scores = engine(seqs_a, seqs_b, device=gpu_scope)  # doctest: +SKIP";
 static PyTypeObject SmithWatermanType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.SmithWatermanScores",
     .tp_doc = doc_SmithWaterman,
@@ -1539,11 +1579,12 @@ static int Fingerprints_init(Fingerprints *self, PyObject *args, PyObject *kwarg
     sz_size_t ndim;
     PyObject *window_widths_obj = NULL;
     sz_size_t alphabet_size = 256;
+    unsigned long long seed = 0;
     PyObject *capabilities_tuple = NULL;
     sz_capability_t capabilities = default_hardware_capabilities;
 
-    static char *kwlist[] = {"ndim", "window_widths", "alphabet_size", "capabilities", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "n|OnO", kwlist, &ndim, &window_widths_obj, &alphabet_size,
+    static char *kwlist[] = {"ndim", "window_widths", "alphabet_size", "seed", "capabilities", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "n|OnKO", kwlist, &ndim, &window_widths_obj, &alphabet_size, &seed,
                                      &capabilities_tuple))
         return -1;
 
@@ -1586,16 +1627,16 @@ static int Fingerprints_init(Fingerprints *self, PyObject *args, PyObject *kwarg
     }
 
     char const *error_detail = NULL;
-    sz_status_t status = szs_fingerprints_init(ndim, alphabet_size, window_widths, window_widths_count, NULL,
-                                               capabilities, &self->handle, &error_detail);
+    sz_status_t status = szs_fingerprints_init(ndim, alphabet_size, window_widths, window_widths_count, (sz_u64_t)seed,
+                                               NULL, capabilities, &self->handle, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Fingerprints initialization");
         return -1;
     }
 
-    snprintf(self->description, sizeof(self->description), "ndim=%zu,window_widths=%zu,alphabet_size=%zu", ndim,
-             window_widths_count, alphabet_size);
+    snprintf(self->description, sizeof(self->description), "ndim=%zu,window_widths=%zu,alphabet_size=%zu,seed=%llu",
+             ndim, window_widths_count, alphabet_size, seed);
     self->capabilities = capabilities;
     self->ndim = ndim;
     return 0;
@@ -1672,9 +1713,9 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
 
     // Handle 64-bit tape inputs
     sz_sequence_u64tape_t texts_u64tape;
-    sz_bool_t texts_is_u64tape =
-        !texts_is_u32tape && sz_py_export_strings_as_u64tape( //
-                                 texts_obj, &texts_u64tape.data, &texts_u64tape.offsets, &texts_u64tape.count);
+    sz_bool_t texts_is_u64tape = !texts_is_u32tape &&
+                                 sz_py_export_strings_as_u64tape( //
+                                     texts_obj, &texts_u64tape.data, &texts_u64tape.offsets, &texts_u64tape.count);
     if (texts_is_u64tape) {
         kernel_input_size = texts_u64tape.count;
         kernel_punned = szs_fingerprints_u64tape;
@@ -1683,8 +1724,8 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
 
     // Handle generic sequence inputs
     sz_sequence_t texts_seq;
-    sz_bool_t texts_is_sequence =
-        !texts_is_u32tape && !texts_is_u64tape && sz_py_export_strings_as_sequence(texts_obj, &texts_seq);
+    sz_bool_t texts_is_sequence = !texts_is_u32tape && !texts_is_u64tape &&
+                                  sz_py_export_strings_as_sequence(texts_obj, &texts_seq);
     if (texts_is_sequence) {
         kernel_input_size = texts_seq.count;
         kernel_punned = szs_fingerprints_sequence;
@@ -1725,9 +1766,9 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         }
 
         char const *error_detail = NULL;
-        sz_status_t status =
-            kernel_punned(self->handle, device_handle, kernel_texts_punned, buf_hashes, self->ndim * sizeof(sz_u32_t),
-                          buf_counts, self->ndim * sizeof(sz_u32_t), &error_detail);
+        sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, buf_hashes,
+                                           self->ndim * sizeof(sz_u32_t), buf_counts, self->ndim * sizeof(sz_u32_t),
+                                           &error_detail);
         if (status != sz_success_k) {
             out_alloc->free(buf_hashes, total_bytes, out_alloc->handle);
             out_alloc->free(buf_counts, total_bytes, out_alloc->handle);
@@ -1756,43 +1797,41 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     return result_tuple;
 }
 
-static char const doc_Fingerprints[] = //
-    "Fingerprints(ndim, window_widths=None, alphabet_size=256, capabilities=None)\n"
-    "\n"
-    "Compute MinHash fingerprints for binary strings.\n"
-    "\n"
-    "Args:\n"
-    "  ndim (int): Number of dimensions per fingerprint.\n"
-    "  window_widths (numpy.array, optional): 1D uint64 contiguous array of window widths. Uses defaults if None.\n"
-    "  alphabet_size (int, optional): Alphabet size, default 256 for binary strings.\n"
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
-    "                                       Can be explicit capabilities like ('serial', 'parallel', 'cuda')\n"
-    "                                       or a DeviceScope for automatic capability inference.\n"
-    "\n"
-    "Call with:\n"
-    "  texts (sequence): Sequence of strings to fingerprint.\n"
-    "  device (DeviceScope, optional): Device execution context.\n"
-    "\n"
-    "Returns:\n"
-    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).\n"
-    "\n"
-    "Examples:\n"
-    "  ```python\n"
-    "  # Minimal CPU example with auto-inferred capabilities\n"
-    "  import stringzilla as sz, stringzillas as szs\n"
-    "  engine = szs.Fingerprints(ndim=128)\n"
-    "  docs = sz.Strs(['document one', 'document two', 'document three'])\n"
-    "  hashes, counts = engine(docs)\n"
-    "  \n"
-    "  # GPU example with custom dimensions\n"
-    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
-    "  engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)\n"
-    "  hashes, counts = engine(docs, device=gpu_scope)\n"
-    "  ```";
-
+static char const doc_Fingerprints[] =                                                                               //
+    "Fingerprints(ndim, window_widths=None, alphabet_size=256, seed=0, capabilities=None)\n"                         //
+    "\n"                                                                                                             //
+    "Compute MinHash fingerprints for binary strings.\n"                                                             //
+    "\n"                                                                                                             //
+    "Args:\n"                                                                                                        //
+    "  ndim (int): Number of dimensions per fingerprint.\n"                                                          //
+    "  window_widths (numpy.array, optional): 1D uint64 contiguous array of window widths. Uses defaults if None.\n" //
+    "  alphabet_size (int, optional): Alphabet size, default 256 for binary strings.\n"                              //
+    "  seed (int, optional): Reproducibility seed; every value derives independent per-dimension multipliers and\n"  //
+    "                        moduli for MinHash independence (0 is the default seed, not a special mode).\n"         //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                          //
+    "                                       Can be explicit capabilities like ('serial', 'parallel', 'cuda')\n"      //
+    "                                       or a DeviceScope for automatic capability inference.\n"                  //
+    "\n"                                                                                                             //
+    "Call with:\n"                                                                                                   //
+    "  texts (sequence): Sequence of strings to fingerprint.\n"                                                      //
+    "  device (DeviceScope, optional): Device execution context.\n"                                                  //
+    "\n"                                                                                                             //
+    "Returns:\n"                                                                                                     //
+    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).\n"              //
+    "\n"                                                                                                             //
+    "Examples:\n"                                                                                                    //
+    "  >>> # Minimal CPU example with auto-inferred capabilities\n"                                                  //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                          //
+    "  >>> engine = szs.Fingerprints(ndim=128)\n"                                                                    //
+    "  >>> docs = sz.Strs(['document one', 'document two', 'document three'])\n"                                     //
+    "  >>> hashes, counts = engine(docs)\n"                                                                          //
+    "  >>> # GPU example with custom dimensions\n"                                                                   //
+    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                            //
+    "  >>> engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)  # doctest: +SKIP\n"                          //
+    "  >>> hashes, counts = engine(docs, device=gpu_scope)  # doctest: +SKIP";
 static PyGetSetDef Fingerprints_getsetters[] = {
-    {"capabilities", (getter)Fingerprints_get_capabilities, NULL, "computational capabilities", NULL},
-    {NULL} /* Sentinel */
+    {"capabilities", (getter)Fingerprints_get_capabilities, NULL, doc_capabilities, NULL}, //
+    {NULL}                                                                                 /* Sentinel */
 };
 
 static PyTypeObject FingerprintsType = {
@@ -1810,12 +1849,16 @@ static PyTypeObject FingerprintsType = {
 
 #pragma endregion
 
-static char const doc_reset_capabilities[] = //
-    "reset_capabilities(names) -> None\n\n"
-    "Sets the active SIMD/backend capabilities for this module and updates the\n"
-    "default hardware capabilities. The provided names are intersected with hardware\n"
-    "capabilities; if the result is empty, falls back to 'serial'.\n\n"
-    "Side effects: updates stringzillas.__capabilities__ and __capabilities_str__.";
+static char const doc_reset_capabilities[] =                                            //
+    "reset_capabilities(names) -> None\n\n"                                             //
+    "Sets the active SIMD/backend capabilities for this module and updates the\n"       //
+    "default hardware capabilities. The provided names are intersected with hardware\n" //
+    "capabilities; if the result is empty, falls back to 'serial'.\n\n"                 //
+    "Side effects: updates stringzillas.__capabilities__ and __capabilities_str__.\n"   //
+    "\n"                                                                                //
+    "Examples:\n"                                                                       //
+    "  >>> import stringzillas as szs\n"                                                //
+    "  >>> szs.reset_capabilities('serial')  # restrict dispatch to the scalar backend";
 
 static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     PyObject *caps_obj = NULL;
@@ -1852,11 +1895,15 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static char const doc_to_device[] = //
-    "to_device(strs: sz.Strs) -> sz.Strs\n\n"
-    "Converts a Strs object to use unified/device-accessible memory allocator.\n"
-    "This function forces the allocator swap that would normally happen during\n"
-    "GPU kernel execution. Useful for testing slice handling after re-allocation.";
+static char const doc_to_device[] =                                                  //
+    "to_device(strs: sz.Strs) -> sz.Strs\n\n"                                        //
+    "Converts a Strs object to use unified/device-accessible memory allocator.\n"    //
+    "This function forces the allocator swap that would normally happen during\n"    //
+    "GPU kernel execution. Useful for testing slice handling after re-allocation.\n" //
+    "\n"                                                                             //
+    "Examples:\n"                                                                    //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                          //
+    "  >>> device_strs = szs.to_device(sz.Strs(['alpha', 'beta']))";
 
 static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
     if (!try_swap_to_unified_allocator(strs_obj)) return NULL;

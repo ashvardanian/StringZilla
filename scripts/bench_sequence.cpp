@@ -1,9 +1,9 @@
 
 /**
- *  @file   bench_sequence.cpp
- *  @brief  Benchmarks sorting, partitioning, and merging operations on string sequences.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_sequence.cpp
+ *  @brief Benchmarks sorting, partitioning, and merging operations on string sequences.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - String sequence sorting algorithms - @b argsort and @b pgrams_sort.
@@ -119,8 +119,8 @@ static int _get_qsort_order(void const *a, void const *b, void *arg) {
     sz_size_t len_a = sequence->get_length(sequence->handle, idx_a);
     sz_size_t len_b = sequence->get_length(sequence->handle, idx_b);
 
-    int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
-    return res ? res : (int)(len_a - len_b);
+    int result = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
+    return result ? result : (int)(len_a - len_b);
 }
 
 #endif
@@ -195,7 +195,7 @@ struct argsort_strings_via_sz {
         array.get_start = get_start;
         array.get_length = get_length;
         sz::_with_alloc<std::allocator<char>>(
-            [&](sz_memory_allocator_t &alloc) { return func_(&array, &alloc, output.data()); });
+            [&](sz_memory_allocator_t &alloc) { return func_(&array, &alloc, output.data(), 0, sz_false_k); });
 
         // Prepare stats and hash the permutation to compare with the reference.
         std::size_t ops_performed = input.size() * std::log2(input.size());
@@ -226,6 +226,10 @@ void bench_sequencing_strings(environment_t const &env) {
 #if SZ_USE_SVE
     auto sve_call = argsort_strings_via_sz<sz_sequence_argsort_sve> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_sve", base_call, sve_call).log(base);
+#endif
+#if SZ_USE_NEON
+    auto neon_call = argsort_strings_via_sz<sz_sequence_argsort_neon> {env.tokens, permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_neon", base_call, neon_call).log(base);
 #endif
 
     // Include POSIX and WinAPI functionality
@@ -309,6 +313,10 @@ void bench_sequencing_pgrams(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     auto skylake_call = sort_pgrams_via_sz<sz_pgrams_sort_skylake> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_skylake", base_call, skylake_call).log(base);
+#endif
+#if SZ_USE_NEON
+    auto neon_call = sort_pgrams_via_sz<sz_pgrams_sort_neon> {pgrams_buffer, pgrams_sorted, permute_buffer};
+    bench_nullary(env, "sz_pgrams_sort_neon", base_call, neon_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = sort_pgrams_via_sz<sz_pgrams_sort_sve> {pgrams_buffer, pgrams_sorted, permute_buffer};
@@ -417,14 +425,14 @@ void bench_intersections(environment_t const &env) {
     // First, benchmark the STL function
     auto base_call = intersect_strings_via_std_t {tokens_a, tokens_b, permute_a, permute_b};
     bench_result_t base = bench_nullary(env, "intersect<std::unordered_map>", base_call).log();
-    auto serial_call =
-        intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a, permute_b};
+    auto serial_call = intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a,
+                                                                               permute_b};
     bench_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_ICE
-    auto ice_call = intersect_strings_via_sz<sz_sequence_intersect_ice> {tokens_a, tokens_b, permute_a, permute_b};
-    bench_nullary(env, "sz_sequence_intersect_ice", base_call, ice_call).log(base);
+#if SZ_USE_ICELAKE
+    auto ice_call = intersect_strings_via_sz<sz_sequence_intersect_icelake> {tokens_a, tokens_b, permute_a, permute_b};
+    bench_nullary(env, "sz_sequence_intersect_icelake", base_call, ice_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = intersect_strings_via_sz<sz_sequence_intersect_sve> {tokens_a, tokens_b, permute_a, permute_b};
@@ -435,6 +443,7 @@ void bench_intersections(environment_t const &env) {
 #pragma endregion
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla!\n");
     if (auto code = log_environment(); code != 0) return code;
 

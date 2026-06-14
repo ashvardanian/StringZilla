@@ -1,6 +1,6 @@
 /**
- *  @file   bench.hpp
- *  @brief  Helper structures and functions for C++ benchmarks.
+ *  @file scripts/bench.hpp
+ *  @brief Helper structures and functions for C++ benchmarks.
  *
  *  The StringZilla benchmarking suite doesn't use any external frameworks like Criterion or Google Benchmark.
  *  There are several reasons for that:
@@ -73,9 +73,9 @@ namespace scripts {
 
 using accurate_clock_t = stdc::high_resolution_clock;
 
-template <std::size_t multiple>
+template <std::size_t multiple_>
 std::size_t round_up_to_multiple(std::size_t n) {
-    return n == 0 ? multiple : ((n + multiple - 1) / multiple) * multiple;
+    return n == 0 ? multiple_ : ((n + multiple_ - 1) / multiple_) * multiple_;
 }
 
 using check_value_t = std::uint64_t;
@@ -102,8 +102,8 @@ struct callable_no_op_t {
 using profiled_function_t = std::function<call_result_t(std::size_t)>;
 
 /**
- *  @brief  Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
- *          Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
+ *  @brief Cross-platform function to get the number of CPU cycles elapsed @b only on the current core.
+ *         Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
  */
 inline std::uint64_t cpu_cycle_counter() {
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
@@ -118,14 +118,16 @@ inline std::uint64_t cpu_cycle_counter() {
     return _ReadStatusReg(ARM64_CNTVCT);
 #elif defined(__i386__) || defined(__x86_64__)
     // Use x86 inline assembly for `rdtsc` only if actually compiling for x86.
-    unsigned int lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    return (static_cast<std::uint64_t>(hi) << 32) | lo;
-#elif defined(__aarch64__) || defined(SZ_IS_64BIT_ARM_)
+    unsigned int low, high;
+    __asm__ volatile("rdtsc" : "=a"(low), "=d"(high));
+    return (static_cast<std::uint64_t>(high) << 32) | low;
+#elif defined(__aarch64__) || SZ_IS_64BIT_ARM_
     // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
-    std::uint64_t cnt;
-    asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
-    return cnt;
+    // (`SZ_IS_64BIT_ARM_` is a 0/1 value macro — testing `defined()` of it would be true everywhere,
+    // wrongly selecting this branch on non-ARM targets such as wasm32.)
+    std::uint64_t counter;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(counter));
+    return counter;
 #else
     return 0;
 #endif
@@ -149,47 +151,53 @@ double seconds_per_call(function_type_ &&function) {
 }
 
 /**
- *  @brief  Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
- *          Use as `for (auto running_seconds : repeat_up_to(5.0)) { ... }`.
+ *  @brief Allows time-limited for-loop iteration, similar to Google Benchmark's `for (auto _ : state)`.
+ *         Use as `for (auto call_index : repeat_up_to(5.0)) { ... }`, then read `repeat.seconds()`.
+ *
+ *  The loop body receives the @b iteration index — the quantity it actually needs to rotate over tokens
+ *  and count calls. The elapsed time and iteration count are deliberately @b not yielded per-iteration;
+ *  they are exposed as `seconds()` and `count()`, computed live from the owning object. Nothing is cached,
+ *  so a read after the loop is as valid as one inside it — there is no stale snapshot to get the denominator
+ *  out of sync with the numerator.
  */
-struct repeat_up_to {
-    double max_seconds = 0;
-    double passed_seconds = 0;
+struct repeat_up_to_t {
+    double max_seconds_ = 0;
+    accurate_clock_t::time_point start_ = accurate_clock_t::now();
+    std::size_t count_ = 0;
 
-    struct end_sentinel {};
-    class iterator {
-        accurate_clock_t::time_point start_time_;
-        double max_seconds_ = 0;
-        double &passed_seconds_;
-
-      public:
-        inline iterator(double max_seconds, double &passed_seconds)
-            : start_time_(accurate_clock_t::now()), max_seconds_(max_seconds), passed_seconds_(passed_seconds) {}
-        inline bool operator!=(end_sentinel) const {
-            accurate_clock_t::time_point current_time = accurate_clock_t::now();
-            passed_seconds_ = stdc::duration_cast<stdc::nanoseconds>(current_time - start_time_).count() / 1.e9;
-            return max_seconds_ != 0 && passed_seconds_ < max_seconds_;
-        }
-        inline double operator*() const { return passed_seconds_; }
-        constexpr void operator++() {} // No-op
+    struct end_sentinel_t {};
+    struct iterator_t {
+        repeat_up_to_t *parent_;
+        inline bool operator!=(end_sentinel_t) const { return parent_->keep_running(); }
+        inline std::size_t operator*() const { return parent_->count_; }
+        inline void operator++() const { ++parent_->count_; }
     };
 
-    inline repeat_up_to(double max_seconds) : max_seconds(max_seconds) {}
-    inline repeat_up_to(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
-    inline iterator begin() { return {max_seconds, passed_seconds}; }
-    inline end_sentinel end() const noexcept { return {}; }
-    inline double seconds() const noexcept { return passed_seconds; }
+    inline explicit repeat_up_to_t(double max_seconds) : max_seconds_(max_seconds) {}
+    inline explicit repeat_up_to_t(std::size_t max_seconds) : max_seconds_(static_cast<double>(max_seconds)) {}
+    inline iterator_t begin() { return start_ = accurate_clock_t::now(), count_ = 0, iterator_t {this}; }
+    inline end_sentinel_t end() const noexcept { return {}; }
+
+    /** @brief Live wall-clock seconds since `begin()` — computed on demand, never cached. */
+    inline double seconds() const noexcept {
+        return stdc::duration_cast<stdc::nanoseconds>(accurate_clock_t::now() - start_).count() / 1.e9;
+    }
+    /** @brief Number of completed iterations — authoritative both during and after the loop. */
+    inline std::size_t count() const noexcept { return count_; }
+    inline bool keep_running() const noexcept { return max_seconds_ != 0 && seconds() < max_seconds_; }
 };
 
+inline repeat_up_to_t repeat_up_to(double max_seconds) noexcept { return repeat_up_to_t {max_seconds}; }
+
 /**
- *  @brief  Stops compilers from optimizing out the expression.
- *          Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
+ *  @brief Stops compilers from optimizing out the expression.
+ *         Shamelessly stolen from Google Benchmark's @b `DoNotOptimize`.
  */
-template <typename argument_type>
-static void do_not_optimize(argument_type &&value) noexcept {
+template <typename argument_type_>
+static void do_not_optimize(argument_type_ &&value) noexcept {
 
 #if defined(_MSC_VER) // MSVC
-    using plain_type = typename std::remove_reference<argument_type>::type;
+    using plain_type = typename std::remove_reference<argument_type_>::type;
     // Use the `volatile` keyword and a memory barrier to prevent optimization
     volatile plain_type *p = &value;
     _ReadWriteBarrier();
@@ -268,7 +276,7 @@ std::vector<result_string_type_, allocator_type_> filter_by_length(
 }
 
 /**
- *  @brief  Environment for the benchmarking scripts pulled from the CLI arguments.
+ *  @brief Environment for the benchmarking scripts pulled from the CLI arguments.
  *
  *  The original CLI arguments include the @p path to the dataset file and the number of @p seconds per benchmark,
  *  the Regex @p filter to select only the backends that match the given pattern, as well as the @p tokenization
@@ -306,6 +314,10 @@ struct environment_t {
     std::size_t stress_limit = 1;
     /** @brief Whether to deduplicate tokens before benchmarking. */
     bool unique = false;
+    /** @brief Optional cap on the number of tokens kept, 0 means unlimited; `STRINGWARS_MAX_TOKENS`. */
+    std::size_t max_tokens = 0;
+    /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
+    std::vector<std::size_t> batch_sizes_override;
 
     /** @brief Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
@@ -323,24 +335,24 @@ struct environment_t {
 };
 
 /**
- *  @brief  Prepares the environment for benchmarking based on environment variables and default settings.
- *          It's expected that different workloads may use different default datasets and tokenization modes,
- *          but time limits and seeds are usually consistent across all benchmarks.
+ *  @brief Prepares the environment for benchmarking based on environment variables and default settings.
+ *         It's expected that different workloads may use different default datasets and tokenization modes,
+ *         but time limits and seeds are usually consistent across all benchmarks.
  *
- *  @param[in] argc Number of command-line string arguments. Not used in reality.
- *  @param[in] argv Array of command-line string arguments. Not used in reality.
+ *  @param argc Number of command-line string arguments. Not used in reality.
+ *  @param argv Array of command-line string arguments. Not used in reality.
  *
- *  @param[in] default_dataset Path to the default dataset file, if the @b `STRINGWARS_DATASET` is not set.
- *  @param[in] default_tokens Tokenization mode, if the @b `STRINGWARS_TOKENS` is not set.
- *  @param[in] default_duration Time limit per benchmark, if the @b `STRINGWARS_DURATION` is not set.
+ *  @param default_dataset Path to the default dataset file, if the @b `STRINGWARS_DATASET` is not set.
+ *  @param default_tokens Tokenization mode, if the @b `STRINGWARS_TOKENS` is not set.
+ *  @param default_duration Time limit per benchmark, if the @b `STRINGWARS_DURATION` is not set.
  *
- *  @param[in] default_stress Whether to stress-test the backends, if the @b `STRINGWARS_STRESS` is not set.
- *  @param[in] default_stress_dir Directory for stress-testing logs, if the @b `STRINGWARS_STRESS_DIR` is not set.
- *  @param[in] default_stress_limit Max number of failures to tolerate, if the @b `STRINGWARS_STRESS_LIMIT` is not set.
- *  @param[in] default_stress_duration Time limit per stress-test, if the @b `STRINGWARS_STRESS_DURATION` is not set.
+ *  @param default_stress Whether to stress-test the backends, if the @b `STRINGWARS_STRESS` is not set.
+ *  @param default_stress_dir Directory for stress-testing logs, if the @b `STRINGWARS_STRESS_DIR` is not set.
+ *  @param default_stress_limit Max number of failures to tolerate, if the @b `STRINGWARS_STRESS_LIMIT` is not set.
+ *  @param default_stress_duration Time limit per stress-test, if the @b `STRINGWARS_STRESS_DURATION` is not set.
  *
- *  @param[in] default_filter Regular expression to filter the backends, if the @b `STRINGWARS_FILTER` is not set.
- *  @param[in] default_seed Seed for reproducibility, if the @b `STRINGWARS_SEED` is not set.
+ *  @param default_filter Regular expression to filter the backends, if the @b `STRINGWARS_FILTER` is not set.
+ *  @param default_seed Seed for reproducibility, if the @b `STRINGWARS_SEED` is not set.
  */
 inline environment_t build_environment(                                        //
     int argc, char const *argv[],                                              //< Ignored
@@ -423,6 +435,21 @@ inline environment_t build_environment(                                        /
         env.unique = is_one;
     }
 
+    // Use `STRINGWARS_MAX_TOKENS` to cap the number of tokens kept, for faster and more targeted runs.
+    if (char const *env_var = std::getenv("STRINGWARS_MAX_TOKENS")) { env.max_tokens = std::stoull(env_var); }
+
+    // Use `STRINGWARS_BATCH` to override the per-benchmark batch sizes with a comma-separated list,
+    // e.g. `STRINGWARS_BATCH=1024` to run a single batch and skip the slow/largest default sweep entries.
+    if (char const *env_var = std::getenv("STRINGWARS_BATCH")) {
+        std::string const batch_argument = env_var;
+        for (std::size_t start = 0; start < batch_argument.size();) {
+            std::size_t const comma = batch_argument.find(',', start);
+            std::size_t const end = comma == std::string::npos ? batch_argument.size() : comma;
+            if (end > start) env.batch_sizes_override.push_back(std::stoull(batch_argument.substr(start, end - start)));
+            start = end + 1;
+        }
+    }
+
     env.dataset = read_file(env.path);
     env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
 
@@ -444,6 +471,8 @@ inline environment_t build_environment(                                        /
         env.tokens.erase(last, env.tokens.end());
     }
 
+    // Optionally cap the token count before the power-of-two shrink, for faster and more targeted runs.
+    if (env.max_tokens != 0 && env.tokens.size() > env.max_tokens) env.tokens.resize(env.max_tokens);
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
@@ -454,10 +483,11 @@ inline environment_t build_environment(                                        /
         seed_message = " (will shuffle tokens)";
     }
 
-    auto const mean_token_length =
-        std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
-                        [](std::size_t sum, token_view_t token) -> std::size_t { return sum + token.size(); }) *
-        1.0 / env.tokens.size();
+    auto const mean_token_length = std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
+                                                   [](std::size_t sum, token_view_t token) -> std::size_t {
+                                                       return sum + token.size();
+                                                   }) *
+                                   1.0 / env.tokens.size();
 
     // Group integer decimal separators by 3
     // https://www.ibm.com/docs/en/i/7.4?topic=categories-lc-numeric-category
@@ -485,8 +515,8 @@ inline environment_t build_environment(                                        /
 }
 
 /**
- *  @brief  Uses C-style file IO to save information about the most recent stress test failure.
- *          Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
+ *  @brief Uses C-style file IO to save information about the most recent stress test failure.
+ *         Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
  */
 inline void log_failure(                                              //
     environment_t const &env, std::string const &name,                //
@@ -514,8 +544,8 @@ inline void log_failure(                                              //
 }
 
 /**
- *  @brief  Light-weight structure to construct a histogram of function call durations for a very
- *          wide range of floating point values using logarithmic binning. TODO:
+ *  @brief Light-weight structure to construct a histogram of function call durations for a very
+ *         wide range of floating point values using logarithmic binning. TODO:
  */
 template <std::size_t slots_ = 128>
 struct duration_histogram {
@@ -553,8 +583,8 @@ struct bench_result_t {
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
 
     /**
-     *  @brief  Logs the benchmark results to the console, including the throughput and latency,
-     *          comparing against one or more baselines.
+     *  @brief Logs the benchmark results to the console, including the throughput and latency,
+     *         comparing against one or more baselines.
      *
      *  Example output:
      *
@@ -654,11 +684,11 @@ struct bench_result_t {
 
 /**
  *  @brief Repeatedly calls and profiles a given @b nullary function, comparing it against a baseline.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
- *  @param[in] check_validator Optional function to validate the results of the benchmark.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
+ *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @param check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -686,8 +716,10 @@ bench_result_t bench_nullary(  //
     if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     // Perform the testing against the baseline, if provided.
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
-        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value) {
+        repeat_up_to_t stress = repeat_up_to(env.stress ? env.stress_seconds : 0.0);
+        for (auto call_index : stress) {
+            sz_unused_(call_index);
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
             ++result.stress_calls;
@@ -698,15 +730,18 @@ bench_result_t bench_nullary(  //
             ++result.errors;
             if (result.errors > env.stress_limit) {
                 std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            running_seconds);
+                            stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, {});
         }
+    }
 
     // Repeat the benchmark of the unary function. Assume most of them are applied to the entire
     // dataset and take a lot of time, so we don't unroll much, unlike `bench_unary`.
-    for (auto running_seconds : repeat_up_to(env.benchmark_seconds)) {
+    repeat_up_to_t repeat = repeat_up_to(env.benchmark_seconds);
+    for (auto call_index : repeat) {
+        sz_unused_(call_index);
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t call_result = callable();
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
@@ -715,23 +750,23 @@ bench_result_t bench_nullary(  //
         result.operations += call_result.operations;
         result.bytes_passed += call_result.bytes_passed;
         result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_seconds = running_seconds;
-        result.profiled_calls += 1;
         result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
         result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
     }
+    result.profiled_calls += repeat.count();
+    result.profiled_seconds = repeat.seconds();
 
     return result;
 }
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
- *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
- *  @param[in] preprocessing Optional function to pre-process the data after the prediction.
- *  @param[in] check_validator Optional function to validate the results of the benchmark.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param baseline Optional serial analog, against which the accelerated function will be stress-tested.
+ *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @param preprocessing Optional function to pre-process the data after the prediction.
+ *  @param check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                                        //
@@ -759,23 +794,26 @@ bench_result_t bench_unary(    //
     if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
-        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
-            std::size_t const token_index = (result.stress_calls++) & lookup_mask;
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value) {
+        repeat_up_to_t stress = repeat_up_to(env.stress ? env.stress_seconds : 0.0);
+        for (auto call_index : stress) {
+            std::size_t const token_index = call_index & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);
             call_result_t const baseline_result = baseline(token_index);
-            result.stress_calls += accelerated_result.inputs_processed;
+            ++result.stress_calls;
+            result.stress_inputs += accelerated_result.inputs_processed;
             if (check_validator(accelerated_result.check_value, baseline_result.check_value)) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
             if (result.errors > env.stress_limit) {
                 std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
-                            running_seconds);
+                            stress.seconds());
                 std::terminate();
             }
             log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, token_index);
         }
+    }
 
     // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
@@ -794,17 +832,20 @@ bench_result_t bench_unary(    //
     result.profiled_seconds = first_call_duration;
     if (first_call_duration >= env.benchmark_seconds) return result;
 
-    // Repeat the benchmarks in unrolled batches until the time limit is reached.
-    for (auto running_seconds : repeat_up_to(env.benchmark_seconds - first_call_duration)) {
+    // Repeat the benchmarks in unrolled batches of `unroll_factor` until the time limit is reached.
+    constexpr std::size_t unroll_factor = 8;
+    repeat_up_to_t repeat = repeat_up_to(env.benchmark_seconds - first_call_duration);
+    for (auto batch_index : repeat) {
+        std::size_t const batch_start = batch_index * unroll_factor;
         std::uint64_t t0 = cpu_cycle_counter();
-        call_result_t r0 = callable((result.profiled_calls + 0) & lookup_mask);
-        call_result_t r1 = callable((result.profiled_calls + 1) & lookup_mask);
-        call_result_t r2 = callable((result.profiled_calls + 2) & lookup_mask);
-        call_result_t r3 = callable((result.profiled_calls + 3) & lookup_mask);
-        call_result_t r4 = callable((result.profiled_calls + 4) & lookup_mask);
-        call_result_t r5 = callable((result.profiled_calls + 5) & lookup_mask);
-        call_result_t r6 = callable((result.profiled_calls + 6) & lookup_mask);
-        call_result_t r7 = callable((result.profiled_calls + 7) & lookup_mask);
+        call_result_t r0 = callable((batch_start + 0) & lookup_mask);
+        call_result_t r1 = callable((batch_start + 1) & lookup_mask);
+        call_result_t r2 = callable((batch_start + 2) & lookup_mask);
+        call_result_t r3 = callable((batch_start + 3) & lookup_mask);
+        call_result_t r4 = callable((batch_start + 4) & lookup_mask);
+        call_result_t r5 = callable((batch_start + 5) & lookup_mask);
+        call_result_t r6 = callable((batch_start + 6) & lookup_mask);
+        call_result_t r7 = callable((batch_start + 7) & lookup_mask);
         std::uint64_t t7 = cpu_cycle_counter();
 
         // Aggregate all of them:
@@ -820,22 +861,20 @@ bench_result_t bench_unary(    //
             result.profiled_inputs += r2.inputs_processed, result.profiled_inputs += r3.inputs_processed, //
             result.profiled_inputs += r4.inputs_processed, result.profiled_inputs += r5.inputs_processed, //
             result.profiled_inputs += r6.inputs_processed, result.profiled_inputs += r7.inputs_processed; //
-        result.profiled_calls += 8;
 
-        result.profiled_seconds = running_seconds;
         result.profiled_cpu_cycles += t7 - t0;
-        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += 8;
+        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += unroll_factor;
     }
-
-    result.profiled_seconds += first_call_duration;
+    result.profiled_calls += repeat.count() * unroll_factor;
+    result.profiled_seconds = repeat.seconds() + first_call_duration;
     return result;
 }
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param callable Nullary function taking no arguments and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
@@ -845,9 +884,9 @@ bench_result_t bench_nullary(environment_t const &env, std::string const &name, 
 
 /**
  *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
- *  @param[in] env Environment with the dataset and tokens.
- *  @param[in] name Name of the benchmark, used for logging.
- *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @param env Environment with the dataset and tokens.
+ *  @param name Name of the benchmark, used for logging.
+ *  @param callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>

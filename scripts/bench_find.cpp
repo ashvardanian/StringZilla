@@ -1,8 +1,8 @@
 /**
- *  @file   bench_find.cpp
- *  @brief  Benchmarks for bidirectional string search operations.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_find.cpp
+ *  @brief Benchmarks for bidirectional string search operations.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
  *  - Substring search: find all inclusions of a token in the dataset - @b find & @b rfind.
@@ -63,8 +63,8 @@ using namespace ashvardanian::stringzilla::scripts;
 #pragma region Substring Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_t find_func_>
 struct matcher_from_sz_find {
@@ -74,10 +74,10 @@ struct matcher_from_sz_find {
     inline matcher_from_sz_find(std::string_view needle = {}) noexcept : needle_(needle) {}
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -85,8 +85,8 @@ struct matcher_from_sz_find {
 static std::string strstr_needle_copy_ {}; //! Reuse the same memory for all needles, potentially causing allocations
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strstr_t {
     using size_type = std::size_t;
@@ -94,18 +94,18 @@ struct matcher_strstr_t {
     inline matcher_strstr_t(std::string_view needle = {}) noexcept(false) { strstr_needle_copy_ = needle; }
     inline size_type needle_length() const noexcept { return strstr_needle_copy_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)strstr(haystack.data(), strstr_needle_copy_.c_str());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)strstr(haystack.data(), strstr_needle_copy_.c_str());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
 #if defined(_GNU_SOURCE)
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_memmem_t {
     using size_type = std::size_t;
@@ -114,10 +114,10 @@ struct matcher_memmem_t {
     inline matcher_memmem_t(std::string_view needle = {}) noexcept : needle_(needle) {}
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)memmem(haystack.data(), haystack.size(), needle_.data(), needle_.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)memmem(haystack.data(), haystack.size(), needle_.data(), needle_.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
@@ -125,8 +125,8 @@ struct matcher_memmem_t {
 
 #if __cpp_lib_boyer_moore_searcher
 /**
- *  @brief  Wraps the C++20 @b Boyer-Moore algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++20 @b Boyer-Moore algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  *  @tparam searcher_type_ Can be `std::boyer_moore_searcher` or `std::boyer_moore_horspool_searcher`.
  *          Both should be instantiated with the `std::string_view::const_iterator` type.
  */
@@ -240,6 +240,46 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_neon>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_find_v128", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_v128>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_v128", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_v128>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_find_v128relaxed", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_v128relaxed>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_v128relaxed", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_v128relaxed>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_find_rvv", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_rvv>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_rvv", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_rvv>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_find_lasx", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_lasx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_lasx", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_lasx>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_find_powervsx", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_powervsx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_powervsx", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_powervsx>>(env))
+        .log(base_reverse);
+#endif
 
     // Include LibC functionality
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
@@ -281,8 +321,8 @@ void bench_substring_search(environment_t const &env) {
 #pragma region Byte Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_byte_t find_func_>
 struct matcher_from_sz_find_byte {
@@ -292,17 +332,17 @@ struct matcher_from_sz_find_byte {
     inline matcher_from_sz_find_byte(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &needle_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &needle_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strchr_t {
     using size_type = std::size_t;
@@ -311,17 +351,17 @@ struct matcher_strchr_t {
     inline matcher_strchr_t(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)strchr(haystack.data(), needle_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)strchr(haystack.data(), needle_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_memchr_t {
     using size_type = std::size_t;
@@ -330,17 +370,17 @@ struct matcher_memchr_t {
     inline matcher_memchr_t(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)std::memchr(haystack.data(), needle_, haystack.size());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return (size_type)(ptr - haystack.data());
+        auto match_pointer = (char *)std::memchr(haystack.data(), needle_, haystack.size());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_from_std_find {
     using size_type = std::size_t;
@@ -428,6 +468,46 @@ void bench_byte_search(environment_t const &env) {
                 callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_sve>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_find_byte_v128", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_v128>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_v128", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_v128>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_find_byte_v128relaxed", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_v128relaxed>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_v128relaxed", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_v128relaxed>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_find_byte_rvv", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_rvv>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_rvv", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_rvv>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_find_byte_lasx", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_lasx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_lasx", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_lasx>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_find_byte_powervsx", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_powervsx>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_powervsx", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_powervsx>>(env))
+        .log(base_reverse);
+#endif
 
     // Include LibC functionality
     bench_unary(env, "find_byte<std::strchr>", base_call, //
@@ -448,8 +528,8 @@ void bench_byte_search(environment_t const &env) {
 #pragma region Byteset Search
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_find_byteset_t find_func_>
 struct matcher_from_sz_find_byteset {
@@ -459,17 +539,17 @@ struct matcher_from_sz_find_byteset {
     constexpr matcher_from_sz_find_byteset(sz::byteset needles) noexcept : needles_(needles) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &needles_.raw());
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &needles_.raw());
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
 /**
- *  @brief  Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_strcspn_t {
     using size_type = std::size_t;
@@ -487,8 +567,8 @@ struct matcher_strcspn_t {
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps the C++11 @b `std::string_view::find_first_of` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 struct matcher_std_string_first_of_t {
     using size_type = std::size_t;
@@ -501,8 +581,8 @@ struct matcher_std_string_first_of_t {
 };
 
 /**
- *  @brief  Wraps the C++11 @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
- *          into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::range_rmatches`.
+ *  @brief Wraps the C++11 @b `std::string_view::find_last_of` algorithms for finding the next occurrence of a string
+ *         into something similar to @b `sz::matcher_rfind` and compatible with @b `sz::range_rmatches`.
  */
 struct matcher_std_string_last_of_t {
     using size_type = std::size_t;
@@ -543,9 +623,9 @@ void bench_byteset_search(environment_t const &env) {
 
     // First, benchmark the serial function
     // The "check value" for normal and reverse search is the same - simply the number of matches.
-    auto base_call =
-        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_serial>,
-                                    sz::byteset>(env);
+    auto base_call = callable_for_byteset_search<sz::range_matches,
+                                                 matcher_from_sz_find_byteset<sz_find_byteset_serial>, sz::byteset>(
+        env);
     bench_result_t base = bench_unary(env, "sz_find_byteset_serial", base_call).log();
     bench_result_t base_reverse =
         bench_unary(
@@ -567,15 +647,15 @@ void bench_byteset_search(environment_t const &env) {
                                     sz::byteset>(env))
         .log(base_reverse);
 #endif
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     bench_unary( //
-        env, "sz_find_byteset_ice", base_call,
-        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_ice>, sz::byteset>(
-            env))
+        env, "sz_find_byteset_icelake", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_icelake>,
+                                    sz::byteset>(env))
         .log(base);
     bench_unary( //
-        env, "sz_rfind_byteset_ice", base_call,
-        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_ice>,
+        env, "sz_rfind_byteset_icelake", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_icelake>,
                                     sz::byteset>(env))
         .log(base_reverse);
 #endif
@@ -588,6 +668,66 @@ void bench_byteset_search(environment_t const &env) {
     bench_unary(env, "sz_rfind_byteset_neon", base_call,
                 callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_neon>,
                                             sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128
+    bench_unary( //
+        env, "sz_find_byteset_v128", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_v128>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_v128", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_v128>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary( //
+        env, "sz_find_byteset_v128relaxed", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_v128relaxed>,
+                                    sz::byteset>(env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_v128relaxed", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_v128relaxed>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_RVV
+    bench_unary( //
+        env, "sz_find_byteset_rvv", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_rvv>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_rvv", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_rvv>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_LASX
+    bench_unary( //
+        env, "sz_find_byteset_lasx", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_lasx>, sz::byteset>(
+            env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_lasx", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_lasx>,
+                                    sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary( //
+        env, "sz_find_byteset_powervsx", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_powervsx>,
+                                    sz::byteset>(env))
+        .log(base);
+    bench_unary( //
+        env, "sz_rfind_byteset_powervsx", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_powervsx>,
+                                    sz::byteset>(env))
         .log(base_reverse);
 #endif
 
@@ -610,8 +750,8 @@ void bench_byteset_search(environment_t const &env) {
 #pragma region UTF8 Tokenization
 
 /**
- *  @brief  Wraps an individual hardware-specific search backend into something similar
- *          to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
+ *  @brief Wraps an individual hardware-specific search backend into something similar
+ *         to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
  */
 template <sz_utf8_find_boundary_t find_func_>
 struct matcher_from_sz_utf8_find_boundary {
@@ -620,10 +760,10 @@ struct matcher_from_sz_utf8_find_boundary {
 
     constexpr matcher_from_sz_utf8_find_boundary() noexcept {}
     inline size_type operator()(std::string_view haystack) noexcept {
-        auto ptr = find_func_(haystack.data(), haystack.size(), &last_match_length_);
-        do_not_optimize(ptr);
-        if (!ptr) return std::string_view::npos; // No match found
-        return ptr - haystack.data();
+        auto match_pointer = find_func_(haystack.data(), haystack.size(), &last_match_length_);
+        do_not_optimize(match_pointer);
+        if (!match_pointer) return std::string_view::npos; // No match found
+        return match_pointer - haystack.data();
     }
     size_type needle_length() const noexcept { return last_match_length_; }
     size_type skip_length() const noexcept { return last_match_length_; }
@@ -659,16 +799,16 @@ void bench_utf8_find_boundary(environment_t const &env) {
     bench_result_t base_whitespace = bench_unary(env, "sz_utf8_find_whitespace_serial", base_whitespace_call).log();
 
     // Conditionally include SIMD-accelerated backends
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     bench_unary( //
-        env, "sz_utf8_find_newline_ice", base_newline_call,
+        env, "sz_utf8_find_newline_icelake", base_newline_call,
         callable_for_utf8_find_boundary<sz::range_matches,
-                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_ice>>(env))
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_icelake>>(env))
         .log(base_newline);
     bench_unary( //
-        env, "sz_utf8_find_whitespace_ice", base_whitespace_call,
+        env, "sz_utf8_find_whitespace_icelake", base_whitespace_call,
         callable_for_utf8_find_boundary<sz::range_matches,
-                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_ice>>(env))
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_icelake>>(env))
         .log(base_whitespace);
 #endif
 #if SZ_USE_NEON
@@ -695,11 +835,72 @@ void bench_utf8_find_boundary(environment_t const &env) {
                                         matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_sve2>>(env))
         .log(base_whitespace);
 #endif
+#if SZ_USE_V128
+    bench_unary( //
+        env, "sz_utf8_find_newline_v128", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_v128>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_v128", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_v128>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary( //
+        env, "sz_utf8_find_newline_v128relaxed", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_v128relaxed>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_v128relaxed", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_v128relaxed>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_RVV
+    bench_unary( //
+        env, "sz_utf8_find_newline_rvv", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_rvv>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_rvv", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_rvv>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_LASX
+    bench_unary( //
+        env, "sz_utf8_find_newline_lasx", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_lasx>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_lasx", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_lasx>>(env))
+        .log(base_whitespace);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary( //
+        env, "sz_utf8_find_newline_powervsx", base_newline_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_newline_powervsx>>(env))
+        .log(base_newline);
+    bench_unary( //
+        env, "sz_utf8_find_whitespace_powervsx", base_whitespace_call,
+        callable_for_utf8_find_boundary<sz::range_matches,
+                                        matcher_from_sz_utf8_find_boundary<sz_utf8_find_whitespace_powervsx>>(env))
+        .log(base_whitespace);
+#endif
 }
 
 #pragma endregion
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla!\n");
     if (auto code = log_environment(); code != 0) return code;
 

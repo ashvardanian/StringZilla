@@ -1,8 +1,8 @@
 /**
- *  @file   bench_memory.cpp
- *  @brief  Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
- *          The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
- *          references to mimic real-world scenarios dealing with individual strings of different lengths.
+ *  @file scripts/bench_memory.cpp
+ *  @brief Benchmarks for memory operations like copying, moving, resetting, and converting with lookup tables.
+ *         The program accepts a file path to a dataset, tokenizes it, and uses those tokens only for size
+ *         references to mimic real-world scenarios dealing with individual strings of different lengths.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -56,20 +56,20 @@ using namespace ashvardanian::stringzilla::scripts;
 constexpr std::size_t max_shift_length = 299;
 
 /**
- *  @brief  Wraps platform-specific @b aligned memory allocation and deallocation functions.
- *          Compatible with `std::unique_ptr` as the second template argument, to free the memory.
+ *  @brief Wraps platform-specific @b aligned memory allocation and deallocation functions.
+ *         Compatible with `std::unique_ptr` as the second template argument, to free the memory.
  */
 struct page_alloc_and_free_t {
 #ifdef _WIN32
     inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
         return reinterpret_cast<char *>(_aligned_malloc(size, alignment));
     }
-    inline void operator()(char *ptr) const noexcept { _aligned_free(ptr); }
+    inline void operator()(char *page_pointer) const noexcept { _aligned_free(page_pointer); }
 #else
     inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
         return reinterpret_cast<char *>(std::aligned_alloc(alignment, size));
     }
-    inline void operator()(char *ptr) const noexcept { std::free(ptr); }
+    inline void operator()(char *page_pointer) const noexcept { std::free(page_pointer); }
 #endif
 };
 
@@ -138,6 +138,26 @@ void bench_copy(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve> {env, o}).log(align);
     bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_copy_v128(align)", copy_from_sz<sz_copy_v128> {env, o}).log(align);
+    bench_unary(env, "sz_copy_v128(shift)", copy_from_sz<sz_copy_v128, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_copy_v128relaxed(align)", copy_from_sz<sz_copy_v128relaxed> {env, o}).log(align);
+    bench_unary(env, "sz_copy_v128relaxed(shift)", copy_from_sz<sz_copy_v128relaxed, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_copy_rvv(align)", copy_from_sz<sz_copy_rvv> {env, o}).log(align);
+    bench_unary(env, "sz_copy_rvv(shift)", copy_from_sz<sz_copy_rvv, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_copy_lasx(align)", copy_from_sz<sz_copy_lasx> {env, o}).log(align);
+    bench_unary(env, "sz_copy_lasx(shift)", copy_from_sz<sz_copy_lasx, 1> {env, o}).log(align, shift);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_copy_powervsx(align)", copy_from_sz<sz_copy_powervsx> {env, o}).log(align);
+    bench_unary(env, "sz_copy_powervsx(shift)", copy_from_sz<sz_copy_powervsx, 1> {env, o}).log(align, shift);
 #endif
 
     bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {env, o}).log(align);
@@ -210,6 +230,26 @@ void bench_move(environment_t const &env) {
     bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1> {env, o}).log(byte);
     bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64> {env, o}).log(byte, page);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_move_v128(by1)", move_from_sz<sz_move_v128, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_v128(by64)", move_from_sz<sz_move_v128, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_move_v128relaxed(by1)", move_from_sz<sz_move_v128relaxed, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_v128relaxed(by64)", move_from_sz<sz_move_v128relaxed, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_move_rvv(by1)", move_from_sz<sz_move_rvv, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_rvv(by64)", move_from_sz<sz_move_rvv, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_move_lasx(by1)", move_from_sz<sz_move_lasx, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_lasx(by64)", move_from_sz<sz_move_lasx, 64> {env, o}).log(byte, page);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_move_powervsx(by1)", move_from_sz<sz_move_powervsx, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_powervsx(by64)", move_from_sz<sz_move_powervsx, 64> {env, o}).log(byte, page);
+#endif
 
     bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {env, o}).log(byte);
     bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {env, o}).log(byte, page);
@@ -266,8 +306,8 @@ void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
 }
 
 /**
- *  @brief  Benchmarks `memset`-like operations overwriting regions of output memory filling
- *          them with the first byte of the input regions or with random @b (reproducible) byte streams.
+ *  @brief Benchmarks `memset`-like operations overwriting regions of output memory filling
+ *         them with the first byte of the input regions or with random @b (reproducible) byte streams.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
  *  So the kernels can be compared against the baseline `memset` function.
@@ -301,19 +341,45 @@ void bench_fill(environment_t const &env) {
     bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake> {env, o})
         .log(zeros, random);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_fill_random_ice", random_call, fill_random_from_sz<sz_fill_random_ice> {env, o})
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_fill_random_icelake", random_call, fill_random_from_sz<sz_fill_random_icelake> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
 #endif
-#if SZ_USE_NEON_AES
-    bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon> {env, o})
+#if SZ_USE_NEONAES
+    bench_unary(env, "sz_fill_random_neonaes", random_call, fill_random_from_sz<sz_fill_random_neonaes> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_SVE
     bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_fill_v128", fill_from_sz<sz_fill_v128> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_v128", random_call, fill_random_from_sz<sz_fill_random_v128> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_fill_v128relaxed", fill_from_sz<sz_fill_v128relaxed> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_v128relaxed", random_call,
+                fill_random_from_sz<sz_fill_random_v128relaxed> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_fill_rvv", fill_from_sz<sz_fill_rvv> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_rvv", random_call, fill_random_from_sz<sz_fill_random_rvv> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_fill_lasx", fill_from_sz<sz_fill_lasx> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_lasx", random_call, fill_random_from_sz<sz_fill_random_lasx> {env, o})
+        .log(zeros, random);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_fill_powervsx", fill_from_sz<sz_fill_powervsx> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_powervsx", random_call, fill_random_from_sz<sz_fill_random_powervsx> {env, o})
+        .log(zeros, random);
 #endif
     bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz> {env, o}).log(zeros);
     bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
@@ -347,7 +413,7 @@ void transform_like_sz(sz_ptr_t output, sz_size_t length, sz_cptr_t input, sz_cp
 }
 
 /**
- *  @brief  Benchmarks look-up transformations on the provided slices, updating them inplace.
+ *  @brief Benchmarks look-up transformations on the provided slices, updating them inplace.
  *
  *  Performs a simple cyclical rotation of the alphabet, to test the performance of the different
  *  "look-up table"-based transformations.
@@ -376,8 +442,8 @@ void bench_lookup(environment_t const &env) {
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell> {env, o, lut}).log(zeros);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_lookup_ice", lookup_from_sz<sz_lookup_ice> {env, o, lut}).log(zeros);
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_lookup_icelake", lookup_from_sz<sz_lookup_icelake> {env, o, lut}).log(zeros);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);
@@ -385,12 +451,28 @@ void bench_lookup(environment_t const &env) {
 #if SZ_USE_SVE
     bench_unary(env, "sz_lookup_sve", lookup_from_sz<sz_lookup_sve> {env, o, lut}).log(zeros);
 #endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_lookup_v128", lookup_from_sz<sz_lookup_v128> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_lookup_v128relaxed", lookup_from_sz<sz_lookup_v128relaxed> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_lookup_rvv", lookup_from_sz<sz_lookup_rvv> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_lookup_lasx", lookup_from_sz<sz_lookup_lasx> {env, o, lut}).log(zeros);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_lookup_powervsx", lookup_from_sz<sz_lookup_powervsx> {env, o, lut}).log(zeros);
+#endif
     bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }
 
 #pragma endregion // Lookup Transformations
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla!\n");
     if (auto code = log_environment(); code != 0) return code;
 

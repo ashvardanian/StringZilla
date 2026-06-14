@@ -470,8 +470,35 @@ extern "C" {
         b_length: usize,
     ) -> i32;
 
+    pub(crate) fn sz_utf8_word_find_boundaries(
+        text: *const c_void,
+        length: usize,
+        word_starts: *mut usize,
+        word_lengths: *mut usize,
+        words_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_word_rfind_boundaries(
+        text: *const c_void,
+        length: usize,
+        word_starts: *mut usize,
+        word_lengths: *mut usize,
+        words_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
+
+    pub(crate) fn sz_equal(a: *const c_void, b: *const c_void, length: usize) -> i32;
+    pub(crate) fn sz_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
+
     pub(crate) fn sz_bytesum(text: *const c_void, length: usize) -> u64;
     pub(crate) fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
+    pub(crate) fn sz_hash_multiseed(
+        text: *const c_void,
+        length: usize,
+        seeds: *const u64,
+        seeds_count: usize,
+        hashes: *mut u64,
+    );
     pub(crate) fn sz_hash_state_init(state: *const c_void, seed: u64);
     pub(crate) fn sz_hash_state_update(state: *const c_void, text: *const c_void, length: usize);
     pub(crate) fn sz_hash_state_digest(state: *const c_void) -> u64;
@@ -484,6 +511,17 @@ extern "C" {
         sequence: *const _SzSequence,
         alloc: *const c_void,
         order: *mut SortedIdx,
+        top_count: usize,
+        reverse: i32,
+    ) -> Status;
+
+    pub(crate) fn sz_sequence_argsort_utf8_case_insensitive(
+        //
+        sequence: *const _SzSequence,
+        alloc: *const c_void,
+        order: *mut SortedIdx,
+        top_count: usize,
+        reverse: i32,
     ) -> Status;
 
     pub(crate) fn sz_sequence_intersect(
@@ -1207,6 +1245,69 @@ where
     }
 }
 
+/// Lexicographic (byte-order) comparison of two strings, SIMD-accelerated.
+///
+/// Mirrors `Ord` on `&[u8]` but uses StringZilla's vectorized `sz_order`.
+///
+/// # Examples
+///
+/// ```
+/// use std::cmp::Ordering;
+/// use stringzilla::stringzilla as sz;
+///
+/// assert_eq!(sz::order("apple", "banana"), Ordering::Less);
+/// assert_eq!(sz::order("abc", "abc"), Ordering::Equal);
+/// ```
+pub fn order<A, B>(a: A, b: B) -> Ordering
+where
+    A: AsRef<[u8]>,
+    B: AsRef<[u8]>,
+{
+    let a_ref = a.as_ref();
+    let b_ref = b.as_ref();
+    let result = unsafe {
+        sz_order(
+            a_ref.as_ptr() as *const c_void,
+            a_ref.len(),
+            b_ref.as_ptr() as *const c_void,
+            b_ref.len(),
+        )
+    };
+    match result {
+        x if x < 0 => Ordering::Less,
+        0 => Ordering::Equal,
+        _ => Ordering::Greater,
+    }
+}
+
+/// Byte-level equality of two strings, SIMD-accelerated via `sz_equal`.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// assert!(sz::equal("abc", "abc"));
+/// assert!(!sz::equal("abc", "abd"));
+/// ```
+pub fn equal<A, B>(a: A, b: B) -> bool
+where
+    A: AsRef<[u8]>,
+    B: AsRef<[u8]>,
+{
+    let a_ref = a.as_ref();
+    let b_ref = b.as_ref();
+    // `sz_equal` assumes equal lengths; differing lengths can never be byte-equal.
+    a_ref.len() == b_ref.len()
+        && unsafe {
+            sz_equal(
+                a_ref.as_ptr() as *const c_void,
+                b_ref.as_ptr() as *const c_void,
+                a_ref.len(),
+            ) != 0
+        }
+}
+
 /// Unpacks a UTF-8 byte sequence into UTF-32 codepoints.
 ///
 /// This function decodes UTF-8 encoded text into individual Unicode codepoints,
@@ -1319,6 +1420,38 @@ where
     T: AsRef<[u8]>,
 {
     hash_with_seed(text, 0)
+}
+
+/// Hashes one byte slice under many seeds at once, writing the results into `out`.
+/// Equivalent to `out[i] = hash_with_seed(text, seeds[i])`, but normalizes the input into AES
+/// blocks once and replays the cheap per-seed rounds - markedly faster for short strings under
+/// many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).
+///
+/// # Arguments
+///
+/// * `text`: The byte slice to hash.
+/// * `seeds`: The 64-bit seeds to hash under.
+/// * `out`: The output buffer, filled with one hash per seed. Must be the same length as `seeds`.
+///
+/// # Panics
+///
+/// Panics if `out.len() != seeds.len()`.
+#[inline(always)]
+pub fn hash_multiseed_into<T>(text: T, seeds: &[u64], out: &mut [u64])
+where
+    T: AsRef<[u8]>,
+{
+    assert_eq!(seeds.len(), out.len(), "`out` must have one slot per seed");
+    let text_ref = text.as_ref();
+    unsafe {
+        sz_hash_multiseed(
+            text_ref.as_ptr() as _,
+            text_ref.len(),
+            seeds.as_ptr(),
+            seeds.len(),
+            out.as_mut_ptr(),
+        )
+    }
 }
 
 /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -2167,11 +2300,52 @@ where
     get_slice_impl::<F>
 }
 
-/// Sorts a sequence of items by comparing their byte-slice representations.
+/// Knobs for [`argsort`] and [`argsort_by`].
 ///
-/// The caller must supply an output buffer `order` whose length is at least
-/// equal to the length of `data`. On success, the function writes the sorted
-/// permutation indices into `order`.
+/// The default is a full, ascending, byte-lexicographic, **stable** sort (equal elements keep their
+/// input order). Tweak the public fields directly or chain the builder methods:
+///
+/// ```rust
+/// use stringzilla::stringzilla as sz;
+///
+/// let descending = sz::ArgsortOptions::default().reversed();
+/// let top_10_folded = sz::ArgsortOptions { case_insensitive: true, top: Some(10), ..Default::default() };
+/// # let _ = (descending, top_10_folded);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArgsortOptions {
+    /// Sort in descending order; equal elements still keep their input order (stable).
+    pub reverse: bool,
+    /// Order under Unicode case-folding instead of raw bytes.
+    pub case_insensitive: bool,
+    /// Only fully order the leading `Some(k)` elements (top-K / partial sort); `None` sorts everything.
+    /// The remaining entries of `order` stay a valid - but arbitrary - permutation of the leftover indices.
+    pub top: Option<usize>,
+}
+
+impl ArgsortOptions {
+    /// Sort in descending order.
+    pub fn reversed(mut self) -> Self {
+        self.reverse = true;
+        self
+    }
+    /// Order under Unicode case-folding instead of raw bytes.
+    pub fn case_insensitive(mut self) -> Self {
+        self.case_insensitive = true;
+        self
+    }
+    /// Only fully order the leading `count` elements (top-K / partial sort).
+    pub fn top(mut self, count: usize) -> Self {
+        self.top = Some(count);
+        self
+    }
+}
+
+/// Computes the permutation that sorts `data` by its byte-slice representations.
+///
+/// The caller supplies an output buffer `order` of length at least `data.len()`; on success the sorted
+/// permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`] for
+/// descending, case-insensitive, and top-K variants.
 ///
 /// # Example
 ///
@@ -2180,37 +2354,41 @@ where
 ///
 /// let fruits = ["banana", "apple", "cherry"];
 /// let mut order = [0; 3];
-/// sz::argsort_permutation(&fruits, &mut order).expect("sort failed");
+/// sz::argsort(&fruits, &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 0, 2]); // "apple", "banana", "cherry"
+///
+/// // Descending, case-insensitive:
+/// let labels = ["beta", "Alpha", "BETA"];
+/// let mut order = [0; 3];
+/// sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed().case_insensitive()).unwrap();
+/// assert_eq!(labels[order[0]], "beta"); // "beta"/"BETA" (fold-equal) before "Alpha", stable on ties
 /// ```
-pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<(), Status> {
+pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status> {
     if data.len() > order.len() {
         return Err(Status::BadAlloc);
     }
-    argsort_permutation_by(|i| data[i].as_ref(), order[..data.len()].as_mut())
+    argsort_by(|i| data[i].as_ref(), &mut order[..data.len()], options)
 }
 
-/// Sorts a sequence of items by comparing their corresponding byte-slice representations.
-/// The size of the permutation is inferred from the length of the `order` slice.
+/// Computes the permutation that sorts items by a caller-provided byte-slice key.
+/// The number of items is inferred from the length of the `order` slice.
 ///
 /// # Example
 ///
 /// ```rust
 /// use stringzilla::stringzilla as sz;
 ///
-/// #[derive(Debug)]
 /// struct Person { name: &'static str, age: u32 }
-///
 /// let people = [
 ///     Person { name: "Charlie", age: 20 },
 ///     Person { name: "Alice", age: 25 },
 ///     Person { name: "Bob", age: 30 },
 /// ];
 /// let mut order = [0; 3];
-/// sz::argsort_permutation_by(|i| people[i].name.as_bytes(), &mut order).expect("sort failed");
+/// sz::argsort_by(|i| people[i].name.as_bytes(), &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
 /// ```
-pub fn argsort_permutation_by<F, A>(mapper: F, order: &mut [SortedIdx]) -> Result<(), Status>
+pub fn argsort_by<F, A>(mapper: F, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
     F: Fn(usize) -> A,
     A: AsRef<[u8]>,
@@ -2224,11 +2402,11 @@ where
         unsafe { core::mem::transmute(slice) }
     };
 
-    _argsort_permutation_impl(adapter, order)
+    _argsort_impl(adapter, order, options)
 }
 
 /// Helper that takes an adapter (with a concrete type) and performs the FFI call.
-fn _argsort_permutation_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx]) -> Result<(), Status>
+fn _argsort_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
     FAdapter: Fn(usize) -> &'static [u8],
 {
@@ -2242,7 +2420,15 @@ where
         get_start: Some(_slice_get_start_punned),
         get_length: Some(_slice_get_length_punned),
     };
-    let status = unsafe { sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr()) };
+    let top_count = options.top.unwrap_or(0);
+    let reverse = options.reverse as i32;
+    let status = unsafe {
+        if options.case_insensitive {
+            sz_sequence_argsort_utf8_case_insensitive(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+        } else {
+            sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+        }
+    };
     if status == Status::Success {
         Ok(())
     } else {
@@ -2831,6 +3017,158 @@ impl<'a> Iterator for RangeUtf8WhitespaceSplits<'a> {
 #[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8WhitespaceSplits")]
 pub type RangeWhitespaceUtf8Splits<'a> = RangeUtf8WhitespaceSplits<'a>;
 
+/// Default batch size for buffering `sz_utf8_word_*_boundaries` output, mirroring the core
+/// `sz_utf8_word_boundaries_batch_k` enum in `include/stringzilla/utf8_iterate.h`. Buffering this many
+/// boundaries per call amortizes the per-word dispatch/FFI overhead without an unbounded buffer; the
+/// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
+const WORD_BOUNDARIES_BATCH: usize = 16;
+
+/// An iterator over UAX-29 words in UTF-8 text, in order.
+///
+/// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
+/// consecutive words are contiguous and no empty slices are produced. Follows the Unicode TR29 rules.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8WordSplits;
+///
+/// let words: Vec<&[u8]> = RangeUtf8WordSplits::new(b"Hi, world").collect();
+/// assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
+/// ```
+pub struct RangeUtf8WordSplits<'a> {
+    text: &'a [u8],
+    suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
+    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets, relative to `suffix`
+    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    count: usize,  // Number of buffered words (0 once exhausted)
+    index: usize,  // Index of the next word to yield from the buffer
+}
+
+impl<'a> RangeUtf8WordSplits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; WORD_BOUNDARIES_BATCH],
+            lengths: [0; WORD_BOUNDARIES_BATCH],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_word_find_boundaries(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                self.text.len() - self.suffix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                WORD_BOUNDARIES_BATCH,
+                &mut consumed,
+            )
+        };
+        self.index = 0;
+    }
+}
+
+impl<'a> Iterator for RangeUtf8WordSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            if self.count == 0 {
+                return None; // Empty input or fully drained.
+            }
+            // Batch drained: advance past the last word (a TR29 boundary) and refill from the remaining suffix.
+            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
+            self.fill();
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let begin = self.suffix + self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-29 words in UTF-8 text, from the end of the text backward (last word first).
+///
+/// Yields the same words as [`RangeUtf8WordSplits`], in reverse order.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8WordRSplits;
+///
+/// let words: Vec<&[u8]> = RangeUtf8WordRSplits::new(b"Hi, world").collect();
+/// assert_eq!(words, vec![&b"world"[..], &b" "[..], &b","[..], &b"Hi"[..]]);
+/// ```
+pub struct RangeUtf8WordRSplits<'a> {
+    text: &'a [u8],
+    prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
+    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets from the text start, last word first
+    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    count: usize,  // Number of buffered words (0 once exhausted)
+    index: usize,  // Index of the next word to yield from the buffer
+}
+
+impl<'a> RangeUtf8WordRSplits<'a> {
+    pub fn new(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            prefix: text.len(),
+            starts: [0; WORD_BOUNDARIES_BATCH],
+            lengths: [0; WORD_BOUNDARIES_BATCH],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the remaining prefix; `count` becomes 0 once the prefix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_word_rfind_boundaries(
+                self.text.as_ptr() as *const c_void,
+                self.prefix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                WORD_BOUNDARIES_BATCH,
+                &mut consumed,
+            )
+        };
+        self.prefix = consumed; // Earliest boundary still segmented; 0 once the prefix is exhausted.
+        self.index = 0;
+    }
+}
+
+impl<'a> Iterator for RangeUtf8WordRSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            self.fill(); // Refill from the remaining prefix; `count` stays 0 once nothing is left.
+            if self.count == 0 {
+                return None;
+            }
+        }
+        // Offsets are relative to the text start; the buffer runs last word → first.
+        let begin = self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
 /// An iterator over case-insensitive matches of a UTF-8 pattern in a string.
 ///
 /// This iterator yields `IndexSpan` values representing the byte offset and length
@@ -3076,6 +3414,12 @@ pub trait StringZillableUnary {
     /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
     /// ```
     fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_>;
+
+    /// Returns an iterator over UAX-29 words (Unicode TR29), in order. Words tile the input contiguously.
+    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_>;
+
+    /// Returns an iterator over UAX-29 words from the end of the text backward (last word first).
+    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -3343,6 +3687,14 @@ where
     fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_> {
         RangeUtf8WhitespaceSplits::new(self.as_ref())
     }
+
+    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_> {
+        RangeUtf8WordSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_> {
+        RangeUtf8WordRSplits::new(self.as_ref())
+    }
 }
 
 impl<'a, T, N> StringZillableBinary<'a, N> for T
@@ -3462,6 +3814,37 @@ mod tests {
         hasher.write(b"Hello, world!");
         let expected = hasher.finish();
         assert_eq!(streamed, expected);
+    }
+
+    #[test]
+    fn multiseed_hash() {
+        // More than four seeds to exercise the 4-wide tail handling on the Ice Lake backend.
+        let seeds: Vec<u64> = (0..9u64)
+            .map(|i| i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(7))
+            .collect();
+        let texts: [&[u8]; 5] = [
+            b"",
+            b"token",
+            b"sixteen_bytes!!!",
+            b"sixty four chars exactly here to fill one whole block boundary..",
+            b"a string definitely longer than sixty four bytes to hit the wide path here please",
+        ];
+        for text in texts {
+            for k in 0..=seeds.len() {
+                let mut out = vec![0u64; k];
+                sz::hash_multiseed_into(text, &seeds[..k], &mut out);
+                for i in 0..k {
+                    assert_eq!(
+                        out[i],
+                        sz::hash_with_seed(text, seeds[i]),
+                        "len={} k={} i={}",
+                        text.len(),
+                        k,
+                        i
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -3692,11 +4075,11 @@ mod tests {
     }
 
     #[test]
-    fn argsort_permutation_default() {
+    fn argsort_default() {
         // Test with a slice of string literals.
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3]; // output buffer must be at least fruits.len()
-        sz::argsort_permutation(&fruits, &mut order).expect("argsort_permutation failed");
+        sz::argsort(&fruits, &mut order, Default::default()).expect("argsort failed");
 
         // Reconstruct sorted order using the returned indices.
         let sorted_from_api: Vec<_> = order.iter().map(|&i| fruits[i]).collect();
@@ -3709,7 +4092,7 @@ mod tests {
     }
 
     #[test]
-    fn argsort_permutation_by_custom() {
+    fn argsort_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -3727,8 +4110,8 @@ mod tests {
             Person { name: "Bob", age: 40 },
         ];
         let mut order = [0; 3];
-        sz::argsort_permutation_by(|i: usize| people[i].name.as_bytes(), &mut order)
-            .expect("argsort_permutation_by failed");
+        sz::argsort_by(|i: usize| people[i].name.as_bytes(), &mut order, Default::default())
+            .expect("argsort_by failed");
 
         let sorted_from_api: Vec<_> = order.iter().map(|&i| people[i].name).collect();
 
@@ -3737,6 +4120,43 @@ mod tests {
         expected.sort();
 
         assert_eq!(sorted_from_api, expected);
+    }
+
+    #[test]
+    fn argsort_reverse_is_stable() {
+        // Two equal "beta"s must keep their input order even when sorting descending.
+        let labels = ["beta", "alpha", "beta", "gamma"];
+        let mut order = [0; 4];
+        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed()).expect("argsort failed");
+        let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
+        assert_eq!(sorted, vec!["gamma", "beta", "beta", "alpha"]);
+        // Stability: the first "beta" (index 0) precedes the second (index 2).
+        let beta_positions: Vec<_> = order.iter().filter(|&&i| labels[i] == "beta").copied().collect();
+        assert_eq!(beta_positions, vec![0, 2]);
+    }
+
+    #[test]
+    fn argsort_top_k_prefix() {
+        let words = ["delta", "alpha", "echo", "bravo", "charlie"];
+        let mut order = [0; 5];
+        sz::argsort(&words, &mut order, sz::ArgsortOptions::default().top(2)).expect("argsort failed");
+        // Only the first two entries are guaranteed sorted (the two smallest).
+        assert_eq!(words[order[0]], "alpha");
+        assert_eq!(words[order[1]], "bravo");
+        // `order` is still a full permutation.
+        let mut seen = order.to_vec();
+        seen.sort();
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn argsort_case_insensitive() {
+        let labels = ["Banana", "apple", "BANANA", "Apple"];
+        let mut order = [0; 4];
+        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().case_insensitive()).expect("argsort failed");
+        let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
+        // Fold-equal strings group together and stay in input order: "apple","Apple" then "Banana","BANANA".
+        assert_eq!(sorted, vec!["apple", "Apple", "Banana", "BANANA"]);
     }
 
     #[test]
@@ -4319,5 +4739,42 @@ mod tests {
         let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines, vec![b"", b""]);
+    }
+
+    #[test]
+    fn utf8_case_fold_golden_vectors() {
+        // One probe per kernel family: ASCII, Latin-1 (C3), Latin Extended (C4/C6),
+        // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
+        // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
+        let golden: &[(&str, &[u8])] = &[
+            ("HeLLo", b"hello"),                   // ASCII fast path
+            ("\u{00DF}", b"ss"),                   // ß → ss expansion
+            ("\u{1E9E}", b"ss"),                   // ẞ → ss (E1 BA lead bytes)
+            ("\u{03A3}", "\u{03C3}".as_bytes()),   // Σ → σ
+            ("\u{03C2}", "\u{03C3}".as_bytes()),   // final sigma ς → σ
+            ("\u{FB03}", b"ffi"),                  // ﬃ ligature → ffi
+            ("\u{041A}", "\u{043A}".as_bytes()),   // Cyrillic К → к
+            ("\u{00C4}", "\u{00E4}".as_bytes()),   // Ä → ä (C3 lead byte)
+            ("\u{0110}", "\u{0111}".as_bytes()),   // Đ → đ (C4 lead byte)
+            ("\u{0111}", "\u{0111}".as_bytes()),   // đ → đ (already folded)
+            ("\u{01A0}", "\u{01A1}".as_bytes()),   // Ơ → ơ (C6 lead byte)
+            ("\u{01A1}", "\u{01A1}".as_bytes()),   // ơ → ơ (already folded)
+            ("\u{1EA0}", "\u{1EA1}".as_bytes()),   // Ạ → ạ (E1 BA lead bytes)
+            ("\u{1EA1}", "\u{1EA1}".as_bytes()),   // ạ → ạ (already folded)
+            ("\u{212A}", b"k"),                    // Kelvin sign K → k
+            ("\u{10D50}", "\u{10D70}".as_bytes()), // Garay capital Ca → small Ca
+        ];
+        for (source, expected) in golden {
+            let mut destination = vec![0u8; source.len() * 3];
+            let folded_length = sz::utf8_case_fold(source, &mut destination[..]);
+            assert_eq!(&destination[..folded_length], *expected, "folding {:?}", source);
+        }
+
+        // Returned length tracks expansion: ẞ shrinks 3 → 2 bytes, ΐ grows 2 → 6 bytes
+        let mut destination = [0u8; 16];
+        assert_eq!(sz::utf8_case_fold("\u{1E9E}", &mut destination), 2);
+        let folded_length = sz::utf8_case_fold("\u{0390}", &mut destination);
+        assert_eq!(folded_length, 6);
+        assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
     }
 }

@@ -1,8 +1,8 @@
 /**
- *  @file   bench_fingerprints.cpp
- *  @brief  Benchmarks for exact multi-pattern substring search algorithms.
- *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
- *          validating the SIMD-accelerated backends against the serial baselines.
+ *  @file scripts/bench_fingerprints.cpp
+ *  @brief Benchmarks for exact multi-pattern substring search algorithms.
+ *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -45,6 +45,7 @@ namespace szs = ashvardanian::stringzillas;
 using namespace sz::scripts;
 
 int main(int argc, char const **argv) {
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZillas on CPU!\n");
     if (auto code = log_environment(); code != 0) return code;
 

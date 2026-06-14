@@ -1593,7 +1593,7 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_NEON_AES`, `SZ_USE_NEON_SHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2_AES`__:
+__`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICELAKE`, `SZ_USE_NEON`, `SZ_USE_NEONAES`, `SZ_USE_NEONSHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2AES`, `SZ_USE_V128`, `SZ_USE_V128RELAXED`, `SZ_USE_RVV`, `SZ_USE_LASX`, `SZ_USE_POWERVSX`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
@@ -2111,7 +2111,7 @@ Build the shared C library once, then ensure your runtime can locate it (Linux s
 
 ```bash
 cmake -B build_shared -D STRINGZILLA_BUILD_SHARED=1 -D CMAKE_BUILD_TYPE=Release
-cmake --build build_shared --target stringzilla_shared --config Release
+cmake --build build_shared --target stringzilla_shared --config Release --parallel
 export LD_LIBRARY_PATH="$PWD/build_shared:$LD_LIBRARY_PATH"
 ```
 
@@ -2610,8 +2610,10 @@ StringZilla automatically picks the most advanced backend for the given CPU.
 Similarly, in Python, you can log the auto-detected capabilities:
 
 ```python
-python -c "import stringzilla; print(stringzilla.__capabilities__)"         # ('serial', 'westmere', 'haswell', 'skylake', 'ice', 'neon', 'sve', 'sve2+aes')
-python -c "import stringzilla; print(stringzilla.__capabilities_str__)"     # "haswell, skylake, ice, neon, sve, sve2+aes"
+python -c "import stringzilla; print(stringzilla.__capabilities__)"         # e.g. ('serial', 'westmere', 'goldmont', 'haswell', 'skylake', 'icelake')
+python -c "import stringzilla; print(stringzilla.__capabilities_str__)"     # e.g. "serial, westmere, goldmont, haswell, skylake, icelake"
+# Other targets report their own names: Arm "neon, neonaes, neonsha, sve, sve2, sve2aes",
+# WebAssembly "v128, v128relaxed", RISC-V "rvv", LoongArch "lasx", IBM Power "powervsx".
 ```
 
 You can also explicitly set the backend to use, or scope the backend to a specific function.

@@ -1,12 +1,12 @@
 /**
- *  @brief   Extensive @b unit-testing suite for StringZilla, written in C++.
- *  @note    It mostly tests one target hardware platform at a time and should be compiled and run separately for each.
- *           To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
+ *  @brief Extensive @b unit-testing suite for StringZilla, written in C++.
+ *  @note It mostly tests one target hardware platform at a time and should be compiled and run separately for each.
+ *      To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
  *
- *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_stringzilla.cpp
- *  @author  Ash Vardanian
+ *  @file scripts/test_stringzilla.cpp
+ *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -28,7 +28,7 @@
  #define SZ_USE_HASWELL 0
  #define SZ_USE_GOLDMONT 0
  #define SZ_USE_SKYLAKE 0
- #define SZ_USE_ICE 0
+ #define SZ_USE_ICELAKE 0
  #define SZ_USE_NEON 0
  #define SZ_USE_SVE 0
  #define SZ_USE_SVE2 0
@@ -104,8 +104,8 @@ template class std::map<sz::string_view, int>;
 template class std::unordered_map<sz::string_view, int>;
 
 /**
- *  @brief  Several string processing operations rely on computing integer logarithms.
- *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
+ *  @brief Several string processing operations rely on computing integer logarithms.
+ *         Failures in such operations will result in wrong `resize` outcomes and heap corruption.
  */
 void test_arithmetical_utilities() {
 
@@ -187,13 +187,13 @@ void test_sequence_struct() {
         sz_sequence_t sequence;
         sequence.handle = &strings;
         sequence.count = strings.size();
-        sequence.get_start =
-            reinterpret_cast<sz_sequence_member_start_t>(+[](void *handle, sz_size_t index) noexcept -> sz_cptr_t {
+        sequence.get_start = reinterpret_cast<sz_sequence_member_start_t>(
+            +[](void *handle, sz_size_t index) noexcept -> sz_cptr_t {
                 auto const &strings = *static_cast<strings_vector_t *>(handle);
                 return strings[index].c_str();
             });
-        sequence.get_length =
-            reinterpret_cast<sz_sequence_member_length_t>(+[](void *handle, sz_size_t index) noexcept -> sz_size_t {
+        sequence.get_length = reinterpret_cast<sz_sequence_member_length_t>(
+            +[](void *handle, sz_size_t index) noexcept -> sz_size_t {
                 auto const &strings = *static_cast<strings_vector_t *>(handle);
                 return strings[index].size();
             });
@@ -253,7 +253,7 @@ void test_byteset_struct() {
 }
 
 /**
- *  @brief  Hashes a string and compares the output between a serial and hardware-specific SIMD backend.
+ *  @brief Hashes a string and compares the output between a serial and hardware-specific SIMD backend.
  *
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
@@ -323,8 +323,66 @@ void test_hash_equivalence(                                               //
 }
 
 /**
- *  @brief  Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
- *          produces exactly the same output across different SIMD implementations.
+ *  @brief Verifies `sz_hash_multiseed` produces exactly the same output as a loop of `sz_hash`,
+ *         for one backend, across many lengths and seed counts (covering the 4-lane tail handling).
+ */
+void test_hash_multiseed_equivalence(sz_hash_multiseed_t multiseed, sz_hash_t hash_one) {
+    // Enough seeds to exercise full 4-wide groups plus every 1..3-seed tail remainder.
+    std::vector<sz_u64_t> seeds = {0u,
+                                   1u,
+                                   42u,
+                                   314159u,
+                                   std::numeric_limits<sz_u32_t>::max(),
+                                   std::numeric_limits<sz_u64_t>::max(),
+                                   7u,
+                                   8u,
+                                   9u,
+                                   10u,
+                                   11u,
+                                   12u,
+                                   13u,
+                                   14u,
+                                   15u,
+                                   16u,
+                                   17u};
+
+    auto check = [&](std::string const &text) {
+        for (std::size_t count = 0; count <= seeds.size(); ++count) {
+            // One guard slot past the end catches any write beyond `count`.
+            std::vector<sz_u64_t> out(count + 1, 0xDEADBEEFDEADBEEFull);
+            multiseed(text.data(), text.size(), seeds.data(), count, out.data());
+            for (std::size_t i = 0; i < count; ++i) assert(out[i] == hash_one(text.data(), text.size(), seeds[i]));
+            assert(out[count] == 0xDEADBEEFDEADBEEFull); // No overwrite past `count`
+        }
+    };
+
+    // Cover the minimal (<= 64 byte) ladder boundaries and the wide path.
+    for (std::size_t length = 0; length != 70; ++length) {
+        std::string text(length, '\0');
+        randomize_string(&text[0], length);
+        check(text);
+    }
+}
+
+void test_multiseed_hashing() {
+    test_hash_multiseed_equivalence(sz_hash_multiseed, sz_hash);
+
+    // And every backend that ships a specialized multi-seed kernel must match its own single-shot.
+    test_hash_multiseed_equivalence(sz_hash_multiseed_serial, sz_hash_serial);
+#if SZ_USE_WESTMERE
+    test_hash_multiseed_equivalence(sz_hash_multiseed_westmere, sz_hash_westmere);
+#endif
+#if SZ_USE_ICELAKE
+    test_hash_multiseed_equivalence(sz_hash_multiseed_icelake, sz_hash_icelake);
+#endif
+#if SZ_USE_NEONAES
+    test_hash_multiseed_equivalence(sz_hash_multiseed_neonaes, sz_hash_neonaes);
+#endif
+}
+
+/**
+ *  @brief Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
+ *         produces exactly the same output across different SIMD implementations.
  */
 void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
 
@@ -350,8 +408,8 @@ void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_r
 }
 
 /**
- *  @brief  Tests SHA256 implementations, comparing serial and SIMD variants
- *          against known FIPS 180-4 test vectors.
+ *  @brief Tests SHA256 implementations, comparing serial and SIMD variants
+ *         against known FIPS 180-4 test vectors.
  */
 void test_sha256_equivalence(                                                                                     //
     sz_sha256_state_init_t init_base, sz_sha256_state_update_t update_base, sz_sha256_state_digest_t digest_base, //
@@ -388,7 +446,7 @@ void test_sha256_equivalence(                                                   
 }
 
 /**
- *  @brief  Tests UTF-8 functions across different SIMD backends against the serial implementation.
+ *  @brief Tests UTF-8 functions across different SIMD backends against the serial implementation.
  *
  *  Generates random strings containing:
  *  - ASCII content (1-byte)
@@ -410,40 +468,40 @@ void test_utf8_equivalence(                                 //
 
     auto check = [&](std::string const &text) {
         sz_cptr_t data = text.data();
-        sz_size_t len = text.size();
+        sz_size_t length = text.size();
 
         // Test `sz_utf8_count` equivalence
-        sz_size_t count_result_base = count_base(data, len);
-        sz_size_t count_result_simd = count_simd(data, len);
+        sz_size_t count_result_base = count_base(data, length);
+        sz_size_t count_result_simd = count_simd(data, length);
         assert(count_result_base == count_result_simd);
 
         // Test `sz_utf8_find_newline` equivalence by scanning the entire string
-        sz_cptr_t pos = data;
-        sz_size_t remaining = len;
+        sz_cptr_t cursor = data;
+        sz_size_t remaining = length;
         while (remaining > 0) {
             sz_size_t matched_base = 0, matched_simd = 0;
-            sz_cptr_t found_base = newline_base(pos, remaining, &matched_base);
-            sz_cptr_t found_simd = newline_simd(pos, remaining, &matched_simd);
+            sz_cptr_t found_base = newline_base(cursor, remaining, &matched_base);
+            sz_cptr_t found_simd = newline_simd(cursor, remaining, &matched_simd);
             assert(found_base == found_simd && "Mismatch in newline detection");
             if (found_base == SZ_NULL_CHAR) break;
             assert(matched_base == matched_simd);
-            sz_size_t offset = (found_base - pos) + matched_base;
-            pos += offset;
+            sz_size_t offset = (found_base - cursor) + matched_base;
+            cursor += offset;
             remaining -= offset;
         }
 
         // Test `sz_utf8_find_whitespace` equivalence by scanning the entire string
-        pos = data;
-        remaining = len;
+        cursor = data;
+        remaining = length;
         while (remaining > 0) {
             sz_size_t matched_base = 0, matched_simd = 0;
-            sz_cptr_t found_base = whitespace_base(pos, remaining, &matched_base);
-            sz_cptr_t found_simd = whitespace_simd(pos, remaining, &matched_simd);
+            sz_cptr_t found_base = whitespace_base(cursor, remaining, &matched_base);
+            sz_cptr_t found_simd = whitespace_simd(cursor, remaining, &matched_simd);
             assert(found_base == found_simd && "Mismatched position in whitespace detection");
             if (found_base == SZ_NULL_CHAR) break;
             assert(matched_base == matched_simd);
-            sz_size_t offset = (found_base - pos) + matched_base;
-            pos += offset;
+            sz_size_t offset = (found_base - cursor) + matched_base;
+            cursor += offset;
             remaining -= offset;
         }
     };
@@ -513,25 +571,25 @@ void test_utf8_equivalence(                                 //
 
         // Now, let's replace 10% of bytes in the sequence with a NUL character, thus breaking many valid codepoints
         std::size_t num_bytes_to_corrupt = text.size() / 10;
-        std::uniform_int_distribution<std::size_t> pos_dist(0, text.size() - 1);
+        std::uniform_int_distribution<std::size_t> byte_index_dist(0, text.size() - 1);
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t pos = pos_dist(rng);
-            text[pos] = '\0';
+            std::size_t byte_index = byte_index_dist(rng);
+            text[byte_index] = '\0';
         }
         check(text);
 
         // Swap 10% of bytes at random positions, creating malformed UTF-8 sequences
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t pos1 = pos_dist(rng);
-            std::size_t pos2 = pos_dist(rng);
-            std::swap(text[pos1], text[pos2]);
+            std::size_t byte_index_1 = byte_index_dist(rng);
+            std::size_t byte_index_2 = byte_index_dist(rng);
+            std::swap(text[byte_index_1], text[byte_index_2]);
         }
         check(text);
     }
 }
 
 /**
- *  @brief  Tests equivalence of case folding implementations (serial vs SIMD).
+ *  @brief Tests equivalence of case folding implementations (serial vs SIMD).
  *
  *  Generates random UTF-8 strings containing:
  *  - ASCII text (uppercase and lowercase)
@@ -542,7 +600,7 @@ void test_utf8_equivalence(                                 //
  */
 void test_utf8_case_fold_equivalence(                             //
     sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd, //
-    std::size_t min_text_length = 4000, std::size_t min_iterations = 10000) {
+    std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
 
     // Output buffers (3x input for worst-case expansion)
     std::vector<char> output_base(min_text_length * 3 + 256);
@@ -641,9 +699,8 @@ void test_utf8_case_fold_equivalence(                             //
         "\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2", // ႠႡႢ → ⴀⴁⴂ
         "\xE1\x83\x90\xE1\x83\x91\xE1\x83\x92", // ა ბ გ (lowercase, no change)
         // Georgian mixed with ASCII (tests fast-path interaction)
-        ("Hello \xE1\x82\xA0\xE1\x82\xA1 World"), // Hello ႠႡ World
-        ("ABC\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2"
-         "DEF"), // ABCႠႡႢdef
+        ("Hello \xE1\x82\xA0\xE1\x82\xA1 World"),          // Hello ႠႡ World
+        ("ABC\xE1\x82\xA0\xE1\x82\xA1\xE1\x82\xA2" "DEF"), // ABCႠႡႢdef
         // Emojis (no case folding, should pass through)
         "\xF0\x9F\x98\x80",             // 😀
         "Hello \xF0\x9F\x8C\x8D World", // Hello 🌍 World
@@ -662,15 +719,15 @@ void test_utf8_case_fold_equivalence(                             //
 
         // Build up a random string of at least `min_text_length` bytes
         while (text.size() < min_text_length) {
-            std::size_t idx = content_dist(rng);
-            text.append(utf8_content[idx]);
+            std::size_t content_index = content_dist(rng);
+            text.append(utf8_content[content_index]);
         }
         check(text);
     }
 }
 
 /**
- *  @brief  Exhaustive fuzz test for UTF-8 case folding using all Unicode codepoints.
+ *  @brief Exhaustive fuzz test for UTF-8 case folding using all Unicode codepoints.
  *
  *  - First run: Tests all valid codepoints in order (0x0 to 0x10FFFF).
  *  - Subsequent runs: Shuffles the codepoints to create random sequences.
@@ -702,13 +759,13 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
         if (it > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
 
         // Convert to UTF-8
-        char *data_ptr = input_buffer.data();
-        for (sz_rune_t cp : all_runes) data_ptr += sz_rune_export(cp, (sz_u8_t *)data_ptr);
-        sz_size_t input_len = data_ptr - input_buffer.data();
+        char *write_cursor = input_buffer.data();
+        for (sz_rune_t cp : all_runes) write_cursor += sz_rune_export(cp, (sz_u8_t *)write_cursor);
+        sz_size_t input_length = write_cursor - input_buffer.data();
 
         // Run tests
-        sz_size_t len_base = fold_base(input_buffer.data(), input_len, output_base.data());
-        sz_size_t len_simd = fold_simd(input_buffer.data(), input_len, output_simd.data());
+        sz_size_t len_base = fold_base(input_buffer.data(), input_length, output_base.data());
+        sz_size_t len_simd = fold_simd(input_buffer.data(), input_length, output_simd.data());
 
         // Validations
         if (len_base != len_simd) {
@@ -741,7 +798,7 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
 
                     // Try to map back to input (approximate)
                     sz_size_t in_start = (i > 16) ? i - 16 : 0;
-                    sz_size_t in_end = (i + 16 < input_len) ? i + 16 : input_len;
+                    sz_size_t in_end = (i + 16 < input_length) ? i + 16 : input_length;
                     std::fprintf(stderr, "Input (approx): ");
                     for (sz_size_t j = in_start; j < in_end; ++j)
                         std::fprintf(stderr, "%02X ", (unsigned char)input_buffer[j]);
@@ -757,7 +814,7 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
 }
 
 /**
- *  @brief  Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
+ *  @brief Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
  *
  *  Uses two verification modes:
  *  - Exhaustive (max_needles_per_haystack == 0): Tests ALL N*(N+1)/2 substrings of each folded haystack
@@ -977,13 +1034,14 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
                                           : std::min(max_needles_per_haystack, queries_remaining);
 
         // Helper to extract needle from folded haystack and test both implementations
-        auto test_needle = [&](sz_size_t start, sz_size_t len) -> bool {
+        auto test_needle = [&](sz_size_t start, sz_size_t rune_count) -> bool {
             sz_cptr_t needle_start = (start == 0)
                                          ? haystack_folded.data()
                                          : utf8_find_nth(haystack_folded.data(), haystack_folded.size(), start);
-            sz_cptr_t needle_end = ((start + len) == runes_in_folded_haystack)
+            sz_cptr_t needle_end = ((start + rune_count) == runes_in_folded_haystack)
                                        ? haystack_folded.data() + haystack_folded.size()
-                                       : utf8_find_nth(haystack_folded.data(), haystack_folded.size(), start + len);
+                                       : utf8_find_nth(haystack_folded.data(), haystack_folded.size(),
+                                                       start + rune_count);
             if (!needle_start || !needle_end || needle_end <= needle_start) return false;
 
             sz_size_t needle_bytes = needle_end - needle_start;
@@ -992,11 +1050,12 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
 
             sz_cptr_t serial_result = find_serial(haystack.data(), haystack.size(), needle_start, needle_bytes,
                                                   &serial_meta, &serial_matched);
-            sz_cptr_t simd_result =
-                find_simd(haystack.data(), haystack.size(), needle_start, needle_bytes, &simd_meta, &simd_matched);
+            sz_cptr_t simd_result = find_simd(haystack.data(), haystack.size(), needle_start, needle_bytes, &simd_meta,
+                                              &simd_matched);
 
             if (serial_result != simd_result || serial_matched != simd_matched) {
-                std::fprintf(stderr, "FUZZ FAIL haystack=%zu start=%zu len=%zu\n", haystacks_tested, start, len);
+                std::fprintf(stderr, "FUZZ FAIL haystack=%zu start=%zu rune_count=%zu\n", haystacks_tested, start,
+                             rune_count);
                 std::fprintf(stderr, "  Haystack len=%zu, needle len=%zu\n", haystack.size(), needle_bytes);
 
                 std::fprintf(stderr, "  Needle bytes: ");
@@ -1032,8 +1091,9 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
         if (max_needles_per_haystack == 0) {
             // Exhaustive mode: every possible (start, length) pair from folded haystack
             for (sz_size_t start = 0; start < runes_in_folded_haystack && queries_remaining > 0; ++start) {
-                for (sz_size_t len = 1; len <= runes_in_folded_haystack - start && queries_remaining > 0; ++len) {
-                    if (test_needle(start, len)) {
+                for (sz_size_t rune_count = 1; rune_count <= runes_in_folded_haystack - start && queries_remaining > 0;
+                     ++rune_count) {
+                    if (test_needle(start, rune_count)) {
                         ++total_passed;
                         --queries_remaining;
                     }
@@ -1045,8 +1105,8 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
             std::uniform_int_distribution<sz_size_t> start_dist(0, runes_in_folded_haystack - 1);
             for (std::size_t i = 0; i < needles_in_this_haystack && queries_remaining > 0; ++i) {
                 sz_size_t start = start_dist(rng);
-                std::uniform_int_distribution<sz_size_t> len_dist(1, runes_in_folded_haystack - start);
-                if (test_needle(start, len_dist(rng))) {
+                std::uniform_int_distribution<sz_size_t> rune_count_dist(1, runes_in_folded_haystack - start);
+                if (test_needle(start, rune_count_dist(rng))) {
                     ++total_passed;
                     --queries_remaining;
                 }
@@ -1057,6 +1117,326 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
     }
 
     std::printf("    passed %zu fuzz tests across %zu haystacks\n", total_passed, haystacks_tested);
+}
+
+/** @brief Prints one labeled hex dump line to `stderr`; used by the adversarial UTF-8 case tests below. */
+static void print_utf8_case_test_bytes(char const *label, char const *bytes, std::size_t length) {
+    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
+    for (std::size_t i = 0; i < length; ++i) std::fprintf(stderr, "%02X ", (unsigned char)bytes[i]);
+    std::fprintf(stderr, "\n");
+}
+
+/**
+ *  @brief Runs one case-insensitive find query through two backends and demands identical results.
+ *
+ *  Both the match pointer offset and the matched length must agree, including the not-found case
+ *  where both backends return `SZ_NULL_CHAR`. On mismatch prints the needle and haystack as hex.
+ */
+static void check_utf8_ci_find_pair(                                                      //
+    sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd, //
+    char const *haystack, std::size_t haystack_length,                                    //
+    char const *needle, std::size_t needle_length, char const *test_name) {
+
+    sz_utf8_case_insensitive_needle_metadata_t base_metadata = {}, simd_metadata = {};
+    sz_size_t base_matched = 0, simd_matched = 0;
+    sz_cptr_t base_result = find_base(haystack, haystack_length, needle, needle_length, &base_metadata, &base_matched);
+    sz_cptr_t simd_result = find_simd(haystack, haystack_length, needle, needle_length, &simd_metadata, &simd_matched);
+
+    bool const same_position = base_result == simd_result;
+    bool const same_length = base_result == SZ_NULL_CHAR || base_matched == simd_matched;
+    if (same_position && same_length) return;
+
+    long const base_offset = base_result ? (long)(base_result - haystack) : -1L;
+    long const simd_offset = simd_result ? (long)(simd_result - haystack) : -1L;
+    std::fprintf(stderr, "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu, simd kernel=%u\n", //
+                 test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
+                 simd_metadata.kernel_id);
+    print_utf8_case_test_bytes("needle  ", needle, needle_length);
+    print_utf8_case_test_bytes("haystack", haystack, haystack_length);
+    assert(same_position && "Case-insensitive find backends disagree on the match position");
+    assert(same_length && "Case-insensitive find backends disagree on the matched length");
+}
+
+/**
+ *  @brief Differential adversarial test for case-insensitive search over @b all fold preimages.
+ *
+ *  Random fuzzing rarely places a rare preimage (like 'ϴ' U+03F4 → 'θ') right where a SIMD
+ *  danger-detection "alarm" crosses a chunk boundary - structured enumeration does. For every
+ *  codepoint whose `sz_unicode_fold_codepoint_` output differs from identity, the folded output
+ *  becomes the needle (bare, "x"-prefixed, "x"-suffixed) and the UTF-8 @b preimage hides in
+ *  'y'-padded haystacks at offsets straddling the 64-byte SIMD chunk boundary. Haystacks are
+ *  built both with and without the mirroring "x" context, so the not-found path is exercised
+ *  with the same adversarial shapes.
+ */
+void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd) {
+
+    std::printf("  - testing case-insensitive find against all fold preimages...\n");
+
+    std::size_t const offsets[] = {0, 30, 61, 62, 63, 64, 65};
+    std::size_t const offsets_count = sizeof(offsets) / sizeof(offsets[0]);
+    std::size_t const padding_length = 16;
+    std::size_t preimages_tested = 0, cases_tested = 0;
+
+    char needle[16];   // Longest folded form is 9 bytes, plus one ASCII context byte
+    char haystack[96]; // Largest offset 65, plus context, plus a 4-byte preimage, plus padding
+
+    for (sz_rune_t preimage = 1; preimage <= 0x10FFFF; ++preimage) {
+        if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
+        sz_rune_t folded_runes[3];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(preimage, folded_runes);
+        if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds aren't adversarial
+
+        sz_u8_t preimage_utf8[4];
+        std::size_t const preimage_length = (std::size_t)sz_rune_export(preimage, preimage_utf8);
+        sz_u8_t folded_utf8[12];
+        std::size_t folded_length = 0;
+        for (sz_size_t i = 0; i < folded_count; ++i)
+            folded_length += (std::size_t)sz_rune_export(folded_runes[i], folded_utf8 + folded_length);
+        ++preimages_tested;
+
+        // Needle variants: 0 = bare folded form, 1 = "x"-prefixed, 2 = "x"-suffixed
+        for (int variant = 0; variant < 3; ++variant) {
+            std::size_t needle_length = 0;
+            if (variant == 1) needle[needle_length++] = 'x';
+            std::memcpy(needle + needle_length, folded_utf8, folded_length);
+            needle_length += folded_length;
+            if (variant == 2) needle[needle_length++] = 'x';
+
+            // With the mirroring "x" context the needle must match through the fold expansion;
+            // without it both backends must agree on the not-found result. The bare variant has
+            // no context to mirror, so it runs once.
+            for (int with_context = variant == 0 ? 1 : 0; with_context < 2; ++with_context) {
+                for (std::size_t offset_index = 0; offset_index < offsets_count; ++offset_index) {
+                    std::size_t haystack_length = 0;
+                    while (haystack_length < offsets[offset_index]) haystack[haystack_length++] = 'y';
+                    if (variant == 1 && with_context) haystack[haystack_length++] = 'x';
+                    std::memcpy(haystack + haystack_length, preimage_utf8, preimage_length);
+                    haystack_length += preimage_length;
+                    if (variant == 2 && with_context) haystack[haystack_length++] = 'x';
+                    for (std::size_t i = 0; i < padding_length; ++i) haystack[haystack_length++] = 'y';
+
+                    check_utf8_ci_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
+                                            "preimage find");
+                    ++cases_tested;
+                }
+            }
+        }
+    }
+    std::printf("    passed %zu cases across %zu fold preimages\n", cases_tested, preimages_tested);
+}
+
+/**
+ *  @brief Closure property of the case-invariant classifier over the Unicode fold table.
+ *
+ *  A rune may be treated as case-invariant only if no case-insensitive match can start or hide
+ *  inside it. That demands two closures over `sz_unicode_fold_codepoint_`: every preimage with a
+ *  non-identity fold participates in case, and every rune @b emitted by such a fold can appear
+ *  inside a folded expansion (like 'ʾ' U+02BE inside 'ẚ' → "aʾ"), so neither may be invariant.
+ *  Fully generative: a Unicode table update re-derives the expected set automatically.
+ */
+void test_utf8_case_invariant_closure() {
+
+    std::printf("  - testing case-invariant closure over the fold table...\n");
+    std::size_t preimages_checked = 0, outputs_checked = 0;
+
+    for (sz_rune_t rune = 0; rune <= 0x10FFFF; ++rune) {
+        if (rune >= 0xD800 && rune <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
+        sz_rune_t folded_runes[3];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+        if (folded_count == 1 && folded_runes[0] == rune) continue; // Identity folds impose no constraint
+
+        if (sz_rune_is_case_invariant_(rune) != sz_false_k) {
+            std::fprintf(stderr, "Fold preimage U+%04X is wrongly classified as case-invariant\n", rune);
+            assert(false && "Fold preimages must not be case-invariant");
+        }
+        ++preimages_checked;
+
+        for (sz_size_t i = 0; i < folded_count; ++i) {
+            if (sz_rune_is_case_invariant_(folded_runes[i]) != sz_false_k) {
+                std::fprintf(stderr,
+                             "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
+                             folded_runes[i], rune);
+                assert(false && "Fold outputs must not be case-invariant");
+            }
+            ++outputs_checked;
+        }
+    }
+    std::printf("    passed %zu preimages and %zu fold-output runes\n", preimages_checked, outputs_checked);
+}
+
+/**
+ *  @brief Differential test for matches sitting at the very tail of the haystack, where the
+ *         haystack span is wider or narrower than the folded needle window.
+ *
+ *  Expanding preimages ('ᾳ' U+1FB3 → "αι", 'ß' → "ss", the ﬁ/ﬀ/ﬃ ligatures, 'ŉ' U+0149) and
+ *  shrinking ones ('K' Kelvin U+212A → "k", 'Å' Angstrom U+212B → "å") break the byte-for-byte
+ *  relation between haystack and folded needle - exactly where SIMD tail danger-windows get cut
+ *  short. The set is derived generatively: every preimage whose folded UTF-8 byte length differs
+ *  from its own. Each lands within the last `needle_window` bytes (windows 4..16) of haystacks
+ *  whose filler also sweeps the 64-byte SIMD chunk boundary.
+ */
+void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base,
+                                       sz_utf8_case_insensitive_find_t find_simd) {
+
+    std::printf("  - testing case-insensitive find with expanding preimages at haystack tails...\n");
+
+    struct expanding_preimage_t {
+        sz_u8_t preimage_utf8[4];
+        std::size_t preimage_length;
+        sz_u8_t folded_utf8[12];
+        std::size_t folded_length;
+    };
+    std::vector<expanding_preimage_t> expanding_preimages;
+
+    for (sz_rune_t preimage = 1; preimage <= 0x10FFFF; ++preimage) {
+        if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
+        sz_rune_t folded_runes[3];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(preimage, folded_runes);
+        if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds can't expand
+
+        expanding_preimage_t entry;
+        entry.preimage_length = (std::size_t)sz_rune_export(preimage, entry.preimage_utf8);
+        entry.folded_length = 0;
+        for (sz_size_t i = 0; i < folded_count; ++i)
+            entry.folded_length += (std::size_t)sz_rune_export(folded_runes[i],
+                                                               entry.folded_utf8 + entry.folded_length);
+        if (entry.folded_length == entry.preimage_length) continue; // Same width → not a tail-expansion shape
+        expanding_preimages.push_back(entry);
+    }
+
+    std::size_t const filler_lengths[] = {0, 1, 2, 30, 59, 60, 61, 62, 63, 64, 65};
+    std::size_t const filler_lengths_count = sizeof(filler_lengths) / sizeof(filler_lengths[0]);
+    std::size_t const needle_window_max = 16; // Tail paddings 0..15 keep the preimage within the last 4..16 bytes
+    std::size_t cases_tested = 0;
+
+    char needle[32];    // Two folded forms of up to 12 bytes, or one with an ASCII context byte
+    char haystack[128]; // Largest filler 65, plus context, plus two 4-byte preimages, plus tail padding
+
+    for (std::size_t entry_index = 0; entry_index < expanding_preimages.size(); ++entry_index) {
+        expanding_preimage_t const &entry = expanding_preimages[entry_index];
+
+        // Needle variants: 0 = folded form, 1 = "x"-suffixed, 2 = "x"-prefixed, 3 = folded form twice
+        for (int variant = 0; variant < 4; ++variant) {
+            std::size_t needle_length = 0;
+            if (variant == 2) needle[needle_length++] = 'x';
+            std::memcpy(needle + needle_length, entry.folded_utf8, entry.folded_length);
+            needle_length += entry.folded_length;
+            if (variant == 1) needle[needle_length++] = 'x';
+            if (variant == 3) {
+                std::memcpy(needle + needle_length, entry.folded_utf8, entry.folded_length);
+                needle_length += entry.folded_length;
+            }
+
+            for (std::size_t filler_index = 0; filler_index < filler_lengths_count; ++filler_index) {
+                for (std::size_t tail_padding = 0; tail_padding < needle_window_max; ++tail_padding) {
+                    std::size_t haystack_length = 0;
+                    while (haystack_length < filler_lengths[filler_index]) haystack[haystack_length++] = 'o';
+                    if (variant == 2) haystack[haystack_length++] = 'x';
+                    std::memcpy(haystack + haystack_length, entry.preimage_utf8, entry.preimage_length);
+                    haystack_length += entry.preimage_length;
+                    if (variant == 3) {
+                        std::memcpy(haystack + haystack_length, entry.preimage_utf8, entry.preimage_length);
+                        haystack_length += entry.preimage_length;
+                    }
+                    if (variant == 1) haystack[haystack_length++] = 'x';
+                    for (std::size_t i = 0; i < tail_padding; ++i) haystack[haystack_length++] = 'y';
+
+                    check_utf8_ci_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
+                                            "expanding tail find");
+                    ++cases_tested;
+                }
+            }
+        }
+    }
+    std::printf("    passed %zu cases across %zu expanding preimages\n", cases_tested, expanding_preimages.size());
+}
+
+/**
+ *  @brief Smoke test feeding invalid UTF-8 into the case kernels of one backend.
+ *
+ *  The valid-UTF-8 contract stands, so outputs may be arbitrary - the only requirements are:
+ *  no crash, the fold output stays within the documented 3x expansion bound, and no writes land
+ *  outside the destination buffer. One nuance: a truncated multi-byte sequence at the very end
+ *  of the input can mis-decode as a single rune and emit up to 4 bytes where fewer source bytes
+ *  remain, so the enforced bound is `3 * input_length + 4`. Canary bytes guard both sides of
+ *  the destination, like the audit's standalone safety probe did. Covers all 256 single bytes,
+ *  all 65,536 byte pairs, and random garbage buffers of 1..70 bytes through fold, find (with a
+ *  short valid needle), and the case-invariant check.
+ */
+void test_utf8_case_invalid_input_safety(sz_utf8_case_fold_t fold, sz_utf8_case_insensitive_find_t find,
+                                         sz_utf8_case_agnostic_t invariant,
+                                         std::size_t random_inputs = scale_iterations(10000)) {
+
+    std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
+
+    std::size_t const max_input_length = 70;
+    std::size_t const guard_length = 64;
+    char const canary = (char)0xA5;
+    std::vector<char> destination(guard_length + max_input_length * 3 + guard_length);
+    char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
+
+    auto check = [&](char const *input, std::size_t input_length) {
+        std::fill(destination.begin(), destination.end(), canary);
+        sz_size_t folded_length = fold(input, input_length, destination.data() + guard_length);
+        // The documented bound is 3x for valid UTF-8; invalid input may add one mis-decoded
+        // trailing rune of up to 4 bytes on top of it
+        std::size_t const output_bound = input_length * 3 + 4;
+        if (folded_length > output_bound) {
+            std::fprintf(stderr, "Fold of invalid input returned %zu bytes for %zu input bytes (bound is 3x + 4)\n",
+                         (std::size_t)folded_length, input_length);
+            print_utf8_case_test_bytes("input", input, input_length);
+            assert(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
+        }
+        // Every destination byte outside that window, in front of the buffer or behind it,
+        // must keep its canary value
+        for (std::size_t i = 0; i < guard_length; ++i) {
+            if (destination[i] == canary) continue;
+            std::fprintf(stderr, "Fold of invalid input smashed the front canary at byte %zu\n", i);
+            print_utf8_case_test_bytes("input", input, input_length);
+            assert(false && "Fold must not write in front of the destination buffer");
+        }
+        for (std::size_t i = guard_length + output_bound; i < destination.size(); ++i) {
+            if (destination[i] == canary) continue;
+            std::fprintf(stderr, "Fold of invalid input smashed the back canary at byte %zu for %zu input bytes\n", //
+                         i - guard_length, input_length);
+            print_utf8_case_test_bytes("input", input, input_length);
+            assert(false && "Fold must not write beyond 3x the input length plus one mis-decoded rune");
+        }
+        // The classifier and the finder return arbitrary verdicts on garbage - they just must survive
+        (void)invariant(input, input_length);
+        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+        sz_size_t matched_length = 0;
+        (void)find(input, input_length, needle, 2, &metadata, &matched_length);
+    };
+
+    char input[max_input_length];
+
+    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF
+    for (std::size_t byte = 0; byte < 256; ++byte) {
+        input[0] = (char)byte;
+        check(input, 1);
+    }
+
+    // All 65,536 byte pairs: every lead × continuation interaction, including overlong shapes
+    for (std::size_t first_byte = 0; first_byte < 256; ++first_byte)
+        for (std::size_t second_byte = 0; second_byte < 256; ++second_byte) {
+            input[0] = (char)first_byte;
+            input[1] = (char)second_byte;
+            check(input, 2);
+        }
+
+    // Random garbage buffers spanning whole SIMD chunks
+    auto &rng = global_random_generator();
+    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
+    std::uniform_int_distribution<int> byte_distribution(0, 255);
+    for (std::size_t iteration = 0; iteration < random_inputs; ++iteration) {
+        std::size_t input_length = length_distribution(rng);
+        for (std::size_t i = 0; i < input_length; ++i) input[i] = (char)byte_distribution(rng);
+        check(input, input_length);
+    }
+
+    std::printf("    passed %zu cases (256 singles + 65536 pairs + %zu random)\n", //
+                256 + 65536 + random_inputs, random_inputs);
 }
 
 void test_equivalence() {
@@ -1081,36 +1461,76 @@ void test_equivalence() {
         sz_hash_state_update_skylake, sz_hash_state_digest_skylake);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_skylake);
 #endif
-#if SZ_USE_ICE
+#if SZ_USE_ICELAKE
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_ice, sz_hash_state_init_ice,                      //
-        sz_hash_state_update_ice, sz_hash_state_digest_ice);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_ice);
+        sz_hash_icelake, sz_hash_state_init_icelake,              //
+        sz_hash_state_update_icelake, sz_hash_state_digest_icelake);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_icelake);
 #endif
-#if SZ_USE_NEON_AES
+#if SZ_USE_NEONAES
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_neon, sz_hash_state_init_neon,                    //
-        sz_hash_state_update_neon, sz_hash_state_digest_neon);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
+        sz_hash_neonaes, sz_hash_state_init_neonaes,              //
+        sz_hash_state_update_neonaes, sz_hash_state_digest_neonaes);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neonaes);
 #endif
-#if SZ_USE_SVE2_AES
+#if SZ_USE_SVE2AES
     test_hash_equivalence(                                        //
         sz_hash_serial, sz_hash_state_init_serial,                //
         sz_hash_state_update_serial, sz_hash_state_digest_serial, //
-        sz_hash_sve2, sz_hash_state_init_sve2,                    //
-        sz_hash_state_update_sve2, sz_hash_state_digest_sve2);
-    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
+        sz_hash_sve2aes, sz_hash_state_init_sve2aes,              //
+        sz_hash_state_update_sve2aes, sz_hash_state_digest_sve2aes);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2aes);
+#endif
+#if SZ_USE_V128
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_v128, sz_hash_state_init_v128,                    //
+        sz_hash_state_update_v128, sz_hash_state_digest_v128);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_v128relaxed, sz_hash_state_init_v128relaxed,      //
+        sz_hash_state_update_v128relaxed, sz_hash_state_digest_v128relaxed);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_rvv, sz_hash_state_init_rvv,                      //
+        sz_hash_state_update_rvv, sz_hash_state_digest_rvv);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_rvv);
+#endif
+#if SZ_USE_LASX
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_lasx, sz_hash_state_init_lasx,                    //
+        sz_hash_state_update_lasx, sz_hash_state_digest_lasx);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    test_hash_equivalence(                                        //
+        sz_hash_serial, sz_hash_state_init_serial,                //
+        sz_hash_state_update_serial, sz_hash_state_digest_serial, //
+        sz_hash_powervsx, sz_hash_state_init_powervsx,            //
+        sz_hash_state_update_powervsx, sz_hash_state_digest_powervsx);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_powervsx);
 #endif
 
     // Test SHA256 implementations
-#if SZ_USE_ICE
-    test_sha256_equivalence(                                                                       //
-        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
-        sz_sha256_state_init_ice, sz_sha256_state_update_ice, sz_sha256_state_digest_ice           //
+#if SZ_USE_ICELAKE
+    test_sha256_equivalence(                                                                         //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,   //
+        sz_sha256_state_init_icelake, sz_sha256_state_update_icelake, sz_sha256_state_digest_icelake //
     );
 #endif
 #if SZ_USE_GOLDMONT
@@ -1119,14 +1539,44 @@ void test_equivalence() {
         sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, sz_sha256_state_digest_goldmont //
     );
 #endif
-#if SZ_USE_NEON_SHA
+#if SZ_USE_NEONSHA
+    test_sha256_equivalence(                                                                         //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,   //
+        sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha, sz_sha256_state_digest_neonsha //
+    );
+#endif
+#if SZ_USE_V128
     test_sha256_equivalence(                                                                       //
         sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
-        sz_sha256_state_init_neon, sz_sha256_state_update_neon, sz_sha256_state_digest_neon        //
+        sz_sha256_state_init_v128, sz_sha256_state_update_v128, sz_sha256_state_digest_v128        //
+    );
+#endif
+#if SZ_USE_RVV
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_rvv, sz_sha256_state_update_rvv, sz_sha256_state_digest_rvv           //
+    );
+#endif
+#if SZ_USE_LASX
+    test_sha256_equivalence(                                                                       //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial, //
+        sz_sha256_state_init_lasx, sz_sha256_state_update_lasx, sz_sha256_state_digest_lasx        //
+    );
+#endif
+#if SZ_USE_POWERVSX
+    test_sha256_equivalence(                                                                            //
+        sz_sha256_state_init_serial, sz_sha256_state_update_serial, sz_sha256_state_digest_serial,      //
+        sz_sha256_state_init_powervsx, sz_sha256_state_update_powervsx, sz_sha256_state_digest_powervsx //
     );
 #endif
 
     // Test UTF-8 functions
+    // Backend-independent: the fold table and the case-invariant classifier must stay closed
+    test_utf8_case_invariant_closure();
+    // The serial backend faces the same invalid-input contract as the SIMD ones
+    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_serial, sz_utf8_case_insensitive_find_serial,
+                                        sz_utf8_case_invariant_serial);
+
 #if SZ_USE_HASWELL
     test_utf8_equivalence(                           //
         sz_utf8_count_serial, sz_utf8_count_haswell, //
@@ -1134,17 +1584,33 @@ void test_equivalence() {
         sz_utf8_find_newline_haswell,                //
         sz_utf8_find_whitespace_serial,              //
         sz_utf8_find_whitespace_haswell);
-#endif
-#if SZ_USE_ICE
-    test_utf8_equivalence(                       //
-        sz_utf8_count_serial, sz_utf8_count_ice, //
-        sz_utf8_find_newline_serial,             //
-        sz_utf8_find_newline_ice,                //
-        sz_utf8_find_whitespace_serial,          //
-        sz_utf8_find_whitespace_ice);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_ice);
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
+
+    std::size_t haswell_fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, haswell_fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, haswell_fuzz_queries);
+
+    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell);
+    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell);
+    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_haswell, sz_utf8_case_insensitive_find_haswell,
+                                        sz_utf8_case_invariant_haswell);
+#endif
+#if SZ_USE_ICELAKE
+    test_utf8_equivalence(                           //
+        sz_utf8_count_serial, sz_utf8_count_icelake, //
+        sz_utf8_find_newline_serial,                 //
+        sz_utf8_find_newline_icelake,                //
+        sz_utf8_find_whitespace_serial,              //
+        sz_utf8_find_whitespace_icelake);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
 
     // Fuzz testing with different haystack sizes and sampling strategies:
     // - (16, 0, N): Exhaustive on tiny haystacks (~136 needles each)
@@ -1153,17 +1619,22 @@ void test_equivalence() {
     // - (200, 100, N): Sampled on larger haystacks (100 random needles)
     std::size_t fuzz_queries = scale_iterations(100000);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, fuzz_queries);
     test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_ice, sz_utf8_case_fold_serial,
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
         sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, fuzz_queries);
+
+    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake);
+    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake);
+    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_icelake, sz_utf8_case_insensitive_find_icelake,
+                                        sz_utf8_case_invariant_icelake);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
@@ -1172,6 +1643,22 @@ void test_equivalence() {
         sz_utf8_find_newline_neon,                //
         sz_utf8_find_whitespace_serial,           //
         sz_utf8_find_whitespace_neon);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
+
+    std::size_t neon_fuzz_queries = scale_iterations(100000);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, neon_fuzz_queries);
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, neon_fuzz_queries);
+
+    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon);
+    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon);
+    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_neon, sz_utf8_case_insensitive_find_neon,
+                                        sz_utf8_case_invariant_neon);
 #endif
 #if SZ_USE_SVE2
     test_utf8_equivalence(                        //
@@ -1181,11 +1668,131 @@ void test_equivalence() {
         sz_utf8_find_whitespace_serial,           //
         sz_utf8_find_whitespace_sve2);
 #endif
+#if SZ_USE_V128
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_v128, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_v128,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_v128);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_V128RELAXED
+    test_utf8_equivalence(                               //
+        sz_utf8_count_serial, sz_utf8_count_v128relaxed, //
+        sz_utf8_find_newline_serial,                     //
+        sz_utf8_find_newline_v128relaxed,                //
+        sz_utf8_find_whitespace_serial,                  //
+        sz_utf8_find_whitespace_v128relaxed);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_RVV
+    test_utf8_equivalence(                       //
+        sz_utf8_count_serial, sz_utf8_count_rvv, //
+        sz_utf8_find_newline_serial,             //
+        sz_utf8_find_newline_rvv,                //
+        sz_utf8_find_whitespace_serial,          //
+        sz_utf8_find_whitespace_rvv);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_LASX
+    test_utf8_equivalence(                        //
+        sz_utf8_count_serial, sz_utf8_count_lasx, //
+        sz_utf8_find_newline_serial,              //
+        sz_utf8_find_newline_lasx,                //
+        sz_utf8_find_whitespace_serial,           //
+        sz_utf8_find_whitespace_lasx);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
+#if SZ_USE_POWERVSX
+    test_utf8_equivalence(                            //
+        sz_utf8_count_serial, sz_utf8_count_powervsx, //
+        sz_utf8_find_newline_serial,                  //
+        sz_utf8_find_newline_powervsx,                //
+        sz_utf8_find_whitespace_serial,               //
+        sz_utf8_find_whitespace_powervsx);
+
+    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
+    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
+
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
+    test_utf8_ci_find_fuzz( //
+        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
+        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+#endif
 };
 
 /**
- *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
- *          provided by `sz::string` and `sz::string_view`.
+ *  @brief Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
+ *         provided by `sz::string` and `sz::string_view`.
  */
 template <typename string_type>
 void test_ascii_utilities() {
@@ -1249,7 +1856,7 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
 }
 
 /**
- *  @brief  Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
+ *  @brief Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
  *
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
  *  regions are tested. Covers various chunk sizes, overlapping regions, and both forward and backward traversals.
@@ -1337,9 +1944,9 @@ void test_memory_utilities(std::size_t max_l2_size = 1024ull * 1024ull) {
 }
 
 /**
- *  @brief  Tests memory utilities on large buffers (>1MB) that trigger special code paths
- *          in AVX2/AVX512 implementations. This specifically tests the bidirectional
- *          traversal optimization used for huge buffers.
+ *  @brief Tests memory utilities on large buffers (>1MB) that trigger special code paths
+ *         in AVX2/AVX512 implementations. This specifically tests the bidirectional
+ *         traversal optimization used for huge buffers.
  */
 void test_large_memory_utilities() {
     // Test sizes that trigger the "huge buffer" path (> 1MB)
@@ -1353,36 +1960,36 @@ void test_large_memory_utilities() {
     for (std::size_t size : test_sizes) {
         // Test memcpy with aligned buffers
         {
-            std::vector<char> src(size);
-            std::vector<char> dst_std(size);
-            std::vector<char> dst_sz(size);
+            std::vector<char> source(size);
+            std::vector<char> target_std(size);
+            std::vector<char> target_sz(size);
 
             // Fill source with pattern to detect copying errors
-            for (std::size_t i = 0; i < size; i++) { src[i] = static_cast<char>('A' + (i % 26)); }
+            for (std::size_t i = 0; i < size; i++) { source[i] = static_cast<char>('A' + (i % 26)); }
 
-            std::memcpy(dst_std.data(), src.data(), size);
-            sz::memcpy(dst_sz.data(), src.data(), size);
+            std::memcpy(target_std.data(), source.data(), size);
+            sz::memcpy(target_sz.data(), source.data(), size);
 
-            expect_equality(dst_std.data(), dst_sz.data(), size);
+            expect_equality(target_std.data(), target_sz.data(), size);
         }
 
         // Test memcpy with unaligned buffers
         {
-            std::vector<char> src_buf(size + 64);
-            std::vector<char> dst_std_buf(size + 64);
-            std::vector<char> dst_sz_buf(size + 64);
+            std::vector<char> source_buffer(size + 64);
+            std::vector<char> target_std_buffer(size + 64);
+            std::vector<char> target_sz_buffer(size + 64);
 
             // Use unaligned pointers
-            char *src = src_buf.data() + 7;
-            char *dst_std = dst_std_buf.data() + 11;
-            char *dst_sz = dst_sz_buf.data() + 11;
+            char *source = source_buffer.data() + 7;
+            char *target_std = target_std_buffer.data() + 11;
+            char *target_sz = target_sz_buffer.data() + 11;
 
-            for (std::size_t i = 0; i < size; i++) { src[i] = static_cast<char>('a' + (i % 26)); }
+            for (std::size_t i = 0; i < size; i++) { source[i] = static_cast<char>('a' + (i % 26)); }
 
-            std::memcpy(dst_std, src, size);
-            sz::memcpy(dst_sz, src, size);
+            std::memcpy(target_std, source, size);
+            sz::memcpy(target_sz, source, size);
 
-            expect_equality(dst_std, dst_sz, size);
+            expect_equality(target_std, target_sz, size);
         }
 
         // Test memset
@@ -1440,8 +2047,8 @@ void test_large_memory_utilities() {
     } while (0)
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover all STL APIs.
- *          This test guarantees API @b compatibility with STL `std::basic_string` template.
+ *  @brief Invokes different C++ member methods of immutable strings to cover all STL APIs.
+ *         This test guarantees API @b compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
 void test_stl_compatibility_for_reads() {
@@ -1583,13 +2190,16 @@ void test_stl_compatibility_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
 
-    // clang-format off
-    // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6)
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_first_of("\xC6\xC7") == 9);  // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_first_of("\xC0\xC1") == 54); // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC6\xC7") == 9);   // sets
-    assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC0\xC1") == 54);  // sets
-    // clang-format on
+    // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6). The `\xFA`/`0` boundary is
+    // load-bearing: a literal hex digit after `\xFA` would extend the escape, so keep it split.
+    {
+        char const *non_ascii_set = "abcdefgh\x01\xC6ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\xC0\xFA" //
+                                    "0123456789+-";                                                        // 68 bytes
+        assert(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);                                     // sets
+        assert(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);                                    // sets
+        assert(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);                                      // sets
+        assert(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);                                     // sets
+    }
 
     // Boundary conditions.
     assert(str("hello").find_first_of("ox", 4) == 4);
@@ -1724,8 +2334,8 @@ void test_stl_compatibility_for_reads() {
 }
 
 /**
- *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
- *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
+ *  @brief Invokes different C++ member methods of the memory-owning string class to make sure they all pass
+ *         compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
 void test_stl_compatibility_for_updates() {
@@ -1879,7 +2489,7 @@ void test_stl_compatibility_for_updates() {
 }
 
 /**
- *  @brief  Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
+ *  @brief Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
  */
 void test_stl_conversions() {
     // From a mutable STL string to StringZilla and vice-versa.
@@ -1928,8 +2538,8 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
 }
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover
- *          extensions beyond the STL API.
+ *  @brief Invokes different C++ member methods of immutable strings to cover
+ *         extensions beyond the STL API.
  */
 template <typename string_type>
 void test_non_stl_extensions_for_reads() {
@@ -1987,11 +2597,11 @@ void test_non_stl_extensions_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
     assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
-    let_assert(
-        str s =
-            "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
-            "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
-        s.bytesum() == accumulate_bytes(s));
+    let_assert(str s = "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累" //
+                       "瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、被过度" //
+                       "消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事" //
+                       "以来，他没有过过一天没有名气的日子。",
+               s.bytesum() == accumulate_bytes(s));
 }
 
 void test_non_stl_extensions_for_updates() {
@@ -2067,7 +2677,7 @@ void test_non_stl_extensions_for_updates() {
 }
 
 /**
- *  @brief  Tests copy constructor and copy-assignment constructor of `sz::string`.
+ *  @brief Tests copy constructor and copy-assignment constructor of `sz::string`.
  */
 void test_constructors() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
@@ -2092,7 +2702,7 @@ void test_constructors() {
 }
 
 /**
- *  @brief  Helper structure that counts the number of allocations and deallocations.
+ *  @brief Helper structure that counts the number of allocations and deallocations.
  */
 struct accounting_allocator : public std::allocator<char> {
     inline static bool &verbose_ref() {
@@ -2141,24 +2751,24 @@ void assert_balanced_memory(callback_type callback) {
 }
 
 /**
- *  @brief  Checks for memory leaks in the string class using the `accounting_allocator`.
+ *  @brief Checks for memory leaks in the string class using the `accounting_allocator`.
  *
- *  @note   The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
+ *  @note The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
-void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t iterations = scale_iterations(100)) {
+void test_memory_stability_for_length(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100)) {
 
     assert(accounting_allocator::counter_ref() == 0);
     using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
-    for (std::size_t i = 0; i < len; ++i) base.push_back('c');
-    assert(base.length() == len);
+    for (std::size_t i = 0; i < length; ++i) base.push_back('c');
+    assert(base.length() == length);
 
     // Do copies leak?
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy(base);
-            assert(copy.length() == len);
+            assert(copy.length() == length);
             assert(copy == base);
         }
     });
@@ -2168,7 +2778,7 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy;
             copy = base;
-            assert(copy.length() == len);
+            assert(copy.length() == length);
             assert(copy == base);
         }
     });
@@ -2177,10 +2787,10 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
-            assert(unique_item.length() == len);
+            assert(unique_item.length() == length);
             assert(unique_item == base);
             string copy(std::move(unique_item));
-            assert(copy.length() == len);
+            assert(copy.length() == length);
             assert(copy == base);
         }
     });
@@ -2191,7 +2801,7 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
             string unique_item(base);
             string copy;
             copy = std::move(unique_item);
-            assert(copy.length() == len);
+            assert(copy.length() == length);
             assert(copy == base);
         }
     });
@@ -2203,7 +2813,7 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
             string copy;
             for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
             copy = std::move(unique_item);
-            assert(copy.length() == len);
+            assert(copy.length() == length);
             assert(copy == base);
         }
     });
@@ -2214,7 +2824,7 @@ void test_memory_stability_for_length(std::size_t len = 1ull << 10, std::size_t 
 }
 
 /**
- *  @brief  Tests the correctness of the string class update methods, such as `push_back` and `erase`.
+ *  @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`.
  */
 void test_updates(std::size_t repetitions = 1024) {
     // Compare STL and StringZilla strings append functionality.
@@ -2241,7 +2851,7 @@ void test_updates(std::size_t repetitions = 1024) {
 }
 
 /**
- *  @brief  Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
+ *  @brief Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
  */
 void test_comparisons() {
     // Comparing relative order of the strings
@@ -2257,8 +2867,8 @@ void test_comparisons() {
 }
 
 /**
- *  @brief  Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
- *          This covers haystacks and needles of different lengths, as well as character-sets.
+ *  @brief Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *         This covers haystacks and needles of different lengths, as well as character-sets.
  */
 void test_search() {
 
@@ -2647,8 +3257,7 @@ void test_utf8() {
         let_assert(auto l = lines("a\u2029b"), l.size() >= 1);
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto l = lines("a\x00"
-                                  "b"_sv),
+        let_assert(auto l = lines("a\x00" "b"_sv),
                    l.size() == 1);                                      // NUL in middle - NOT a newline
         let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
         let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
@@ -2730,8 +3339,7 @@ void test_utf8() {
         let_assert(auto w = words("a\u001Fb"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto w = words("a\x00"
-                                  "b"_sv),
+        let_assert(auto w = words("a\x00" "b"_sv),
                    w.size() == 1);                                      // NUL in middle - NOT split
         let_assert(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
         let_assert(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
@@ -2826,7 +3434,7 @@ void test_utf8() {
 void test_utf8_ligature_semantics() {
     using str = sz::string_view;
 
-    // --- Ligature in haystack, ASCII needle ---
+    // Ligature in haystack, ASCII needle
 
     // "fi" in "ﬃ": fold("ﬃ")="ffi", "fi" is suffix of "ffi" → MATCH
     let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("fi"), m.offset == 0);
@@ -2838,10 +3446,7 @@ void test_utf8_ligature_semantics() {
     let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("ffi"), m.offset == 0);
 
     // "if" in "ﬃf": fold("ﬃf")="ffif", "if" at folded position 2 → MATCH
-    let_assert(auto m = str("\xEF\xAC\x83"
-                            "f")
-                            .utf8_case_insensitive_find("if"),
-               m.offset != str::npos);
+    let_assert(auto m = str("\xEF\xAC\x83" "f").utf8_case_insensitive_find("if"), m.offset != str::npos);
 
     // "lf" in "ﬂﬃ": fold("ﬂﬃ")="flffi", "lf" at folded position 1 → MATCH
     let_assert(auto m = str("\xEF\xAC\x82\xEF\xAC\x83").utf8_case_insensitive_find("lf"), m.offset != str::npos);
@@ -2849,7 +3454,7 @@ void test_utf8_ligature_semantics() {
     // "xfi" in "xﬃ": fold("xﬃ")="xffi", "xfi" is NOT a substring → NO MATCH
     let_assert(auto m = str("x\xEF\xAC\x83").utf8_case_insensitive_find("xfi"), m.offset == str::npos);
 
-    // --- Ligature in needle, ASCII haystack ---
+    // Ligature in needle, ASCII haystack
 
     // "ﬂ" in "ffll": fold("ﬂ")="fl", "fl" at position 1 → MATCH
     let_assert(auto m = str("ffll").utf8_case_insensitive_find("\xEF\xAC\x82"), m.offset == 1);
@@ -2860,7 +3465,7 @@ void test_utf8_ligature_semantics() {
     // "ﬁ" in "ﬀi": fold("ﬁ")="fi", fold("ﬀi")="ffi", "fi" at folded position 1 → MATCH
     let_assert(auto m = str("\xEF\xAC\x80i").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset != str::npos);
 
-    // --- Eszett (ß) cases ---
+    // Eszett (ß) cases
 
     // "ss" in "ß": fold("ß")="ss" → exact MATCH
     let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("ss"), m.offset == 0);
@@ -2985,10 +3590,7 @@ void test_utf8_case() {
     // Haystack: "ßfox" (5 bytes) → folds to "ssfox"
     // Needle "sfox" matches at position 1 in folded, but we report offset=0 (start of ß)
     // Length is 5 because we consume the entire ß character (can't point to half of it)
-    let_assert(auto m = str("\xC3\x9F"
-                            "fox")
-                            .utf8_case_insensitive_find("sfox"),
-               m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("\xC3\x9F" "fox").utf8_case_insensitive_find("sfox"), m.offset == 0 && m.length == 5);
 
     // Needle ends with 's' - suffix case (uses serial fallback)
     // Haystack: "foxß" → folds to "foxss"
@@ -2999,27 +3601,15 @@ void test_utf8_case() {
     // Haystack: "ßStra" (6 bytes) → folds to "ssstra"
     // Needle "sstra" starts with 's', would match at position 1 (mid-ß) without the rule
     // Length is 6 because we consume the entire haystack (ß expands, consuming whole character)
-    let_assert(auto m = str("\xC3\x9F"
-                            "Stra")
-                            .utf8_case_insensitive_find("sstra"),
-               m.offset == 0 && m.length == 6);
+    let_assert(auto m = str("\xC3\x9F" "Stra").utf8_case_insensitive_find("sstra"), m.offset == 0 && m.length == 6);
 
     // Needle with 's' NOT at boundary - should use fast SIMD path
-    let_assert(auto m = str("te\xC3\x9F"
-                            "t")
-                            .utf8_case_insensitive_find("tesst"),
-               m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("ma\xC3\x9F"
-                            "e")
-                            .utf8_case_insensitive_find("masse"),
-               m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("te\xC3\x9F" "t").utf8_case_insensitive_find("tesst"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ma\xC3\x9F" "e").utf8_case_insensitive_find("masse"), m.offset == 0 && m.length == 5);
 
     // Needle with 'ss' at boundary - also uses serial (can't match across ß boundary)
     let_assert(auto m = str("fo\xC3\x9F").utf8_case_insensitive_find("foss"), m.offset == 0 && m.length == 4);
-    let_assert(auto m = str("\xC3\x9F"
-                            "fo")
-                            .utf8_case_insensitive_find("ssfo"),
-               m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("\xC3\x9F" "fo").utf8_case_insensitive_find("ssfo"), m.offset == 0 && m.length == 4);
 
     // Math Symbols
     // Multiplication × (U+00D7, C3 97) and Division ÷ (U+00F7, C3 B7)
@@ -3135,18 +3725,14 @@ void test_utf8_case() {
     let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("i̇stanbul"), // "i" + dot
                m.offset == 0 && m.length == 9); // Haystack length is 2 (İ) + 7 (stanbul) = 9
     // Needle starts with the combining dot (mid-expansion of 'İ'), so the match still anchors to 'İ'.
-    let_assert(auto m = str("İstanbul")
-                            .utf8_case_insensitive_find("\xCC\x87"
-                                                        "stanbul"),
+    let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("\xCC\x87" "stanbul"),
                m.offset == 0 && m.length == 9);
 
     // Turkish Context Extensions
     // "Welcome to " is 11 bytes.
     let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("i̇stanbul"),
                m.offset == 11 && m.length == 9);
-    let_assert(auto m = str("Welcome to İstanbul")
-                            .utf8_case_insensitive_find("\xCC\x87"
-                                                        "stanbul"),
+    let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("\xCC\x87" "stanbul"),
                m.offset == 11 && m.length == 9);
     // "İstanbul city"
     let_assert(auto m = str("İstanbul city").utf8_case_insensitive_find("i̇stanbul"), m.offset == 0 && m.length == 9);
@@ -3291,12 +3877,9 @@ void test_utf8_case() {
 
     // Combining diacritical marks: ǰ (U+01F0) folds to 'j' + combining caron (U+030C)
     // Needle starts with combining caron - can match mid-expansion of ǰ
-    let_assert(auto m = str("ǰ0").utf8_case_insensitive_find("\xCC\x8C"
-                                                             "0"), // caron + '0'
-               m.offset == 0 && m.length == 3);                    // Match entire ǰ0 (2 byte ǰ + 1 byte 0)
-    let_assert(auto m = str("abcǰ0def")
-                            .utf8_case_insensitive_find("\xCC\x8C"
-                                                        "0"),
+    let_assert(auto m = str("ǰ0").utf8_case_insensitive_find("\xCC\x8C" "0"), // caron + '0'
+               m.offset == 0 && m.length == 3);                               // Match entire ǰ0 (2 byte ǰ + 1 byte 0)
+    let_assert(auto m = str("abcǰ0def").utf8_case_insensitive_find("\xCC\x8C" "0"),
                m.offset == 3 && m.length == 3); // "abc" = 3 bytes
 
     // Mid-expansion matches with ß (U+00DF) → "ss"
@@ -3367,37 +3950,28 @@ void test_utf8_case() {
 
     // Complex SIMD Regression Trigger
     // Needle includes: ǰ (Latin B), ẞ (Sharp S), Turkish ı, Emoji
-    std::string complex_haystack = "\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82"
-                                   "\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC\x85\x57\x6F\x72\x6C\x64"
-                                   "\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81"
-                                   "\x84\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4"
-                                   "\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF\x8C\xCF"
-                                   "\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21"
-                                   "\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0"
-                                   "\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F"
-                                   "\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3"
-                                   "\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85\xD0\x91\xC5\xBF"
-                                   "\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91"
-                                   "\x4D\x52\xE1\xBA\xA1\x4A\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F"
-                                   "\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3"
-                                   "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A"
-                                   "\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91\x66\x67\x6F\x41\xC3\x85"
-                                   "\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA"
-                                   "\xD4\xB2\xD4\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF"
-                                   "\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F\xCE\x92"
-                                   "\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA"
-                                   "\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59\xEF\xAC\x86\x59\x56\x2E\x33\xC3"
-                                   "\xA9\x7A\x4C\x4C";
+    std::string complex_haystack =
+        "\x66\x6F\x78\x74\xD0\xB2\x58\x77\x58\x20\x67\x31\x5A\xEF\xAC\x82\x46\x21\xC3\xA0\x31\x21\xC6\xA0\xEF\xAC" //
+        "\x85\x57\x6F\x72\x6C\x64\xC4\x91\xE4\xB8\xAD\xE6\x96\x87\x43\xCF\x83\xE3\x81\x82\xE3\x81\x84\xD4\xB2\xD4" //
+        "\xB1\xD5\x90\xD4\xB5\xD5\x8E\xC4\xB1\x6E\x32\xE4\xB8\xAD\xE6\x96\x87\x42\x30\x6E\xC3\x9F\x55\xCE\xBA\xCF" //
+        "\x8C\xCF\x83\xCE\xBC\x30\x62\x72\x6F\x77\x6E\xCF\x83\x67\x66\x6F\x78\x21\xC2\xB5\x4D\xE4\xB8\xAD\xE6\x96" //
+        "\x87\xC7\xB0\xE1\xBB\x86\xC4\xB0\x6A\x75\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80" //
+        "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49\x74\x68\x65\x61\xC5\xBF\xC3\x80\xC3\x85" //
+        "\xD0\x91\xC5\xBF\x4C\x20\xC4\xB0\xCE\x91\x2C\x67\xE1\xBA\x96\xC3\xA0\x77\xC3\x91\x4D\x52\xE1\xBA\xA1\x4A" //
+        "\xC6\xA0\xEF\xAC\x85\xE1\xBA\x9E\xF0\x9F\x98\x80\xEF\xAC\x80\xD0\xB1\xCF\x82\x65\x4B\x7A\xC3\xB1\x65\xC3" //
+        "\x9C\x64\xC3\xB1\x55\xD0\xB0\xC3\xA4\x67\x41\x7A\xE1\xBB\x87\x5A\x4A\x71\x76\xC3\x89\xC6\xA0\x45\xCE\x91" //
+        "\x66\x67\x6F\x41\xC3\x85\x4F\x6B\x58\xC3\xB1\x52\xE1\xBA\x98\xE1\xBA\xA1\x63\x47\xC2\xAA\xD4\xB2\xD4\xB1" //
+        "\xD5\x90\xD4\xB5\xD5\x8E\xC3\x89\x77\x31\x46\xCF\x82\x76\xCE\xA3\x56\x56\xCA\xBE\xE1\xBA\x96\xD0\x91\x6F" //
+        "\xCE\x92\x6A\x75\x6D\x70\x73\x33\xE1\xBA\xA1\x6A\x75\x6D\x70\x73\xE1\xBA\x98\xC3\x9F\xC3\x9C\xC6\xA1\x59" //
+        "\xEF\xAC\x86\x59\x56\x2E\x33\xC3\xA9\x7A\x4C\x4C";
 
-    std::string complex_needle = "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80"
-                                 "\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3\xB1\x45\x7A\xC3\xBC\x49"
-                                 "\x74\x68\x65";
+    std::string complex_needle =
+        "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3" //
+        "\xB1\x45\x7A\xC3\xBC\x49\x74\x68\x65";
 
     let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
 
-    // ==========================================================================
     // Cross-Script Mixed Needles (Regression tests for kernel selection issues)
-    // ==========================================================================
 
     // Capital Eszett (U+1E9E, E1 BA 9E) - folds to "ss"
     // Single Capital Eszett
@@ -3413,16 +3987,12 @@ void test_utf8_case() {
                m.offset == 0 && m.length == 6);
 
     // Capital Eszett at boundaries
-    let_assert(auto m = str("prefix\xE1\xBA\x9E"
-                            "suffix")
-                            .utf8_case_insensitive_find("xss"),
+    let_assert(auto m = str("prefix\xE1\xBA\x9E" "suffix").utf8_case_insensitive_find("xss"),
                m.offset == 5 && m.length == 4); // 'x'(1) + ẞ(3) = 4
 
     // Capital Eszett + Vietnamese (Western + Vietnamese kernels)
     // ẞ (E1 BA 9E) + ệ (E1 BB 87) - the exact failing pattern from fuzz tests
-    let_assert(auto m = str("test\xE1\xBA\x9E\xE1\xBB\x87"
-                            "end")
-                            .utf8_case_insensitive_find("ss\xE1\xBB\x86"),
+    let_assert(auto m = str("test\xE1\xBA\x9E\xE1\xBB\x87" "end").utf8_case_insensitive_find("ss\xE1\xBB\x86"),
                m.offset == 4 && m.length == 6); // ẞ(3) + ệ(3) searched as ss + Ệ
 
     // Micro Sign + Greek (Western + Greek kernels)
@@ -3431,9 +4001,7 @@ void test_utf8_case() {
                m.offset == 0 && m.length == 6); // αµβ vs αμβ
 
     // Long S (C5 BF) + non-ASCII context
-    let_assert(auto m = str("me\xC5\xBF\xC5\xBF"
-                            "age")
-                            .utf8_case_insensitive_find("MESSAGE"),
+    let_assert(auto m = str("me\xC5\xBF\xC5\xBF" "age").utf8_case_insensitive_find("MESSAGE"),
                m.offset == 0 && m.length == 9); // meſſage (9 bytes)
 
     // One-to-Many Expansions (U+1E96-1E9A range)
@@ -3457,58 +4025,40 @@ void test_utf8_case() {
     let_assert(auto m = str("10 \xE2\x84\xAB unit").utf8_case_insensitive_find("10 \xC3\xA5"),
                m.offset == 0 && m.length == 6); // Å (3) vs å (2)
 
-    // ==========================================================================
     // 64-byte Boundary Stress Tests
-    // ==========================================================================
 
     // Capital Eszett at position 63 (just at SIMD boundary)
     {
         std::string prefix(63, 'x');
-        let_assert(auto m = str((prefix + "\xE1\xBA\x9E"
-                                          "end")
-                                    .c_str())
-                                .utf8_case_insensitive_find("xss"),
+        let_assert(auto m = str((prefix + "\xE1\xBA\x9E" "end").c_str()).utf8_case_insensitive_find("xss"),
                    m.offset == 62 && m.length == 4); // last 'x' + ẞ(3)
     }
 
     // Vietnamese char at position 62
     {
         std::string prefix(62, 'a');
-        let_assert(auto m = str((prefix + "\xE1\xBB\x87"
-                                          "b")
-                                    .c_str())
-                                .utf8_case_insensitive_find("\xE1\xBB\x86"
-                                                            "B"),
+        let_assert(auto m = str((prefix + "\xE1\xBB\x87" "b").c_str()).utf8_case_insensitive_find("\xE1\xBB\x86" "B"),
                    m.offset == 62 && m.length == 4); // ệ(3) + b(1)
     }
 
     // Micro Sign at position 64 (just past SIMD boundary)
     {
         std::string prefix(64, 'z');
-        let_assert(auto m = str((prefix + "\xC2\xB5"
-                                          "test")
-                                    .c_str())
-                                .utf8_case_insensitive_find("\xCE\xBC"),
+        let_assert(auto m = str((prefix + "\xC2\xB5" "test").c_str()).utf8_case_insensitive_find("\xCE\xBC"),
                    m.offset == 64 && m.length == 2); // µ matches μ
     }
 
     // 'ﬄ' at position 63 (just at SIMD boundary), matching from inside its fold.
     {
         std::string prefix(63, 'x');
-        let_assert(auto m = str((prefix + "\xEF\xAC\x84"
-                                          "end")
-                                    .c_str())
-                                .utf8_case_insensitive_find("fl"),
+        let_assert(auto m = str((prefix + "\xEF\xAC\x84" "end").c_str()).utf8_case_insensitive_find("fl"),
                    m.offset == 63 && m.length == 3); // consume whole ligature
     }
 
     // ASCII + ligature spanning the SIMD boundary: 'P' at 62 and 'ﬄ' at 63.
     {
         std::string prefix(62, 'x');
-        let_assert(auto m = str((prefix + "P\xEF\xAC\x84"
-                                          "end")
-                                    .c_str())
-                                .utf8_case_insensitive_find("pf"),
+        let_assert(auto m = str((prefix + "P\xEF\xAC\x84" "end").c_str()).utf8_case_insensitive_find("pf"),
                    m.offset == 62 && m.length == 4); // "P"(1) + "ﬄ"(3)
     }
 
@@ -3519,71 +4069,22 @@ void test_utf8_case() {
     let_assert(auto m = str("Hello").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
     let_assert(auto m = str("Hello").utf8_case_insensitive_find(""), m.offset == 0 && m.length == 0);
 
-    // ==========================================================================
     // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
     // These patterns were discovered by test_utf8_ci_find_fuzz() and expose
     // disagreements between serial and SIMD implementations.
-    // ==========================================================================
 
     // Pattern 0: Ligature tail-match in mixed-case context (historical verify crash).
     // Haystack: C3 96 45 47 76 C3 91 2C 50 EF AC 84 ... EF AC 82 70
     // Needle:   67 76 C3 B1 2C 70 66
     {
-        let_assert(auto m = str("\xC3\x96"
-                                "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
+        let_assert(auto m = str("\xC3\x96" "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
                                 .utf8_case_insensitive_find("gv\xC3\xB1,pf"),
                    m.offset == 3 && m.length == 9);
-        let_assert(auto m = str("\xC3\x96"
-                                "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
-                                .utf8_case_insensitive_find("pf"),
-                   m.offset == 8 && m.length == 4);
+        let_assert(
+            auto m =
+                str("\xC3\x96" "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p").utf8_case_insensitive_find("pf"),
+            m.offset == 8 && m.length == 4);
     }
-#if 0
-    // Pattern 0b: Fuzz mismatch (seed=3418818602) where the needle is extracted from the folded haystack,
-    // but `sz_utf8_case_insensitive_find_ice` disagrees with `sz_utf8_case_insensitive_find_serial`.
-    // Fuzzer parameters: haystack=0 start=21 len=41 (in folded runes), kernel=2.
-    {
-        static char const haystack[] =
-            "\xCA\xBE\x6F\x4F\xE1\xBA\xA0\x4E\x77\x66\x6F\x78\xCE\xBA\xCF\x8C\xCF\x83\xCE\xBC\x50\xD5\xA2\xD5\xA1"
-            "\xD6\x80\xD5\xA5\xD5\xBE\x4C\xC7\xB0\x46\xCE\xB2\x69\xE2\x84\xAA\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x90"
-            "\xCE\x91\xE1\xBA\x98\xD0\xB0\x48\x51\xD0\xB1\x4C\x64\xE2\x84\xAA\xC3\xA5\x50\xC3\xB1\x74\x68\x65\x3F"
-            "\x4C\xC3\x9C\xC3\x9F\xE2\x84\xAB\xE1\xBA\x9E\x48\x78\xCE\xB1\x6E\xE1\xBA\xA1\x56\x49\xE1\xBB\x86\xCE"
-            "\x91";
-
-        static char const needle[] =
-            "\xCC\x8C\x66\xCE\xB2\x69\x6B\xCA\xBC\xC6\xA1\x66\xC3\xA0\xC4\x91\xCE\xB1\x77\xCC\x8A\xD0\xB0\x68\x71"
-            "\xD0\xB1\x6C\x64\x6B\xC3\xA5\x70\xC3\xB1\x74\x68\x65\x3F\x6C\xC3\xBC\x73\x73\xC3\xA5\x73\x73\x68\x78"
-            "\xCE\xB1\x6E\xE1\xBA\xA1\x76\x69";
-
-        sz_size_t haystack_length = (sz_size_t)sizeof(haystack) - 1;
-        sz_size_t needle_length = (sz_size_t)sizeof(needle) - 1;
-
-        sz_size_t serial_matched = 0, ice_matched = 0;
-        sz_utf8_case_insensitive_needle_metadata_t serial_meta = {}, ice_meta = {};
-        sz_cptr_t serial_result = sz_utf8_case_insensitive_find_serial( //
-            haystack, haystack_length,                                  //
-            needle, needle_length,                                      //
-            &serial_meta, &serial_matched);
-        sz_cptr_t ice_result = sz_utf8_case_insensitive_find_ice( //
-            haystack, haystack_length,                            //
-            needle, needle_length,                                //
-            &ice_meta, &ice_matched);
-
-        if (serial_result != ice_result || serial_matched != ice_matched) {
-            sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack) : (sz_size_t)-1;
-            sz_size_t ice_off = ice_result ? (sz_size_t)(ice_result - haystack) : (sz_size_t)-1;
-            std::fprintf(stderr,
-                         "FUZZ REGRESSION seed=3418818602: serial_off=%zu serial_len=%zu ice_off=%zu ice_len=%zu "
-                         "kernel=%u offset_in_unfolded=%zu length_in_unfolded=%zu\n",
-                         (std::size_t)serial_off, (std::size_t)serial_matched, (std::size_t)ice_off,
-                         (std::size_t)ice_matched, (unsigned)ice_meta.kernel_id,
-                         (std::size_t)ice_meta.offset_in_unfolded, (std::size_t)ice_meta.length_in_unfolded);
-        }
-
-        assert(serial_result == ice_result);
-        assert(serial_matched == ice_matched);
-    }
-#endif
 
     // Pattern 1: "st" + Latin-1 char (st ligature expansion issue?)
     // Needle: 73 74 C2 BA = "st" + º (masculine ordinal indicator)
@@ -3595,21 +4096,15 @@ void test_utf8_case() {
     // These trigger kernel=2 (Central Europe) with safe_window issues
     {
         // "st" followed by º - should this match "st" ligature + º?
-        let_assert(auto m = str("test\xEF\xAC\x85\xC2\xBA"
-                                "end")
-                                .utf8_case_insensitive_find("st\xC2\xBA"),
+        let_assert(auto m = str("test\xEF\xAC\x85\xC2\xBA" "end").utf8_case_insensitive_find("st\xC2\xBA"),
                    m.offset == 4 && m.length == 5); // st ligature (3) + º (2)
 
         // "st" followed by ñ
-        let_assert(auto m = str("test\xEF\xAC\x85\xC3\xB1"
-                                "end")
-                                .utf8_case_insensitive_find("st\xC3\xB1"),
+        let_assert(auto m = str("test\xEF\xAC\x85\xC3\xB1" "end").utf8_case_insensitive_find("st\xC3\xB1"),
                    m.offset == 4 && m.length == 5); // st ligature (3) + ñ (2)
 
         // "st" followed by Greek α
-        let_assert(auto m = str("prefix\xEF\xAC\x85\xCE\xB1"
-                                "suffix")
-                                .utf8_case_insensitive_find("st\xCE\xB1"),
+        let_assert(auto m = str("prefix\xEF\xAC\x85\xCE\xB1" "suffix").utf8_case_insensitive_find("st\xCE\xB1"),
                    m.offset == 6 && m.length == 5); // st ligature (3) + α (2)
     }
 
@@ -3618,15 +4113,11 @@ void test_utf8_case() {
     // Needle: 73 73 C3 A5 = "ss" + å
     {
         // "ss" followed by Greek α - should match ß + α
-        let_assert(auto m = str("test\xC3\x9F\xCE\xB1"
-                                "end")
-                                .utf8_case_insensitive_find("ss\xCE\xB1"),
+        let_assert(auto m = str("test\xC3\x9F\xCE\xB1" "end").utf8_case_insensitive_find("ss\xCE\xB1"),
                    m.offset == 4 && m.length == 4); // ß (2) + α (2)
 
         // "ss" followed by å
-        let_assert(auto m = str("prefix\xC3\x9F\xC3\xA5"
-                                "suffix")
-                                .utf8_case_insensitive_find("ss\xC3\xA5"),
+        let_assert(auto m = str("prefix\xC3\x9F\xC3\xA5" "suffix").utf8_case_insensitive_find("ss\xC3\xA5"),
                    m.offset == 6 && m.length == 4); // ß (2) + å (2)
     }
 
@@ -3664,9 +4155,7 @@ void test_utf8_case() {
     // These test n-apostrophe (U+0149) and a-right-half-ring (U+1E9A) expansions
     {
         // 'n (U+0149) expands to modifier apostrophe + n
-        let_assert(auto m = str("\xC5\x89\xCE\xBC")
-                                .utf8_case_insensitive_find("\xCA\xBC"
-                                                            "n\xCE\xBC"),
+        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_case_insensitive_find("\xCA\xBC" "n\xCE\xBC"),
                    m.offset == 0 && m.length == 4); // ʼn (2) + μ (2)
         // Needle starts at the second rune of the expansion ("n..."), so it still anchors to 'ŉ'.
         let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_case_insensitive_find("n\xCE\xBC"),
@@ -3743,11 +4232,7 @@ void test_utf8_case() {
 
         // Word with ß crossing boundary: "straße" starting at position 60
         std::string prefix60(60, 'a');
-        let_assert(auto m = str(prefix60 +
-                                "stra\xC3\x9F"
-                                "e" +
-                                "zzz")
-                                .utf8_case_insensitive_find("strasse"),
+        let_assert(auto m = str(prefix60 + "stra\xC3\x9F" "e" + "zzz").utf8_case_insensitive_find("strasse"),
                    m.offset == 60 && m.length == 7);
     }
 
@@ -3765,11 +4250,9 @@ void test_utf8_case() {
         // This creates 116-byte prefix of ä characters
     }
 
-    // ==========================================================================
     // Minimal Divergence Cases (Ice Lake vs Serial)
     // These were discovered by multi-seed fuzzing and represent minimal inputs
     // that previously caused Serial/SIMD disagreement.
-    // ==========================================================================
 
     // Pattern 7: "sss" prefix matching "Sß" (seed 5678, Kernel 2)
     // Haystack: "brown Sßà jumps" - bytes at [6]: 53 C3 9F C3 A0 ("Sßà") = 5 bytes
@@ -3790,21 +4273,14 @@ void test_utf8_case() {
 
         // Triple-s with space (seed 1234): "sß " should match "sss "
         // Match starts at byte 7 where 's' is (byte 6 is space before 's')
-        let_assert(auto m = str("\xC7\xB0"
-                                "bee3 s\xC3\x9F ee\xC3\xA9 nc")
-                                .utf8_case_insensitive_find("sss ee\xC3\xA9"),
+        let_assert(auto m = str("\xC7\xB0" "bee3 s\xC3\x9F ee\xC3\xA9 nc").utf8_case_insensitive_find("sss ee\xC3\xA9"),
                    m.offset == 7 && m.length == 8);
 
         // "ss" needle vs "ß" haystack (basic case)
-        let_assert(auto m = str("\xC3\x9F"
-                                "abc")
-                                .utf8_case_insensitive_find("ssabc"),
-                   m.offset == 0 && m.length == 5);
+        let_assert(auto m = str("\xC3\x9F" "abc").utf8_case_insensitive_find("ssabc"), m.offset == 0 && m.length == 5);
 
         // "sss" needle vs "sß" haystack
-        let_assert(auto m = str("s\xC3\x9F"
-                                "abc")
-                                .utf8_case_insensitive_find("sssabc"),
+        let_assert(auto m = str("s\xC3\x9F" "abc").utf8_case_insensitive_find("sssabc"),
                    m.offset == 0 && m.length == 6);
     }
 
@@ -3861,39 +4337,27 @@ void test_utf8_case() {
     // ﬁ should case-fold to "fi"
     {
         // Simple: ﬁ vs fi
-        let_assert(auto m = str("\xEF\xAC\x81"
-                                "nd")
-                                .utf8_case_insensitive_find("find"),
+        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_case_insensitive_find("find"),
                    m.offset == 0 && m.length == 5);
 
         // With uppercase: ﬁ vs FI
-        let_assert(auto m = str("\xEF\xAC\x81"
-                                "nd")
-                                .utf8_case_insensitive_find("FInd"),
+        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_case_insensitive_find("FInd"),
                    m.offset == 0 && m.length == 5);
 
         // ff ligature: ﬀ (EF AC 80) vs ff
-        let_assert(auto m = str("\xEF\xAC\x80"
-                                "oo")
-                                .utf8_case_insensitive_find("ffoo"),
+        let_assert(auto m = str("\xEF\xAC\x80" "oo").utf8_case_insensitive_find("ffoo"),
                    m.offset == 0 && m.length == 5);
 
         // ffi ligature: ﬃ (EF AC 83) vs ffi
-        let_assert(auto m = str("\xEF\xAC\x83"
-                                "ce")
-                                .utf8_case_insensitive_find("ffice"),
+        let_assert(auto m = str("\xEF\xAC\x83" "ce").utf8_case_insensitive_find("ffice"),
                    m.offset == 0 && m.length == 5);
 
         // fl ligature: ﬂ (EF AC 82) vs fl
-        let_assert(auto m = str("\xEF\xAC\x82"
-                                "oor")
-                                .utf8_case_insensitive_find("floor"),
+        let_assert(auto m = str("\xEF\xAC\x82" "oor").utf8_case_insensitive_find("floor"),
                    m.offset == 0 && m.length == 6);
 
         // ffl ligature: ﬄ (EF AC 84) vs ffl
-        let_assert(auto m = str("wa\xEF\xAC\x84"
-                                "e")
-                                .utf8_case_insensitive_find("waffle"),
+        let_assert(auto m = str("wa\xEF\xAC\x84" "e").utf8_case_insensitive_find("waffle"),
                    m.offset == 0 && m.length == 6);
     }
 
@@ -3905,18 +4369,11 @@ void test_utf8_case() {
         // Precomposed ǰ vs decomposed j+caron
         // If normalization is performed, these should match
         // If not, they won't match (current behavior TBD)
-        let_assert(auto m = str("\xC7\xB0"
-                                "ump")
-                                .utf8_case_insensitive_find("j\xCC\x8C"
-                                                            "ump"),
+        let_assert(auto m = str("\xC7\xB0" "ump").utf8_case_insensitive_find("j\xCC\x8C" "ump"),
                    m.offset == 0 && m.length == 5);
 
         // é precomposed (C3 A9) vs e+acute (65 CC 81)
-        let_assert(auto m = str("\xC3\xA9"
-                                "lan")
-                                .utf8_case_insensitive_find("e\xCC\x81"
-                                                            "lan"),
-                   m.offset == str::npos);
+        let_assert(auto m = str("\xC3\xA9" "lan").utf8_case_insensitive_find("e\xCC\x81" "lan"), m.offset == str::npos);
     }
 
     // Pattern 12: Mixed script verification (seeds 456, 789, 22222, Kernels 3, 5, 6)
@@ -3937,10 +4394,7 @@ void test_utf8_case() {
                    m.offset == 5 && m.length == 10);
 
         // Armenian ligature: և (D6 87 - U+0587) vs ե+ւ (D5 A5 D6 82)
-        let_assert(auto m = str("\xD6\x87"
-                                "nd")
-                                .utf8_case_insensitive_find("\xD5\xA5\xD6\x82"
-                                                            "nd"),
+        let_assert(auto m = str("\xD6\x87" "nd").utf8_case_insensitive_find("\xD5\xA5\xD6\x82" "nd"),
                    m.offset == 0 && m.length == 4);
     }
 }
@@ -4021,6 +4475,55 @@ void test_utf8_words() {
         assert(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
         assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
     }
+
+    // Segment `text` into UAX-29 words through one of the plural kernels (forward or reverse variant).
+    using word_boundaries_t = sz_size_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
+    auto uax29_segments = [](word_boundaries_t boundaries, sz::string_view text) {
+        std::vector<sz_size_t> starts(text.size() + 1), lengths(text.size() + 1);
+        sz_size_t consumed = 0;
+        sz_size_t count = boundaries(text.data(), text.size(), starts.data(), lengths.data(), text.size() + 1,
+                                     &consumed);
+        std::vector<std::string> words;
+        for (sz_size_t i = 0; i != count; ++i) words.emplace_back(text.data() + starts[i], lengths[i]);
+        return words;
+    };
+    auto words = [&](sz::string_view text) { return uax29_segments(sz_utf8_word_find_boundaries, text); };
+
+    // Forward segmentation against hand-checked UAX-29 expectations.
+    let_assert(auto w = words(""), w.empty());
+    let_assert(auto w = words("a"), w.size() == 1 && w[0] == "a");
+    let_assert(auto w = words("Hello, world!"),
+               w.size() == 5 && w[0] == "Hello" && w[1] == "," && w[2] == " " && w[3] == "world" && w[4] == "!");
+    let_assert(auto w = words("don't"), w.size() == 1 && w[0] == "don't"); // WB6/WB7: apostrophe between letters
+    let_assert(auto w = words("3,14"), w.size() == 1 && w[0] == "3,14");   // WB11/WB12: comma between digits
+    let_assert(auto w = words("3,"), w.size() == 2 && w[0] == "3" && w[1] == ","); // digit then non-digit → break
+    let_assert(auto w = words("can't_stop"), w.size() == 1);               // underscore is ExtendNumLet (WB13a/b)
+    let_assert(auto w = words("a\r\nb"), w.size() == 3 && w[1] == "\r\n"); // WB3: CR × LF stay together
+    let_assert(auto w = words("你好"), w.size() == 2 && w[0] == "你" && w[1] == "好"); // CJK: each is its own word
+
+    // For each input the active backend, the serial reference, and the forward & reverse C++ ranges must agree.
+    auto check_consistency = [&](sz::string_view text) {
+        auto forward = uax29_segments(sz_utf8_word_find_boundaries, text);
+        std::vector<std::string> reversed(forward.rbegin(), forward.rend());
+        assert(uax29_segments(sz_utf8_word_find_boundaries_serial, text) == forward && "backend ≠ serial reference");
+        assert(uax29_segments(sz_utf8_word_rfind_boundaries, text) == reversed &&
+               "reverse pass ≠ reversed forward list");
+        assert(text.utf8_split_words().template to<std::vector<std::string>>() == forward &&
+               "utf8_split_words ≠ kernel");
+        assert(text.utf8_rsplit_words().template to<std::vector<std::string>>() == reversed &&
+               "utf8_rsplit_words ≠ kernel");
+    };
+    for (sz::string_view text : {"", "a", "Hello, world!", "don't", "l'avion", "3,14", "1,2,3", "3,", "can't_stop",
+                                 "a\r\nb", "Größe привет мир 你好 42", "the quick brown fox, really!"})
+        check_consistency(text);
+
+    // A long mixed string exercises the wide SIMD windows and their tails.
+    scope_assert(
+        std::string big,
+        [&] {
+            for (int i = 0; i != 200; ++i) big += "hello world, foo_bar 42 don't ";
+        }(),
+        uax29_segments(sz_utf8_word_find_boundaries, big) == uax29_segments(sz_utf8_word_find_boundaries_serial, big));
 }
 
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
@@ -4171,8 +4674,8 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 }
 
 /**
- *  @brief  Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
- *          Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
+ *  @brief Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *         Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
  */
 void test_search_with_misaligned_repetitions() {
     // When haystack is only formed of needles:
@@ -4257,7 +4760,7 @@ void test_replacements(std::size_t lookup_tables_to_try = 32, std::size_t slices
 }
 
 /**
- *  @brief  Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
+ *  @brief Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
  *
  *  Tries to sort incrementally complex inputs, such as strings of varying lengths, with many equal inputs.
  *  1. Basic tests with predetermined orders.
@@ -4354,10 +4857,76 @@ void test_sorting_algorithms() {
             for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
+
+    // Stability, reverse, top-K, and case-insensitive coverage against `std::stable_sort` references.
+    auto compare_bytes = [](std::string const &a, std::string const &b) -> int {
+        std::size_t const min_length = a.size() < b.size() ? a.size() : b.size();
+        for (std::size_t i = 0; i < min_length; ++i) {
+            unsigned char const ca = (unsigned char)a[i], cb = (unsigned char)b[i];
+            if (ca != cb) return ca < cb ? -1 : 1;
+        }
+        return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
+    };
+    auto fold_string = [](std::string const &s) -> std::string {
+        std::vector<char> destination(s.size() * 3 + 4);
+        std::size_t const folded_length = sz_utf8_case_fold(s.data(), s.size(), destination.data());
+        return std::string(destination.data(), folded_length);
+    };
+
+    // A duplicate-heavy, mixed-case, multi-script dataset exercising every new knob.
+    strs_t mixed;
+    {
+        char const *seed_words[] = {"apple",  "Apple",   "APPLE",  "banana", "BANANA", "ab",     "AB", "Ab", "aB",
+                                    "straße", "STRASSE", "Straße", "Привет", "привет", "ПРИВЕТ", "",   "a",  "A"};
+        for (std::size_t repeat = 0; repeat < 200; ++repeat)
+            for (char const *word : seed_words) mixed.push_back(word);
+        for (std::size_t i = 0; i < 4000; ++i) mixed.push_back(sz::scripts::random_string(i % 6, "abc", 3));
+        std::shuffle(mixed.begin(), mixed.end(), global_random_generator());
+    }
+    std::size_t const mixed_count = mixed.size();
+    auto is_permutation = [&](order_t const &order) {
+        std::vector<char> seen(mixed_count, 0);
+        for (auto idx : order) {
+            if (idx >= mixed_count || seen[idx]) return false;
+            seen[idx] = 1;
+        }
+        return order.size() == mixed_count;
+    };
+    auto reference_order = [&](std::vector<std::string> const &keys, bool reverse) {
+        order_t reference(mixed_count);
+        std::iota(reference.begin(), reference.end(), 0u);
+        std::stable_sort(reference.begin(), reference.end(), [&](sz::sorted_idx_t a, sz::sorted_idx_t b) {
+            int const ordering = compare_bytes(keys[a], keys[b]);
+            if (ordering != 0) return reverse ? ordering > 0 : ordering < 0;
+            return a < b; // Equal keys stay ascending by original index in both directions.
+        });
+        return reference;
+    };
+
+    // Ascending and descending must match a byte-key stable sort exactly.
+    assert(is_permutation(sz::argsort(mixed)) && sz::argsort(mixed) == reference_order(mixed, false));
+    assert(sz::argsort(mixed, 0, true) == reference_order(mixed, true));
+
+    // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
+    for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
+        for (bool reverse : {false, true}) {
+            order_t const got = sz::argsort(mixed, top_count, reverse);
+            order_t const reference = reference_order(mixed, reverse);
+            assert(is_permutation(got));
+            std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
+            for (std::size_t i = 0; i < head; ++i) assert(mixed[got[i]] == mixed[reference[i]]);
+        }
+    }
+
+    // Case-insensitive sort must match folding every string then byte-stable-sorting.
+    std::vector<std::string> folded(mixed_count);
+    for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
+    assert(sz::argsort_utf8_case_insensitive(mixed) == reference_order(folded, false));
+    assert(sz::argsort_utf8_case_insensitive(mixed, 0, true) == reference_order(folded, true));
 }
 
 /**
- *  @brief  Tests array intersection functionality.
+ *  @brief Tests array intersection functionality.
  */
 void test_intersecting_algorithms() {
     using strs_t = std::vector<std::string>;
@@ -4435,7 +5004,7 @@ void test_intersecting_algorithms() {
 }
 
 /**
- *  @brief  Tests constructing STL containers with StringZilla strings.
+ *  @brief Tests constructing STL containers with StringZilla strings.
  */
 void test_stl_containers() {
     std::map<sz::string, int> sorted_words_sz;
@@ -4453,103 +5022,95 @@ int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
     sz_unused_(argc && argv);
+    install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
+    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
+    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
+    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
+    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
+    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
 
+    int failures = 0;
+
     std::printf("\n=== Basic Utilities ===\n");
-    std::printf("- test_arithmetical_utilities...\n");
-    test_arithmetical_utilities();
-    std::printf("- test_sequence_struct...\n");
-    test_sequence_struct();
-    std::printf("- test_memory_allocator_struct...\n");
-    test_memory_allocator_struct();
-    std::printf("- test_byteset_struct...\n");
-    test_byteset_struct();
-    std::printf("- test_equivalence...\n");
-    test_equivalence();
+    failures += run_test("test_arithmetical_utilities", test_arithmetical_utilities);
+    failures += run_test("test_sequence_struct", test_sequence_struct);
+    failures += run_test("test_memory_allocator_struct", test_memory_allocator_struct);
+    failures += run_test("test_byteset_struct", test_byteset_struct);
+    failures += run_test("test_equivalence", test_equivalence);
+    failures += run_test("test_multiseed_hashing", test_multiseed_hashing);
 
     std::printf("\n=== Sequence Algorithms ===\n");
-    std::printf("- test_sorting_algorithms...\n");
-    test_sorting_algorithms();
-    std::printf("- test_intersecting_algorithms...\n");
-    test_intersecting_algorithms();
+    failures += run_test("test_sorting_algorithms", test_sorting_algorithms);
+    failures += run_test("test_intersecting_algorithms", test_intersecting_algorithms);
 
     std::printf("\n=== Core APIs ===\n");
-    std::printf("- test_ascii_utilities<sz::string>...\n");
-    test_ascii_utilities<sz::string>();
-    std::printf("- test_ascii_utilities<sz::string_view>...\n");
-    test_ascii_utilities<sz::string_view>();
-    std::printf("- test_memory_utilities...\n");
-    test_memory_utilities();
-    std::printf("- test_large_memory_utilities...\n");
-    test_large_memory_utilities();
-    std::printf("- test_replacements...\n");
-    test_replacements();
+    failures += run_test("test_ascii_utilities<sz::string>", test_ascii_utilities<sz::string>);
+    failures += run_test("test_ascii_utilities<sz::string_view>", test_ascii_utilities<sz::string_view>);
+    failures += run_test("test_memory_utilities", [] { test_memory_utilities(); }); // ! Defaulted arg
+    failures += run_test("test_large_memory_utilities", test_large_memory_utilities);
+    failures += run_test("test_replacements", [] { test_replacements(); }); // ! Defaulted args
 
     std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    std::printf("- test_stl_compatibility_for_reads<std::string_view>...\n");
-    test_stl_compatibility_for_reads<std::string_view>();
+    failures += run_test("test_stl_compatibility_for_reads<std::string_view>",
+                         test_stl_compatibility_for_reads<std::string_view>);
 #endif
-    std::printf("- test_stl_compatibility_for_reads<std::string>...\n");
-    test_stl_compatibility_for_reads<std::string>();
-    std::printf("- test_stl_compatibility_for_reads<sz::string_view>...\n");
-    test_stl_compatibility_for_reads<sz::string_view>();
-    std::printf("- test_stl_compatibility_for_reads<sz::string>...\n");
-    test_stl_compatibility_for_reads<sz::string>();
-    std::printf("- test_stl_compatibility_for_updates<std::string>...\n");
-    test_stl_compatibility_for_updates<std::string>();
-    std::printf("- test_stl_compatibility_for_updates<sz::string>...\n");
-    test_stl_compatibility_for_updates<sz::string>();
-    std::printf("- test_stl_conversions...\n");
-    test_stl_conversions();
-    std::printf("- test_stl_containers...\n");
-    test_stl_containers();
+    failures += run_test("test_stl_compatibility_for_reads<std::string>",
+                         test_stl_compatibility_for_reads<std::string>);
+    failures += run_test("test_stl_compatibility_for_reads<sz::string_view>",
+                         test_stl_compatibility_for_reads<sz::string_view>);
+    failures += run_test("test_stl_compatibility_for_reads<sz::string>", test_stl_compatibility_for_reads<sz::string>);
+    failures += run_test("test_stl_compatibility_for_updates<std::string>",
+                         test_stl_compatibility_for_updates<std::string>);
+    failures += run_test("test_stl_compatibility_for_updates<sz::string>",
+                         test_stl_compatibility_for_updates<sz::string>);
+    failures += run_test("test_stl_conversions", test_stl_conversions);
+    failures += run_test("test_stl_containers", test_stl_containers);
 
     std::printf("\n=== StringZilla Extensions ===\n");
-    std::printf("- test_non_stl_extensions_for_reads<sz::string_view>...\n");
-    test_non_stl_extensions_for_reads<sz::string_view>();
-    std::printf("- test_non_stl_extensions_for_reads<sz::string>...\n");
-    test_non_stl_extensions_for_reads<sz::string>();
-    std::printf("- test_non_stl_extensions_for_updates...\n");
-    test_non_stl_extensions_for_updates();
+    failures += run_test("test_non_stl_extensions_for_reads<sz::string_view>",
+                         test_non_stl_extensions_for_reads<sz::string_view>);
+    failures += run_test("test_non_stl_extensions_for_reads<sz::string>",
+                         test_non_stl_extensions_for_reads<sz::string>);
+    failures += run_test("test_non_stl_extensions_for_updates", test_non_stl_extensions_for_updates);
 
     std::printf("\n=== String Class Implementation ===\n");
-    std::printf("- test_constructors...\n");
-    test_constructors();
-    std::printf("- test_memory_stability_for_length(1024)...\n");
-    test_memory_stability_for_length(1024);
-    std::printf("- test_memory_stability_for_length(14)...\n");
-    test_memory_stability_for_length(14);
-    std::printf("- test_updates...\n");
-    test_updates();
+    failures += run_test("test_constructors", test_constructors);
+    failures += run_test("test_memory_stability_for_length(1024)", [] { test_memory_stability_for_length(1024); });
+    failures += run_test("test_memory_stability_for_length(14)", [] { test_memory_stability_for_length(14); });
+    failures += run_test("test_updates", [] { test_updates(); }); // ! Defaulted arg
 
     std::printf("\n=== Search and Comparison ===\n");
-    std::printf("- test_comparisons...\n");
-    test_comparisons();
-    std::printf("- test_search...\n");
-    test_search();
-    std::printf("- test_utf8...\n");
-    test_utf8();
-    std::printf("- test_utf8_case...\n");
-    test_utf8_case();
+    failures += run_test("test_comparisons", test_comparisons);
+    failures += run_test("test_search", test_search);
+    failures += run_test("test_utf8", test_utf8);
+    failures += run_test("test_utf8_words", test_utf8_words);
+    failures += run_test("test_utf8_case", test_utf8_case);
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
+    // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.
     std::printf("- test_search_with_misaligned_repetitions...\n");
     test_search_with_misaligned_repetitions();
 #endif
 
+    if (failures != 0) {
+        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
+        return 1;
+    }
     std::printf("\nAll tests passed!\n");
     return 0;
 }

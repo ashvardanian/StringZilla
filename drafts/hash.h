@@ -9,9 +9,7 @@
 
 #pragma once
 
-// ========================================================================
 // 128-bit SVE Implementation (original approach)
-// ========================================================================
 
 /**
  *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
@@ -128,9 +126,7 @@ SZ_PUBLIC sz_u64_t sz_hash_sve2_b128(sz_cptr_t text, sz_size_t length, sz_u64_t 
     }
 }
 
-// ========================================================================
 // 256-bit SVE Implementation (store-based approach)
-// ========================================================================
 
 /**
  *  @brief  Hash implementation assuming 256-bit SVE registers
@@ -273,9 +269,7 @@ SZ_PUBLIC sz_u64_t sz_hash_sve2_b256(sz_cptr_t text, sz_size_t length, sz_u64_t 
     }
 }
 
-// ========================================================================
 // Performance Notes
-// ========================================================================
 
 /*
  * Benchmarks on Graviton3 (256-bit SVE, Neoverse V1):

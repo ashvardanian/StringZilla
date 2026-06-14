@@ -266,4 +266,51 @@ class StringZillaTests: XCTestCase {
         hasher.update("test")
         XCTAssertEqual(hasher.digest().count, 32)
     }
+
+    // MARK: - UAX-29 Word Boundary Tests
+
+    func testUtf8WordsTileInput() {
+        let text = "Hello, world! 👋"
+        let words = text.utf8Words()
+        // Words tile the input: concatenating every word range reconstructs the original.
+        let reconstructed = words.map { String(text[$0]) }.joined()
+        XCTAssertEqual(reconstructed, text)
+        // And the segmentation keeps recognizable tokens intact.
+        let wordStrings = words.map { String(text[$0]) }
+        XCTAssertTrue(wordStrings.contains("Hello"))
+        XCTAssertTrue(wordStrings.contains("world"))
+    }
+
+    func testUtf8WordsReversedMirrorsForward() {
+        let text = "Die Temperaturschwankungen im Maß von etwa 20 µK."
+        let forward = text.utf8Words().map { String(text[$0]) }
+        let reversed = text.utf8WordsReversed().map { String(text[$0]) }
+        XCTAssertEqual(reversed, forward.reversed())
+        // Reverse traversal also tiles the input when read back-to-front.
+        XCTAssertEqual(reversed.reversed().joined(), text)
+    }
+
+    // MARK: - Compare / Order Tests
+
+    func testCompareByteOrder() {
+        XCTAssertEqual("apple".compare("banana"), .ascending)
+        XCTAssertEqual("banana".compare("apple"), .descending)
+        XCTAssertEqual("apple".compare("apple"), .equal)
+        // Shorter prefix orders before its extension.
+        XCTAssertEqual("app".compare("apple"), .ascending)
+    }
+
+    func testEquals() {
+        XCTAssertTrue("StringZilla".equals("StringZilla"))
+        XCTAssertFalse("StringZilla".equals("StringZillb"))
+        // Differing lengths are never equal, even on a shared prefix.
+        XCTAssertFalse("String".equals("StringZilla"))
+    }
+
+    func testUtf8CaseInsensitiveOrder() {
+        XCTAssertEqual("HELLO".utf8CaseInsensitiveOrder("hello"), .equal)
+        // German sharp-S folds to "ss", so "Straße" and "strasse" compare equal.
+        XCTAssertEqual("Straße".utf8CaseInsensitiveOrder("STRASSE"), .equal)
+        XCTAssertEqual("apple".utf8CaseInsensitiveOrder("BANANA"), .ascending)
+    }
 }

@@ -1,6 +1,6 @@
 /**
- *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   test_stringzilla.hpp
+ *  @brief Helper structures and functions for C++ unit- and stress-tests.
+ *  @file scripts/test_stringzilla.hpp
  *  @author Ash Vardanian
  *
  *  @section Environment Variables
@@ -16,6 +16,8 @@
  *    operation complexity. This multiplier scales all baselines
  *    proportionally (e.g., 0.1 for quick smoke tests, 10 for
  *    thorough CI fuzzing).
+ *  - `SZ_TESTS_FILTER` : ECMAScript regex matched against test names; only matching tests run
+ *    (e.g. `SZ_TESTS_FILTER=utf8`). Unset or empty runs everything. Honored by `run_test`.
  *
  *  @section Example Usage
  *
@@ -26,6 +28,9 @@
  *  # Quick smoke test (10% of normal iterations)
  *  SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
  *
+ *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
+ *  SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 ./build_release/stringzilla_test_cpp20
+ *
  *  # Thorough CI stress test (10x normal iterations)
  *  SZ_TESTS_MULTIPLIER=10 ./build_release/stringzilla_test_cpp20
  *
@@ -34,15 +39,24 @@
  *  @endcode
  */
 #pragma once
+#include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdio>  // `std::printf`, `std::fflush`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::strcmp`
 
+#include <algorithm> // `std::copy`, `std::generate`
+#include <chrono>    // `std::chrono::steady_clock` for per-test timing
+#include <exception> // `std::exception`
 #include <fstream>   // `std::ifstream`
 #include <random>    // `std::random_device`
+#include <regex>     // `std::regex_search` for `SZ_TESTS_FILTER`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
-#include <algorithm> // `std::copy`, `std::generate`
+
+#if defined(__linux__)
+#include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
+#include <unistd.h>   // `STDERR_FILENO`
+#endif
 
 #include "stringzilla/types.hpp"
 #if SZ_USE_CUDA
@@ -79,7 +93,7 @@ inline void write_file(std::string path, std::string content) noexcept(false) {
 }
 
 /**
- *  @brief  Returns the seed used for the global random number generator.
+ *  @brief Returns the seed used for the global random number generator.
  *
  *  If `SZ_TESTS_SEED` is set, returns its value. Otherwise, generates a random seed
  *  using `std::random_device`. The seed is cached after the first call.
@@ -102,7 +116,7 @@ inline bool global_random_seed_from_env() noexcept {
 }
 
 /**
- *  @brief  Returns a reference to the global random number generator.
+ *  @brief Returns a reference to the global random number generator.
  *
  *  The generator is seeded once using `global_random_seed()`, which respects the
  *  `SZ_TESTS_SEED` environment variable for reproducible testing.
@@ -113,7 +127,7 @@ inline std::mt19937 &global_random_generator() noexcept {
 }
 
 /**
- *  @brief  Returns the multiplier for stress-test iteration counts.
+ *  @brief Returns the multiplier for stress-test iteration counts.
  *
  *  Reads from the `SZ_TESTS_MULTIPLIER` environment variable. Defaults to 1.0.
  *  Use values < 1.0 for quick smoke tests, > 1.0 for thorough stress testing in CI.
@@ -131,7 +145,7 @@ inline double get_iterations_multiplier() noexcept {
 }
 
 /**
- *  @brief  Scales a baseline iteration count by the global multiplier.
+ *  @brief Scales a baseline iteration count by the global multiplier.
  *
  *  Use this to wrap hardcoded iteration counts in stress tests, e.g.:
  *  @code{.cpp}
@@ -152,8 +166,8 @@ inline string_type_ to_str(other_string_type_ const &other) noexcept {
 }
 
 /**
- *  @brief  A uniform distribution of characters, with a given alphabet size.
- *          The alphabet size is the number of distinct characters in the distribution.
+ *  @brief A uniform distribution of characters, with a given alphabet size.
+ *         The alphabet size is the number of distinct characters in the distribution.
  *
  *  We can't use `std::uniform_int_distribution<char>` because `char` overload is not supported by some platforms.
  *  MSVC, for example, requires one of `short`, `int`, `long`, `long long`, `unsigned short`, `unsigned int`,
@@ -261,15 +275,21 @@ inline char const *status_name(status_t s) noexcept {
 
 inline int log_environment() {
     std::printf("- Uses Westmere: %s \n", SZ_USE_WESTMERE ? "yes" : "no");
+    std::printf("- Uses Goldmont: %s \n", SZ_USE_GOLDMONT ? "yes" : "no");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
-    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICELAKE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
-    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEON_AES ? "yes" : "no");
-    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEON_SHA ? "yes" : "no");
+    std::printf("- Uses NEON AES: %s \n", SZ_USE_NEONAES ? "yes" : "no");
+    std::printf("- Uses NEON SHA: %s \n", SZ_USE_NEONSHA ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2_AES ? "yes" : "no");
+    std::printf("- Uses SVE2 AES: %s \n", SZ_USE_SVE2AES ? "yes" : "no");
+    std::printf("- Uses WASM SIMD128: %s \n", SZ_USE_V128 ? "yes" : "no");
+    std::printf("- Uses WASM relaxed SIMD: %s \n", SZ_USE_V128RELAXED ? "yes" : "no");
+    std::printf("- Uses RISC-V RVV: %s \n", SZ_USE_RVV ? "yes" : "no");
+    std::printf("- Uses LoongArch LASX: %s \n", SZ_USE_LASX ? "yes" : "no");
+    std::printf("- Uses Power VSX: %s \n", SZ_USE_POWERVSX ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     std::printf("- Uses Kepler CUDA: %s \n", SZ_USE_KEPLER ? "yes" : "no");
     std::printf("- Uses Hopper CUDA: %s \n", SZ_USE_HOPPER ? "yes" : "no");
@@ -322,7 +342,7 @@ inline int log_environment() {
 }
 
 /**
- *  @brief  Prints test environment configuration (seed and multiplier).
+ *  @brief Prints test environment configuration (seed and multiplier).
  *
  *  Call this at the start of main() to display test configuration alongside
  *  other environment info. Format matches capability flags style.
@@ -335,6 +355,89 @@ inline void print_test_environment() noexcept {
     if (multiplier != 1.0) std::printf("- Iterations multiplier: %.2fx\n", multiplier);
     std::fflush(stdout); // Ensure output is visible even on crash
 }
+
+#pragma region - Test Runner
+
+/**
+ *  @brief Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes
+ *         instead of dying silently - especially under output redirection in CI.
+ */
+inline void test_fatal_signal_handler(int signal_number) noexcept {
+    std::fprintf(stderr, "\n*** Fatal signal %d - backtrace follows ***\n", signal_number);
+#if defined(__linux__)
+    void *frames[64];
+    int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
+    backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
+#endif
+    std::signal(signal_number, SIG_DFL);
+    std::raise(signal_number);
+}
+
+/**
+ *  @brief Installs SIGSEGV/SIGABRT backtrace handlers and line-buffers stdout.
+ *         Shared by the serial (`.cpp`) and CUDA (`.cu`) test entry points; call once from `main`.
+ */
+inline void install_test_signal_handlers() noexcept {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0); // Line-buffer, so progress survives a crash under output redirection.
+    std::signal(SIGSEGV, test_fatal_signal_handler);
+    std::signal(SIGABRT, test_fatal_signal_handler);
+}
+
+/**
+ *  @brief Returns true if a test named @p name should run, honoring the `SZ_TESTS_FILTER` regex.
+ *
+ *  `SZ_TESTS_FILTER` is an ECMAScript regular expression matched against the test name (e.g.
+ *  `SZ_TESTS_FILTER=fingerprint` runs only the rolling-hasher tests, skipping the slower similarity
+ *  suite). An empty or unset filter runs everything; an invalid pattern runs everything rather than
+ *  silently skipping the whole suite.
+ */
+inline bool test_should_run(char const *name) noexcept {
+    static std::string const filter = []() -> std::string {
+        char const *env = std::getenv("SZ_TESTS_FILTER");
+        return env && env[0] != '\0' ? std::string(env) : std::string();
+    }();
+    if (filter.empty()) return true;
+    try {
+        return std::regex_search(name, std::regex(filter));
+    }
+    catch (std::regex_error const &) {
+        return true;
+    }
+}
+
+/**
+ *  @brief Runs one named test: honors `SZ_TESTS_FILTER`, wall-clock times it, and reports the outcome.
+ *  @return The number of failures (0 on success or when skipped, 1 on a thrown exception).
+ *
+ *  Hard failures via `sz_assert_` abort the process (and self-localize through the installed signal
+ *  handler); this wrapper additionally turns thrown exceptions into a localized, named failure instead
+ *  of a bare `what()` at the top of `main`, and surfaces per-test durations so slow tests are obvious.
+ */
+template <typename function_type_>
+inline int run_test(char const *name, function_type_ &&test_function) noexcept {
+    if (!test_should_run(name)) {
+        std::printf("- %s ... skipped (SZ_TESTS_FILTER)\n", name);
+        std::fflush(stdout);
+        return 0;
+    }
+    std::printf("- %s ...\n", name);
+    std::fflush(stdout);
+    auto const start = std::chrono::steady_clock::now();
+    try {
+        test_function();
+    }
+    catch (std::exception const &error) {
+        std::fprintf(stderr, "- %s ... FAILED: %s\n", name, error.what());
+        std::fflush(stderr);
+        return 1;
+    }
+    double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("- %s ... ok (%.2f s)\n", name, seconds);
+    std::fflush(stdout);
+    return 0;
+}
+
+#pragma endregion - Test Runner
 
 } // namespace scripts
 } // namespace stringzilla
