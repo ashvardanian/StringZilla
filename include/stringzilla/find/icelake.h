@@ -149,7 +149,50 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
-    return sz_rfind_byteset_serial(text, length, filter);
+
+    // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan 64-byte
+    // windows from the end of the buffer and take the HIGHEST set bit (closest to the buffer end) so the
+    // result matches `sz_rfind_byteset_serial`, which returns the last in-set byte.
+    sz_u512_vec_t filter_even_vec, filter_odd_vec;
+    __m256i filter_ymm = _mm256_lddqu_si256((__m256i const *)filter);
+    filter_even_vec.zmm = _mm512_broadcast_i32x4(_mm256_castsi256_si128( //
+        _mm256_maskz_compress_epi8(0x55555555, filter_ymm)));
+    filter_odd_vec.zmm = _mm512_broadcast_i32x4(_mm256_castsi256_si128( //
+        _mm256_maskz_compress_epi8(0xaaaaaaaa, filter_ymm)));
+
+    sz_u512_vec_t text_vec;
+    sz_u512_vec_t lower_nibbles_vec, higher_nibbles_vec;
+    sz_u512_vec_t bitset_even_vec, bitset_odd_vec;
+    sz_u512_vec_t bitmask_vec, bitmask_lookup_vec;
+    bitmask_lookup_vec.zmm = _mm512_set_epi8(                       //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
+
+    while (length) {
+        // Take the trailing window of up to 64 bytes; valid lanes occupy bits [0, load_length).
+        sz_size_t load_length = sz_min_of_two(length, 64);
+        sz_cptr_t window = text + length - load_length;
+        __mmask64 load_mask = sz_u64_mask_until_(load_length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, window);
+        lower_nibbles_vec.zmm = _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8(0x0f));
+        bitmask_vec.zmm = _mm512_shuffle_epi8(bitmask_lookup_vec.zmm, lower_nibbles_vec.zmm);
+        higher_nibbles_vec.zmm = _mm512_and_si512(_mm512_srli_epi16(text_vec.zmm, 4), _mm512_set1_epi8(0x0f));
+        bitset_even_vec.zmm = _mm512_shuffle_epi8(filter_even_vec.zmm, higher_nibbles_vec.zmm);
+        bitset_odd_vec.zmm = _mm512_shuffle_epi8(filter_odd_vec.zmm, higher_nibbles_vec.zmm);
+        __mmask64 take_first = _mm512_cmplt_epi8_mask(lower_nibbles_vec.zmm, _mm512_set1_epi8(8));
+        bitset_even_vec.zmm = _mm512_mask_blend_epi8(take_first, bitset_odd_vec.zmm, bitset_even_vec.zmm);
+        sz_u64_t matches_mask = _cvtmask64_u64(
+            _mm512_mask_test_epi8_mask(load_mask, bitset_even_vec.zmm, bitmask_vec.zmm));
+        if (matches_mask) {
+            int offset = 63 - sz_u64_clz(matches_mask); // highest set bit -> last in-set byte
+            return window + offset;
+        }
+        else { length -= load_length; }
+    }
+
+    return SZ_NULL_CHAR;
 }
 
 #if defined(__clang__)
