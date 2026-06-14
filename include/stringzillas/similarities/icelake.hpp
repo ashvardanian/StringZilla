@@ -1211,6 +1211,246 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
 };
 
 /**
+ *  @brief AVX-512 @b lockstep Myers/Hyyrö unit-cost Levenshtein for Ice Lake, with one dedicated routine per
+ *      shorter-side tier so each carries exactly the cross-lane machinery it needs:
+ *      - `distances_8x64_`  - 8 independent single-word Myers (shorter <= 64), no cross-lane logic at all;
+ *      - `distances_4x128_` - 4 pairs of 2 lanes (shorter <= 128), 128-bit Myers integers;
+ *      - `distances_2x256_` - 2 pairs of 4 lanes (shorter <= 256), 256-bit Myers integers;
+ *      - `distances_1x512_` - 1 pair of 8 lanes (shorter <= 512), a single 512-bit Myers integer.
+ *      The three multi-lane tiers share the `lockstep_pairs_` core: only the carry of `(Eq & VP) + VP` and the
+ *      `<< 1` ripple cross a pair's lanes (masked at pair boundaries); everything else is per-lane bit-logic.
+ *      Variable per-pair lengths are handled with an active mask that freezes finished pairs.
+ */
+template <sz_capability_t capability_>
+struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>> {
+
+    using char_t = char;
+    using index_t = u32_t;
+    static constexpr index_t lanes_k = 8;
+    static constexpr size_t match_masks_bytes_k = sizeof(u64_t) * lanes_k * 256; // ? 16 KB `Peq` table.
+
+    levenshtein_distance_myers() noexcept {}
+
+    /** @brief Compile-time mask of the lanes that begin a pair (every `lanes_per_pair_`-th lane). */
+    template <index_t lanes_per_pair_>
+    static constexpr __mmask8 pair_starts_mask_() noexcept {
+        __mmask8 mask = 0;
+        for (index_t lane = 0; lane != lanes_k; ++lane)
+            if (lane % lanes_per_pair_ == 0) mask = (__mmask8)(mask | (1u << lane));
+        return mask;
+    }
+
+    /**
+     *  @brief Eight independent single-word Myers distances, one per ZMM lane (each shorter side <= 64).
+     *      The hot path for short words: no carry, shift, or boundary masking crosses lanes - every lane is
+     *      its own 64-bit Myers integer. @p scratch_space holds the `Peq[8][256]` table (`match_masks_bytes_k`)
+     *      followed by a transposed-text buffer of at least `max_longer * 8` bytes.
+     */
+    status_t distances_8x64_(span<char_t const> const *shorters, span<char_t const> const *longers,
+                             index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+
+        size_t max_longer = 0;
+        for (index_t lane = 0; lane != pairs_active; ++lane)
+            max_longer = sz_max_of_two(max_longer, longers[lane].size());
+        if (scratch_space.size() < match_masks_bytes_k + max_longer * lanes_k) return status_t::bad_alloc_k;
+
+        u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data()); // ? Indexed `lane * 256 + symbol`.
+        u8_t *const transposed_text = reinterpret_cast<u8_t *>(scratch_space.data() + match_masks_bytes_k);
+        alignas(64) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
+        for (size_t position = 0; position != max_longer * lanes_k; ++position) transposed_text[position] = 0;
+
+        for (index_t lane = 0; lane != pairs_active; ++lane) {
+            index_t const shorter_length = (index_t)shorters[lane].size();
+            size_t const longer_length = longers[lane].size();
+            char_t const *const shorter = shorters[lane].data();
+            char_t const *const longer = longers[lane].data();
+            // Zero this lane's `Peq` entries for every character its text may read (see the scalar Myers).
+            for (index_t position = 0; position != shorter_length; ++position)
+                match_masks[lane * 256 + (u8_t)shorter[position]] = 0;
+            for (size_t position = 0; position != longer_length; ++position)
+                match_masks[lane * 256 + (u8_t)longer[position]] = 0;
+            for (index_t position = 0; position != shorter_length; ++position)
+                match_masks[lane * 256 + (u8_t)shorter[position]] |= (u64_t)1 << position;
+            top_bits[lane] = (u64_t)1 << (shorter_length - 1);
+            shorter_lengths[lane] = shorter_length;
+            longer_lengths[lane] = longer_length;
+            for (size_t position = 0; position != longer_length; ++position)
+                transposed_text[position * lanes_k + lane] = (u8_t)longer[position];
+        }
+
+        __m512i const lane_offsets = _mm512_set_epi64(7 * 256, 6 * 256, 5 * 256, 4 * 256, 3 * 256, 2 * 256, 1 * 256, 0);
+        __m512i const ones = _mm512_set1_epi64(-1), one = _mm512_set1_epi64(1);
+        __m512i const top_mask = _mm512_load_si512(top_bits), longer_vec = _mm512_load_si512(longer_lengths);
+        __m512i const length_vec = _mm512_load_si512(shorter_lengths);
+        // VP = the low `shorter_length` bits set (a shift count of 64 yields 0, so `(1 << 64) - 1` == ~0).
+        __m512i vertical_positive = _mm512_sub_epi64(_mm512_sllv_epi64(one, length_vec), one);
+        __m512i vertical_negative = _mm512_setzero_si512();
+        __m512i score = length_vec;
+
+        for (size_t position = 0; position != max_longer; ++position) {
+            __mmask8 const active = _mm512_cmpgt_epi64_mask(longer_vec, _mm512_set1_epi64((long long)position));
+            __m512i const symbols = _mm512_cvtepu8_epi64(
+                _mm_loadl_epi64((__m128i const *)(transposed_text + position * lanes_k)));
+            __m512i const equality = _mm512_i64gather_epi64(_mm512_add_epi64(lane_offsets, symbols), match_masks, 8);
+            __m512i const carry_in = _mm512_or_si512(equality, vertical_negative);
+            __m512i const diagonal = _mm512_or_si512(
+                _mm512_xor_si512(_mm512_add_epi64(_mm512_and_si512(equality, vertical_positive), vertical_positive),
+                                 vertical_positive),
+                equality);
+            __m512i horizontal_positive = _mm512_or_si512(
+                vertical_negative, _mm512_xor_si512(_mm512_or_si512(diagonal, vertical_positive), ones));
+            __m512i horizontal_negative = _mm512_and_si512(vertical_positive, diagonal);
+            score = _mm512_mask_add_epi64(score, active & _mm512_test_epi64_mask(horizontal_positive, top_mask), score,
+                                          one);
+            score = _mm512_mask_sub_epi64(score, active & _mm512_test_epi64_mask(horizontal_negative, top_mask), score,
+                                          one);
+            horizontal_positive = _mm512_or_si512(_mm512_slli_epi64(horizontal_positive, 1), one);
+            horizontal_negative = _mm512_slli_epi64(horizontal_negative, 1);
+            __m512i const next_positive = _mm512_or_si512(
+                horizontal_negative, _mm512_xor_si512(_mm512_or_si512(carry_in, horizontal_positive), ones));
+            __m512i const next_negative = _mm512_and_si512(horizontal_positive, carry_in);
+            vertical_positive = _mm512_mask_blend_epi64(active, vertical_positive, next_positive);
+            vertical_negative = _mm512_mask_blend_epi64(active, vertical_negative, next_negative);
+        }
+
+        alignas(64) u64_t final_scores[lanes_k];
+        _mm512_store_si512(final_scores, score);
+        for (index_t lane = 0; lane != pairs_active; ++lane) results[lane] = (size_t)final_scores[lane];
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief `8 / lanes_per_pair_` distances in lockstep, each pair spanning `lanes_per_pair_` consecutive lanes
+     *      as one `lanes_per_pair_ * 64`-bit Myers integer. Only the carry of `(Eq & VP) + VP` and the `<< 1` ripple
+     *      cross a pair's lanes; both are masked at pair boundaries so the pairs stay independent. `lanes_per_pair_`
+     *      = 2/4/8 covers shorter sides <= 128/256/512 (4/2/1 pairs per ZMM).
+     */
+    template <index_t lanes_per_pair_>
+    status_t lockstep_pairs_(span<char_t const> const *shorters, span<char_t const> const *longers,
+                             index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+
+        constexpr __mmask8 pair_starts = pair_starts_mask_<lanes_per_pair_>();
+        constexpr __mmask8 receivers = (__mmask8)(~pair_starts & 0xFFu); // ? Lanes that take an incoming carry/bit.
+
+        size_t max_longer = 0;
+        for (index_t pair = 0; pair != pairs_active; ++pair)
+            max_longer = sz_max_of_two(max_longer, longers[pair].size());
+        if (scratch_space.size() < match_masks_bytes_k + max_longer * lanes_k) return status_t::bad_alloc_k;
+
+        u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data()); // ? Indexed `lane * 256 + symbol`.
+        u8_t *const transposed_text = reinterpret_cast<u8_t *>(scratch_space.data() + match_masks_bytes_k);
+        alignas(64) u64_t vertical_positives[lanes_k] = {0}, top_bits[lanes_k] = {0};
+        alignas(64) u64_t shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
+        for (size_t position = 0; position != max_longer * lanes_k; ++position) transposed_text[position] = 0;
+
+        for (index_t pair = 0; pair != pairs_active; ++pair) {
+            index_t const shorter_length = (index_t)shorters[pair].size();
+            size_t const longer_length = longers[pair].size();
+            char_t const *const shorter = shorters[pair].data();
+            char_t const *const longer = longers[pair].data();
+            for (index_t word = 0; word != lanes_per_pair_; ++word) {
+                index_t const lane = pair * lanes_per_pair_ + word;
+                // Zero this lane's `Peq` entries for every character its text may read (see the scalar Myers).
+                for (index_t position = 0; position != shorter_length; ++position)
+                    match_masks[lane * 256 + (u8_t)shorter[position]] = 0;
+                for (size_t position = 0; position != longer_length; ++position)
+                    match_masks[lane * 256 + (u8_t)longer[position]] = 0;
+                // VP = the low `shorter_length` bits, spread across the pair's words.
+                index_t const word_low = word * 64;
+                if (shorter_length >= word_low + 64) vertical_positives[lane] = ~(u64_t)0;
+                else if (shorter_length <= word_low) vertical_positives[lane] = 0;
+                else vertical_positives[lane] = ((u64_t)1 << (shorter_length - word_low)) - 1;
+                shorter_lengths[lane] = shorter_length;
+                longer_lengths[lane] = longer_length;
+            }
+            for (index_t position = 0; position != shorter_length; ++position)
+                match_masks[(pair * lanes_per_pair_ + (position >> 6)) * 256 + (u8_t)shorter[position]] |=
+                    (u64_t)1 << (position & 63);
+            index_t const top_word = (shorter_length - 1) >> 6, top_bit = (shorter_length - 1) & 63;
+            top_bits[pair * lanes_per_pair_ + top_word] = (u64_t)1 << top_bit;
+            for (size_t position = 0; position != longer_length; ++position)
+                for (index_t word = 0; word != lanes_per_pair_; ++word)
+                    transposed_text[position * lanes_k + pair * lanes_per_pair_ + word] = (u8_t)longer[position];
+        }
+
+        __m512i const lane_offsets = _mm512_set_epi64(7 * 256, 6 * 256, 5 * 256, 4 * 256, 3 * 256, 2 * 256, 1 * 256, 0);
+        __m512i const ones = _mm512_set1_epi64(-1), one = _mm512_set1_epi64(1);
+        __m512i const shift_up = _mm512_set_epi64(6, 5, 4, 3, 2, 1, 0, 0); // ? Lane i receives lane (i-1)'s top bit.
+        __m512i const boundary_one = _mm512_maskz_mov_epi64(pair_starts, one);
+        __m512i const top_mask = _mm512_load_si512(top_bits), longer_vec = _mm512_load_si512(longer_lengths);
+        __m512i vertical_positive = _mm512_load_si512(vertical_positives);
+        __m512i vertical_negative = _mm512_setzero_si512();
+        __m512i score = _mm512_load_si512(shorter_lengths);
+
+        for (size_t position = 0; position != max_longer; ++position) {
+            __mmask8 const active = _mm512_cmpgt_epi64_mask(longer_vec, _mm512_set1_epi64((long long)position));
+            __m512i const symbols = _mm512_cvtepu8_epi64(
+                _mm_loadl_epi64((__m128i const *)(transposed_text + position * lanes_k)));
+            __m512i const equality = _mm512_i64gather_epi64(_mm512_add_epi64(lane_offsets, symbols), match_masks, 8);
+            __m512i const carry_in = _mm512_or_si512(equality, vertical_negative);
+            // (Eq & VP) + VP, rippling the carry across each pair's lanes (blocked at pair starts).
+            __m512i const addend = _mm512_and_si512(equality, vertical_positive);
+            __m512i sum = _mm512_add_epi64(addend, vertical_positive);
+            __mmask8 carry = _mm512_cmplt_epu64_mask(sum, addend);
+            for (index_t iteration = 1; iteration != lanes_per_pair_; ++iteration) {
+                __mmask8 const into_next = (__mmask8)((carry << 1) & receivers);
+                if (!into_next) break;
+                __m512i const advanced = _mm512_add_epi64(sum, _mm512_maskz_mov_epi64(into_next, one));
+                carry = _mm512_cmplt_epu64_mask(advanced, sum);
+                sum = advanced;
+            }
+            __m512i const diagonal = _mm512_or_si512(_mm512_xor_si512(sum, vertical_positive), equality);
+            __m512i horizontal_positive = _mm512_or_si512(
+                vertical_negative, _mm512_xor_si512(_mm512_or_si512(diagonal, vertical_positive), ones));
+            __m512i horizontal_negative = _mm512_and_si512(vertical_positive, diagonal);
+            score = _mm512_mask_add_epi64(score, active & _mm512_test_epi64_mask(horizontal_positive, top_mask), score,
+                                          one);
+            score = _mm512_mask_sub_epi64(score, active & _mm512_test_epi64_mask(horizontal_negative, top_mask), score,
+                                          one);
+            // (Ph | Mh) << 1 across each pair's lanes; Ph also takes a +1 at each pair start.
+            __m512i const positive_carry = _mm512_maskz_mov_epi64(
+                receivers, _mm512_permutexvar_epi64(shift_up, _mm512_srli_epi64(horizontal_positive, 63)));
+            __m512i const negative_carry = _mm512_maskz_mov_epi64(
+                receivers, _mm512_permutexvar_epi64(shift_up, _mm512_srli_epi64(horizontal_negative, 63)));
+            horizontal_positive = _mm512_or_si512(
+                _mm512_or_si512(_mm512_slli_epi64(horizontal_positive, 1), positive_carry), boundary_one);
+            horizontal_negative = _mm512_or_si512(_mm512_slli_epi64(horizontal_negative, 1), negative_carry);
+            __m512i const next_positive = _mm512_or_si512(
+                horizontal_negative, _mm512_xor_si512(_mm512_or_si512(carry_in, horizontal_positive), ones));
+            __m512i const next_negative = _mm512_and_si512(horizontal_positive, carry_in);
+            vertical_positive = _mm512_mask_blend_epi64(active, vertical_positive, next_positive);
+            vertical_negative = _mm512_mask_blend_epi64(active, vertical_negative, next_negative);
+        }
+
+        alignas(64) u64_t final_scores[lanes_k];
+        _mm512_store_si512(final_scores, score);
+        for (index_t pair = 0; pair != pairs_active; ++pair) {
+            index_t const top_word = ((index_t)shorters[pair].size() - 1) >> 6;
+            results[pair] = (size_t)final_scores[pair * lanes_per_pair_ + top_word];
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Four distances in lockstep, each pair a 128-bit Myers integer over two lanes (shorter side <= 128). */
+    status_t distances_4x128_(span<char_t const> const *shorters, span<char_t const> const *longers,
+                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<2>(shorters, longers, pairs_active, results, scratch_space);
+    }
+
+    /** @brief Two distances in lockstep, each pair a 256-bit Myers integer over four lanes (shorter side <= 256). */
+    status_t distances_2x256_(span<char_t const> const *shorters, span<char_t const> const *longers,
+                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<4>(shorters, longers, pairs_active, results, scratch_space);
+    }
+
+    /** @brief One distance as a single 512-bit Myers integer over all eight lanes (shorter side <= 512). */
+    status_t distances_1x512_(span<char_t const> const *shorters, span<char_t const> const *longers,
+                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<8>(shorters, longers, pairs_active, results, scratch_space);
+    }
+};
+
+/**
  *  @brief Computes the @b byte-level Levenshtein distance between two strings using the CPU backend.
  *  @sa `levenshtein_distance_utf8` for UTF-8 strings.
  */
@@ -1294,6 +1534,153 @@ struct levenshtein_distance<char, gap_costs_type_, capability_,
         }
 
         return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Batched byte-level Levenshtein distances on Ice Lake, using the @b AVX-512 lockstep Myers family for
+ *      unit-cost pairs (8/4/2/1 distances at once for shorter sides <= 64/128/256/512) and the anti-diagonal DP
+ *      for everything else (non-unit costs, or shorter side > 512). Pairs are grouped by their shorter-side tier.
+ */
+template <typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
+                             std::enable_if_t<(capability_ & sz_cap_icelake_k) != 0>> {
+
+    using gap_costs_t = linear_gap_costs_t;
+    using allocator_t = allocator_type_;
+    using index_t = u32_t;
+
+    static constexpr sz_capability_t capability_k = capability_;
+    using scoring_t = levenshtein_distance<char, gap_costs_t, capability_k>; // ? Per-pair DP fallback.
+    using myers_t = levenshtein_distance_myers<char, capability_k>;          // ? AVX-512 lockstep Myers.
+
+    uniform_substitution_costs_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+    allocator_t alloc_ {};
+
+    levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances(uniform_substitution_costs_t subs, linear_gap_costs_t gaps,
+                          allocator_t alloc = allocator_t {}) noexcept
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
+
+    bool is_unit_cost_() const noexcept {
+        return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
+    }
+
+    /** @brief Scores pairs [begin, end) with the lockstep Myers family, falling back to the DP per pair. */
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
+    [[gnu::noinline]] status_t score_range_(first_strings_type_ const &first_strings,
+                                            second_strings_type_ const &second_strings, results_type_ &&results,
+                                            size_t begin, size_t end, cpu_specs_t const &specs) const noexcept {
+
+        // Size one reusable buffer for the widest transposed text and the largest DP fallback in this range.
+        scoring_t dp {substituter_, gap_costs_};
+        size_t max_longer = 0, dp_scratch = 0;
+        for (size_t i = begin; i != end; ++i) {
+            auto const first = to_view(first_strings[i]);
+            auto const second = to_view(second_strings[i]);
+            max_longer = sz_max_of_two(max_longer, sz_max_of_two(first.size(), second.size()));
+            if (sz_min_of_two(first.size(), second.size()) > 512)
+                dp_scratch = sz_max_of_two(dp_scratch, dp.scratch_space_needed(first, second, specs));
+        }
+        size_t const myers_scratch = myers_t::match_masks_bytes_k + max_longer * (size_t)myers_t::lanes_k;
+        size_t const scratch_size = sz_max_of_two(myers_scratch, dp_scratch);
+        safe_vector<std::byte, allocator_t> scratch_buffer(alloc_);
+        if (status_t status = scratch_buffer.try_resize(scratch_size); status != status_t::success_k) return status;
+        scratch_space_t scratch = scratch_space_t(scratch_buffer);
+
+        myers_t myers;
+        dummy_executor_t dummy;
+        for (size_t i = begin; i != end;) {
+            auto const first = to_view(first_strings[i]);
+            auto const second = to_view(second_strings[i]);
+            size_t const shorter = sz_min_of_two(first.size(), second.size());
+            if (shorter == 0) {
+                results[i] = sz_max_of_two(first.size(), second.size()), ++i;
+                continue;
+            }
+            if (shorter > 512) { // Anti-diagonal DP for the long tail.
+                size_t result = 0;
+                if (status_t status = dp(first, second, result, scratch, dummy, specs); status != status_t::success_k)
+                    return status;
+                results[i] = result, ++i;
+                continue;
+            }
+
+            // Pick the tier from this first pair, seed the group with it (it is non-empty and fits its tier), then
+            // extend with consecutive pairs that also fit. Seeding first guarantees forward progress (`i` advances).
+            size_t const tier_limit = shorter <= 64 ? 64 : shorter <= 128 ? 128 : shorter <= 256 ? 256 : 512;
+            index_t const lanes_per_pair = shorter <= 64 ? 1 : shorter <= 128 ? 2 : shorter <= 256 ? 4 : 8;
+            index_t const pairs_capacity = myers_t::lanes_k / lanes_per_pair;
+            span<char const> shorters[myers_t::lanes_k], longers[myers_t::lanes_k];
+            size_t const group_begin = i;
+            bool const seed_first_shorter = first.size() <= second.size();
+            shorters[0] = seed_first_shorter ? first : second;
+            longers[0] = seed_first_shorter ? second : first;
+            index_t group = 1;
+            ++i;
+            for (; i != end && group != pairs_capacity; ++i, ++group) {
+                auto const f = to_view(first_strings[i]);
+                auto const s = to_view(second_strings[i]);
+                size_t const sh = sz_min_of_two(f.size(), s.size());
+                if (sh == 0 || sh > tier_limit) break;
+                bool const first_is_shorter = f.size() <= s.size();
+                shorters[group] = first_is_shorter ? f : s;
+                longers[group] = first_is_shorter ? s : f;
+            }
+
+            size_t group_results[myers_t::lanes_k];
+            status_t status = status_t::success_k;
+            switch (lanes_per_pair) {
+            case 1: status = myers.distances_8x64_(shorters, longers, group, group_results, scratch); break;
+            case 2: status = myers.distances_4x128_(shorters, longers, group, group_results, scratch); break;
+            case 4: status = myers.distances_2x256_(shorters, longers, group, group_results, scratch); break;
+            default: status = myers.distances_1x512_(shorters, longers, group, group_results, scratch); break;
+            }
+            if (status != status_t::success_k) return status;
+            for (index_t pair = 0; pair != group; ++pair) results[group_begin + pair] = group_results[pair];
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Scores every pair in parallel: each worker takes a contiguous slice of the index range. */
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              typename executor_type_>
+    [[gnu::noinline]] status_t score_parallel_(first_strings_type_ const &first_strings,
+                                               second_strings_type_ const &second_strings, results_type_ &&results,
+                                               executor_type_ &&executor, cpu_specs_t const &specs) const noexcept {
+        std::atomic<status_t> error {status_t::success_k};
+        // `for_slices` hands each worker the first index of its slice and the slice length.
+        executor.for_slices(first_strings.size(), [&](size_t begin, size_t length) noexcept {
+            status_t status = score_range_(first_strings, second_strings, results, begin, begin + length, specs);
+            if (status != status_t::success_k) error.store(status);
+        });
+        return error.load();
+    }
+
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, cpu_specs_t const &specs = {}) noexcept {
+        if (!is_unit_cost_())
+            return score_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, first_strings, second_strings,
+                                               std::forward<results_type_>(results), alloc_, specs);
+        return score_range_(first_strings, second_strings, std::forward<results_type_>(results), 0,
+                            first_strings.size(), specs);
+    }
+
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              typename executor_type_>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_> && indexed_results_like<results_type_>
+#endif
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        if (!is_unit_cost_())
+            return score_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, first_strings, second_strings,
+                                              std::forward<results_type_>(results), alloc_,
+                                              std::forward<executor_type_>(executor), specs);
+        return score_parallel_(first_strings, second_strings, std::forward<results_type_>(results),
+                               std::forward<executor_type_>(executor), specs);
     }
 };
 
