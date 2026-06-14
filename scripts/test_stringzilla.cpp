@@ -1699,22 +1699,6 @@ void test_equivalence() {
         sz_utf8_find_newline_v128relaxed,                //
         sz_utf8_find_whitespace_serial,                  //
         sz_utf8_find_whitespace_v128relaxed);
-
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128relaxed);
-
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128relaxed, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
 #endif
 #if SZ_USE_RVV
     test_utf8_equivalence(                       //

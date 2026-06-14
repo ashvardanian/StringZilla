@@ -616,7 +616,11 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
                                   sz_u64_t const *seeds, sz_size_t seeds_count, //
                                   sz_u64_t *hashes) {
-#if SZ_USE_ICELAKE
+#if SZ_USE_V128RELAXED
+    sz_hash_multiseed_v128relaxed(text, length, seeds, seeds_count, hashes);
+#elif SZ_USE_V128
+    sz_hash_multiseed_v128(text, length, seeds, seeds_count, hashes);
+#elif SZ_USE_ICELAKE
     sz_hash_multiseed_icelake(text, length, seeds, seeds_count, hashes);
 #elif SZ_USE_WESTMERE
     sz_hash_multiseed_westmere(text, length, seeds, seeds_count, hashes);

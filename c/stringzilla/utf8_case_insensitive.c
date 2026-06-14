@@ -40,13 +40,6 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_insensitive_update_(sz_capabilit
     }
 #endif
 
-#if SZ_USE_V128RELAXED
-    if (caps & sz_cap_v128relaxed_k) {
-        impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_v128relaxed;
-        impl->utf8_case_insensitive_order = sz_utf8_case_insensitive_order_v128relaxed;
-    }
-#endif
-
 #if SZ_USE_RVV
     if (caps & sz_cap_rvv_k) {
         impl->utf8_case_insensitive_find = sz_utf8_case_insensitive_find_rvv;

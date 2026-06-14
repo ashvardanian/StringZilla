@@ -274,7 +274,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
 #include "stringzilla/utf8_case_insensitive/haswell.h"
 #include "stringzilla/utf8_case_insensitive/neon.h"
 #include "stringzilla/utf8_case_insensitive/v128.h"
-#include "stringzilla/utf8_case_insensitive/v128relaxed.h"
 #include "stringzilla/utf8_case_insensitive/rvv.h"
 #include "stringzilla/utf8_case_insensitive/lasx.h"
 #include "stringzilla/utf8_case_insensitive/powervsx.h"
@@ -289,10 +288,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find(sz_cptr_t haystack, sz_size_t
                                                    sz_size_t needle_length,
                                                    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata,
                                                    sz_size_t *matched_length) {
-#if SZ_USE_V128RELAXED
-    return sz_utf8_case_insensitive_find_v128relaxed(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                     matched_length);
-#elif SZ_USE_V128
+#if SZ_USE_V128
     return sz_utf8_case_insensitive_find_v128(haystack, haystack_length, needle, needle_length, needle_metadata,
                                               matched_length);
 #elif SZ_USE_RVV
@@ -325,9 +321,7 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
 }
 
 SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
-#if SZ_USE_V128RELAXED
-    return sz_utf8_case_invariant_v128relaxed(str, length);
-#elif SZ_USE_V128
+#if SZ_USE_V128
     return sz_utf8_case_invariant_v128(str, length);
 #elif SZ_USE_RVV
     return sz_utf8_case_invariant_rvv(str, length);

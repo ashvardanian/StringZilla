@@ -378,6 +378,42 @@ SZ_PUBLIC void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length, sz_u6
     }
 }
 
+/**
+ *  @brief Replays prepared text-lanes through the relaxed-SIMD minimal AES state for a single seed.
+ *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)` (hence to serial).
+ */
+SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes,
+                                                           sz_size_t text_lanes_count, sz_size_t length,
+                                                           sz_u64_t seed) {
+    sz_align_(16) sz_hash_minimal_t_ state;
+    sz_hash_minimal_init_serial_(&state, seed);
+    for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+        sz_hash_minimal_update_v128relaxed_(&state, text_lanes->u128s[lane_index]);
+    return sz_hash_minimal_finalize_v128relaxed_(&state, length);
+}
+
+/** @copydoc sz_hash_multiseed_v128 */
+SZ_PUBLIC void sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length,             //
+                                             sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                             sz_u64_t *hashes) {
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_v128relaxed(text, length, seeds[0]);
+        return;
+    }
+    if (length <= 64) {
+        sz_u512_vec_t text_lanes;
+        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes);
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_multiseed_replay_v128relaxed_(&text_lanes, text_lanes_count, length,
+                                                                       seeds[seed_index]);
+    }
+    else {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_v128relaxed(text, length, seeds[seed_index]);
+    }
+}
+
 #pragma endregion // Hash with relaxed-SIMD AES
 
 #if defined(__clang__)

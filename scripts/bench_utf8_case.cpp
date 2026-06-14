@@ -96,11 +96,6 @@ void bench_utf8_case_fold(environment_t const &env) {
     bench_unary(env, "sz_utf8_case_fold_v128", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_v128> {env})
         .log(base);
 #endif
-#if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_case_fold_v128relaxed", validator,
-                utf8_case_fold_from_sz<sz_utf8_case_fold_v128relaxed> {env})
-        .log(base);
-#endif
 #if SZ_USE_RVV
     bench_unary(env, "sz_utf8_case_fold_rvv", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_rvv> {env}).log(base);
 #endif
@@ -181,11 +176,6 @@ void bench_utf8_case_insensitive_find(environment_t const &env) {
 #if SZ_USE_V128
     bench_unary(env, "sz_utf8_case_insensitive_find_v128", validator,
                 utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_v128> {env})
-        .log(base);
-#endif
-#if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_case_insensitive_find_v128relaxed", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_v128relaxed> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV

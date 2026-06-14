@@ -363,6 +363,54 @@ SZ_PUBLIC void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
+#pragma region Multi-Seed Hashing
+
+/**
+ *  @brief Replays prepared text-lanes through the SIMD128 minimal AES state for a single seed.
+ *  @return 64-bit hash, bit-identical to `sz_hash_v128(text, length, seed)` (hence to serial).
+ *  @sa sz_hash_multiseed_replay_serial_, sz_hash_multiseed_prepare_serial_
+ */
+SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
+                                                    sz_size_t length, sz_u64_t seed) {
+    sz_align_(16) sz_hash_minimal_t_ state;
+    sz_hash_minimal_init_v128_(&state, seed);
+    for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+        sz_hash_minimal_update_v128_(&state, text_lanes->u128s[lane_index]);
+    return sz_hash_minimal_finalize_v128_(&state, length);
+}
+
+/**
+ *  @brief Hashes one `text` under many `seeds`, sharing a single normalization pass for short inputs.
+ *
+ *  The branchy load + de-interleave of a `<= 64` byte input depends only on `(text, length)`, so it is
+ *  done exactly once (`sz_hash_multiseed_prepare_serial_`) and replayed through the cheap SIMD128 AES
+ *  rounds per seed — amortizing the input-load/tail cost that dominates short-string hashing. On a
+ *  128-bit register each seed's minimal state is a full vector, so seeds are not lane-packed; the win is
+ *  the shared normalization plus the faster v128 AES emulation. Bit-identical to `sz_hash_multiseed_serial`.
+ */
+SZ_PUBLIC void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,             //
+                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                      sz_u64_t *hashes) {
+    if (seeds_count == 0) return;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_v128(text, length, seeds[0]);
+        return;
+    }
+    if (length <= 64) {
+        sz_u512_vec_t text_lanes;
+        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes);
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_multiseed_replay_v128_(&text_lanes, text_lanes_count, length,
+                                                                seeds[seed_index]);
+    }
+    else {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_v128(text, length, seeds[seed_index]);
+    }
+}
+
+#pragma endregion // Multi-Seed Hashing
+
 #pragma endregion // Hash with SIMD128 AES
 
 /** @brief 32-bit lane-wise rotate-right (no native WASM rotate; built from two shifts and an OR). */

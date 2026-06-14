@@ -4499,6 +4499,10 @@ mod tests {
         // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
         let golden: &[(&str, &[u8])] = &[
             ("HeLLo", b"hello"),                   // ASCII fast path
+            ("ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"abcdefghijklmnopqrstuvwxyz"), // >16B ASCII: SIMD fold loop
+            ("Hello, WASM World! 12345.", b"hello, wasm world! 12345."),   // >16B mixed: only A-Z fold
+            // Long ASCII run, then a multi-byte codepoint, then more ASCII: SIMD → serial → scalar tail.
+            ("LONG ASCII PREFIX \u{00C4} SUFFIX", "long ascii prefix \u{00E4} suffix".as_bytes()),
             ("\u{00DF}", b"ss"),                   // ß → ss expansion
             ("\u{1E9E}", b"ss"),                   // ẞ → ss (E1 BA lead bytes)
             ("\u{03A3}", "\u{03C3}".as_bytes()),   // Σ → σ

@@ -488,6 +488,13 @@
 #undef SZ_USE_NEON
 #define SZ_USE_NEON (1)
 #endif
+/*  WebAssembly relaxed-SIMD is a tier above baseline SIMD128 (it requires `simd128`). Close the set
+ *  downward so backends that ship only a `_v128` kernel can dispatch on `#if SZ_USE_V128` alone and
+ *  still be reached when the build enabled relaxed-SIMD. */
+#if SZ_USE_V128RELAXED && !SZ_USE_V128
+#undef SZ_USE_V128
+#define SZ_USE_V128 (1)
+#endif
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */

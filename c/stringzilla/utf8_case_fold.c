@@ -32,10 +32,6 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_fold_update_(sz_capability_t cap
     if (caps & sz_cap_v128_k) { impl->utf8_case_fold = sz_utf8_case_fold_v128; }
 #endif
 
-#if SZ_USE_V128RELAXED
-    if (caps & sz_cap_v128relaxed_k) { impl->utf8_case_fold = sz_utf8_case_fold_v128relaxed; }
-#endif
-
 #if SZ_USE_RVV
     if (caps & sz_cap_rvv_k) { impl->utf8_case_fold = sz_utf8_case_fold_rvv; }
 #endif

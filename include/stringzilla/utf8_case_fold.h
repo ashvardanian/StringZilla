@@ -84,12 +84,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
-#if SZ_USE_V128RELAXED
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128relaxed( //
-    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
-#endif
-
 #if SZ_USE_RVV
 /** @copydoc sz_utf8_case_fold */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_rvv( //
@@ -117,7 +111,6 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_powervsx( //
 #include "stringzilla/utf8_case_fold/haswell.h"
 #include "stringzilla/utf8_case_fold/neon.h"
 #include "stringzilla/utf8_case_fold/v128.h"
-#include "stringzilla/utf8_case_fold/v128relaxed.h"
 #include "stringzilla/utf8_case_fold/rvv.h"
 #include "stringzilla/utf8_case_fold/lasx.h"
 #include "stringzilla/utf8_case_fold/powervsx.h"
@@ -135,8 +128,6 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length
     return sz_utf8_case_fold_haswell(source, source_length, destination);
 #elif SZ_USE_NEON
     return sz_utf8_case_fold_neon(source, source_length, destination);
-#elif SZ_USE_V128RELAXED
-    return sz_utf8_case_fold_v128relaxed(source, source_length, destination);
 #elif SZ_USE_V128
     return sz_utf8_case_fold_v128(source, source_length, destination);
 #elif SZ_USE_RVV
