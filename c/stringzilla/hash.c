@@ -171,6 +171,20 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
     }
 #endif
 
+#if SZ_USE_RVVCRYPTO
+    if (caps & sz_cap_rvvcrypto_k) {
+        impl->hash = sz_hash_rvvcrypto;
+        impl->hash_state_init = sz_hash_state_init_rvvcrypto;
+        impl->hash_state_update = sz_hash_state_update_rvvcrypto;
+        impl->hash_state_digest = sz_hash_state_digest_rvvcrypto;
+        impl->fill_random = sz_fill_random_rvvcrypto;
+
+        impl->sha256_state_init = sz_sha256_state_init_rvvcrypto;
+        impl->sha256_state_update = sz_sha256_state_update_rvvcrypto;
+        impl->sha256_state_digest = sz_sha256_state_digest_rvvcrypto;
+    }
+#endif
+
 #if SZ_USE_LASX
     if (caps & sz_cap_lasx_k) {
         impl->bytesum = sz_bytesum_lasx;

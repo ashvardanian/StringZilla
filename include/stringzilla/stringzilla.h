@@ -98,11 +98,25 @@
 #define SZ_IS_APPLE_ 1
 #elif defined(__linux__)
 #define SZ_IS_LINUX_ 1
+#elif defined(__FreeBSD__)
+#define SZ_IS_FREEBSD_ 1
 #endif
 
 /* On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API */
 #if defined(SZ_IS_APPLE_)
 #include <sys/sysctl.h>
+#endif
+
+/* On 64-bit RISC-V we probe HWCAP via the auxiliary vector and vector sub-extensions via the
+ * Linux `riscv_hwprobe` syscall (FreeBSD lacks it and uses `elf_aux_info` for base RVV only). */
+#if defined(__riscv) && (__riscv_xlen == 64) && !SZ_AVOID_LIBC
+#if defined(SZ_IS_LINUX_)
+#include <sys/auxv.h>    // `getauxval`, `AT_HWCAP`
+#include <sys/syscall.h> // `SYS_riscv_hwprobe`
+#include <unistd.h>      // `syscall`
+#elif defined(SZ_IS_FREEBSD_)
+#include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`
+#endif
 #endif
 
 /* Detect POSIX extensions availability for signal handling.
@@ -161,6 +175,7 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
         {sz_cap_v128_k, "v128"},
         {sz_cap_v128relaxed_k, "v128relaxed"},
         {sz_cap_rvv_k, "rvv"},
+        {sz_cap_rvvcrypto_k, "rvvcrypto"},
         {sz_cap_lasx_k, "lasx"},
         {sz_cap_powervsx_k, "powervsx"},
         //
@@ -207,6 +222,7 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
     if (sz_equal_null_terminated_serial(name, "v128") == sz_true_k) return sz_cap_v128_k;
     if (sz_equal_null_terminated_serial(name, "v128relaxed") == sz_true_k) return sz_cap_v128relaxed_k;
     if (sz_equal_null_terminated_serial(name, "rvv") == sz_true_k) return sz_cap_rvv_k;
+    if (sz_equal_null_terminated_serial(name, "rvvcrypto") == sz_true_k) return sz_cap_rvvcrypto_k;
     if (sz_equal_null_terminated_serial(name, "lasx") == sz_true_k) return sz_cap_lasx_k;
     if (sz_equal_null_terminated_serial(name, "powervsx") == sz_true_k) return sz_cap_powervsx_k;
     // Arm
@@ -276,6 +292,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
         (sz_cap_v128_k * SZ_USE_V128) |               //
         (sz_cap_v128relaxed_k * SZ_USE_V128RELAXED) | //
         (sz_cap_rvv_k * SZ_USE_RVV) |                 //
+        (sz_cap_rvvcrypto_k * SZ_USE_RVVCRYPTO) |     //
         (sz_cap_lasx_k * SZ_USE_LASX) |               //
         (sz_cap_powervsx_k * SZ_USE_POWERVSX) |       //
         (sz_cap_serial_k));
@@ -519,6 +536,64 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 }
 #endif // SZ_IS_64BIT_X86_
 
+#if defined(__riscv) && (__riscv_xlen == 64)
+
+/**
+ *  @brief Function to determine the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_INTERNAL sz_capability_t sz_capabilities_implementation_riscv_(void) {
+#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+
+    // The base "V" extension is reported through the auxiliary vector, but the individual
+    // vector sub-extensions (vector crypto, bf16, …) are only exposed through the
+    // `riscv_hwprobe(2)` syscall (number 258), introduced in Linux 6.4.
+    unsigned long hwcap = getauxval(AT_HWCAP);
+    sz_capability_t caps = sz_cap_serial_k;
+
+    // HWCAP bit 21 (`COMPAT_HWCAP_ISA_V`, i.e. `1UL << ('V' - 'A')`) marks RVV 1.0.
+    if (hwcap & (1UL << 21)) {
+        caps = (sz_capability_t)(caps | sz_cap_rvv_k);
+
+        // `riscv_hwprobe(2)`: fill an array of {key, value} pairs. We query a single key,
+        // `RISCV_HWPROBE_KEY_IMA_EXT_0` (= 4), whose value carries the extension bitmask.
+        // Constants confirmed against `/usr/riscv64-linux-gnu/include/asm/hwprobe.h`:
+        //   RISCV_HWPROBE_KEY_IMA_EXT_0 == 4
+        //   RISCV_HWPROBE_EXT_ZVKNED    == (1 << 21)  // Zvkned (AES)
+        //   RISCV_HWPROBE_EXT_ZVKNHB    == (1 << 23)  // Zvknhb (SHA-256/512)
+        struct {
+            long long key;
+            unsigned long long value;
+        } pairs[1];
+        pairs[0].key = 4; // RISCV_HWPROBE_KEY_IMA_EXT_0
+        pairs[0].value = 0;
+        // `long syscall(SYS_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags)`.
+        if (syscall(258, pairs, (unsigned long)1, (unsigned long)0, (void *)0, (unsigned long)0) == 0) {
+            unsigned long long const has_zvkned = pairs[0].value & (1ULL << 21); // RISCV_HWPROBE_EXT_ZVKNED
+            unsigned long long const has_zvknhb = pairs[0].value & (1ULL << 23); // RISCV_HWPROBE_EXT_ZVKNHB
+            if (has_zvkned && has_zvknhb) caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
+        }
+    }
+    return caps;
+
+#elif defined(SZ_IS_FREEBSD_) && !SZ_AVOID_LIBC
+
+    // FreeBSD exposes HWCAP through `elf_aux_info`, but lacks the Linux `riscv_hwprobe`
+    // syscall, so the vector crypto sub-extensions stay compile-time only here.
+    unsigned long hwcap = 0;
+    elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
+    sz_capability_t caps = sz_cap_serial_k;
+    if (hwcap & (1UL << 21)) caps = (sz_capability_t)(caps | sz_cap_rvv_k);
+    return caps;
+
+#else
+    // Without a portable runtime probe, mirror the compile-time capabilities.
+    return sz_capabilities_comptime_implementation_();
+#endif
+}
+
+#endif // defined(__riscv) && (__riscv_xlen == 64)
+
 /**
  *  @brief Function to determine the SIMD capabilities of the current CPU at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
@@ -529,8 +604,10 @@ SZ_PUBLIC sz_capability_t sz_capabilities_runtime_implementation_(void) {
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
     return sz_capabilities_implementation_arm_();
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    return sz_capabilities_implementation_riscv_();
 #else
-    // WebAssembly, RISC-V, LoongArch, and Power expose their SIMD support at compile time
+    // WebAssembly, LoongArch, and Power expose their SIMD support at compile time
     // (there is no portable runtime probe here), so runtime capabilities mirror compile-time ones.
     return sz_capabilities_comptime_implementation_();
 #endif

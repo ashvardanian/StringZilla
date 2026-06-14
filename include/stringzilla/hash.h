@@ -549,6 +549,7 @@ SZ_PUBLIC sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_stat
 #include "stringzilla/hash/v128relaxed.h"
 #include "stringzilla/hash/v128.h"
 #include "stringzilla/hash/rvv.h"
+#include "stringzilla/hash/rvvcrypto.h"
 #include "stringzilla/hash/lasx.h"
 #include "stringzilla/hash/powervsx.h"
 

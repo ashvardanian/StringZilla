@@ -432,6 +432,15 @@
 #endif
 #endif
 
+/*  RISC-V Vector Crypto (Zvk: Zvkned AES + Zvknhb SHA) — `-march=rv64gcv_zvkned_zvknhb`. */
+#if !defined(SZ_USE_RVVCRYPTO)
+#if SZ_USE_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
+#define SZ_USE_RVVCRYPTO (1)
+#else
+#define SZ_USE_RVVCRYPTO (0)
+#endif
+#endif
+
 /*  LoongArch Advanced SIMD eXtension (LASX, 256-bit) — `-mlasx`. */
 #if !defined(SZ_USE_LASX)
 #if defined(__loongarch__) && defined(__loongarch_asx)
@@ -730,6 +739,8 @@ typedef enum sz_capability_t {
     sz_cap_kepler_k = 1 << 22, ///< CUDA capability with support with in-warp register shuffles
     sz_cap_hopper_k = 1 << 23, ///< CUDA capability with support for Hopper's DPX instructions
 
+    sz_cap_rvvcrypto_k = 1 << 24, ///< RISC-V vector crypto (Zvk: Zvkned AES + Zvknhb SHA) capability
+
     sz_caps_none_k = 0,
 
     sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
@@ -747,7 +758,7 @@ typedef enum sz_capability_t {
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
                      sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
                      sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
-                     sz_cap_rvv_k | sz_cap_lasx_k | sz_cap_powervsx_k,
+                     sz_cap_rvv_k | sz_cap_rvvcrypto_k | sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -756,7 +767,7 @@ typedef enum sz_capability_t {
  *  @brief Maximum number of individual capability flags that can be represented.
  *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
  */
-#define SZ_CAPABILITIES_COUNT 21
+#define SZ_CAPABILITIES_COUNT 22
 
 /**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
