@@ -1,7 +1,11 @@
 // Only the C API umbrella is exposed as a Clang module for now. The C++ wrapper
 // (stringzilla.hpp) and the heavy templated headers don't build cleanly as Clang
 // modules against current libstdc++ yet, so C++ stays on textual includes.
+//
+// The module header root is `include/`, matching every other build (CMake, Rust,
+// Python all compile with `-I include`), so the `#include "stringzilla/<...>.h"`
+// umbrella includes inside `stringzilla.h` resolve consistently.
 module StringZillaC {
-    header "stringzilla.h"
+    header "stringzilla/stringzilla.h"
     export *
 }
