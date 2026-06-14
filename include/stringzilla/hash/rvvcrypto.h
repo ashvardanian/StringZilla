@@ -44,7 +44,7 @@ extern "C" {
  *  AES block is one element group (`EGW = 128`), so the operation runs with `vl = 4` 32-bit lanes.
  */
 SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    size_t vl = __riscv_vsetvl_e32m1(4); // one 128-bit AES block = 4x u32 lanes
+    sz_size_t vl = __riscv_vsetvl_e32m1(4); // one 128-bit AES block = 4x u32 lanes
     vuint32m1_t state_u32 = __riscv_vle32_v_u32m1((sz_u32_t const *)state_vec.u32s, vl);
     vuint32m1_t key_u32 = __riscv_vle32_v_u32m1((sz_u32_t const *)round_key_vec.u32s, vl);
     state_u32 = __riscv_vaesem_vv_u32m1(state_u32, key_u32, vl);
@@ -126,7 +126,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_t const *st
 /** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target->u8s`,
  *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
 SZ_INTERNAL void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *target, sz_cptr_t source) {
-    size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
+    sz_size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
     __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vl), vl);
 }
 
@@ -138,7 +138,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start, sz_s
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
         // A length-agnostic load drops the zero pad and the scalar byte loop: VL covers the partial bytes.
-        size_t vl = __riscv_vsetvl_e8m1(length);
+        sz_size_t vl = __riscv_vsetvl_e8m1(length);
         __riscv_vse8_v_u8m1(data_vec.u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)start, vl), vl);
         sz_hash_minimal_update_rvvcrypto_(&state, data_vec);
         return sz_hash_minimal_finalize_rvvcrypto_(&state, length);
@@ -187,14 +187,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start, sz_s
         sz_size_t const window = sizeof(state.ins); // the 64-byte hashing window
         sz_hash_state_init_serial(&state, seed);
         for (; state.ins_length + window <= length; state.ins_length += window) {
-            size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
+            sz_size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
             __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vl), vl);
             sz_hash_state_update_rvvcrypto_(&state);
         }
         if (state.ins_length < length) {
-            size_t zero_vl = __riscv_vsetvl_e8m8(window);
+            sz_size_t zero_vl = __riscv_vsetvl_e8m8(window);
             __riscv_vse8_v_u8m8(state.ins, __riscv_vmv_v_x_u8m8(0, zero_vl), zero_vl);
-            size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
+            sz_size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
             __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, tail_vl),
                                 tail_vl);
             sz_hash_state_update_rvvcrypto_(&state);
@@ -218,7 +218,7 @@ SZ_PUBLIC void sz_hash_state_update_rvvcrypto(sz_hash_state_t *state, sz_cptr_t 
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_rvvcrypto_(state);
-            size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
+            sz_size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
             __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, clear_vl), clear_vl);
         }
     }
@@ -271,7 +271,7 @@ SZ_PUBLIC void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, sz_u64_
         generated_vec = sz_emulate_aesenc_rvvcrypto_(input_vec, key_vec);
         // VL deletes both the per-byte loop and the `&& length` tail guard: it clamps to the bytes left,
         // capped at the block we just generated.
-        size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
+        sz_size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
         __riscv_vse8_v_u8m1((sz_u8_t *)text, __riscv_vle8_v_u8m1(generated_vec.u8s, out_vl), out_vl);
         text += out_vl, length -= out_vl;
     }
@@ -301,7 +301,7 @@ SZ_PUBLIC void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, sz_u64_
 SZ_INTERNAL void sz_sha256_process_block_rvvcrypto_(sz_u32_t hash[sz_at_least_(8)],
                                                     sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
-    size_t const vl = __riscv_vsetvl_e32m1(4);
+    sz_size_t const vl = __riscv_vsetvl_e32m1(4);
 
     // Lane-0 selection mask for the message-schedule `vmerge` (replace the oldest word of the group).
     sz_align_(16) sz_u32_t const mask_seed[4] = {1, 0, 0, 0};
@@ -390,7 +390,7 @@ SZ_PUBLIC void sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state_ptr) {
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     // Copy all 8 initial words in halves of 4: `vsetvl_e32m1(8)` would clamp to 4 lanes at VLEN=128,
     // silently leaving the upper four words uninitialized, so the half-width copy is VLEN-independent.
-    size_t const vl = __riscv_vsetvl_e32m1(4);
+    sz_size_t const vl = __riscv_vsetvl_e32m1(4);
     __riscv_vse32_v_u32m1(state_ptr->hash + 0, __riscv_vle32_v_u32m1(initial_hash + 0, vl), vl);
     __riscv_vse32_v_u32m1(state_ptr->hash + 4, __riscv_vle32_v_u32m1(initial_hash + 4, vl), vl);
     state_ptr->block_length = 0, state_ptr->total_length = 0;

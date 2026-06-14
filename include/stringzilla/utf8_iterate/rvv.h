@@ -49,21 +49,21 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_rvv(   //
 
         sz_size_t ascii_run = 0;
         while (ascii_run < want) {
-            size_t vl = __riscv_vsetvl_e8m8(want - ascii_run);
-            vuint8m8_t vec = __riscv_vle8_v_u8m8(text_cursor + ascii_run, vl);
+            sz_size_t vl = __riscv_vsetvl_e8m8(want - ascii_run);
+            vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_cursor + ascii_run, vl);
             // Non-ASCII iff the high bit is set, i.e. byte >= 0x80.
-            vbool1_t non_ascii = __riscv_vmsgtu_vx_u8m8_b1(vec, 0x7F, vl);
+            vbool1_t non_ascii = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0x7F, vl);
             long first_match_index = __riscv_vfirst_m_b1(non_ascii, vl);
-            size_t take = first_match_index < 0 ? vl : (size_t)first_match_index;
+            sz_size_t take = first_match_index < 0 ? vl : (sz_size_t)first_match_index;
             // Widen the ASCII bytes (u8 -> u16 -> u32) and store them as runes.
             if (take) {
-                size_t done = 0;
+                sz_size_t done = 0;
                 while (done < take) {
-                    size_t wvl = __riscv_vsetvl_e8m2(take - done);
-                    vuint8m2_t b = __riscv_vle8_v_u8m2(text_cursor + ascii_run + done, wvl);
-                    vuint16m4_t w16 = __riscv_vwcvtu_x_x_v_u16m4(b, wvl);
-                    vuint32m8_t w32 = __riscv_vwcvtu_x_x_v_u32m8(w16, wvl);
-                    __riscv_vse32_v_u32m8(runes + runes_written + ascii_run + done, w32, wvl);
+                    sz_size_t wvl = __riscv_vsetvl_e8m2(take - done);
+                    vuint8m2_t ascii_u8m2 = __riscv_vle8_v_u8m2(text_cursor + ascii_run + done, wvl);
+                    vuint16m4_t ascii_u16m4 = __riscv_vwcvtu_x_x_v_u16m4(ascii_u8m2, wvl);
+                    vuint32m8_t ascii_u32m8 = __riscv_vwcvtu_x_x_v_u32m8(ascii_u16m4, wvl);
+                    __riscv_vse32_v_u32m8(runes + runes_written + ascii_run + done, ascii_u32m8, wvl);
                     done += wvl;
                 }
             }
@@ -98,10 +98,10 @@ SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t count = 0;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(text_u8, vl);
+        sz_size_t vl = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8, vl);
         // Leading byte iff `(c & 0xC0) != 0x80`.
-        vuint8m8_t masked = __riscv_vand_vx_u8m8(vec, 0xC0, vl);
+        vuint8m8_t masked = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vl);
         vbool1_t lead_mask = __riscv_vmsne_vx_u8m8_b1(masked, 0x80, vl);
         count += (sz_size_t)__riscv_vcpop_m_b1(lead_mask, vl);
         text_u8 += vl, length -= vl;
@@ -122,9 +122,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_si
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m4(length);
-        vuint8m4_t vec = __riscv_vle8_v_u8m4(text_u8, vl);
-        vbool2_t lead_mask = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(vec, 0xC0, vl), 0x80, vl);
+        sz_size_t vl = __riscv_vsetvl_e8m4(length);
+        vuint8m4_t bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8, vl);
+        vbool2_t lead_mask = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(bytes_u8m4, 0xC0, vl), 0x80, vl);
         sz_size_t strip_leads = (sz_size_t)__riscv_vcpop_m_b2(lead_mask, vl);
         if (seen + strip_leads > n) {
             sz_u16_t target = (sz_u16_t)(n - seen); // 0-based index of the wanted lead byte within this strip
@@ -138,47 +138,48 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_si
     return SZ_NULL_CHAR;
 }
 
-/*  Membership test against a 256-bit set stored as 32 bytes, vectorized via `vrgather`.
- *  Equivalent to `set_u8s[c >> 3] & (1 << (c & 7))`. */
-SZ_INTERNAL vbool1_t sz_utf8_set_mask_rvv_(vuint8m8_t bytes_u8m8, vuint8m8_t set_vec, size_t vl) {
-    vuint8m8_t byte_index = __riscv_vsrl_vx_u8m8(bytes_u8m8, 3, vl);
-    vuint8m8_t bit_position = __riscv_vand_vx_u8m8(bytes_u8m8, 7, vl);
-    vuint8m8_t one = __riscv_vmv_v_x_u8m8(1, vl);
-    vuint8m8_t byte_mask = __riscv_vsll_vv_u8m8(one, bit_position, vl);
-    vuint8m8_t set_bytes = __riscv_vrgather_vv_u8m8(set_vec, byte_index, vl);
-    vuint8m8_t anded = __riscv_vand_vv_u8m8(set_bytes, byte_mask, vl);
-    return __riscv_vmsne_vx_u8m8_b1(anded, 0, vl);
-}
-
-/*  Vector-accelerated scan for the first "candidate" byte that could begin a newline match
- *  (one of '\n' '\v' '\f' '\r' 0xC2 0xE2), then delegate to the serial routine from that point.
- *  Because every real match must start at a candidate byte, and the serial routine returns the
- *  first match at-or-after its start, this is byte-for-byte equivalent to `sz_utf8_find_newline_serial`. */
+/*  Fully in-register newline search: per strip, derive each lane's match length (0 = no newline starts
+ *  here) and return the first non-zero lane with its length. The 2nd/3rd bytes of multi-byte sequences
+ *  come from the original buffer via `vslide1down` carries, so sequences straddling a strip boundary
+ *  resolve exactly and an out-of-bounds byte reads as 0 (never matching a non-zero continuation) — which
+ *  reproduces serial's `+1 != end` / `+2 < end` bounds. Byte-for-byte equivalent to
+ *  `sz_utf8_find_newline_serial`, with no serial remainder. */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    // Build a 32-byte membership set for the candidate starting bytes.
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    sz_byteset_add_u8(&set, '\n');
-    sz_byteset_add_u8(&set, '\v');
-    sz_byteset_add_u8(&set, '\f');
-    sz_byteset_add_u8(&set, '\r');
-    sz_byteset_add_u8(&set, 0xC2);
-    sz_byteset_add_u8(&set, 0xE2);
-
-    size_t set_vl = __riscv_vsetvl_e8m8(32);
-    if (set_vl < 32) return sz_utf8_find_newline_serial(text, length, matched_length);
-    vuint8m8_t set_vec = __riscv_vle8_v_u8m8(&set._u8s[0], 32);
-
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
-        size_t vl = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
-        vbool1_t mask = sz_utf8_set_mask_rvv_(vec, set_vec, vl);
-        long first_match_index = __riscv_vfirst_m_b1(mask, vl);
-        if (first_match_index >= 0) {
-            sz_size_t candidate = offset + (sz_size_t)first_match_index;
-            return sz_utf8_find_newline_serial((sz_cptr_t)(text_u8 + candidate), length - candidate, matched_length);
+        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
+        sz_u8_t carry_first = (offset + vl < length) ? text_u8[offset + vl] : 0;
+        sz_u8_t carry_second = (offset + vl + 1 < length) ? text_u8[offset + vl + 1] : 0;
+        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vl);
+        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vl);
+
+        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vl);
+        // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
+        vbool1_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x0A, vl), 3, vl);
+        vbool1_t is_cr = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x0D, vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, __riscv_vmor_mm_b1(is_lf_vt_ff, is_cr, vl), vl);
+        // '\r\n': length 2 (overrides the lone-'\r').
+        vbool1_t is_cr_lf = __riscv_vmand_mm_b1(is_cr, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x0A, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_cr_lf, vl);
+        // U+0085 NEL (C2 85): length 2.
+        vbool1_t is_nel = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vl),
+                                              __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_nel, vl);
+        // U+2028 / U+2029 (E2 80 A8 / E2 80 A9): length 3.
+        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vl),
+                                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl);
+        vbool1_t is_a8_a9 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vl),
+                                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmand_mm_b1(is_e2_80, is_a8_a9, vl), vl);
+
+        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vl);
+        long match_index = __riscv_vfirst_m_b1(match_mask, vl);
+        if (match_index >= 0) {
+            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vl);
+            *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
+            return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
         }
         offset += vl;
     }
@@ -186,36 +187,62 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_rvv(sz_cptr_t text, sz_size_t length, s
     return SZ_NULL_CHAR;
 }
 
-/*  Vector-accelerated scan for the first whitespace-candidate byte
- *  (' ' '\t' '\n' '\v' '\f' '\r' 0xC2 0xE1 0xE2 0xE3), then delegate to the serial routine. */
+/*  Fully in-register whitespace search, structured like `sz_utf8_find_newline_rvv`: per-lane match length
+ *  with the 2nd/3rd bytes carried from the original buffer via `vslide1down`, byte-for-byte equivalent to
+ *  `sz_utf8_find_whitespace_serial` with no serial remainder. */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    sz_byteset_add_u8(&set, ' ');
-    sz_byteset_add_u8(&set, '\t');
-    sz_byteset_add_u8(&set, '\n');
-    sz_byteset_add_u8(&set, '\v');
-    sz_byteset_add_u8(&set, '\f');
-    sz_byteset_add_u8(&set, '\r');
-    sz_byteset_add_u8(&set, 0xC2);
-    sz_byteset_add_u8(&set, 0xE1);
-    sz_byteset_add_u8(&set, 0xE2);
-    sz_byteset_add_u8(&set, 0xE3);
-
-    size_t set_vl = __riscv_vsetvl_e8m8(32);
-    if (set_vl < 32) return sz_utf8_find_whitespace_serial(text, length, matched_length);
-    vuint8m8_t set_vec = __riscv_vle8_v_u8m8(&set._u8s[0], 32);
-
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
-        size_t vl = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
-        vbool1_t mask = sz_utf8_set_mask_rvv_(vec, set_vec, vl);
-        long first_match_index = __riscv_vfirst_m_b1(mask, vl);
-        if (first_match_index >= 0) {
-            sz_size_t candidate = offset + (sz_size_t)first_match_index;
-            return sz_utf8_find_whitespace_serial((sz_cptr_t)(text_u8 + candidate), length - candidate, matched_length);
+        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
+        sz_u8_t carry_first = (offset + vl < length) ? text_u8[offset + vl] : 0;
+        sz_u8_t carry_second = (offset + vl + 1 < length) ? text_u8[offset + vl + 1] : 0;
+        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vl);
+        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vl);
+
+        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vl);
+        // ASCII whitespace: '\t'-'\r' (0x09-0x0D) and ' ' (0x20): length 1.
+        vbool1_t is_ascii_ws = __riscv_vmor_mm_b1(
+            __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x09, vl), 5, vl),
+            __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x20, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, is_ascii_ws, vl);
+        // U+0085 NEL (C2 85) and U+00A0 NBSP (C2 A0): length 2.
+        vbool1_t is_c2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vl);
+        vbool1_t next_85_a0 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vl),
+                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xA0, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, __riscv_vmand_mm_b1(is_c2, next_85_a0, vl), vl);
+        // U+1680 Ogham space mark (E1 9A 80): length 3.
+        vbool1_t is_ogham = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE1, vl),
+                                                                    __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9A, vl), vl),
+                                                __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_ogham, vl);
+        // U+2000-U+200D, U+2028, U+2029, U+202F (E2 80 {80-8D, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
+        vbool1_t is_e2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vl);
+        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl);
+        vbool1_t third_2000_200d = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(after_next_u8m8, 0x80, vl), 0x0E, vl);
+        vbool1_t third_a8_a9_af = __riscv_vmor_mm_b1(
+            __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vl),
+                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vl), vl),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xAF, vl), vl);
+        vbool1_t is_e2_80_ws = __riscv_vmand_mm_b1(is_e2_80, __riscv_vmor_mm_b1(third_2000_200d, third_a8_a9_af, vl),
+                                                   vl);
+        vbool1_t is_e2_81_9f = __riscv_vmand_mm_b1(
+            __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x81, vl), vl),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x9F, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmor_mm_b1(is_e2_80_ws, is_e2_81_9f, vl), vl);
+        // U+3000 ideographic space (E3 80 80): length 3.
+        vbool1_t is_e3 = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE3, vl),
+                                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl),
+                                             __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vl), vl);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_e3, vl);
+
+        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vl);
+        long match_index = __riscv_vfirst_m_b1(match_mask, vl);
+        if (match_index >= 0) {
+            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vl);
+            *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
+            return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
         }
         offset += vl;
     }
@@ -232,7 +259,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length
  *  1.  PROPERTY CLASSIFICATION (`sz_word_break_classify_props_rvv_`): codepoint start offsets are found with the
  *      same leading-byte vector trick as `sz_utf8_count_rvv`; the codepoints' Word_Break properties are
  *      then produced in bulk. The ASCII fast path classifies whole strips of `rune < 0x80` with a single
- *      `__riscv_vrgather` over the 128-byte ASCII property table. Non-ASCII codepoints (BMP 2-stage trie /
+ *      indexed memory load (`vluxei8`) over the 128-byte ASCII property table. Non-ASCII codepoints (BMP 2-stage trie /
  *      SMP) fall back to the scalar `sz_rune_word_break_property`, which is itself value-exact. This is the
  *      ASCII/Latin-vectorized classification the task calls for.
  *
@@ -255,44 +282,35 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length
  *  vectorized for the common ASCII/Latin case. */
 
 /*  Vectorized Word_Break property classification for one codepoint per `runes` lane (u32).
- *  ASCII lanes (`rune < 0x80`) are classified with a single `vrgather` over the 128-byte ASCII table;
- *  every other lane is classified by the value-exact scalar `sz_rune_word_break_property`. */
+ *  ASCII lanes (`rune < 0x80`) are classified with a single indexed memory load (`vluxei8`) over the
+ *  128-byte ASCII table; every other lane is classified by the value-exact scalar `sz_rune_word_break_property`. */
 SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8_t *props, sz_size_t count) {
-    // The ASCII property table has 128 entries; a single `vrgather` source needs to hold all 128 bytes,
-    // which requires the active vector register group to span >= 128 bytes. If the hardware is too narrow
-    // we simply skip the vector path and classify everything scalar (still value-exact).
-    size_t table_vl = __riscv_vsetvl_e8m8(128);
-    int can_gather = (table_vl >= 128);
-    vuint8m8_t ascii_tbl;
-    if (can_gather) ascii_tbl = __riscv_vle8_v_u8m8(&sz_word_break_prop_ascii_[0], 128);
-
+    // The ASCII property table has 128 entries. An indexed memory load (`vluxei8`) fetches
+    // `sz_word_break_prop_ascii_[index]` straight from memory, so the index in [0, 127] is valid at any
+    // `VLEN` — no register-group capacity ceiling and no scalar fallback for the ASCII prefix.
     sz_size_t codepoint_index = 0;
     while (codepoint_index < count) {
-        size_t vl = __riscv_vsetvl_e32m8(count - codepoint_index);
-        vuint32m8_t r = __riscv_vle32_v_u32m8(runes + codepoint_index, vl);
-        vbool4_t is_ascii = __riscv_vmsltu_vx_u32m8_b4(r, 0x80, vl);
+        sz_size_t vl = __riscv_vsetvl_e32m8(count - codepoint_index);
+        vuint32m8_t runes_u32m8 = __riscv_vle32_v_u32m8(runes + codepoint_index, vl);
+        vbool4_t is_ascii = __riscv_vmsltu_vx_u32m8_b4(runes_u32m8, 0x80, vl);
         long first_non_ascii = __riscv_vfirst_m_b4(__riscv_vmnot_m_b4(is_ascii, vl), vl);
 
-        if (can_gather && first_non_ascii != 0) {
+        if (first_non_ascii != 0) {
             // Gather ASCII properties for the whole strip; non-ASCII lanes get garbage we overwrite below.
-            // `vrgather` index must be u8; narrow the low byte of each rune (ASCII lanes are < 0x80).
-            vuint16m4_t r16 = __riscv_vncvt_x_x_w_u16m4(r, vl);
-            vuint8m2_t gather_indices = __riscv_vncvt_x_x_w_u8m2(r16, vl);
-            // Widen the 128-byte table read across the index group via m8 gather, then narrow result.
+            // Narrow the low byte of each rune (ASCII lanes are < 0x80) to a byte index, then load the
+            // table entry per lane. Index EEW (8) matches the u8m2 data, one element per e32m8 lane.
+            vuint16m4_t runes_u16m4 = __riscv_vncvt_x_x_w_u16m4(runes_u32m8, vl);
+            vuint8m2_t gather_indices = __riscv_vncvt_x_x_w_u8m2(runes_u16m4, vl);
             vuint8m2_t idx_clamped = __riscv_vand_vx_u8m2(gather_indices, 0x7F, vl); // keep indices in [0,127]
-            // Promote indices to m8 lane count matching `vl` for the gather over the 128-elem table.
-            vuint8m8_t idx8 = __riscv_vlmul_ext_v_u8m2_u8m8(idx_clamped);
-            vuint8m8_t gathered8 = __riscv_vrgather_vv_u8m8(ascii_tbl, idx8, vl);
-            vuint8m2_t gathered = __riscv_vlmul_trunc_v_u8m8_u8m2(gathered8);
+            vuint8m2_t gathered = __riscv_vluxei8_v_u8m2(&sz_word_break_prop_ascii_[0], idx_clamped, vl);
             __riscv_vse8_v_u8m2(props + codepoint_index, gathered, vl);
         }
 
         // Determine how many leading lanes are ASCII (and thus already correctly classified).
-        size_t ascii_run = (first_non_ascii < 0) ? vl : (size_t)first_non_ascii;
-        if (!can_gather) ascii_run = 0;
+        sz_size_t ascii_run = (first_non_ascii < 0) ? vl : (sz_size_t)first_non_ascii;
 
         // Scalar-classify any lane that is not part of the fully-vectorized ASCII prefix.
-        for (size_t lane_index = ascii_run; lane_index < vl; ++lane_index)
+        for (sz_size_t lane_index = ascii_run; lane_index < vl; ++lane_index)
             props[codepoint_index + lane_index] = sz_rune_word_break_property(runes[codepoint_index + lane_index]);
 
         codepoint_index += vl;
@@ -312,10 +330,10 @@ SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8
  *  the vector path and routes only genuinely malformed buffers to the serial reference. */
 SZ_INTERNAL int sz_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t position = 0;
-    while (position < length) {
-        size_t vl = __riscv_vsetvl_e8m8(length - position);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + position, vl);
+    sz_size_t offset = 0;
+    while (offset < length) {
+        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
         // Continuation bytes: (c & 0xC0) == 0x80.
         vuint8m8_t top_two_bits_u8m8 = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vl);
         vbool1_t is_cont = __riscv_vmseq_vx_u8m8_b1(top_two_bits_u8m8, 0x80, vl);
@@ -325,18 +343,18 @@ SZ_INTERNAL int sz_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t leng
         vbool1_t is_bad = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0xF7, vl);
         if (__riscv_vfirst_m_b1(is_bad, vl) >= 0) return 0;
         (void)is_cont;
-        position += vl;
+        offset += vl;
     }
     // Structural pass done; now confirm sequence framing with a single linear walk (decode vs char-length).
-    position = 0;
-    while (position < length) {
-        sz_u8_t lead = text_u8[position];
+    offset = 0;
+    while (offset < length) {
+        sz_u8_t lead = text_u8[offset];
         sz_size_t clen = sz_utf8_char_length_(lead);
-        if ((lead & 0xC0) == 0x80) return 0;    // stray continuation byte at a lead position
-        if (position + clen > length) return 0; // truncated trailing sequence
+        if ((lead & 0xC0) == 0x80) return 0;  // stray continuation byte at a lead position
+        if (offset + clen > length) return 0; // truncated trailing sequence
         for (sz_size_t byte_index = 1; byte_index < clen; ++byte_index)
-            if ((text_u8[position + byte_index] & 0xC0) != 0x80) return 0; // missing continuation byte
-        position += clen;
+            if ((text_u8[offset + byte_index] & 0xC0) != 0x80) return 0; // missing continuation byte
+        offset += clen;
     }
     return 1;
 }
@@ -422,7 +440,7 @@ SZ_INTERNAL int sz_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t aft
  *      buffered is the current ignorable run — bounded by `sz_word_break_pending_capacity_k_`, not by word or input length.
  *
  *  Property classification still runs vectorized in fixed `sz_word_break_tile_codepoints_k_` tiles, so the common ASCII path
- *  keeps its `vrgather` bulk classification. The decision per codepoint is value-identical to the serial
+ *  keeps its indexed-load (`vluxei8`) bulk classification. The decision per codepoint is value-identical to the serial
  *  reference (same `sz_word_break_local_decision_rvv_` plus the same serial fix-up for the stateful WB6/7/11/12/15/16
  *  rules), so the only fall-back left is a pathological ignorable run longer than the pending cap. */
 enum { sz_word_break_tile_codepoints_k_ = 256, sz_word_break_pending_capacity_k_ = 256 };

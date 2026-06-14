@@ -26,7 +26,7 @@ SZ_PUBLIC sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     while (length) {
-        size_t vl = __riscv_vsetvl_e8m8(length);
+        sz_size_t vl = __riscv_vsetvl_e8m8(length);
         vuint8m8_t a_u8m8 = __riscv_vle8_v_u8m8(a_u8, vl);
         vuint8m8_t b_u8m8 = __riscv_vle8_v_u8m8(b_u8, vl);
         vbool1_t ne_mask_b1 = __riscv_vmsne_vv_u8m8_b1(a_u8m8, b_u8m8, vl);

@@ -27,7 +27,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_leng
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
-        size_t vl = __riscv_vsetvl_e8m8(haystack_length);
+        sz_size_t vl = __riscv_vsetvl_e8m8(haystack_length);
         vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vl);
         vbool1_t eq_mask = __riscv_vmseq_vx_u8m8_b1(haystack_u8m8, needle_byte, vl);
         long match_index = __riscv_vfirst_m_b1(eq_mask, vl);
@@ -44,7 +44,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_leng
  *      span up to 65535 lanes — beyond the RVV 1.0 maximum `VLEN` of 64 Kib at `e8m4`
  *      (`VLMAX = VLEN/2`), so no software cap is ever needed.
  */
-SZ_INTERNAL vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, size_t vl) {
+SZ_INTERNAL vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vl) {
     vuint16m8_t iota_u16m8 = __riscv_vid_v_u16m8(vl);
     vuint16m8_t reverse_index_u16m8 = __riscv_vrsub_vx_u16m8(iota_u16m8, (sz_u16_t)(vl - 1), vl);
     return __riscv_vrgatherei16_vv_u8m4(strip_u8m4, reverse_index_u16m8, vl);
@@ -54,7 +54,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_len
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
-        size_t vl = __riscv_vsetvl_e8m4(haystack_length);
+        sz_size_t vl = __riscv_vsetvl_e8m4(haystack_length);
         sz_u8_t const *strip = haystack_u8 + haystack_length - vl;
         // Reverse the strip: out[i] = in[vl-1-i], so `vfirst` returns the highest match.
         vuint8m4_t reversed_u8m4 = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(strip, vl), vl);
@@ -68,48 +68,44 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_len
 
 /**
  *  @brief Build a per-lane byteset membership mask for a vector strip.
- *      Mirrors the NEON `_u8s[c>>3] & (1<<(c&7))` formulation, using `vrgather` to index the
- *      32-byte set and a variable shift to build the per-lane bit.
+ *      Mirrors the NEON `_u8s[c>>3] & (1<<(c&7))` formulation. The set byte is fetched with an indexed
+ *      memory load (`vluxei8`) straight from the 32-byte `_u8s` table, so the index `c >> 3` in [0, 31]
+ *      is valid at any `VLEN` — no register-group capacity ceiling and no serial fallback.
  *
  *  @param haystack_u8m8 Vector of bytes to test.
- *  @param set_u8m8 The 32-byte byteset loaded as a vector.
+ *  @param set_u8s The 32-byte byteset in memory.
  *  @param vl Vector length for this strip.
  *  @return Predicate mask where lane `i` is set if `haystack_u8m8[i]` is in the set.
  */
-SZ_INTERNAL vbool1_t sz_find_byteset_rvv_mask_(vuint8m8_t haystack_u8m8, vuint8m8_t set_u8m8, size_t vl) {
+SZ_INTERNAL vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s, sz_size_t vl) {
     vuint8m8_t byte_index_u8m8 = __riscv_vsrl_vx_u8m8(haystack_u8m8, 3, vl);   // c >> 3, in [0, 31]
     vuint8m8_t bit_position_u8m8 = __riscv_vand_vx_u8m8(haystack_u8m8, 7, vl); // c & 7
     vuint8m8_t one_u8m8 = __riscv_vmv_v_x_u8m8(1, vl);
     vuint8m8_t bit_mask_u8m8 = __riscv_vsll_vv_u8m8(one_u8m8, bit_position_u8m8, vl); // 1 << (c & 7)
-    vuint8m8_t set_bytes_u8m8 = __riscv_vrgather_vv_u8m8(set_u8m8, byte_index_u8m8, vl);
+    vuint8m8_t set_bytes_u8m8 = __riscv_vluxei8_v_u8m8(set_u8s, byte_index_u8m8, vl);
     vuint8m8_t anded_u8m8 = __riscv_vand_vv_u8m8(set_bytes_u8m8, bit_mask_u8m8, vl);
     return __riscv_vmsne_vx_u8m8_b1(anded_u8m8, 0, vl);
 }
 
 /**
- *  @brief `m4` sibling of @ref sz_find_byteset_rvv_mask_, used on the reversed backward strip.
- *      The set-index gather stays in `[0, 31]`, so it is `VLEN`-agnostic at any LMUL.
+ *  @brief `m4` sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip.
  */
-SZ_INTERNAL vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, vuint8m4_t set_u8m4, size_t vl) {
+SZ_INTERNAL vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s, sz_size_t vl) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vl);   // c >> 3, in [0, 31]
     vuint8m4_t bit_position_u8m4 = __riscv_vand_vx_u8m4(haystack_u8m4, 7, vl); // c & 7
     vuint8m4_t one_u8m4 = __riscv_vmv_v_x_u8m4(1, vl);
     vuint8m4_t bit_mask_u8m4 = __riscv_vsll_vv_u8m4(one_u8m4, bit_position_u8m4, vl); // 1 << (c & 7)
-    vuint8m4_t set_bytes_u8m4 = __riscv_vrgather_vv_u8m4(set_u8m4, byte_index_u8m4, vl);
+    vuint8m4_t set_bytes_u8m4 = __riscv_vluxei8_v_u8m4(set_u8s, byte_index_u8m4, vl);
     vuint8m4_t anded_u8m4 = __riscv_vand_vv_u8m4(set_bytes_u8m4, bit_mask_u8m4, vl);
     return __riscv_vmsne_vx_u8m4_b2(anded_u8m4, 0, vl);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
-    // The set spans 32 bytes; load it into a `u8m8` group (needs `VLEN >= 4`, always true).
-    size_t set_vl = __riscv_vsetvl_e8m8(32);
-    if (set_vl < 32) return sz_find_byteset_serial(haystack, haystack_length, set);
-    vuint8m8_t set_u8m8 = __riscv_vle8_v_u8m8(&set->_u8s[0], 32);
     while (haystack_length) {
-        size_t vl = __riscv_vsetvl_e8m8(haystack_length);
+        sz_size_t vl = __riscv_vsetvl_e8m8(haystack_length);
         vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vl);
-        vbool1_t match_mask = sz_find_byteset_rvv_mask_(haystack_u8m8, set_u8m8, vl);
+        vbool1_t match_mask = sz_find_byteset_rvv_mask_m8_(haystack_u8m8, &set->_u8s[0], vl);
         long match_index = __riscv_vfirst_m_b1(match_mask, vl);
         if (match_index >= 0) return (sz_cptr_t)(haystack_u8 + match_index);
         haystack_u8 += vl, haystack_length -= vl;
@@ -119,14 +115,11 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_l
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
-    size_t set_vl = __riscv_vsetvl_e8m4(32);
-    if (set_vl < 32) return sz_rfind_byteset_serial(haystack, haystack_length, set);
-    vuint8m4_t set_u8m4 = __riscv_vle8_v_u8m4(&set->_u8s[0], 32);
     while (haystack_length) {
-        size_t vl = __riscv_vsetvl_e8m4(haystack_length);
+        sz_size_t vl = __riscv_vsetvl_e8m4(haystack_length);
         sz_u8_t const *strip = haystack_u8 + haystack_length - vl;
         vuint8m4_t reversed_u8m4 = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(strip, vl), vl);
-        vbool2_t match_mask = sz_find_byteset_rvv_mask_m4_(reversed_u8m4, set_u8m4, vl);
+        vbool2_t match_mask = sz_find_byteset_rvv_mask_m4_(reversed_u8m4, &set->_u8s[0], vl);
         long match_index = __riscv_vfirst_m_b2(match_mask, vl);
         if (match_index >= 0) return (sz_cptr_t)(strip + (vl - 1 - match_index));
         haystack_length -= vl;
@@ -150,7 +143,7 @@ SZ_PUBLIC sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, s
     sz_size_t candidates = haystack_length - needle_length + 1;
     sz_size_t position = 0;
     while (position < candidates) {
-        size_t vl = __riscv_vsetvl_e8m8(candidates - position);
+        sz_size_t vl = __riscv_vsetvl_e8m8(candidates - position);
         vuint8m8_t first_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_first, vl);
         vuint8m8_t mid_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_mid, vl);
         vuint8m8_t last_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_last, vl);
@@ -187,7 +180,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, 
     sz_size_t candidates = haystack_length - needle_length + 1; // start positions 0 .. candidates-1
     sz_size_t remaining = candidates;
     while (remaining) {
-        size_t vl = __riscv_vsetvl_e8m4(remaining);
+        sz_size_t vl = __riscv_vsetvl_e8m4(remaining);
         sz_size_t base = remaining - vl; // strip covers candidate starts [base, base+vl)
         // Reverse the three anchor loads so reversed lane 0 is the highest candidate (base+vl-1);
         // `vfirst` then yields the highest match, with no mask byte-spill round trip.

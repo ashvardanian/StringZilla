@@ -39,12 +39,12 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u64_t bytesum = 0;
     while (length) {
-        size_t want = length < 256 ? length : 256;
-        size_t vl = __riscv_vsetvl_e8m8(want);
-        vuint8m8_t vec = __riscv_vle8_v_u8m8(text_u8, vl);
+        sz_size_t want = length < 256 ? length : 256;
+        sz_size_t vl = __riscv_vsetvl_e8m8(want);
+        vuint8m8_t text_u8m8 = __riscv_vle8_v_u8m8(text_u8, vl);
         // Seed the reduction accumulator with zero; widen u8 lanes and reduce into one u16 lane.
         vuint16m1_t zero = __riscv_vmv_v_x_u16m1(0, __riscv_vsetvl_e16m1(1));
-        vuint16m1_t partial = __riscv_vwredsumu_vs_u8m8_u16m1(vec, zero, vl);
+        vuint16m1_t partial = __riscv_vwredsumu_vs_u8m8_u16m1(text_u8m8, zero, vl);
         bytesum += (sz_u64_t)__riscv_vmv_x_s_u16m1_u16(partial);
         text_u8 += vl, length -= vl;
     }
@@ -88,7 +88,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
  *  - `INV4`  : multiplicative inverse in GF(2^4).
  *  - `LOG`/`ALOG` : discrete log / antilog (base the GF(2^4) generator `2`) for general multiply.
  *  - `MUL_A`/`MUL_B` : multiply-by-`A` (=2) and by-`B` (=6) in GF(2^4). */
-SZ_INTERNAL sz_u8_t const *sz_rvv_aes_tables_(void) {
+SZ_INTERNAL sz_u8_t const *sz_aes_tables_rvv_(void) {
     static sz_align_(16) sz_u8_t const tables[16 * 10] = {
         /* MlowTbl  */ 0, 1,   16,  17,  38,  39,  54,  55,  44,  45,  60,  61,  10,  11,  26,  27,
         /* MhighTbl */ 0, 140, 245, 121, 132, 8,   113, 253, 117, 249, 128, 12,  241, 125, 4,   136,
@@ -104,13 +104,13 @@ SZ_INTERNAL sz_u8_t const *sz_rvv_aes_tables_(void) {
 }
 
 /*  Combined ShiftRows permutation matching the serial code: `premix[j] = sbox[state[shiftrows[j]]]`. */
-SZ_INTERNAL sz_u8_t const *sz_rvv_aes_shiftrows_(void) {
+SZ_INTERNAL sz_u8_t const *sz_aes_shiftrows_rvv_(void) {
     static sz_align_(16) sz_u8_t const order[16] = {0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11};
     return &order[0];
 }
 
 /*  Within-group rotate by +1 for MixColumns: lane `j -> 4*(j/4) + (j+1)%4`. */
-SZ_INTERNAL sz_u8_t const *sz_rvv_aes_rot1_(void) {
+SZ_INTERNAL sz_u8_t const *sz_aes_rot1_rvv_(void) {
     static sz_align_(16) sz_u8_t const rot1[16] = {1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12};
     return &rot1[0];
 }
@@ -118,14 +118,16 @@ SZ_INTERNAL sz_u8_t const *sz_rvv_aes_rot1_(void) {
 /*  General GF(2^4) multiply of two vector operands via log/antilog, with the discrete-log sum
  *  reduced modulo 15 so the antilog gather index stays inside the 16 active lanes, and a zero-select
  *  for the `0 * x` and `x * 0` cases. */
-SZ_INTERNAL vuint8m1_t sz_rvv_gf16_mul_(vuint8m1_t a, vuint8m1_t b, vuint8m1_t logt, vuint8m1_t alog, size_t vl) {
-    vuint8m1_t log_a_vec = __riscv_vrgather_vv_u8m1(logt, a, vl);
-    vuint8m1_t log_b_vec = __riscv_vrgather_vv_u8m1(logt, b, vl);
+SZ_INTERNAL vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
+                                        vuint8m1_t antilog_table_u8m1, sz_size_t vl) {
+    vuint8m1_t log_a_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vl);
+    vuint8m1_t log_b_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vl);
     vuint8m1_t log_sum_vec = __riscv_vadd_vv_u8m1(log_a_vec, log_b_vec, vl);
     vbool8_t overflow_mask = __riscv_vmsgeu_vx_u8m1_b8(log_sum_vec, 15, vl);
     log_sum_vec = __riscv_vmerge_vvm_u8m1(log_sum_vec, __riscv_vsub_vx_u8m1(log_sum_vec, 15, vl), overflow_mask, vl);
-    vuint8m1_t product_vec = __riscv_vrgather_vv_u8m1(alog, log_sum_vec, vl);
-    vbool8_t zero_mask = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a, 0, vl), __riscv_vmseq_vx_u8m1_b8(b, 0, vl), vl);
+    vuint8m1_t product_vec = __riscv_vrgather_vv_u8m1(antilog_table_u8m1, log_sum_vec, vl);
+    vbool8_t zero_mask = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a_u8m1, 0, vl),
+                                            __riscv_vmseq_vx_u8m1_b8(b_u8m1, 0, vl), vl);
     return __riscv_vmerge_vvm_u8m1(product_vec, __riscv_vmv_v_x_u8m1(0, vl), zero_mask, vl);
 }
 
@@ -136,8 +138,8 @@ SZ_INTERNAL vuint8m1_t sz_rvv_gf16_mul_(vuint8m1_t a, vuint8m1_t b, vuint8m1_t l
  *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions" (CHES 2009).
  */
 SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    size_t vl = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
-    sz_u8_t const *tables = sz_rvv_aes_tables_();
+    sz_size_t vl = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
+    sz_u8_t const *tables = sz_aes_tables_rvv_();
 
     vuint8m1_t state_bytes_vec = __riscv_vle8_v_u8m1(state_vec.u8s, vl);
     vuint8m1_t key_vec = __riscv_vle8_v_u8m1(round_key_vec.u8s, vl);
@@ -164,7 +166,7 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u12
     // Norm: norm = lo^2 + lo*hi*A + hi^2*B  (all in GF(2^4)).
     vuint8m1_t low_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_low_vec, vl);
     vuint8m1_t high_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_high_vec, vl);
-    vuint8m1_t low_high_vec = sz_rvv_gf16_mul_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vl);
+    vuint8m1_t low_high_vec = sz_gf16_mul_rvv_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vl);
     vuint8m1_t low_high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, low_high_vec, vl);
     vuint8m1_t high_squared_b_vec = __riscv_vrgather_vv_u8m1(mul_b_vec, high_squared_vec, vl);
     vuint8m1_t norm_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vl),
@@ -172,10 +174,10 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u12
     vuint8m1_t norm_inverse_vec = __riscv_vrgather_vv_u8m1(inverse4_vec, norm_vec, vl);
 
     // Inverse in the tower: new_high = hi*norm_inverse, new_low = (lo + hi*A) * norm_inverse.
-    vuint8m1_t new_high_vec = sz_rvv_gf16_mul_(tower_high_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
+    vuint8m1_t new_high_vec = sz_gf16_mul_rvv_(tower_high_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
     vuint8m1_t high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, tower_high_vec, vl);
     vuint8m1_t low_xor_high_a_vec = __riscv_vxor_vv_u8m1(tower_low_vec, high_a_vec, vl);
-    vuint8m1_t new_low_vec = sz_rvv_gf16_mul_(low_xor_high_a_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
+    vuint8m1_t new_low_vec = sz_gf16_mul_rvv_(low_xor_high_a_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
 
     // Map back out of the tower and apply the AES affine transform (linear part + 0x63).
     vuint8m1_t packed_inverse_vec = __riscv_vor_vv_u8m1(__riscv_vsll_vx_u8m1(new_high_vec, 4, vl), new_low_vec, vl);
@@ -186,11 +188,11 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u12
     sbox_vec = __riscv_vxor_vx_u8m1(sbox_vec, 0x63, vl);
 
     // ShiftRows (combined ordering): premix[j] = sbox[shiftrows[j]].
-    vuint8m1_t shiftrows_index_vec = __riscv_vle8_v_u8m1(sz_rvv_aes_shiftrows_(), vl);
+    vuint8m1_t shiftrows_index_vec = __riscv_vle8_v_u8m1(sz_aes_shiftrows_rvv_(), vl);
     vuint8m1_t premix_vec = __riscv_vrgather_vv_u8m1(sbox_vec, shiftrows_index_vec, vl);
 
     // MixColumns over groups of 4: out[j] = premix[j] ^ group_xor ^ xtime(premix[j] ^ premix[(j+1)%4]).
-    vuint8m1_t rot1_index_vec = __riscv_vle8_v_u8m1(sz_rvv_aes_rot1_(), vl);
+    vuint8m1_t rot1_index_vec = __riscv_vle8_v_u8m1(sz_aes_rot1_rvv_(), vl);
     vuint8m1_t premix_next_vec = __riscv_vrgather_vv_u8m1(premix_vec, rot1_index_vec, vl);
     vuint8m1_t diff_vec = __riscv_vxor_vv_u8m1(premix_vec, premix_next_vec, vl);
     vuint8m1_t shifted_vec = __riscv_vsll_vx_u8m1(diff_vec, 1, vl);
@@ -287,7 +289,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_t const *state) {
 /** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target->u8s`,
  *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
 SZ_INTERNAL void sz_hash_load_block_rvv_(sz_u128_vec_t *target, sz_cptr_t source) {
-    size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
+    sz_size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
     __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vl), vl);
 }
 
@@ -299,7 +301,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t 
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
         // A length-agnostic load drops the zero pad and the scalar byte loop: VL covers the partial bytes.
-        size_t vl = __riscv_vsetvl_e8m1(length);
+        sz_size_t vl = __riscv_vsetvl_e8m1(length);
         __riscv_vse8_v_u8m1(data_vec.u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)start, vl), vl);
         sz_hash_minimal_update_rvv_(&state, data_vec);
         return sz_hash_minimal_finalize_rvv_(&state, length);
@@ -348,14 +350,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t 
         sz_size_t const window = sizeof(state.ins); // the 64-byte hashing window
         sz_hash_state_init_serial(&state, seed);
         for (; state.ins_length + window <= length; state.ins_length += window) {
-            size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
+            sz_size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
             __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vl), vl);
             sz_hash_state_update_rvv_(&state);
         }
         if (state.ins_length < length) {
-            size_t zero_vl = __riscv_vsetvl_e8m8(window);
+            sz_size_t zero_vl = __riscv_vsetvl_e8m8(window);
             __riscv_vse8_v_u8m8(state.ins, __riscv_vmv_v_x_u8m8(0, zero_vl), zero_vl);
-            size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
+            sz_size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
             __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, tail_vl),
                                 tail_vl);
             sz_hash_state_update_rvv_(&state);
@@ -377,7 +379,7 @@ SZ_PUBLIC void sz_hash_state_update_rvv(sz_hash_state_t *state, sz_cptr_t text, 
         while (to_copy--) state->ins[progress_in_block++] = *text++;
         if (will_fill_block) {
             sz_hash_state_update_rvv_(state);
-            size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
+            sz_size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
             __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, clear_vl), clear_vl);
         }
     }
@@ -430,7 +432,7 @@ SZ_PUBLIC void sz_fill_random_rvv(sz_ptr_t text, sz_size_t length, sz_u64_t nonc
         generated_vec = sz_emulate_aesenc_rvv_(input_vec, key_vec);
         // VL deletes both the per-byte loop and the `&& length` tail guard: it clamps to the bytes left,
         // capped at the block we just generated.
-        size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
+        sz_size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
         __riscv_vse8_v_u8m1((sz_u8_t *)text, __riscv_vle8_v_u8m1(generated_vec.u8s, out_vl), out_vl);
         text += out_vl, length -= out_vl;
     }
