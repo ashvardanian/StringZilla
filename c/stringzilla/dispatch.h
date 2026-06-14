@@ -64,6 +64,8 @@ typedef struct sz_implementations_t {
     sz_utf8_find_boundary_t utf8_find_whitespace;
     sz_utf8_unpack_chunk_t utf8_unpack_chunk;
 
+    sz_utf8_norm_t utf8_norm;
+    sz_utf8_norm_violation_t utf8_norm_violation;
     sz_utf8_case_fold_t utf8_case_fold;
     sz_utf8_case_insensitive_find_t utf8_case_insensitive_find;
 
@@ -94,6 +96,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_fold_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_insensitive_update_(sz_capability_t caps);
 
 #endif // STRINGZILLA_DISPATCH_H_

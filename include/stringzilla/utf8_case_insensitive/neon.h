@@ -19,6 +19,7 @@
 #define STRINGZILLA_UTF8_CASE_INSENSITIVE_NEON_H_
 
 #include "stringzilla/utf8_case_insensitive/serial.h"
+#include "stringzilla/utf8_case_fold/neon.h" // `sz_utf8_fold_neon_ascii_`
 
 #ifdef __cplusplus
 extern "C" {

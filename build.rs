@@ -31,6 +31,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "c/stringzilla/intersect.c",
             "c/stringzilla/utf8_iterate.c",
             "c/stringzilla/utf8_case_fold.c",
+            "c/stringzilla/utf8_norm.c",
             "c/stringzilla/utf8_case_insensitive.c",
         ])
         .include("include")
