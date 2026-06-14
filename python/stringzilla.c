@@ -234,20 +234,29 @@ typedef struct {
 /**
  *  @brief  Iterator for finding word boundaries in UTF-8 text per Unicode TR29.
  *
- *  Uses sz_utf8_word_find_boundary to find boundaries, supporting all TR29 rules.
- *  Yields words (text segments between consecutive word boundaries).
+ *  Streams words by refilling a small inline buffer with @c sz_utf8_word_find_boundaries (forward) or
+ *  @c sz_utf8_word_rfind_boundaries (reverse), yielding one word per @c __next__. The buffer lives in the
+ *  iterator itself - no extra allocation. Forward advances @c start past each batch; reverse keeps @c start
+ *  fixed (the offset base) and retreats @c end, yielding words from the end of the text backward.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj; //< For reference counting
 
-    sz_cptr_t start;      //< Start of current word
-    sz_cptr_t end;        //< End of original text (immutable)
-    sz_cptr_t text_start; //< Start of original text (for reverse iteration)
+    sz_cptr_t start; //< Start of the original text; for forward, also the not-yet-segmented suffix start (a boundary).
+    sz_cptr_t end;   //< End of the not-yet-segmented prefix; immutable for forward, retreats for reverse.
 
     /// @brief  Should we skip empty segments (consecutive boundaries)?
     sz_bool_t skip_empty;
+    /// @brief  Iterate words from the end of the text backward (last word first)?
+    sz_bool_t reverse;
+
+    /// @brief  Inline batch of word offsets relative to @c start, refilled on demand.
+    sz_size_t batch_starts[sz_utf8_word_boundaries_batch_k];
+    sz_size_t batch_lengths[sz_utf8_word_boundaries_batch_k];
+    sz_size_t batch_count; //< Number of words currently buffered.
+    sz_size_t batch_index; //< Index of the next word to yield from the buffer.
 
 } Utf8WordBoundaryIterator;
 
@@ -4910,7 +4919,7 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
 }
 
 static char const doc_utf8_word_iter[] =                                             //
-    "utf8_word_iter(string, /, skip_empty=False)\n"                                  //
+    "utf8_word_iter(string, /, skip_empty=False, reverse=False)\n"                   //
     "\n"                                                                             //
     "Return an iterator yielding words per Unicode TR29 word boundary rules.\n"      //
     "Unlike str.split(), this is TR29 compliant and supports all Unicode scripts.\n" //
@@ -4918,6 +4927,7 @@ static char const doc_utf8_word_iter[] =                                        
     "Args:\n"                                                                        //
     "    string: The input UTF-8 string to split into words.\n"                      //
     "    skip_empty: If True, skip empty segments between consecutive boundaries.\n" //
+    "    reverse: If True, yield words from the end of the text backward.\n"         //
     "\n"                                                                             //
     "Returns:\n"                                                                     //
     "    Iterator yielding Str objects for each word.\n\n"                           //
@@ -4925,11 +4935,13 @@ static char const doc_utf8_word_iter[] =                                        
     "Example:\n"                                                                     //
     "  >>> # Stream TR29 word tokens lazily:\n"                                      //
     "  >>> 'world' in (str(w) for w in sz.utf8_word_iter('Hi, world'))\n"            //
-    "  True";
+    "  True\n"                                                                       //
+    "  >>> [str(w) for w in sz.utf8_word_iter('a b', reverse=True)]\n"               //
+    "  ['b', ' ', 'a']";
 
 static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *kwnames) {
-    int min_args = 1, max_args = 2;
+    int min_args = 1, max_args = 3;
     if (positional_args_count < min_args || positional_args_count > max_args) {
         PyErr_Format(PyExc_TypeError, "utf8_word_iter() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
@@ -4937,6 +4949,7 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
 
     PyObject *text_obj = args[0];
     int skip_empty = 0;
+    int reverse = 0;
 
     // Parse keyword arguments
     if (kwnames) {
@@ -4945,10 +4958,12 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
             PyObject *key = PyTuple_GET_ITEM(kwnames, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0) { skip_empty = PyObject_IsTrue(value); }
+            else if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse = PyObject_IsTrue(value); }
         }
     }
-    // Check positional skip_empty
+    // Check positional skip_empty / reverse
     if (positional_args_count > 1) { skip_empty = PyObject_IsTrue(args[1]); }
+    if (positional_args_count > 2) { reverse = PyObject_IsTrue(args[2]); }
 
     sz_string_view_t text_view;
     if (PyObject_TypeCheck(text_obj, &StrType)) {
@@ -4977,8 +4992,10 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     Py_INCREF(text_obj);
     iter->start = text_view.start;
     iter->end = text_view.start + text_view.length;
-    iter->text_start = text_view.start;
     iter->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+    iter->reverse = reverse ? sz_true_k : sz_false_k;
+    iter->batch_count = 0;
+    iter->batch_index = 0;
 
     (void)self; // Unused
     return (PyObject *)iter;
@@ -5969,58 +5986,44 @@ static PyTypeObject Utf8SplitWhitespaceIteratorType = {
 #pragma region UTF8 Word Boundary Iterator
 
 static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *self) {
-    // Termination: start >= end means we're done
-    if (self->start >= self->end) return NULL;
-
-    // Find next word boundary
-    sz_size_t boundary_width = 0;
-    sz_cptr_t boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
-
-    // If boundary is at start (empty segment) or at end
-    if (boundary == self->start || boundary >= self->end) {
-        // Return remaining text as last word
-        sz_size_t word_len = (sz_size_t)(self->end - self->start);
-        if (word_len == 0) return NULL;
-
-        // Create a new `Str` object
-        Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
-        if (result_obj == NULL && PyErr_NoMemory()) return NULL;
-
-        result_obj->memory.start = self->start;
-        result_obj->memory.length = word_len;
-        result_obj->parent = self->text_obj;
-        Py_INCREF(self->text_obj);
-
-        self->start = self->end; // Mark as done
-        return (PyObject *)result_obj;
+    // Refill the inline batch when drained. TR29 never yields zero-length words, so the `skip_empty` option is
+    // a no-op for word segmentation and needs no special handling here. Batch offsets are always relative to
+    // `self->start` (the immutable text origin), so only the moving bound (`start` forward, `end` reverse) and
+    // the boundary kernel differ between directions.
+    if (self->batch_index >= self->batch_count) {
+        if (self->start >= self->end) return NULL;
+        sz_size_t consumed = 0;
+        self->batch_count = self->reverse //
+                                ? sz_utf8_word_rfind_boundaries(self->start, (sz_size_t)(self->end - self->start),
+                                                                self->batch_starts, self->batch_lengths,
+                                                                sz_utf8_word_boundaries_batch_k, &consumed)
+                                : sz_utf8_word_find_boundaries(self->start, (sz_size_t)(self->end - self->start),
+                                                               self->batch_starts, self->batch_lengths,
+                                                               sz_utf8_word_boundaries_batch_k, &consumed);
+        self->batch_index = 0;
+        if (self->batch_count == 0) return NULL;
     }
 
-    // Get word length (from current position to boundary)
-    sz_size_t word_len = (sz_size_t)(boundary - self->start);
+    sz_size_t i = self->batch_index++;
+    sz_cptr_t word_start = self->start + self->batch_starts[i];
+    sz_size_t word_len = self->batch_lengths[i];
 
-    // Skip empty segments if requested
-    while (self->skip_empty && word_len == 0 && boundary < self->end) {
-        self->start = boundary;
-        boundary = sz_utf8_word_find_boundary(self->start, (sz_size_t)(self->end - self->start), &boundary_width);
-        if (boundary == self->start) break; // Avoid infinite loop
-        word_len = (sz_size_t)(boundary - self->start);
+    // Once the batch is drained, move the segmenting bound to the last buffered word's edge (a TR29 boundary)
+    // so the next refill resumes there. Forward batches run low→high, reverse high→low, so the last buffered
+    // word is the rightmost (forward) or leftmost (reverse) one respectively.
+    if (self->batch_index >= self->batch_count) {
+        sz_size_t last = self->batch_count - 1;
+        if (self->reverse) self->end = self->start + self->batch_starts[last];    // leftmost emitted word's start
+        else self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost word's end
     }
 
-    if (word_len == 0 && self->skip_empty) {
-        return NULL; // No more non-empty segments
-    }
-
-    // Create a new `Str` object for the word
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    result_obj->memory.start = self->start;
+    result_obj->memory.start = word_start;
     result_obj->memory.length = word_len;
     result_obj->parent = self->text_obj;
     Py_INCREF(self->text_obj);
-
-    // Move start to next word
-    self->start = boundary;
 
     return (PyObject *)result_obj;
 }
