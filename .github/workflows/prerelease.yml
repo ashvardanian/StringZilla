@@ -570,6 +570,51 @@ jobs:
           file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.target_arch }}"
           echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
+  test_wasm:
+    name: WebAssembly (wasm32-wasip1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install WASI SDK
+        run: |
+          WASI_VERSION_FULL=25.0
+          curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux.tar.gz" \
+            | tar xz -C "$HOME"
+          echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux" >> "$GITHUB_ENV"
+
+      - name: Install Wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      # The C kernels need the WASI SDK clang + sysroot; `build.rs` passes `-msimd128` (+ probed
+      # `-mrelaxed-simd`). Tests run under Wasmtime via the `.cargo/config.toml` runner, single-threaded
+      # (wasm32-wasip1 has no threads).
+      - name: Build & test (relaxed-SIMD + SIMD128)
+        env:
+          CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
+          AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
+          CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+        run: |
+          cargo build --target wasm32-wasip1
+          cargo test --release --target wasm32-wasip1 -- --test-threads=1
+
+      - name: Build & test (baseline SIMD128, relaxed off)
+        env:
+          CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
+          AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
+          CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+          SZ_USE_V128RELAXED: "0"
+        run: cargo test --release --target wasm32-wasip1 -- --test-threads=1
+
   test_macos:
     name: MacOS
     runs-on: macos-15

@@ -36,7 +36,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
         .include("include")
         .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
-        .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
         .flag("-O2")
@@ -77,6 +76,25 @@ fn build_stringzilla() -> HashMap<String, bool> {
         flags.insert("SZ_IS_64BIT_ARM_".to_string(), false);
     }
 
+    // WebAssembly has no runtime CPU probe, so SIMD is selected at compile time. SIMD128 is the
+    // baseline; relaxed-SIMD sits one tier above and is enabled only when the compiler accepts
+    // `-mrelaxed-simd` (probed below) and `SZ_USE_V128RELAXED` is not forced off. We pass the
+    // instruction flags here (which define `__wasm_simd128__` / `__wasm_relaxed_simd__`, the macros
+    // `types.h` keys off) and switch to compile-time dispatch so `sz_find`, `sz_hash`, ... resolve
+    // through the `#if SZ_USE_V128RELAXED #elif SZ_USE_V128` paths with no constructor/table.
+    let is_wasm = target_arch == "wasm32" || target_arch == "wasm64";
+    let wasm_relaxed = is_wasm
+        && env::var("SZ_USE_V128RELAXED").map_or(true, |v| v != "0" && v.to_lowercase() != "false")
+        && wasm_relaxed_simd_supported();
+    // Native targets use the runtime dispatch table; wasm resolves SIMD at compile time.
+    build.define("SZ_DYNAMIC_DISPATCH", if is_wasm { "0" } else { "1" });
+    if is_wasm {
+        build.flag("-msimd128");
+        if wasm_relaxed {
+            build.flag("-mrelaxed-simd");
+        }
+    }
+
     // At start we will try compiling with all SIMD backends enabled
     // https://doc.rust-lang.org/reference/conditional-compilation.html#target_arch
     let flags_to_try = match target_arch.as_str() {
@@ -100,6 +118,13 @@ fn build_stringzilla() -> HashMap<String, bool> {
         "riscv64" => vec!["SZ_USE_RVV"],
         "loongarch64" => vec!["SZ_USE_LASX"],
         "powerpc64" => vec!["SZ_USE_POWERVSX"],
+        "wasm32" | "wasm64" => {
+            if wasm_relaxed {
+                vec!["SZ_USE_V128RELAXED", "SZ_USE_V128"]
+            } else {
+                vec!["SZ_USE_V128"]
+            }
+        }
         _ => vec![],
     };
 
@@ -148,8 +173,31 @@ fn build_stringzilla() -> HashMap<String, bool> {
     for flag in flags_to_try.iter() {
         println!("cargo:rerun-if-env-changed={}", flag);
     }
+    // Track the wasm SIMD toggles even when relaxed is currently OFF (so it is absent from
+    // `flags_to_try`): otherwise toggling `SZ_USE_V128RELAXED` between builds that share a target
+    // directory - e.g. the relaxed-on and relaxed-off CI steps - would not rebuild the C objects.
+    println!("cargo:rerun-if-env-changed=SZ_USE_V128");
+    println!("cargo:rerun-if-env-changed=SZ_USE_V128RELAXED");
 
     flags
+}
+
+/// Probe whether the C compiler can target WebAssembly relaxed-SIMD (`-mrelaxed-simd`).
+/// Compiles `probes/wasm_relaxed_simd.c` into a throwaway object; success means the relaxed
+/// intrinsics and the `__wasm_relaxed_simd__` macro are available for the v128relaxed backend.
+fn wasm_relaxed_simd_supported() -> bool {
+    let mut probe = cc::Build::new();
+    probe
+        .file("probes/wasm_relaxed_simd.c")
+        .flag("-msimd128")
+        .flag("-mrelaxed-simd")
+        .warnings(false)
+        .cargo_metadata(false);
+    let supported = probe.try_compile("sz_wasm_relaxed_probe").is_ok();
+    if !supported {
+        println!("cargo:warning=WASM relaxed-SIMD unsupported by compiler; using baseline SIMD128");
+    }
+    supported
 }
 
 fn build_stringzillas(serial_flags: &HashMap<String, bool>) {

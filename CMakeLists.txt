@@ -125,6 +125,10 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|powerpc64le|PPC64LE|POWERPC64LE")
     set(SZ_IS_64BIT_POWER_ TRUE)
     message(STATUS "Platform: PowerPC64 LE (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
+    # WebAssembly is 32-bit; SIMD comes from the toolchain's `-msimd128` / `-mrelaxed-simd`, and the
+    # `set_architecture_simd_definitions` wasm branch keys off `CMAKE_SYSTEM_NAME`, not a 64-bit flag.
+    message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
@@ -509,6 +513,31 @@ function (set_architecture_simd_definitions target)
         # IBM POWER (little-endian) with VSX (the toolchain passes `-mcpu=power9 -mvsx`).
         target_compile_definitions(
             ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=1" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
+        )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "WASI" OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten" OR CMAKE_SYSTEM_PROCESSOR
+                                                                                            MATCHES "wasm")
+        # WebAssembly: the toolchain passes `-msimd128` (+ `-mrelaxed-simd`), and `types.h` auto-enables
+        # SZ_USE_V128 / SZ_USE_V128RELAXED from the predefined `__wasm_simd128__` / `__wasm_relaxed_simd__`
+        # macros. Leave those to auto-detect; just disable every native tier. wasm has no runtime probe, so
+        # the header-only test/bench TUs use compile-time dispatch (SZ_DYNAMIC_DISPATCH defaults to 0).
+        target_compile_definitions(
+            ${target}
+            PRIVATE "SZ_IS_64BIT_X86_=0"
+                    "SZ_IS_64BIT_ARM_=0"
+                    "SZ_USE_WESTMERE=0"
+                    "SZ_USE_GOLDMONT=0"
+                    "SZ_USE_HASWELL=0"
+                    "SZ_USE_SKYLAKE=0"
+                    "SZ_USE_ICELAKE=0"
+                    "SZ_USE_NEON=0"
+                    "SZ_USE_NEONAES=0"
+                    "SZ_USE_NEONSHA=0"
+                    "SZ_USE_SVE=0"
+                    "SZ_USE_SVE2=0"
+                    "SZ_USE_SVE2AES=0"
+                    "SZ_USE_RVV=0"
+                    "SZ_USE_LASX=0"
+                    "SZ_USE_POWERVSX=0"
         )
     else ()
         # Fallback: disable all SIMD and use serial execution only
