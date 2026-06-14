@@ -56,3 +56,10 @@ transmute_ptr_to_ptr = "warn"
 improper_ctypes = "warn"
 # Catch platform-specific code that might fail on other targets
 unexpected_cfgs = "warn"
+
+[profile.release]
+# Align the optimized build with the CMake and Python builds at -O2; `build.rs` forwards this `OPT_LEVEL`
+# to `cc` for the bundled C/C++ sources. -O3's aggressive inlining bloats the heavy `utf8_case_insensitive`
+# translation unit (~3 MB object, ~44s to compile) with no measured runtime win. `dev` keeps the default
+# -O0 so clean builds stay fast.
+opt-level = 2

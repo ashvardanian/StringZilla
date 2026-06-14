@@ -23,6 +23,16 @@ import StringZillaC
     import Darwin.C
 #endif
 
+/// Result of a three-way string comparison.
+///
+/// Mirrors `Foundation.ComparisonResult` but is defined here so the package stays Foundation-free and usable
+/// on Linux and embedded targets. The cases match the `sz_order` / `sz_utf8_case_insensitive_order` verdicts.
+public enum StringZillaOrdering: Sendable {
+    case ascending  // The receiver sorts before the argument.
+    case equal  // The two compare as equal.
+    case descending  // The receiver sorts after the argument.
+}
+
 /// Protocol defining a single-byte data type.
 private protocol SingleByte {}
 
@@ -309,6 +319,99 @@ extension StringZillaViewable {
                     let end = self.stringZillaByteOffset(forByte: endPointer, after: hPointer)
                     result = start..<end
                 }
+            }
+        }
+        return result
+    }
+
+    /// Splits the content into UAX-29 words (Unicode TR29), in order.
+    /// Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word.
+    /// - Returns: Byte-accurate ranges into the receiver, one per word.
+    public func utf8Words() -> [Range<Index>] {
+        var ranges: [Range<Index>] = []
+        withStringZillaScope { pointer, length in
+            var cursor: sz_size_t = 0
+            while cursor < length {
+                var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
+                let count = sz_utf8_word_find_boundaries(
+                    pointer.advanced(by: Int(cursor)), length - cursor, &wordStart, &wordLength, 1, &consumed)
+                if count == 0 { break }
+                let begin = cursor + wordStart // The first word of the suffix starts at offset 0.
+                let end = begin + wordLength
+                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
+                let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
+                ranges.append(lo..<hi)
+                cursor = end
+            }
+        }
+        return ranges
+    }
+
+    /// Splits the content into UAX-29 words from the end backward (last word first).
+    /// - Returns: Byte-accurate ranges into the receiver, one per word, in reverse order.
+    public func utf8WordsReversed() -> [Range<Index>] {
+        var ranges: [Range<Index>] = []
+        withStringZillaScope { pointer, length in
+            var end: sz_size_t = length
+            while end > 0 {
+                var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
+                let count = sz_utf8_word_rfind_boundaries(pointer, end, &wordStart, &wordLength, 1, &consumed)
+                if count == 0 { break }
+                // The last word of `[0, end)` ends exactly at `end`; continue over the prefix before it.
+                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(wordStart)), after: pointer)
+                let hi = self.stringZillaByteOffset(
+                    forByte: pointer.advanced(by: Int(wordStart + wordLength)), after: pointer)
+                ranges.append(lo..<hi)
+                end = wordStart
+            }
+        }
+        return ranges
+    }
+
+    /// Lexicographic (byte-order) comparison, SIMD-accelerated via `sz_order`.
+    /// - Parameter other: The string to compare against.
+    /// - Returns: `.ascending`, `.equal`, or `.descending`.
+    @_specialize(where Self == String, S == String)
+    @_specialize(where Self == String.UTF8View, S == String.UTF8View)
+    public func compare<S: StringZillaViewable>(_ other: S) -> StringZillaOrdering {
+        var ordering = sz_equal_k
+        withStringZillaScope { aPointer, aLength in
+            other.withStringZillaScope { bPointer, bLength in
+                ordering = sz_order(aPointer, aLength, bPointer, bLength)
+            }
+        }
+        if ordering == sz_less_k { return .ascending }
+        if ordering == sz_greater_k { return .descending }
+        return .equal
+    }
+
+    /// Case-insensitive comparison using full Unicode case folding, via `sz_utf8_case_insensitive_order`.
+    /// - Parameter other: The string to compare against.
+    /// - Returns: `.ascending`, `.equal`, or `.descending`.
+    @_specialize(where Self == String, S == String)
+    @_specialize(where Self == String.UTF8View, S == String.UTF8View)
+    public func utf8CaseInsensitiveOrder<S: StringZillaViewable>(_ other: S) -> StringZillaOrdering {
+        var ordering = sz_equal_k
+        withStringZillaScope { aPointer, aLength in
+            other.withStringZillaScope { bPointer, bLength in
+                ordering = sz_utf8_case_insensitive_order(aPointer, aLength, bPointer, bLength)
+            }
+        }
+        if ordering == sz_less_k { return .ascending }
+        if ordering == sz_greater_k { return .descending }
+        return .equal
+    }
+
+    /// Byte-level equality, SIMD-accelerated via `sz_equal` (differing lengths are never equal).
+    /// - Parameter other: The string to compare against.
+    /// - Returns: `true` if the byte contents are identical.
+    @_specialize(where Self == String, S == String)
+    @_specialize(where Self == String.UTF8View, S == String.UTF8View)
+    public func equals<S: StringZillaViewable>(_ other: S) -> Bool {
+        var result = false
+        withStringZillaScope { aPointer, aLength in
+            other.withStringZillaScope { bPointer, bLength in
+                result = aLength == bLength && sz_equal(aPointer, bPointer, aLength) == sz_true_k
             }
         }
         return result

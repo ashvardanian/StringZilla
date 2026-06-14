@@ -243,6 +243,15 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
+ *  @brief Suggested default batch size for callers that stream words through `sz_utf8_word_*_boundaries`.
+ *
+ *  Iterators that emit one word at a time (the Python and C++ bindings) buffer this many boundaries per call
+ *  so the per-word overhead amortizes without an unbounded output buffer. It is only a default — any capacity
+ *  works, and the kernels report `bytes_consumed` so the caller can resume past a full buffer.
+ */
+enum { sz_utf8_word_boundaries_batch_k = 16 };
+
+/**
  *  @brief Segment UTF-8 text into UAX-29 words in a single pass (dispatch function).
  *
  *  Walks the whole input left-to-right and writes one entry per word into two parallel output arrays:

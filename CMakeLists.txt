@@ -603,6 +603,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/find.c
     c/stringzilla/sort.c
     c/stringzilla/intersect.c
+    c/stringzilla/utf8_norm.c
     c/stringzilla/utf8_iterate.c
     c/stringzilla/utf8_case_fold.c
     c/stringzilla/utf8_case_insensitive.c
@@ -706,7 +707,7 @@ function (define_stringzillas_shared target source_file backend_flags)
         target_compile_definitions(${objects} PRIVATE ${flag})
     endforeach ()
     target_compile_options(
-        ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O3;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
+        ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O2;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
     )
     set_architecture_simd_definitions(${objects})
 

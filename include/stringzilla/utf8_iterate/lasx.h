@@ -16,7 +16,7 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-/*  UTF-8 -> UTF-32 transcoding for one chunk.
+/*  UTF-8 → UTF-32 transcoding for one chunk.
  *
  *  The serial reference walks the input one codepoint at a time via `sz_rune_parse`, where each step's byte
  *  width (1..4) depends on the just-decoded leading byte. That data-dependent stride, combined with the
@@ -121,7 +121,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
 
         // 1-byte indicators & matches. Range [9,13] covers \t, \n, \v, \f, \r.
         __m256i x_20_cmp = __lasx_xvseq_b(text_vec, x_20_vec);
-        // `cmpgt_epi8(text, 0x08)` -> signed `0x08 < text`; `cmpgt_epi8(0x0E, text)` -> signed `text < 0x0E`.
+        // `cmpgt_epi8(text, 0x08)` → signed `0x08 < text`; `cmpgt_epi8(0x0E, text)` → signed `text < 0x0E`.
         __m256i t_cmp = __lasx_xvslt_b(__lasx_xvreplgr2vr_b((char)0x08), text_vec);
         __m256i r_cmp = __lasx_xvslt_b(text_vec, __lasx_xvreplgr2vr_b((char)0x0E));
         __m256i tr_range = __lasx_xvand_v(t_cmp, r_cmp);
@@ -294,37 +294,31 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_s
  *  3 = non-ASCII. We then build a per-byte "safe" mask (class == predecessor's class AND class ∈ {0,1}) and
  *  scan it via `sz_xvmovemask_b_utf8_lasx_` for the first/last position that is not safe. */
 
-SZ_INTERNAL __m256i sz_utf8_wb_classify_lasx_(__m256i bytes_vec) {
-    __m256i is_high = __lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0x80), bytes_vec); // byte >= 0x80
-    __m256i ge_zero = __lasx_xvsle_bu(__lasx_xvreplgr2vr_b('0'), bytes_vec);
-    __m256i le_nine = __lasx_xvsle_bu(bytes_vec, __lasx_xvreplgr2vr_b('9'));
-    __m256i is_digit = __lasx_xvand_v(ge_zero, le_nine);
-    __m256i ge_upper_a = __lasx_xvsle_bu(__lasx_xvreplgr2vr_b('A'), bytes_vec);
-    __m256i le_upper_z = __lasx_xvsle_bu(bytes_vec, __lasx_xvreplgr2vr_b('Z'));
-    __m256i ge_lower_a = __lasx_xvsle_bu(__lasx_xvreplgr2vr_b('a'), bytes_vec);
-    __m256i le_lower_z = __lasx_xvsle_bu(bytes_vec, __lasx_xvreplgr2vr_b('z'));
-    __m256i is_letter = __lasx_xvor_v(__lasx_xvand_v(ge_upper_a, le_upper_z), __lasx_xvand_v(ge_lower_a, le_lower_z));
-    // Start with class 2; override with 1 for digit, 0 for letter, 3 for non-ASCII.
-    __m256i classes_vec = __lasx_xvreplgr2vr_b(2);
-    classes_vec = __lasx_xvbitsel_v(classes_vec, __lasx_xvreplgr2vr_b(1), is_digit);
-    classes_vec = __lasx_xvbitsel_v(classes_vec, __lasx_xvreplgr2vr_b(0), is_letter);
-    classes_vec = __lasx_xvbitsel_v(classes_vec, __lasx_xvreplgr2vr_b(3), is_high);
-    return classes_vec;
-}
-
-// 32-bit mask: bit i set when position base+i is a proven non-boundary (safe interior of a letter/digit run).
-SZ_INTERNAL sz_u32_t sz_utf8_wb_safe_mask_lasx_(sz_cptr_t text, sz_size_t base) {
-    sz_u8_t const *text_bytes = (sz_u8_t const *)text;
-    // Position base+i is a proven non-boundary when its class equals the class of byte base+i-1 and both are
-    // letter(0)/digit(1). Rather than store the class window and walk it scalar-side, we classify a SECOND
-    // window loaded one byte earlier: its lane i holds the class of byte base+i-1 — exactly the per-lane
-    // predecessor, lane 0 included. Callers guarantee base >= 1 and base+32 <= length, so both loads are
-    // in-bounds (see `sz_utf8_word_find_boundaries_lasx` / `_rfind_`).
-    __m256i classes_vec = sz_utf8_wb_classify_lasx_(__lasx_xvld(text_bytes + base, 0));
-    __m256i predecessor_vec = sz_utf8_wb_classify_lasx_(__lasx_xvld(text_bytes + base - 1, 0));
-    __m256i same_class_vec = __lasx_xvseq_b(classes_vec, predecessor_vec);          // class[i] == class[i-1]
-    __m256i word_class_vec = __lasx_xvsle_bu(classes_vec, __lasx_xvreplgr2vr_b(1)); // class[i] in {letter, digit}
-    return sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(same_class_vec, word_class_vec));
+/*  Per-class 32-bit lane mask helper: `sz_xvmovemask_b_utf8_lasx_` over an all-ASCII byte compare. Each
+ *  Word_Break class is a small ASCII byte set (ALetter = A-Z|a-z via the 0x20 fold, Numeric = 0-9,
+ *  ExtendNumLet = '_', MidLetter = ':', MidNum = ','|';', MidQuotes = '"'|'\''|'.', plus CR and LF). */
+SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_lasx_(__m256i window) {
+    __m256i lowered = __lasx_xvor_v(window, __lasx_xvreplgr2vr_b(0x20)); // fold A-Z onto a-z
+    sz_u64_t aletter_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(
+        __lasx_xvsle_bu(__lasx_xvreplgr2vr_b(0x61), lowered), __lasx_xvsle_bu(lowered, __lasx_xvreplgr2vr_b(0x7A))));
+    sz_u64_t numeric_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(
+        __lasx_xvsle_bu(__lasx_xvreplgr2vr_b(0x30), window), __lasx_xvsle_bu(window, __lasx_xvreplgr2vr_b(0x39))));
+    sz_u64_t extendnumlet_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(
+        __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x5F)));
+    sz_u64_t midletter_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x3A)));
+    sz_u64_t midnum_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvor_v(
+        __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x2C)), __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x3B))));
+    sz_u64_t mid_quotes_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(
+        __lasx_xvor_v(__lasx_xvor_v(__lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x22)),
+                                    __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x27))),
+                      __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x2E))));
+    sz_u64_t carriage_return_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(
+        __lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x0D)));
+    sz_u64_t line_feed_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, __lasx_xvreplgr2vr_b(0x0A)));
+    sz_u64_t join = sz_utf8_word_break_join_from_class_masks_(aletter_mask, numeric_mask, extendnumlet_mask,
+                                                              midletter_mask, midnum_mask, mid_quotes_mask,
+                                                              carriage_return_mask, line_feed_mask);
+    return (sz_u32_t)((~join) & 0x7FFFFFFCu); // trusted lanes [2,30]
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
@@ -340,18 +334,28 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     sz_size_t position = (sz_size_t)(1 + ((sz_u8_t)text[0] >= 0xC0) + ((sz_u8_t)text[0] >= 0xE0) +
                                      ((sz_u8_t)text[0] >= 0xF0));
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     while (position < length) {
-        if (position > 0 && position + 32 <= length) {
-            sz_u32_t safe = sz_utf8_wb_safe_mask_lasx_(text, position);
-            sz_u32_t not_safe = ~safe;
-            if (not_safe == 0) {
-                position += 32;
+        // Oracle-free fast path: a window [position-2, position+30) gives lanes [2,30] full +/-2 context, so an
+        // all-ASCII window resolves boundaries at positions [position, position+28] directly from the mask.
+        if (position >= 2 && position + 30 <= length) {
+            __m256i window = __lasx_xvld(text_u8 + position - 2, 0); // lane j = byte position-2+j
+            if (sz_xvmovemask_b_utf8_lasx_(window) == 0) {           // all ASCII
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_lasx_(window);
+                while (boundary) {
+                    sz_size_t boundary_position = position - 2 + (sz_size_t)sz_u32_ctz(boundary);
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
+                    }
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
+                    boundary &= boundary - 1;
+                }
+                position += 29; // Resolved [position, position+28]; next unresolved boundary is at position+29.
                 continue;
-            }
-            sz_size_t skipped = position + (sz_size_t)sz_u32_ctz(not_safe);
-            if (skipped > position) {
-                position = skipped;
-                if (position >= length) break;
             }
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
@@ -364,8 +368,8 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
             ++words;
             word_start = position;
         }
-        position += (sz_size_t)(1 + ((sz_u8_t)text[position] >= 0xC0) + ((sz_u8_t)text[position] >= 0xE0) +
-                                ((sz_u8_t)text[position] >= 0xF0));
+        position += (sz_size_t)(1 + (text_u8[position] >= 0xC0) + (text_u8[position] >= 0xE0) +
+                                (text_u8[position] >= 0xF0));
     }
     if (words == words_capacity) {
         if (bytes_consumed) *bytes_consumed = word_start;
@@ -388,21 +392,33 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx( //
         if (bytes_consumed) *bytes_consumed = length;
         return 0;
     }
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
     sz_size_t position = length - 1;
-    while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
+    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     while (position > 0) {
-        if (position >= 32) {
-            // Window [position-31, position+1): top lane is `position` itself.
-            sz_size_t base = position - 31;
-            sz_u32_t safe = sz_utf8_wb_safe_mask_lasx_(text, base);
-            sz_u32_t not_safe = ~safe;
-            if (not_safe == 0) { position = base; }
-            else {
-                int high_index = 31 - sz_u32_clz(not_safe); // highest unsafe lane
-                position = base + (sz_size_t)high_index;
+        // Oracle-free fast path: a window [position-30, position+2) gives lanes [2,30] full +/-2 context,
+        // resolving boundaries at positions [position-28, position]; emit them high-to-low.
+        if (position >= 30 && position + 2 <= length) {
+            __m256i window = __lasx_xvld(text_u8 + position - 30, 0); // lane 30 = byte position
+            if (sz_xvmovemask_b_utf8_lasx_(window) == 0) {
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_lasx_(window);
+                while (boundary) {
+                    int lane = 31 - sz_u32_clz(boundary); // highest set lane first
+                    sz_size_t boundary_position = position - 30 + (sz_size_t)lane;
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
+                    }
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
+                    boundary &= ~((sz_u32_t)1 << lane);
+                }
+                position -= 29; // Resolved [position-28, position]; next unresolved boundary is at position-29.
+                continue;
             }
-            if (position == 0) break;
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
@@ -415,7 +431,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx( //
             word_end = position;
         }
         position--;
-        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
+        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
     if (words == words_capacity) {
         if (bytes_consumed) *bytes_consumed = word_end;

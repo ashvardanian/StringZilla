@@ -14,6 +14,7 @@
 #ifndef STRINGZILLA_UTF8_CASE_INSENSITIVE_HASWELL_H_
 #define STRINGZILLA_UTF8_CASE_INSENSITIVE_HASWELL_H_
 
+#include "stringzilla/find/haswell.h" // `sz_find_haswell`
 #include "stringzilla/utf8_case_insensitive/serial.h"
 
 #ifdef __cplusplus
@@ -1073,7 +1074,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_haswell( //
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_case_rune_unknown_k;
     int const known_agnostic = needle_metadata->kernel_id == sz_utf8_case_rune_case_invariant_k;
     if (known_agnostic || (is_unknown && sz_utf8_case_invariant_haswell(needle, needle_length))) {
-        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
+        sz_cptr_t result = sz_find_haswell(haystack, haystack_length, needle, needle_length);
         *matched_length = result ? needle_length : 0;
         return result;
     }

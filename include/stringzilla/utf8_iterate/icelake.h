@@ -555,7 +555,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
  *  1. Vectorized property classification. For a 64-byte chunk that is pure ASCII (the dominant case
  *     for English text and source code, where every byte is its own codepoint), we look up each
  *     byte's `sz_tr29_word_break_t` class through a single `_mm512_permutexvar_epi8` over the
- *     128-entry `sz_word_break_prop_ascii_` table (each rune < 0x80 maps directly).
+ *     128-entry `sz_utf8_word_break_property_ascii_` table (each rune < 0x80 maps directly).
  *
  *  2. Local "definitely-not-a-boundary" mask. From the class vector and its shift-by-one neighbor we
  *     compute, with masked compares, the set of adjacencies that the *unconditional* local rules
@@ -575,11 +575,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
  *  (3) intentionally stay serial — only classification and candidate filtering are vectorized. */
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
-SZ_INTERNAL __m512i sz_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
-    // The 128-entry `sz_word_break_prop_ascii_` table fits in two ZMM registers; a 7-bit index (ASCII) selects
+SZ_INTERNAL __m512i sz_utf8_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
+    // The 128-entry `sz_utf8_word_break_property_ascii_` table fits in two ZMM registers; a 7-bit index (ASCII) selects
     // via `_mm512_permutexvar_epi8` from a 64-lane table, so we need a two-table blend on bit 6.
-    __m512i low_table = _mm512_loadu_epi8(sz_word_break_prop_ascii_);       // entries 0..63
-    __m512i high_table = _mm512_loadu_epi8(sz_word_break_prop_ascii_ + 64); // entries 64..127
+    __m512i low_table = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_);       // entries 0..63
+    __m512i high_table = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_ + 64); // entries 64..127
     __mmask64 high_half = _mm512_test_epi8_mask(ascii_bytes, _mm512_set1_epi8(0x40));
     __m512i low_result = _mm512_permutexvar_epi8(ascii_bytes, low_table);
     __m512i high_result = _mm512_permutexvar_epi8(ascii_bytes, high_table);
@@ -587,42 +587,30 @@ SZ_INTERNAL __m512i sz_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
 }
 
 /** @brief  Mask of class==v lanes. */
-SZ_INTERNAL __mmask64 sz_word_break_is_(__m512i cls, int v) { return _mm512_cmpeq_epi8_mask(cls, _mm512_set1_epi8((char)v)); }
+SZ_INTERNAL __mmask64 sz_utf8_word_break_class_mask_(__m512i classes, int v) {
+    return _mm512_cmpeq_epi8_mask(classes, _mm512_set1_epi8((char)v));
+}
 
 /**
- *  @brief Compute, for an all-ASCII chunk, the per-position "guaranteed non-boundary" mask.
+ *  @brief Compute, for an all-ASCII chunk, the per-position "joined" (guaranteed non-boundary) mask.
  *
- *  Bit `i` (for i in [1,63]) is set when the pair (class[i-1], class[i]) is joined by an
- *  unconditional local rule (WB5/8/9/10/13a/13b). Such positions can never be boundaries and are
- *  skipped; all other positions are candidates verified by the serial oracle.
+ *  Bit `i` is set when the boundary before lane `i` is suppressed by a UAX-29 no-break rule. ASCII contains no
+ *  Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana, so WB4 and WB15/16 never apply and the look-around
+ *  rules WB6/7/11/12 reduce to neighbour bit-shifts (`<< 1` = previous lane, `>> 1` = next, `<< 2` = two back).
+ *  The result is exact for lanes whose i-2 and i+1 neighbours are in-window, so the caller needs no oracle.
  */
-SZ_INTERNAL sz_u64_t sz_word_break_nonboundary_mask_ascii_(__m512i cls) {
-    // Class membership masks for the current lanes.
-    __mmask64 is_aletter = sz_word_break_is_(cls, sz_tr29_word_break_aletter_k);
-    __mmask64 is_hebrew = sz_word_break_is_(cls, sz_tr29_word_break_hebrew_letter_k);
-    __mmask64 is_numeric = sz_word_break_is_(cls, sz_tr29_word_break_numeric_k);
-    __mmask64 is_katakana = sz_word_break_is_(cls, sz_tr29_word_break_katakana_k); // not in ASCII, but kept for clarity
-    __mmask64 is_extnumlet = sz_word_break_is_(cls, sz_tr29_word_break_extendnumlet_k);
-    __mmask64 is_ahletter = _kor_mask64(is_aletter, is_hebrew);
-    // "cur" predicates as 64-bit integers; "prev" predicates are the same masks shifted left by 1 bit
-    // (so that bit i carries the predicate of lane i-1).
-    sz_u64_t cur_ah = _cvtmask64_u64(is_ahletter);
-    sz_u64_t cur_num = _cvtmask64_u64(is_numeric);
-    sz_u64_t cur_kana = _cvtmask64_u64(is_katakana);
-    sz_u64_t cur_enl = _cvtmask64_u64(is_extnumlet);
-    sz_u64_t prev_ah = cur_ah << 1;
-    sz_u64_t prev_num = cur_num << 1;
-    sz_u64_t prev_kana = cur_kana << 1;
-    sz_u64_t prev_enl = cur_enl << 1;
-
-    sz_u64_t join = 0;
-    join |= prev_ah & cur_ah;                                      // WB5:  AHLetter  x AHLetter
-    join |= prev_num & cur_num;                                    // WB8:  Numeric   x Numeric
-    join |= prev_ah & cur_num;                                     // WB9:  AHLetter  x Numeric
-    join |= prev_num & cur_ah;                                     // WB10: Numeric   x AHLetter
-    join |= (prev_ah | prev_num | prev_kana | prev_enl) & cur_enl; // WB13a
-    join |= prev_enl & (cur_ah | cur_num | cur_kana);              // WB13b
-    return join;
+SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_mask_ascii_(__m512i classes) {
+    // ASCII has no Hebrew, so AHLetter == ALetter; reduce each class to a 64-lane bitmask and defer the rule
+    // logic to the shared portable routine.
+    return sz_utf8_word_break_join_from_class_masks_(
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_aletter_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_numeric_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_extendnumlet_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_midletter_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_midnum_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_mid_quotes_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_cr_k)),
+        _cvtmask64_u64(sz_utf8_word_break_class_mask_(classes, sz_tr29_word_break_lf_k)));
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake( //
@@ -639,44 +627,44 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake( //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Position 0 is always a boundary; the first reportable boundary is after the first codepoint.
-    sz_size_t position = sz_utf8_char_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
 
-    // Vectorized scan: while we have a full ASCII window, skip provably-non-boundary positions.
+    // Lane identity {0,1,...,63}: compressing it by the boundary mask yields the boundary lane offsets.
+    // `_mm512_set_epi8` takes lane 63 first, so the arguments descend (GCC has no `_mm512_setr_epi8`).
+    __m512i const lane_identity = _mm512_set_epi8(                      //
+        63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
+        47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+
+    // Oracle-free fast path: a window [position-2, position+62) gives lanes [2,62] full +/-2 context, so an
+    // all-ASCII window resolves boundaries at positions [position, position+60] directly from the mask.
     while (position < length) {
-        // We can only take the fast path when at least 64 bytes remain and the window [position-1, position+63)
-        // is entirely ASCII (so 1 byte == 1 codepoint and the class lookup is exact). We need the byte
-        // at position-1 too (for the "prev" predicate of the first lane), which is always available since
-        // position >= 1 here.
-        if (position + 64 <= length) {
-            __m512i window = _mm512_loadu_epi8(text_u8 + position - 1); // lane 0 = byte at position-1
-            __mmask64 non_ascii = _mm512_movepi8_mask(window);
-            if (non_ascii == 0) {
-                __m512i cls = sz_word_break_classify_ascii_icelake_(window);
-                sz_u64_t nonboundary = sz_word_break_nonboundary_mask_ascii_(cls);
-                // Candidate positions correspond to lanes 1..63 (== text positions position..position+62).
-                // Lane i is a candidate boundary unless it's in `nonboundary`. We restrict to lanes >=1.
-                sz_u64_t candidates = (~nonboundary) & 0xFFFFFFFFFFFFFFFEull;
-                while (candidates) {
-                    int lane = sz_u64_ctz(candidates);
-                    sz_size_t candidate_position = position + (sz_size_t)(lane - 1);
-                    if (sz_utf8_is_word_boundary_serial(text, length, candidate_position)) {
-                        if (words == words_capacity) {
-                            if (bytes_consumed) *bytes_consumed = word_start;
-                            return words;
-                        }
-                        word_starts[words] = word_start;
-                        word_lengths[words] = candidate_position - word_start;
-                        ++words;
-                        word_start = candidate_position;
+        if (position >= 2 && position + 62 <= length) {
+            __m512i window = _mm512_loadu_epi8(text_u8 + position - 2); // lane j = byte position-2+j
+            if (_mm512_movepi8_mask(window) == 0) {
+                __m512i classes = sz_utf8_word_break_classify_ascii_icelake_(window);
+                sz_u64_t join = sz_utf8_word_break_join_mask_ascii_(classes);
+                sz_u64_t boundary = (~join) & 0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
+                sz_u8_t boundary_lanes[64];
+                _mm512_mask_compressstoreu_epi8(boundary_lanes, boundary, lane_identity);
+                sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
+                for (sz_size_t i = 0; i < boundary_count; ++i) {
+                    sz_size_t boundary_position = position - 2 + (sz_size_t)boundary_lanes[i];
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
                     }
-                    candidates &= candidates - 1;
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
                 }
-                // All boundaries within lanes 1..63 emitted -> advance past the 63 verified positions.
-                position += 63;
+                position += 61; // Resolved [position, position+60]; next unresolved boundary is at position+61.
                 continue;
             }
         }
-        // Scalar step (non-ASCII window, or tail shorter than 64 bytes).
+        // Scalar step (non-ASCII window, or near the leading/trailing edges).
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
@@ -687,7 +675,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake( //
             ++words;
             word_start = position;
         }
-        position += sz_utf8_char_length_(text_u8[position]);
+        position += sz_utf8_codepoint_length_(text_u8[position]);
     }
 
     if (words == words_capacity) {
@@ -718,37 +706,37 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake( //
     sz_size_t position = length - 1;
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
+    // `_mm512_set_epi8` takes lane 63 first, so the arguments descend (GCC has no `_mm512_setr_epi8`).
+    __m512i const lane_identity = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46,
+                                                  45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28,
+                                                  27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
+                                                  9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+
     while (position > 0) {
-        // Fast path: a 64-byte ASCII window where candidate lanes 1..63 map to text positions
-        // [position-62 .. position] and lane 0 (position position-63) supplies the "prev" predicate of lane 1.
-        // Requires position >= 63 so that position-63 is a valid index.
-        if (position >= 63) {
-            sz_size_t base = position - 62;                         // candidate lanes 1..63 -> positions base..position
-            __m512i window = _mm512_loadu_epi8(text_u8 + base - 1); // lane i = position (base-1)+i, i in 0..63
-            __mmask64 non_ascii = _mm512_movepi8_mask(window);
-            if (non_ascii == 0) {
-                __m512i cls = sz_word_break_classify_ascii_icelake_(window);
-                sz_u64_t nonboundary = sz_word_break_nonboundary_mask_ascii_(cls);
-                sz_u64_t candidates = (~nonboundary) & 0xFFFFFFFFFFFFFFFEull; // lanes 1..63
-                // Scan candidates from the highest lane (closest to `position`) downward.
-                while (candidates) {
-                    int lane = 63 - sz_u64_clz(candidates);
-                    sz_size_t candidate_position = base + (sz_size_t)(lane - 1);
-                    if (sz_utf8_is_word_boundary_serial(text, length, candidate_position)) {
-                        if (words == words_capacity) {
-                            if (bytes_consumed) *bytes_consumed = word_end;
-                            return words;
-                        }
-                        word_starts[words] = candidate_position;
-                        word_lengths[words] = word_end - candidate_position;
-                        ++words;
-                        word_end = candidate_position;
+        // Oracle-free fast path: a window [position-62, position+2) gives lanes [2,62] full +/-2 context,
+        // resolving boundaries at positions [position-60, position]; emit them high-to-low.
+        if (position >= 62 && position + 2 <= length) {
+            sz_size_t base = position - 62; // lane j = byte base+j; trusted lanes [2,62] → [position-60, position]
+            __m512i window = _mm512_loadu_epi8(text_u8 + base);
+            if (_mm512_movepi8_mask(window) == 0) {
+                __m512i classes = sz_utf8_word_break_classify_ascii_icelake_(window);
+                sz_u64_t join = sz_utf8_word_break_join_mask_ascii_(classes);
+                sz_u64_t boundary = (~join) & 0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
+                sz_u8_t boundary_lanes[64];
+                _mm512_mask_compressstoreu_epi8(boundary_lanes, boundary, lane_identity);
+                sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
+                for (sz_size_t i = boundary_count; i-- > 0;) { // descending position (highest lane first)
+                    sz_size_t boundary_position = base + (sz_size_t)boundary_lanes[i];
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
                     }
-                    candidates &= ~((sz_u64_t)1 << lane);
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
                 }
-                // All boundaries within positions base..position emitted -> jump to just before base.
-                position = base - 1;
-                while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
+                position = base + 1; // Resolved down to position-60; next unresolved boundary is at position-61.
                 continue;
             }
         }

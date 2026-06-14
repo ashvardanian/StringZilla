@@ -43,7 +43,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
         for (sz_size_t window_index = 0; window_index < windows; ++window_index, text_u8 += 16) {
             __vector unsigned char bytes_vec = vec_xl(0, text_u8);
             __vector unsigned char headers_vec = vec_and(bytes_vec, mask_c0_vec);
-            // Continuation bytes -> 0xFF, starts -> 0x00; invert so each start contributes 0x01.
+            // Continuation bytes → 0xFF, starts → 0x00; invert so each start contributes 0x01.
             __vector unsigned char is_continuation_vec = (__vector unsigned char)vec_cmpeq(headers_vec, pat_80_vec);
             __vector unsigned char starts_vec = vec_andc(ones_vec, is_continuation_vec);
             accumulator_vec = vec_msum(starts_vec, ones_vec,
@@ -190,48 +190,46 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_powervsx(sz_cptr_t text, sz_size_t l
  *  zero count to locate the first/last candidate boundary.
  */
 
-SZ_INTERNAL sz_u8_t sz_utf8_wb_class1_(sz_u8_t b) {
-    if (b >= 0x80) return 3;
-    if (b >= '0' && b <= '9') return 1;
-    if ((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')) return 0;
-    return 2;
-}
+/*  Boundary mask for the trusted lanes [2,14] of an all-ASCII 16-byte window. VSX has no movemask, so each
+ *  byte is mapped to a small Word_Break class id with range/equality compares + `vec_sel`, the id vector is
+ *  stored once, and the eight per-class lane bitmasks are folded scalar-side and fed to the shared portable
+ *  join routine. Class ids: 0 ALetter (A-Z|a-z via the 0x20 fold), 1 Numeric, 2 ExtendNumLet ('_'),
+ *  3 MidLetter (':'), 4 MidNum (','|';'), 5 MidQuotes ('"'|'\''|'.'), 6 CR, 7 LF, 8 other. */
+SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigned char bytes_vec) {
+    __vector unsigned char lowered = vec_or(bytes_vec, vec_splats((unsigned char)0x20));
+    __vector unsigned char is_aletter = vec_and((__vector unsigned char)vec_cmpge(lowered, vec_splats((unsigned char)0x61)),
+                                                (__vector unsigned char)vec_cmple(lowered, vec_splats((unsigned char)0x7A)));
+    __vector unsigned char is_numeric = vec_and((__vector unsigned char)vec_cmpge(bytes_vec, vec_splats((unsigned char)0x30)),
+                                                (__vector unsigned char)vec_cmple(bytes_vec, vec_splats((unsigned char)0x39)));
+    __vector unsigned char is_extendnumlet = (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x5F));
+    __vector unsigned char is_midletter = (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x3A));
+    __vector unsigned char is_midnum = vec_or((__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x2C)),
+                                              (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x3B)));
+    __vector unsigned char is_mid_quotes =
+        vec_or(vec_or((__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x22)),
+                      (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x27))),
+               (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x2E)));
+    __vector unsigned char is_cr = (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x0D));
+    __vector unsigned char is_lf = (__vector unsigned char)vec_cmpeq(bytes_vec, vec_splats((unsigned char)0x0A));
+    __vector unsigned char ids = vec_splats((unsigned char)8);
+    ids = vec_sel(ids, vec_splats((unsigned char)0), is_aletter);
+    ids = vec_sel(ids, vec_splats((unsigned char)1), is_numeric);
+    ids = vec_sel(ids, vec_splats((unsigned char)2), is_extendnumlet);
+    ids = vec_sel(ids, vec_splats((unsigned char)3), is_midletter);
+    ids = vec_sel(ids, vec_splats((unsigned char)4), is_midnum);
+    ids = vec_sel(ids, vec_splats((unsigned char)5), is_mid_quotes);
+    ids = vec_sel(ids, vec_splats((unsigned char)6), is_cr);
+    ids = vec_sel(ids, vec_splats((unsigned char)7), is_lf);
 
-// 16-bit mask: bit i set when position base+i is a proven non-boundary (safe interior of a letter/digit run).
-SZ_INTERNAL sz_u64_t sz_utf8_wb_safe_mask_powervsx_(sz_cptr_t text, sz_size_t base) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    __vector unsigned char bytes_vec = vec_xl(0, text_u8 + base);
-    __vector unsigned char const digit_low_vec = vec_splats((unsigned char)'0');
-    __vector unsigned char const digit_high_vec = vec_splats((unsigned char)'9');
-    __vector unsigned char const upper_low_vec = vec_splats((unsigned char)'A');
-    __vector unsigned char const upper_high_vec = vec_splats((unsigned char)'Z');
-    __vector unsigned char const lower_low_vec = vec_splats((unsigned char)'a');
-    __vector unsigned char const lower_high_vec = vec_splats((unsigned char)'z');
-    __vector unsigned char const high_bit_vec = vec_splats((unsigned char)0x80);
-
-    __vector unsigned char is_high_vec = (__vector unsigned char)vec_cmpge(bytes_vec, high_bit_vec);
-    __vector unsigned char is_digit_vec = vec_and((__vector unsigned char)vec_cmpge(bytes_vec, digit_low_vec),
-                                                  (__vector unsigned char)vec_cmple(bytes_vec, digit_high_vec));
-    __vector unsigned char is_letter_vec = vec_or(
-        vec_and((__vector unsigned char)vec_cmpge(bytes_vec, upper_low_vec),
-                (__vector unsigned char)vec_cmple(bytes_vec, upper_high_vec)),
-        vec_and((__vector unsigned char)vec_cmpge(bytes_vec, lower_low_vec),
-                (__vector unsigned char)vec_cmple(bytes_vec, lower_high_vec)));
-    // class = 2 default; 1 if digit; 0 if letter; 3 if non-ASCII.
-    __vector unsigned char class_vec = vec_splats((unsigned char)2);
-    class_vec = vec_sel(class_vec, vec_splats((unsigned char)1), is_digit_vec);
-    class_vec = vec_sel(class_vec, vec_splats((unsigned char)0), is_letter_vec);
-    class_vec = vec_sel(class_vec, vec_splats((unsigned char)3), is_high_vec);
-
-    unsigned char classes[16];
-    vec_xst(class_vec, 0, classes);
-    sz_u8_t previous_class = sz_utf8_wb_class1_(text_u8[base - 1]);
-    sz_u64_t mask = 0;
-    for (sz_size_t lane_index = 0; lane_index < 16; ++lane_index) {
-        sz_u8_t predecessor_class = (lane_index == 0) ? previous_class : classes[lane_index - 1];
-        if (classes[lane_index] == predecessor_class && classes[lane_index] <= 1) mask |= (sz_u64_t)1 << lane_index;
-    }
-    return mask;
+    unsigned char id_array[16];
+    vec_xst(ids, 0, id_array);
+    sz_u64_t class_masks[9];
+    for (int class_index = 0; class_index < 9; ++class_index) class_masks[class_index] = 0;
+    for (int lane = 0; lane < 16; ++lane) class_masks[id_array[lane]] |= (sz_u64_t)1 << lane;
+    sz_u64_t join = sz_utf8_word_break_join_from_class_masks_(class_masks[0], class_masks[1], class_masks[2],
+                                                              class_masks[3], class_masks[4], class_masks[5],
+                                                              class_masks[6], class_masks[7]);
+    return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
@@ -244,21 +242,31 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
         if (bytes_consumed) *bytes_consumed = 0;
         return 0;
     }
-    sz_u8_t first_byte = (sz_u8_t)text[0];
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t first_byte = text_u8[0];
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     sz_size_t position = (sz_size_t)(1 + (first_byte >= 0xC0) + (first_byte >= 0xE0) + (first_byte >= 0xF0));
     while (position < length) {
-        if (position > 0 && position + 16 <= length) {
-            sz_u64_t safe = sz_utf8_wb_safe_mask_powervsx_(text, position);
-            sz_u64_t not_safe = (~safe) & 0xFFFFull;
-            if (not_safe == 0) {
-                position += 16;
+        // Oracle-free fast path: a window [position-2, position+14) gives lanes [2,14] full +/-2 context, so an
+        // all-ASCII window resolves boundaries at positions [position, position+12] directly from the mask.
+        if (position >= 2 && position + 14 <= length) {
+            __vector unsigned char window = vec_xl(0, text_u8 + position - 2); // lane j = byte position-2+j
+            if (!vec_any_ge(window, vec_splats((unsigned char)0x80))) {        // all ASCII
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_powervsx_(window);
+                while (boundary) {
+                    sz_size_t boundary_position = position - 2 + (sz_size_t)sz_u32_ctz(boundary);
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_start;
+                        return words;
+                    }
+                    word_starts[words] = word_start;
+                    word_lengths[words] = boundary_position - word_start;
+                    ++words;
+                    word_start = boundary_position;
+                    boundary &= boundary - 1;
+                }
+                position += 13; // Resolved [position, position+12]; next unresolved boundary is at position+13.
                 continue;
-            }
-            sz_size_t skipped = position + (sz_size_t)sz_u64_ctz(not_safe);
-            if (skipped > position) {
-                position = skipped;
-                if (position >= length) break;
             }
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
@@ -271,9 +279,8 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
             ++words;
             word_start = position;
         }
-        sz_u8_t byte_at_position = (sz_u8_t)text[position];
-        position += (sz_size_t)(1 + (byte_at_position >= 0xC0) + (byte_at_position >= 0xE0) +
-                                (byte_at_position >= 0xF0));
+        position += (sz_size_t)(1 + (text_u8[position] >= 0xC0) + (text_u8[position] >= 0xE0) +
+                                (text_u8[position] >= 0xF0));
     }
     if (words == words_capacity) {
         if (bytes_consumed) *bytes_consumed = word_start;
@@ -296,21 +303,33 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx( //
         if (bytes_consumed) *bytes_consumed = length;
         return 0;
     }
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
     sz_size_t position = length - 1;
-    while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
+    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     while (position > 0) {
-        if (position >= 16) {
-            // Window [position-15, position+1): top lane is `position` itself.
-            sz_size_t base = position - 15;
-            sz_u64_t safe = sz_utf8_wb_safe_mask_powervsx_(text, base);
-            sz_u64_t not_safe = (~safe) & 0xFFFFull;
-            if (not_safe == 0) { position = base; }
-            else {
-                int highest_unsafe_lane = 15 - sz_u64_clz(not_safe << 48); // highest unsafe lane within [0,16)
-                position = base + (sz_size_t)highest_unsafe_lane;
+        // Oracle-free fast path: a window [position-14, position+2) gives lanes [2,14] full +/-2 context,
+        // resolving boundaries at positions [position-12, position]; emit them high-to-low.
+        if (position >= 14 && position + 2 <= length) {
+            __vector unsigned char window = vec_xl(0, text_u8 + position - 14); // lane 14 = byte position
+            if (!vec_any_ge(window, vec_splats((unsigned char)0x80))) {
+                sz_u32_t boundary = sz_utf8_word_break_boundary_mask_powervsx_(window);
+                while (boundary) {
+                    int lane = 31 - sz_u32_clz(boundary); // highest set lane first
+                    sz_size_t boundary_position = position - 14 + (sz_size_t)lane;
+                    if (words == words_capacity) {
+                        if (bytes_consumed) *bytes_consumed = word_end;
+                        return words;
+                    }
+                    word_starts[words] = boundary_position;
+                    word_lengths[words] = word_end - boundary_position;
+                    ++words;
+                    word_end = boundary_position;
+                    boundary &= ~((sz_u32_t)1 << lane);
+                }
+                position -= 13; // Resolved [position-12, position]; next unresolved boundary is at position-13.
+                continue;
             }
-            if (position == 0) break;
         }
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
             if (words == words_capacity) {
@@ -323,7 +342,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx( //
             word_end = position;
         }
         position--;
-        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
+        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
     }
     if (words == words_capacity) {
         if (bytes_consumed) *bytes_consumed = word_end;

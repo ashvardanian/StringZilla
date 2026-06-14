@@ -959,6 +959,20 @@ typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, s
 /** @brief Signature of `sz_utf8_case_fold`. */
 typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
+/** @brief Unicode normalization form selector (see `utf8_norm.h`). */
+typedef enum sz_normal_form_t {
+    sz_normal_form_nfd_k = 0,  /**< Canonical decomposition. */
+    sz_normal_form_nfc_k = 1,  /**< Canonical decomposition + canonical composition. */
+    sz_normal_form_nfkd_k = 2, /**< Compatibility decomposition. */
+    sz_normal_form_nfkc_k = 3, /**< Compatibility decomposition + canonical composition. */
+} sz_normal_form_t;
+
+/** @brief Signature of `sz_utf8_norm` (single-pass normalizer). */
+typedef sz_size_t (*sz_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_ptr_t);
+
+/** @brief Signature of `sz_utf8_norm_violation`. */
+typedef sz_cptr_t (*sz_utf8_norm_violation_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
+
 /** @brief Forward declaration for case-insensitive needle metadata. */
 struct sz_utf8_case_insensitive_needle_metadata_t;
 
@@ -974,11 +988,11 @@ typedef sz_bool_t (*sz_utf8_case_agnostic_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_utf8_word_find_boundaries`. */
 typedef sz_size_t (*sz_utf8_word_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-sz_size_t *);
+                                                    sz_size_t *);
 
 /** @brief Signature of `sz_utf8_word_rfind_boundaries`. */
 typedef sz_size_t (*sz_utf8_word_rfind_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-sz_size_t *);
+                                                     sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);

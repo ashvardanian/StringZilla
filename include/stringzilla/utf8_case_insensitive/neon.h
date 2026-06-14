@@ -18,7 +18,9 @@
 #ifndef STRINGZILLA_UTF8_CASE_INSENSITIVE_NEON_H_
 #define STRINGZILLA_UTF8_CASE_INSENSITIVE_NEON_H_
 
+#include "stringzilla/find/neon.h" // `sz_find_neon`
 #include "stringzilla/utf8_case_insensitive/serial.h"
+#include "stringzilla/utf8_case_fold/neon.h" // `sz_utf8_fold_neon_ascii_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -1250,7 +1252,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_case_rune_unknown_k;
     int const known_agnostic = needle_metadata->kernel_id == sz_utf8_case_rune_case_invariant_k;
     if (known_agnostic || (is_unknown && sz_utf8_case_invariant_neon(needle, needle_length))) {
-        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
+        sz_cptr_t result = sz_find_neon(haystack, haystack_length, needle, needle_length);
         *matched_length = result ? needle_length : 0;
         return result;
     }

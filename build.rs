@@ -31,6 +31,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "c/stringzilla/intersect.c",
             "c/stringzilla/utf8_iterate.c",
             "c/stringzilla/utf8_case_fold.c",
+            "c/stringzilla/utf8_norm.c",
             "c/stringzilla/utf8_case_insensitive.c",
         ])
         .include("include")
@@ -38,7 +39,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
         .warnings(false)
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        .flag("-O2")
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
@@ -165,8 +165,9 @@ fn build_stringzilla() -> HashMap<String, bool> {
         }
     }
 
+    // Only re-run the C build when the C sources or headers change. The Rust source (`rust/stringzilla.rs`)
+    // does not feed this compilation, so listing it here forced a full ~55s C rebuild on every Rust-only edit.
     println!("cargo:rerun-if-changed=c/stringzilla");
-    println!("cargo:rerun-if-changed=rust/stringzilla.rs");
     println!("cargo:rerun-if-changed=include/stringzilla");
 
     // Rerun if SIMD backend environment variables change
@@ -215,8 +216,7 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
         .define("SZ_DEBUG", "0")
         // The per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so the
         // build does not require libnuma (matches the `stringzillas.cuh` default and the CMake build).
-        .define("FU_ENABLE_NUMA", "0")
-        .flag("-O2");
+        .define("FU_ENABLE_NUMA", "0");
 
     // Nvidia GPU backend
     if is_cuda {

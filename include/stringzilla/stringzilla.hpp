@@ -1354,6 +1354,180 @@ class range_utf8_whitespace_splits {
 };
 
 /**
+ *  @brief A range of string slices split at UAX-29 word boundaries, in order.
+ *
+ *  Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
+ *  consecutive words are contiguous and no empty segments are produced. Drives `sz_utf8_word_find_boundaries`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_>
+class range_utf8_word_splits {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = string_view_type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    range_utf8_word_splits() noexcept = default;
+    range_utf8_word_splits(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        char const *suffix_; // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
+        char const *end_;    // End of original text (immutable)
+        size_type starts_[sz_utf8_word_boundaries_batch_k];  // Buffered word offsets, relative to `suffix_`
+        size_type lengths_[sz_utf8_word_boundaries_batch_k]; // Buffered word lengths
+        size_type count_;                                    // Number of buffered words (0 once exhausted)
+        size_type index_;                                    // Index of the current word within the buffer
+
+        void fill_() noexcept {
+            sz_size_t consumed = 0;
+            count_ = sz_utf8_word_find_boundaries(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_,
+                                                  sz_utf8_word_boundaries_batch_k, &consumed);
+            index_ = 0;
+        }
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = string_view_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = string_view_type;
+        using reference = string_view_type;
+
+        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0) {}
+        iterator(string_view_type text) noexcept : suffix_(text.data()), end_(text.data() + text.size()) { fill_(); }
+
+        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
+        pointer operator->() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
+
+        iterator &operator++() noexcept {
+            if (++index_ < count_) return *this; // Still words buffered from the current batch.
+            // Batch drained: advance past the last word (a TR29 boundary) and refill; `count_` hits 0 at the end.
+            suffix_ += starts_[count_ - 1] + lengths_[count_ - 1];
+            fill_();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
+        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    end_sentinel_type end() const noexcept { return {}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Copies the words into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto word : *this) container.push_back(word);
+    }
+
+    /** @brief Copies the words into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto word : *this) container.push_back(word);
+        return std::move(container);
+    }
+};
+
+/**
+ *  @brief A range of string slices split at UAX-29 word boundaries, from the end of the text backward.
+ *
+ *  Yields the same words as `range_utf8_word_splits` but last-to-first. Drives `sz_utf8_word_rfind_boundaries`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_>
+class range_utf8_word_rsplits {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = string_view_type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    range_utf8_word_rsplits() noexcept = default;
+    range_utf8_word_rsplits(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        char const *base_; // Start of original text (immutable; buffered offsets are relative to it)
+        size_type prefix_; // Length of the prefix `[0, prefix_)` still to segment on the next refill (0 when done)
+        size_type starts_[sz_utf8_word_boundaries_batch_k];  // Buffered word offsets from `base_`, last word first
+        size_type lengths_[sz_utf8_word_boundaries_batch_k]; // Buffered word lengths
+        size_type count_;                                    // Number of buffered words (0 once exhausted)
+        size_type index_;                                    // Index of the current word within the buffer
+
+        void fill_() noexcept {
+            sz_size_t consumed = 0;
+            count_ = sz_utf8_word_rfind_boundaries(base_, prefix_, starts_, lengths_, sz_utf8_word_boundaries_batch_k,
+                                                   &consumed);
+            prefix_ = static_cast<size_type>(consumed); // Earliest boundary still segmented; 0 once the prefix is done.
+            index_ = 0;
+        }
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = string_view_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = string_view_type;
+        using reference = string_view_type;
+
+        iterator() noexcept : base_(nullptr), prefix_(0), count_(0), index_(0) {}
+        iterator(string_view_type text) noexcept : base_(text.data()), prefix_(text.size()) { fill_(); }
+
+        reference operator*() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
+        pointer operator->() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
+
+        iterator &operator++() noexcept {
+            if (++index_ < count_) return *this; // Still words buffered from the current batch (last → first).
+            fill_();                             // Refill from the remaining prefix; `count_` hits 0 at the end.
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
+        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    end_sentinel_type end() const noexcept { return {}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Copies the words into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto word : *this) container.push_back(word);
+    }
+
+    /** @brief Copies the words into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto word : *this) container.push_back(word);
+        return std::move(container);
+    }
+};
+
+/**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
@@ -2419,6 +2593,17 @@ class basic_string_slice {
      *  Empty segments are skipped.
      */
     range_utf8_whitespace_splits<string_slice> utf8_split() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Lazily splits the string into UAX-29 words, in order.
+     *
+     *  Unlike `utf8_split()`, the words tile the input contiguously (no empty segments). Each yielded slice is
+     *  the span between consecutive TR29 word boundaries.
+     */
+    range_utf8_word_splits<string_slice> utf8_split_words() const noexcept { return {*this}; }
+
+    /** @brief Lazily splits the string into UAX-29 words, from the end backward (last word first). */
+    range_utf8_word_rsplits<string_slice> utf8_rsplit_words() const noexcept { return {*this}; }
 
 #pragma endregion
 #pragma region String Arguments
@@ -4225,6 +4410,12 @@ class basic_string {
      *  Splits on all 25 Unicode whitespace characters. Empty segments (consecutive whitespace) are skipped.
      */
     range_utf8_whitespace_splits<basic_string> utf8_split() const noexcept { return {*this}; }
+
+    /** @brief Lazily splits the string into UAX-29 words, in order (words tile the input contiguously). */
+    range_utf8_word_splits<basic_string> utf8_split_words() const noexcept { return {*this}; }
+
+    /** @brief Lazily splits the string into UAX-29 words, from the end backward (last word first). */
+    range_utf8_word_rsplits<basic_string> utf8_rsplit_words() const noexcept { return {*this}; }
 
     /**
      *  @brief Apply Unicode case folding to the string in-place.

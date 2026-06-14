@@ -84,12 +84,16 @@
 #include "stringzilla/memory.h"  // `sz_copy`, `sz_move`, `sz_fill`
 #include "stringzilla/hash.h"    // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
 #include "stringzilla/find.h"    // `sz_find`, `sz_find_byteset`, `sz_rfind`
+
+#include "stringzilla/sort.h"      // `sz_sequence_argsort`, `sz_pgrams_sort`
+#include "stringzilla/intersect.h" // `sz_sequence_intersect`
+
 #include "stringzilla/utf8_iterate.h" // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
 #include "stringzilla/utf8_case_fold.h"        // `sz_utf8_case_fold`
 #include "stringzilla/utf8_case_insensitive.h" // `sz_utf8_case_insensitive_find`, `sz_utf8_case_insensitive_order`
-#include "stringzilla/small_string.h"          // `sz_string_t`, `sz_string_init`, `sz_string_free`
-#include "stringzilla/sort.h"                  // `sz_sequence_argsort`, `sz_pgrams_sort`
-#include "stringzilla/intersect.h"             // `sz_sequence_intersect`
+#include "stringzilla/utf8_norm.h"             // `sz_utf8_norm`, `sz_utf8_norm_violation`
+
+#include "stringzilla/small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
 
 /* Inferring target OS: Windows, MacOS, or Linux */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)

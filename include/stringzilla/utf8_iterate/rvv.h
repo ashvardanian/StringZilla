@@ -256,7 +256,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length
  *  into one of 16 Word_Break properties via a two-stage trie / SMP binary search, repeated for the
  *  neighbours of every candidate position. We vectorize both:
  *
- *  1.  PROPERTY CLASSIFICATION (`sz_word_break_classify_props_rvv_`): codepoint start offsets are found with the
+ *  1.  PROPERTY CLASSIFICATION (`sz_utf8_word_break_classify_properties_rvv_`): codepoint start offsets are found with the
  *      same leading-byte vector trick as `sz_utf8_count_rvv`; the codepoints' Word_Break properties are
  *      then produced in bulk. The ASCII fast path classifies whole strips of `rune < 0x80` with a single
  *      indexed memory load (`vluxei8`) over the 128-byte ASCII property table. Non-ASCII codepoints (BMP 2-stage trie /
@@ -284,9 +284,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length
 /*  Vectorized Word_Break property classification for one codepoint per `runes` lane (u32).
  *  ASCII lanes (`rune < 0x80`) are classified with a single indexed memory load (`vluxei8`) over the
  *  128-byte ASCII table; every other lane is classified by the value-exact scalar `sz_rune_word_break_property`. */
-SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8_t *props, sz_size_t count) {
+SZ_INTERNAL void sz_utf8_word_break_classify_properties_rvv_(sz_rune_t const *runes, sz_u8_t *props, sz_size_t count) {
     // The ASCII property table has 128 entries. An indexed memory load (`vluxei8`) fetches
-    // `sz_word_break_prop_ascii_[index]` straight from memory, so the index in [0, 127] is valid at any
+    // `sz_utf8_word_break_property_ascii_[index]` straight from memory, so the index in [0, 127] is valid at any
     // `VLEN` — no register-group capacity ceiling and no scalar fallback for the ASCII prefix.
     sz_size_t codepoint_index = 0;
     while (codepoint_index < count) {
@@ -302,7 +302,7 @@ SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8
             vuint16m4_t runes_u16m4 = __riscv_vncvt_x_x_w_u16m4(runes_u32m8, vl);
             vuint8m2_t gather_indices = __riscv_vncvt_x_x_w_u8m2(runes_u16m4, vl);
             vuint8m2_t idx_clamped = __riscv_vand_vx_u8m2(gather_indices, 0x7F, vl); // keep indices in [0,127]
-            vuint8m2_t gathered = __riscv_vluxei8_v_u8m2(&sz_word_break_prop_ascii_[0], idx_clamped, vl);
+            vuint8m2_t gathered = __riscv_vluxei8_v_u8m2(&sz_utf8_word_break_property_ascii_[0], idx_clamped, vl);
             __riscv_vse8_v_u8m2(props + codepoint_index, gathered, vl);
         }
 
@@ -320,7 +320,7 @@ SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8
 /*  Vectorized UTF-8 well-formedness check for `[text, text+length)`.
  *
  *  The serial word-boundary code mixes two different steppings: candidate positions are enumerated with the
- *  lead-byte length (`sz_utf8_char_length_`), while every property/neighbour decision decodes with
+ *  lead-byte length (`sz_utf8_codepoint_length_`), while every property/neighbour decision decodes with
  *  `sz_utf8_decode_` and scans backward byte-wise across continuation bytes. On MALFORMED input these three
  *  views disagree (e.g. a 0xEF lead followed by non-continuation bytes), so a single forward codepoint table
  *  cannot reproduce serial exactly. On WELL-FORMED UTF-8 all three agree, and the table path is exact.
@@ -328,7 +328,7 @@ SZ_INTERNAL void sz_word_break_classify_props_rvv_(sz_rune_t const *runes, sz_u8
  *  Real text (ASCII, Latin, CJK, emoji, regional indicators) is well-formed, so this check (a `vrgather` of
  *  the per-byte expected sequence length plus a continuation-byte mask, both `m8`) keeps the common case on
  *  the vector path and routes only genuinely malformed buffers to the serial reference. */
-SZ_INTERNAL int sz_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t length) {
+SZ_INTERNAL int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
@@ -349,7 +349,7 @@ SZ_INTERNAL int sz_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t leng
     offset = 0;
     while (offset < length) {
         sz_u8_t lead = text_u8[offset];
-        sz_size_t clen = sz_utf8_char_length_(lead);
+        sz_size_t clen = sz_utf8_codepoint_length_(lead);
         if ((lead & 0xC0) == 0x80) return 0;  // stray continuation byte at a lead position
         if (offset + clen > length) return 0; // truncated trailing sequence
         for (sz_size_t byte_index = 1; byte_index < clen; ++byte_index)
@@ -361,7 +361,7 @@ SZ_INTERNAL int sz_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t leng
 
 /*  Local (non-stateful) word-break decision driven purely by the effective neighbour properties.
  *  Returns 1 (break), 0 (no break), or -1 (stateful rule — caller must consult the serial reference). */
-SZ_INTERNAL int sz_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t after_raw, sz_u8_t after_prop) {
+SZ_INTERNAL int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t after_raw, sz_u8_t after_prop) {
     // WB3: CR x LF
     if (prev_prop == sz_tr29_word_break_cr_k && after_raw == sz_tr29_word_break_lf_k) return 0;
     // WB3a: break after Newline/CR/LF
@@ -433,21 +433,21 @@ SZ_INTERNAL int sz_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t aft
  *  backward property arrays) for the whole input, which meant a ~60 KB stack frame and a hard fall-back to
  *  serial above a fixed length. Two observations collapse that to O(1) working set:
  *
- *  1.  The effective BACKWARD property (`sz_word_break_prev_prop_`) is a forward running carry: it is just the last
+ *  1.  The effective BACKWARD property (`sz_utf8_word_break_previous_property_`) is a forward running carry: it is just the last
  *      non-ignorable property seen so far (floored at codepoint 0's property). No array — one scalar.
- *  2.  The effective FORWARD property (`sz_word_break_get_effective_prop_`) only ever skips WB4-ignorable codepoints
+ *  2.  The effective FORWARD property (`sz_utf8_word_break_effective_property_`) only ever skips WB4-ignorable codepoints
  *      (Extend/Format/ZWJ). A run of letters or digits is never deferred, so the only thing that must be
- *      buffered is the current ignorable run — bounded by `sz_word_break_pending_capacity_k_`, not by word or input length.
+ *      buffered is the current ignorable run — bounded by `sz_utf8_word_break_pending_capacity_k_`, not by word or input length.
  *
- *  Property classification still runs vectorized in fixed `sz_word_break_tile_codepoints_k_` tiles, so the common ASCII path
+ *  Property classification still runs vectorized in fixed `sz_utf8_word_break_tile_codepoints_k_` tiles, so the common ASCII path
  *  keeps its indexed-load (`vluxei8`) bulk classification. The decision per codepoint is value-identical to the serial
- *  reference (same `sz_word_break_local_decision_rvv_` plus the same serial fix-up for the stateful WB6/7/11/12/15/16
+ *  reference (same `sz_utf8_word_break_local_decision_rvv_` plus the same serial fix-up for the stateful WB6/7/11/12/15/16
  *  rules), so the only fall-back left is a pathological ignorable run longer than the pending cap. */
-enum { sz_word_break_tile_codepoints_k_ = 256, sz_word_break_pending_capacity_k_ = 256 };
+enum { sz_utf8_word_break_tile_codepoints_k_ = 256, sz_utf8_word_break_pending_capacity_k_ = 256 };
 
 /*  Emit the word `[*word_start, boundary_offset)` and advance `*word_start`. Returns 1 if the output is full
  *  (caller must stop and report `*word_start` as the resume point), 0 otherwise. */
-SZ_INTERNAL int sz_word_break_emit_forward_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
+SZ_INTERNAL int sz_utf8_word_break_emit_forward_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
                                             sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_start) {
     if (*words == words_capacity) return 1;
     word_starts[*words] = *word_start;
@@ -459,14 +459,14 @@ SZ_INTERNAL int sz_word_break_emit_forward_(sz_size_t boundary_offset, sz_size_t
 
 /*  Forward streaming scan. Sets `*overflowed` when an ignorable run exceeds the pending cap so the caller can
  *  defer to the (value-identical) serial reference. */
-SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
                                                      sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
-    sz_rune_t tile_runes[sz_word_break_tile_codepoints_k_];
-    sz_size_t tile_offsets[sz_word_break_tile_codepoints_k_];
-    sz_u8_t tile_props[sz_word_break_tile_codepoints_k_];
-    sz_size_t pending_offsets[sz_word_break_pending_capacity_k_]; // offsets of the current deferred ignorable run
-    sz_u8_t pending_raw[sz_word_break_pending_capacity_k_];       // their raw Word_Break properties
+    sz_rune_t tile_runes[sz_utf8_word_break_tile_codepoints_k_];
+    sz_size_t tile_offsets[sz_utf8_word_break_tile_codepoints_k_];
+    sz_u8_t tile_props[sz_utf8_word_break_tile_codepoints_k_];
+    sz_size_t pending_offsets[sz_utf8_word_break_pending_capacity_k_]; // offsets of the current deferred ignorable run
+    sz_u8_t pending_raw[sz_utf8_word_break_pending_capacity_k_];       // their raw Word_Break properties
     sz_size_t pending_count = 0;
 
     *overflowed = sz_false_k;
@@ -480,14 +480,14 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
     while (position < length) {
         // Decode and vector-classify one tile of codepoints.
         sz_size_t tile_count = 0;
-        while (tile_count < sz_word_break_tile_codepoints_k_ && position < length) {
+        while (tile_count < sz_utf8_word_break_tile_codepoints_k_ && position < length) {
             tile_offsets[tile_count] = position;
             sz_size_t decode_position = position;
             tile_runes[tile_count] = sz_utf8_decode_(text, length, &decode_position);
             position = decode_position;
             ++tile_count;
         }
-        sz_word_break_classify_props_rvv_(tile_runes, tile_props, tile_count);
+        sz_utf8_word_break_classify_properties_rvv_(tile_runes, tile_props, tile_count);
 
         for (sz_size_t tile_index = 0; tile_index < tile_count; ++tile_index) {
             sz_u8_t this_prop = tile_props[tile_index];
@@ -498,8 +498,8 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
                 consumed_first = 1;
                 continue;
             }
-            if (sz_word_break_is_ignorable_(this_prop)) {
-                if (pending_count == sz_word_break_pending_capacity_k_) {
+            if (sz_utf8_word_break_is_ignorable_(this_prop)) {
+                if (pending_count == sz_utf8_word_break_pending_capacity_k_) {
                     *overflowed = sz_true_k;
                     return 0;
                 }
@@ -511,11 +511,11 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
             // A non-ignorable codepoint resolves the deferred ignorable run: their effective forward property
             // is exactly this codepoint's property. Decide each deferred boundary in order, then this one.
             for (sz_size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
-                int decision = sz_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index], this_prop);
+                int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index], this_prop);
                 sz_bool_t is_boundary = (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length,
                                                                                          pending_offsets[pending_index])
                                                        : (sz_bool_t)decision;
-                if (is_boundary && sz_word_break_emit_forward_(pending_offsets[pending_index], word_starts,
+                if (is_boundary && sz_utf8_word_break_emit_forward_(pending_offsets[pending_index], word_starts,
                                                                word_lengths, words_capacity, &words, &word_start)) {
                     if (bytes_consumed) *bytes_consumed = word_start;
                     return words;
@@ -523,10 +523,10 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
             }
             pending_count = 0;
             {
-                int decision = sz_word_break_local_decision_rvv_(backward_carry, this_prop, this_prop);
+                int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, this_prop, this_prop);
                 sz_bool_t is_boundary = (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length, this_offset)
                                                        : (sz_bool_t)decision;
-                if (is_boundary && sz_word_break_emit_forward_(this_offset, word_starts, word_lengths, words_capacity,
+                if (is_boundary && sz_utf8_word_break_emit_forward_(this_offset, word_starts, word_lengths, words_capacity,
                                                                &words, &word_start)) {
                     if (bytes_consumed) *bytes_consumed = word_start;
                     return words;
@@ -538,11 +538,11 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
 
     // A trailing ignorable run resolves with the effective forward floor = the last codepoint's property.
     for (sz_size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
-        int decision = sz_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index], last_prop);
+        int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index], last_prop);
         sz_bool_t is_boundary = (decision < 0)
                                     ? sz_utf8_is_word_boundary_serial(text, length, pending_offsets[pending_index])
                                     : (sz_bool_t)decision;
-        if (is_boundary && sz_word_break_emit_forward_(pending_offsets[pending_index], word_starts, word_lengths,
+        if (is_boundary && sz_utf8_word_break_emit_forward_(pending_offsets[pending_index], word_starts, word_lengths,
                                                        words_capacity, &words, &word_start)) {
             if (bytes_consumed) *bytes_consumed = word_start;
             return words;
@@ -562,7 +562,7 @@ SZ_INTERNAL sz_size_t sz_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t l
 
 /*  Emit the reverse word `[boundary_offset, *word_end)` and lower `*word_end`. Returns 1 when the output is
  *  full (caller stops and reports `*word_end` as the resume point), 0 otherwise. */
-SZ_INTERNAL int sz_word_break_emit_reverse_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
+SZ_INTERNAL int sz_utf8_word_break_emit_reverse_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
                                             sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_end) {
     if (*words == words_capacity) return 1;
     word_starts[*words] = boundary_offset;
@@ -574,38 +574,38 @@ SZ_INTERNAL int sz_word_break_emit_reverse_(sz_size_t boundary_offset, sz_size_t
 
 /*  Resolve a deferred run of (higher-index) codepoints now that their nearest non-ignorable below is known
  *  (`prev_prop`). Emits boundaries high-to-low. Returns 1 if the output filled mid-run. */
-SZ_INTERNAL int sz_word_break_resolve_reverse_(sz_cptr_t text, sz_size_t length, sz_u8_t prev_prop,
+SZ_INTERNAL int sz_utf8_word_break_resolve_reverse_(sz_cptr_t text, sz_size_t length, sz_u8_t prev_prop,
                                                sz_size_t const *pending_offsets, sz_u8_t const *pending_raw,
                                                sz_u8_t const *pending_after, sz_size_t pending_count,
                                                sz_size_t *word_starts, sz_size_t *word_lengths,
                                                sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_end) {
     for (sz_size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
-        int decision = sz_word_break_local_decision_rvv_(prev_prop, pending_raw[pending_index],
+        int decision = sz_utf8_word_break_local_decision_rvv_(prev_prop, pending_raw[pending_index],
                                                          pending_after[pending_index]);
         sz_bool_t is_boundary = (decision < 0)
                                     ? sz_utf8_is_word_boundary_serial(text, length, pending_offsets[pending_index])
                                     : (sz_bool_t)decision;
-        if (is_boundary && sz_word_break_emit_reverse_(pending_offsets[pending_index], word_starts, word_lengths,
+        if (is_boundary && sz_utf8_word_break_emit_reverse_(pending_offsets[pending_index], word_starts, word_lengths,
                                                        words_capacity, words, word_end))
             return 1;
     }
     return 0;
 }
 
-/*  Reverse streaming scan: the mirror of `sz_word_break_find_stream_rvv_`. It walks codepoints high-to-low in
+/*  Reverse streaming scan: the mirror of `sz_utf8_word_break_find_stream_rvv_`. It walks codepoints high-to-low in
  *  back-scanned tiles, carrying the effective FORWARD property as a running scalar and deferring each
  *  codepoint's decision until the nearest non-ignorable BELOW it is reached. Because it emits from the end
  *  and stops at `words_capacity`, it only ever touches the needed suffix — matching the serial reference. */
-SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+SZ_INTERNAL sz_size_t sz_utf8_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
                                                       sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_rune_t tile_runes[sz_word_break_tile_codepoints_k_];
-    sz_size_t tile_offsets[sz_word_break_tile_codepoints_k_];
-    sz_u8_t tile_props[sz_word_break_tile_codepoints_k_];
-    sz_size_t pending_offsets[sz_word_break_pending_capacity_k_];
-    sz_u8_t pending_raw[sz_word_break_pending_capacity_k_];
-    sz_u8_t pending_after[sz_word_break_pending_capacity_k_]; // effective forward property captured at push time
+    sz_rune_t tile_runes[sz_utf8_word_break_tile_codepoints_k_];
+    sz_size_t tile_offsets[sz_utf8_word_break_tile_codepoints_k_];
+    sz_u8_t tile_props[sz_utf8_word_break_tile_codepoints_k_];
+    sz_size_t pending_offsets[sz_utf8_word_break_pending_capacity_k_];
+    sz_u8_t pending_raw[sz_utf8_word_break_pending_capacity_k_];
+    sz_u8_t pending_after[sz_utf8_word_break_pending_capacity_k_]; // effective forward property captured at push time
     sz_size_t pending_count = 0;
 
     *overflowed = sz_false_k;
@@ -619,21 +619,21 @@ SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t 
         // Back-scan up to one tile of codepoints to find a codepoint-aligned tile start, then decode forward.
         sz_size_t tile_start = frontier;
         sz_size_t scanned = 0;
-        while (tile_start > 0 && scanned < sz_word_break_tile_codepoints_k_) {
+        while (tile_start > 0 && scanned < sz_utf8_word_break_tile_codepoints_k_) {
             --tile_start;
             while (tile_start > 0 && (text_u8[tile_start] & 0xC0) == 0x80) --tile_start;
             ++scanned;
         }
         sz_size_t tile_count = 0;
         sz_size_t decode_cursor = tile_start;
-        while (decode_cursor < frontier && tile_count < sz_word_break_tile_codepoints_k_) {
+        while (decode_cursor < frontier && tile_count < sz_utf8_word_break_tile_codepoints_k_) {
             tile_offsets[tile_count] = decode_cursor;
             sz_size_t decode_position = decode_cursor;
             tile_runes[tile_count] = sz_utf8_decode_(text, length, &decode_position);
             decode_cursor = decode_position;
             ++tile_count;
         }
-        sz_word_break_classify_props_rvv_(tile_runes, tile_props, tile_count);
+        sz_utf8_word_break_classify_properties_rvv_(tile_runes, tile_props, tile_count);
 
         for (sz_size_t tile_index = tile_count; tile_index-- > 0;) {
             sz_u8_t this_prop = tile_props[tile_index];
@@ -643,9 +643,9 @@ SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t 
                 seen_any = 1;
             }
             sz_u8_t after_prop;
-            if (!sz_word_break_is_ignorable_(this_prop)) {
+            if (!sz_utf8_word_break_is_ignorable_(this_prop)) {
                 // This non-ignorable is the nearest-below for every still-pending higher codepoint.
-                if (sz_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
+                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
                                                    pending_count, word_starts, word_lengths, words_capacity, &words,
                                                    &word_end)) {
                     if (bytes_consumed) *bytes_consumed = word_end;
@@ -658,7 +658,7 @@ SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t 
             else { after_prop = forward_carry; }
 
             if (this_offset > 0) {
-                if (pending_count == sz_word_break_pending_capacity_k_) {
+                if (pending_count == sz_utf8_word_break_pending_capacity_k_) {
                     *overflowed = sz_true_k;
                     return 0;
                 }
@@ -670,7 +670,7 @@ SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t 
             else {
                 // Codepoint 0: start of text is always a boundary (no decision), and it is the floor
                 // nearest-below (`prop[0]`) for every remaining pending codepoint.
-                if (sz_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
+                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
                                                    pending_count, word_starts, word_lengths, words_capacity, &words,
                                                    &word_end)) {
                     if (bytes_consumed) *bytes_consumed = word_end;
@@ -697,23 +697,23 @@ SZ_INTERNAL sz_size_t sz_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t 
 /*  Common driver: dispatches to the streaming forward/backward scans, deferring to the serial reference for
  *  malformed UTF-8 (whose mixed stepping a codepoint scan cannot reproduce) and for pathological ignorable
  *  runs that overflow the pending buffer. */
-SZ_INTERNAL sz_size_t sz_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                               sz_size_t *word_lengths, sz_size_t words_capacity,
                                               sz_size_t *bytes_consumed, int reverse) {
     if (length == 0 || words_capacity == 0) {
         if (bytes_consumed) *bytes_consumed = (length == 0) ? 0 : (reverse ? length : 0);
         return 0;
     }
-    if (!sz_word_break_is_well_formed_rvv_(text, length))
+    if (!sz_utf8_word_break_is_well_formed_rvv_(text, length))
         return reverse ? sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
                                                               bytes_consumed)
                        : sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
                                                              bytes_consumed);
 
     sz_bool_t overflowed = sz_false_k;
-    sz_size_t words = reverse ? sz_word_break_rfind_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
+    sz_size_t words = reverse ? sz_utf8_word_break_rfind_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
                                                                 bytes_consumed, &overflowed)
-                              : sz_word_break_find_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
+                              : sz_utf8_word_break_find_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
                                                                bytes_consumed, &overflowed);
     if (overflowed)
         return reverse ? sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
@@ -726,13 +726,13 @@ SZ_INTERNAL sz_size_t sz_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
                                                      sz_size_t *bytes_consumed) {
-    return sz_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 0);
+    return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 0);
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
                                                       sz_size_t *bytes_consumed) {
-    return sz_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 1);
+    return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 1);
 }
 
 #if defined(__clang__)

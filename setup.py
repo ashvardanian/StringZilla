@@ -124,7 +124,7 @@ class CudaBuildExtension(NumpyBuildExt):
                 "--compiler-options",
                 "-fPIC",
                 "-std=c++17",
-                "-O3",
+                "-O2",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
                 "-arch=sm_90a",  # Default to Hopper
@@ -382,6 +382,7 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/find.c",
     "c/stringzilla/sort.c",
     "c/stringzilla/intersect.c",
+    "c/stringzilla/utf8_norm.c",
     "c/stringzilla/utf8_iterate.c",
     "c/stringzilla/utf8_case_fold.c",
     "c/stringzilla/utf8_case_insensitive.c",
