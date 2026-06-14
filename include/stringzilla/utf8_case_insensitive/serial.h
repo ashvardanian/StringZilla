@@ -9,7 +9,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes.h"
-#include "stringzilla/find.h" // `sz_find`
+#include "stringzilla/find/serial.h" // `sz_find_serial`
 
 #ifdef __cplusplus
 extern "C" {
@@ -758,7 +758,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
     }
 
     if (sz_utf8_case_invariant_serial(needle, needle_length)) {
-        sz_cptr_t result = sz_find(haystack, haystack_length, needle, needle_length);
+        sz_cptr_t result = sz_find_serial(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
             return result;

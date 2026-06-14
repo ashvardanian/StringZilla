@@ -85,6 +85,24 @@ template <typename status_type_>
     return static_cast<status_t>(materialized);
 }
 
+/**
+ *  @brief Calls an engine and reads its status entirely inside one @b `[[gnu::noinline]]` frame.
+ *
+ *  @note `read_engine_status_` alone is not enough: when the optimizer folds the engine's return-by-value
+ *        into the caller it can corrupt the status @b before the read runs (seen with g++ trunk on the Ice
+ *        Lake instantiations in this large TU, and with NVCC 12.x on the affine `cuda_status_t`). Performing
+ *        the call and the read together in a non-inlined frame reproduces the same code path as a separate-TU
+ *        call, which the library validates as correct in isolation.
+ */
+template <typename engine_type_, typename first_type_, typename second_type_, typename... rest_types_>
+[[gnu::noinline]] status_t invoke_engine_status_(engine_type_ &engine, first_type_ const &first,
+                                                 second_type_ const &second, similarities_t &results,
+                                                 rest_types_ &...rest) noexcept {
+    auto status = engine(first, second, results, rest...);
+    do_not_optimize(status);
+    return read_engine_status_(status);
+}
+
 #pragma region Levenshtein Distance and Alignment Scores
 
 /** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
@@ -112,13 +130,10 @@ struct similarities_callable {
     }
 
     call_result_t operator()(std::span<token_view_t const> a, std::span<token_view_t const> b) noexcept(false) {
-        // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
-        auto status = std::apply([&](auto &&...rest) { return engine(a, b, results, rest...); }, extra_args);
-        do_not_optimize(status);
-
-        // ! Read the status through `read_engine_status_` to work around an NVCC -O2 host-codegen artifact
-        // ! that corrupts the integer fields of the affine engines' returned `cuda_status_t` in this TU.
-        status_t const status_code = read_engine_status_(status);
+        // Unpack the extra arguments from `std::tuple` and run the call + status read behind one non-inlined
+        // boundary (`invoke_engine_status_`) to dodge a large-TU return-by-value miscompile (see its note).
+        status_t const status_code = std::apply(
+            [&](auto &&...rest) { return invoke_engine_status_(engine, a, b, results, rest...); }, extra_args);
         if (status_code != status_t::success_k)
             throw std::runtime_error(std::string("Failed to compute Levenshtein distance: ") +
                                      status_name(status_code));
