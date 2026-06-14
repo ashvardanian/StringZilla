@@ -21,8 +21,420 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
+/*  Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low 6 bits:
+ *  0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (route to serial). Identical values to the NEON /
+ *  Ice Lake `cN_deltas_lut`, in ascending index order so a single `vrgather` covers the 64-entry table.
+ *  Generated from Unicode full case folding; verified byte-exact against the serial reference. */
+static sz_u8_t const sz_utf8_fold_latin_c4_deltas_rvv_[64] = {1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
+                                                              1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
+                                                              1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
+                                                              0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80};
+static sz_u8_t const sz_utf8_fold_latin_c5_deltas_rvv_[64] = {0, 1, 0, 1, 0, 1, 0, 1, 0,    0x80, 1, 0, 1, 0, 1, 0, //
+                                                              1, 0, 1, 0, 1, 0, 1, 0, 1,    0,    1, 0, 1, 0, 1, 0, //
+                                                              1, 0, 1, 0, 1, 0, 1, 0, 1,    0,    1, 0, 1, 0, 1, 0, //
+                                                              1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1,    0, 1, 0, 1, 0, 0x80};
+static sz_u8_t const sz_utf8_fold_latin_c6_deltas_rvv_[64] = {
+    0,    0x80, 1,    0,    1,    0, 0x80, 1,    0, 0x80, 0x80, 1, 0,    0,    0x80, 0x80, //
+    0x80, 1,    0,    0x80, 0x80, 0, 0x80, 0x80, 1, 0,    0,    0, 0x80, 0x80, 0,    0x80, //
+    1,    0,    1,    0,    1,    0, 0x80, 1,    0, 0x80, 0,    0, 1,    0,    0x80, 1,    //
+    0,    0x80, 0x80, 1,    0,    1, 0,    0x80, 1, 0,    0,    0, 1,    0,    0,    0};
+
+/*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of `sz_ascii_fold_`.
+ *  Only `[0x41, 0x5A]` shifts by `+0x20`; every other lane passes through unchanged. */
+SZ_INTERNAL vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, size_t vl) {
+    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vl), 25, vl);
+    vuint8m8_t lowered_u8m8 = __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vl);
+    return __riscv_vmerge_vvm_u8m8(source_u8m8, lowered_u8m8, is_upper, vl);
+}
+
+/*  Largest strip length that does not split a trailing multi-byte sequence across strips. On the final strip
+ *  (`vl == remaining`) the whole input ends here, so nothing is trimmed; otherwise a last codepoint whose
+ *  declared length runs past `vl` is excluded and reprocessed in the next strip. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vl, sz_size_t remaining) {
+    if (vl >= remaining) return vl;
+    sz_size_t boundary = vl;
+    while (boundary && (source_ptr[boundary - 1] & 0xC0) == 0x80) --boundary; // back up to the last lead
+    if (!boundary) return vl;
+    sz_u8_t lead = source_ptr[boundary - 1];
+    sz_size_t needed = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+    return ((boundary - 1) + needed > vl) ? (boundary - 1) : vl;
+}
+
+/*  Vector-fold one strip of Latin text (ASCII + Latin-1 Supplement C2/C3 + Latin Extended-A/B C4-C6) in
+ *  place — the length-preserving working set of most Latin-script languages. Mirrors the NEON latin chunk:
+ *  Latin-1 uppercase is `+0x20`, Latin Extended is a `+0` / `+1` parity delta from the `cN` LUTs, and the
+ *  length-preserving special cases ß→"ss" and µ→μ are byte replacements. Continuation deltas flagged `0x80`
+ *  (expand / shrink / cross-block) and any lead outside C2-C6 are "stops": the consumed prefix ends on the
+ *  character boundary before the first stop, and the caller routes that one codepoint to serial.
+ *
+ *  Runs at `e8m4` so the 64-entry `vrgather` over the delta LUTs is a same-LMUL gather, legal and identical
+ *  for every VLEN >= 128. Sets `*needs_serial` when it stopped on a non-handled codepoint (vs. merely
+ *  trimming a trailing incomplete sequence). Returns the number of bytes folded and written. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                    sz_u8_t *destination_ptr, int *needs_serial) {
+    size_t vl = __riscv_vsetvl_e8m4(remaining);
+    vuint8m4_t source = __riscv_vle8_v_u8m4(source_ptr, vl);
+    vuint8m4_t previous = __riscv_vslide1up_vx_u8m4(source, 0, vl);
+    sz_u8_t next_carry = (vl < remaining) ? source_ptr[vl] : 0;
+    vuint8m4_t next = __riscv_vslide1down_vx_u8m4(source, next_carry, vl);
+
+    vbool2_t is_continuation = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(source, 0xC0, vl), 0x80, vl);
+    vbool2_t after_c2 = __riscv_vmseq_vx_u8m4_b2(previous, 0xC2, vl);
+    vbool2_t after_c3 = __riscv_vmseq_vx_u8m4_b2(previous, 0xC3, vl);
+    vbool2_t after_c4 = __riscv_vmseq_vx_u8m4_b2(previous, 0xC4, vl);
+    vbool2_t after_c5 = __riscv_vmseq_vx_u8m4_b2(previous, 0xC5, vl);
+    vbool2_t after_c6 = __riscv_vmseq_vx_u8m4_b2(previous, 0xC6, vl);
+
+    // Latin Extended-A/B continuation deltas: pick the LUT of the preceding lead, only on continuation bytes.
+    vuint8m4_t low6 = __riscv_vand_vx_u8m4(source, 0x3F, vl);
+    vuint8m4_t c4_lut = __riscv_vle8_v_u8m4(sz_utf8_fold_latin_c4_deltas_rvv_, 64);
+    vuint8m4_t c5_lut = __riscv_vle8_v_u8m4(sz_utf8_fold_latin_c5_deltas_rvv_, 64);
+    vuint8m4_t c6_lut = __riscv_vle8_v_u8m4(sz_utf8_fold_latin_c6_deltas_rvv_, 64);
+    vuint8m4_t delta = __riscv_vmv_v_x_u8m4(0, vl);
+    delta = __riscv_vmerge_vvm_u8m4(delta, __riscv_vrgather_vv_u8m4(c4_lut, low6, vl), after_c4, vl);
+    delta = __riscv_vmerge_vvm_u8m4(delta, __riscv_vrgather_vv_u8m4(c5_lut, low6, vl), after_c5, vl);
+    delta = __riscv_vmerge_vvm_u8m4(delta, __riscv_vrgather_vv_u8m4(c6_lut, low6, vl), after_c6, vl);
+    // Deltas apply only on continuation bytes; zero them everywhere else.
+    delta = __riscv_vmerge_vvm_u8m4(__riscv_vmv_v_x_u8m4(0, vl), delta, is_continuation, vl);
+    vbool2_t is_irregular = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(delta, 0x80, vl), 0, vl);
+
+    // Build the folded strip: ASCII A-Z, Latin-1 upper +0x20, ß/µ replacements, then the Extended delta.
+    vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
+    vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
+    // Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20.
+    vbool2_t latin1_range = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x80, vl), 0x1F, vl);
+    vbool2_t is_latin1_upper = __riscv_vmandn_mm_b2(__riscv_vmand_mm_b2(after_c3, latin1_range, vl),
+                                                    __riscv_vmseq_vx_u8m4_b2(source, 0x97, vl), vl);
+    folded = __riscv_vmerge_vvm_u8m4(folded, __riscv_vadd_vx_u8m4(folded, 0x20, vl), is_latin1_upper, vl);
+    // ß (C3 9F) -> "ss": both bytes become 's'.
+    vbool2_t eszett_lead = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(source, 0xC3, vl),
+                                               __riscv_vmseq_vx_u8m4_b2(next, 0x9F, vl), vl);
+    vbool2_t eszett_second = __riscv_vmand_mm_b2(after_c3, __riscv_vmseq_vx_u8m4_b2(source, 0x9F, vl), vl);
+    folded = __riscv_vmerge_vxm_u8m4(folded, 's', __riscv_vmor_mm_b2(eszett_lead, eszett_second, vl), vl);
+    // µ (C2 B5) -> μ (CE BC): lead byte becomes 0xCE, continuation 0xBC.
+    folded = __riscv_vmerge_vxm_u8m4(
+        folded, 0xCE,
+        __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(source, 0xC2, vl), __riscv_vmseq_vx_u8m4_b2(next, 0xB5, vl), vl),
+        vl);
+    folded = __riscv_vmerge_vxm_u8m4(folded, 0xBC,
+                                     __riscv_vmand_mm_b2(after_c2, __riscv_vmseq_vx_u8m4_b2(source, 0xB5, vl), vl), vl);
+    // Latin Extended +1 parity delta (0x80 irregulars corrupt their lane but are trimmed off below).
+    folded = __riscv_vadd_vv_u8m4(folded, delta, vl);
+
+    // Stops: any lead outside the C2-C6 family, or an irregular continuation.
+    vbool2_t is_non_ascii = __riscv_vmsgtu_vx_u8m4_b2(source, 0x7F, vl);
+    vbool2_t is_lead = __riscv_vmandn_mm_b2(is_non_ascii, is_continuation, vl);
+    vbool2_t is_family_lead = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0xC2, vl), 4, vl);
+    vbool2_t is_foreign_lead = __riscv_vmandn_mm_b2(is_lead, is_family_lead, vl);
+    vbool2_t stop = __riscv_vmor_mm_b2(is_foreign_lead, is_irregular, vl);
+
+    long first_stop = __riscv_vfirst_m_b2(stop, vl);
+    sz_size_t consumed;
+    if (first_stop >= 0) {
+        consumed = (sz_size_t)first_stop;
+        while (consumed && (source_ptr[consumed] & 0xC0) == 0x80) --consumed; // back up to the lead
+        *needs_serial = 1;
+    }
+    else {
+        consumed = vl;
+        // Don't split a trailing incomplete sequence: a lead in the last byte belongs to the next strip.
+        if (vl < remaining && source_ptr[vl - 1] >= 0xC0) --consumed;
+        *needs_serial = 0;
+    }
+    if (consumed) __riscv_vse8_v_u8m4(destination_ptr, folded, consumed);
+    return consumed;
+}
+
+/*  Vector-fold one strip of basic Cyrillic (D0/D1 leads) in place. Uppercase sub-ranges are keyed by the
+ *  second byte's high nibble — one `vrgather` over a 16-entry table yields the offset (8→+0x10, 9→+0x20,
+ *  A→−0x20) — and the D0→D1 lead rewrite is a masked `+1` where the lowercase lives in the next block.
+ *  Cyrillic Extended-A (D1 A0+) and any non-D0/D1 lead are stops routed to serial. Same `e8m4` strip /
+ *  stop-and-serial contract as `sz_utf8_fold_latin_strip_rvv_`. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+    static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    size_t vl = __riscv_vsetvl_e8m4(remaining);
+    vuint8m4_t source = __riscv_vle8_v_u8m4(source_ptr, vl);
+    sz_u8_t next_carry = (vl < remaining) ? source_ptr[vl] : 0;
+    vuint8m4_t next = __riscv_vslide1down_vx_u8m4(source, next_carry, vl);
+    vuint8m4_t previous = __riscv_vslide1up_vx_u8m4(source, 0, vl);
+
+    vbool2_t is_continuation = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(source, 0xC0, vl), 0x80, vl);
+    vbool2_t is_d0 = __riscv_vmseq_vx_u8m4_b2(source, 0xD0, vl);
+    vbool2_t is_d1 = __riscv_vmseq_vx_u8m4_b2(source, 0xD1, vl);
+    vbool2_t after_d0 = __riscv_vmseq_vx_u8m4_b2(previous, 0xD0, vl);
+    vbool2_t is_lead = __riscv_vmandn_mm_b2(__riscv_vmsgtu_vx_u8m4_b2(source, 0x7F, vl), is_continuation, vl);
+    vbool2_t is_foreign_lead = __riscv_vmandn_mm_b2(is_lead, __riscv_vmor_mm_b2(is_d0, is_d1, vl), vl);
+    // Cyrillic Extended-A (D1 A0+) folds by parity across blocks — leave it to serial.
+    vbool2_t is_extended = __riscv_vmand_mm_b2(is_d1, __riscv_vmsgeu_vx_u8m4_b2(next, 0xA0, vl), vl);
+    vbool2_t stop = __riscv_vmor_mm_b2(is_foreign_lead, is_extended, vl);
+
+    // Second-byte offset by high nibble, applied only after a D0 lead.
+    vuint8m4_t offsets_lut = __riscv_vle8_v_u8m4(second_byte_offsets, 16);
+    vuint8m4_t offset = __riscv_vrgather_vv_u8m4(offsets_lut, __riscv_vsrl_vx_u8m4(source, 4, vl), vl);
+    offset = __riscv_vmerge_vvm_u8m4(__riscv_vmv_v_x_u8m4(0, vl), offset, after_d0, vl);
+    vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
+    vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
+    folded = __riscv_vadd_vv_u8m4(folded, offset, vl);
+    // Lead rewrite D0 -> D1 (+1) where the next byte is 80-8F or A0-AF.
+    vbool2_t next_80_8f = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0x80, vl), 0x10, vl);
+    vbool2_t next_a0_af = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0xA0, vl), 0x10, vl);
+    vbool2_t needs_d1 = __riscv_vmand_mm_b2(is_d0, __riscv_vmor_mm_b2(next_80_8f, next_a0_af, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(needs_d1, folded, 1, vl);
+
+    long first_stop = __riscv_vfirst_m_b2(stop, vl);
+    sz_size_t consumed;
+    if (first_stop >= 0) {
+        consumed = (sz_size_t)first_stop;
+        while (consumed && (source_ptr[consumed] & 0xC0) == 0x80) --consumed;
+        *needs_serial = 1;
+    }
+    else {
+        consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vl, remaining);
+        *needs_serial = 0;
+    }
+    if (consumed) __riscv_vse8_v_u8m4(destination_ptr, folded, consumed);
+    return consumed;
+}
+
+/*  Vector-fold one strip of basic Greek (CE/CF leads) in place. 'Α'-'Ο' (CE 91-9F) fold `+0x20`; 'Π'-'Ρ'
+ *  and 'Σ'-'Ϋ' fold `-0x20` with a CE->CF lead promotion (+1); final sigma 'ς' (CF 82) folds to 'σ' (+1).
+ *  Accented uppercase (CE 84-90), the expanding 'ΰ' (CE B0), the CF 8F+ symbols, and any non-CE/CF lead are
+ *  stops routed to serial. Same `e8m4` strip / stop-and-serial contract as the other handlers. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                    sz_u8_t *destination_ptr, int *needs_serial) {
+    size_t vl = __riscv_vsetvl_e8m4(remaining);
+    vuint8m4_t source = __riscv_vle8_v_u8m4(source_ptr, vl);
+    sz_u8_t next_carry = (vl < remaining) ? source_ptr[vl] : 0;
+    vuint8m4_t next = __riscv_vslide1down_vx_u8m4(source, next_carry, vl);
+    vuint8m4_t previous = __riscv_vslide1up_vx_u8m4(source, 0, vl);
+
+    vbool2_t is_continuation = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(source, 0xC0, vl), 0x80, vl);
+    vbool2_t is_ce = __riscv_vmseq_vx_u8m4_b2(source, 0xCE, vl);
+    vbool2_t is_cf = __riscv_vmseq_vx_u8m4_b2(source, 0xCF, vl);
+    vbool2_t after_ce = __riscv_vmseq_vx_u8m4_b2(previous, 0xCE, vl);
+    vbool2_t after_cf = __riscv_vmseq_vx_u8m4_b2(previous, 0xCF, vl);
+    vbool2_t is_lead = __riscv_vmandn_mm_b2(__riscv_vmsgtu_vx_u8m4_b2(source, 0x7F, vl), is_continuation, vl);
+    vbool2_t is_foreign_lead = __riscv_vmandn_mm_b2(is_lead, __riscv_vmor_mm_b2(is_ce, is_cf, vl), vl);
+    // CE excluded: next < 0x91 (accented uppercase) or next == 0xB0 ('ΰ' expands). CF excluded: next >= 0x8F.
+    vbool2_t ce_excluded = __riscv_vmand_mm_b2(
+        is_ce,
+        __riscv_vmor_mm_b2(__riscv_vmsltu_vx_u8m4_b2(next, 0x91, vl), __riscv_vmseq_vx_u8m4_b2(next, 0xB0, vl), vl),
+        vl);
+    vbool2_t cf_excluded = __riscv_vmand_mm_b2(is_cf, __riscv_vmsgeu_vx_u8m4_b2(next, 0x8F, vl), vl);
+    vbool2_t stop = __riscv_vmor_mm_b2(is_foreign_lead, __riscv_vmor_mm_b2(ce_excluded, cf_excluded, vl), vl);
+
+    // Promoting ranges (second byte A0-A1 or A3-AB), used both for the second-byte -0x20 and the lead +1.
+    vbool2_t in_promote_a0 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0xA0, vl), 0x02, vl);
+    vbool2_t in_promote_a3 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0xA3, vl), 0x09, vl);
+    vbool2_t next_promote_a0 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0xA0, vl), 0x02, vl);
+    vbool2_t next_promote_a3 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0xA3, vl), 0x09, vl);
+
+    vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
+    vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
+    vbool2_t basic_upper = __riscv_vmand_mm_b2(
+        after_ce, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x91, vl), 0x0F, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(basic_upper, folded, 0x20, vl);
+    vbool2_t promoting_upper = __riscv_vmand_mm_b2(after_ce, __riscv_vmor_mm_b2(in_promote_a0, in_promote_a3, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(promoting_upper, folded, 0xE0, vl); // -0x20
+    vbool2_t final_sigma = __riscv_vmand_mm_b2(after_cf, __riscv_vmseq_vx_u8m4_b2(source, 0x82, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(final_sigma, folded, 0x01, vl);
+    vbool2_t promotes_lead = __riscv_vmand_mm_b2(is_ce, __riscv_vmor_mm_b2(next_promote_a0, next_promote_a3, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(promotes_lead, folded, 0x01, vl); // CE -> CF
+
+    long first_stop = __riscv_vfirst_m_b2(stop, vl);
+    sz_size_t consumed;
+    if (first_stop >= 0) {
+        consumed = (sz_size_t)first_stop;
+        while (consumed && (source_ptr[consumed] & 0xC0) == 0x80) --consumed;
+        *needs_serial = 1;
+    }
+    else {
+        consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vl, remaining);
+        *needs_serial = 0;
+    }
+    if (consumed) __riscv_vse8_v_u8m4(destination_ptr, folded, consumed);
+    return consumed;
+}
+
+/*  Vector-fold one strip of Armenian (D4/D5/D6 leads) in place. Disjoint second-byte offsets — D4 B1-BF and
+ *  D5 90-96 fold `-0x10`, D5 80-8F folds `+0x30` — plus the lead `+1` rewrites D4->D5 (next B1-BF) and
+ *  D5->D6 (next 90-96). The 'և' ligature (D6 87, expands), the D4 Cyrillic-Supplement range (next < B1), and
+ *  any non-D4/D5/D6 lead are stops routed to serial. Same `e8m4` strip / stop-and-serial contract. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+    size_t vl = __riscv_vsetvl_e8m4(remaining);
+    vuint8m4_t source = __riscv_vle8_v_u8m4(source_ptr, vl);
+    sz_u8_t next_carry = (vl < remaining) ? source_ptr[vl] : 0;
+    vuint8m4_t next = __riscv_vslide1down_vx_u8m4(source, next_carry, vl);
+    vuint8m4_t previous = __riscv_vslide1up_vx_u8m4(source, 0, vl);
+
+    vbool2_t is_continuation = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(source, 0xC0, vl), 0x80, vl);
+    vbool2_t is_d4 = __riscv_vmseq_vx_u8m4_b2(source, 0xD4, vl);
+    vbool2_t is_d5 = __riscv_vmseq_vx_u8m4_b2(source, 0xD5, vl);
+    vbool2_t is_d6 = __riscv_vmseq_vx_u8m4_b2(source, 0xD6, vl);
+    vbool2_t after_d4 = __riscv_vmseq_vx_u8m4_b2(previous, 0xD4, vl);
+    vbool2_t after_d5 = __riscv_vmseq_vx_u8m4_b2(previous, 0xD5, vl);
+    vbool2_t is_lead = __riscv_vmandn_mm_b2(__riscv_vmsgtu_vx_u8m4_b2(source, 0x7F, vl), is_continuation, vl);
+    vbool2_t is_family = __riscv_vmor_mm_b2(__riscv_vmor_mm_b2(is_d4, is_d5, vl), is_d6, vl);
+    vbool2_t is_foreign_lead = __riscv_vmandn_mm_b2(is_lead, is_family, vl);
+    vbool2_t d4_stop = __riscv_vmand_mm_b2(is_d4, __riscv_vmsltu_vx_u8m4_b2(next, 0xB1, vl), vl);
+    vbool2_t ligature_stop = __riscv_vmand_mm_b2(is_d6, __riscv_vmseq_vx_u8m4_b2(next, 0x87, vl), vl);
+    vbool2_t stop = __riscv_vmor_mm_b2(is_foreign_lead, __riscv_vmor_mm_b2(d4_stop, ligature_stop, vl), vl);
+
+    vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
+    vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
+    // Second-byte offsets (disjoint lanes).
+    vbool2_t d4_second = __riscv_vmand_mm_b2(after_d4, __riscv_vmsgeu_vx_u8m4_b2(source, 0xB1, vl), vl);
+    vbool2_t d5_plus30 = __riscv_vmand_mm_b2(
+        after_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x80, vl), 0x10, vl), vl);
+    vbool2_t d5_minus10 = __riscv_vmand_mm_b2(
+        after_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x90, vl), 0x07, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(__riscv_vmor_mm_b2(d4_second, d5_minus10, vl), folded, 0xF0, vl); // -0x10
+    folded = __riscv_vadd_vx_u8m4_m(d5_plus30, folded, 0x30, vl);
+    // Lead +1 rewrites D4->D5 and D5->D6.
+    vbool2_t promotes_d4 = __riscv_vmand_mm_b2(is_d4, __riscv_vmsgeu_vx_u8m4_b2(next, 0xB1, vl), vl);
+    vbool2_t promotes_d5 = __riscv_vmand_mm_b2(
+        is_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0x90, vl), 0x07, vl), vl);
+    folded = __riscv_vadd_vx_u8m4_m(__riscv_vmor_mm_b2(promotes_d4, promotes_d5, vl), folded, 0x01, vl);
+
+    long first_stop = __riscv_vfirst_m_b2(stop, vl);
+    sz_size_t consumed;
+    if (first_stop >= 0) {
+        consumed = (sz_size_t)first_stop;
+        while (consumed && (source_ptr[consumed] & 0xC0) == 0x80) --consumed;
+        *needs_serial = 1;
+    }
+    else {
+        consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vl, remaining);
+        *needs_serial = 0;
+    }
+    if (consumed) __riscv_vse8_v_u8m4(destination_ptr, folded, consumed);
+    return consumed;
+}
+
+/*  Vector-fold one strip of Georgian (3-byte E1 82/83 sequences) in place — a uniform 3-byte->3-byte fold
+ *  whose uppercase subset is decided by the THIRD byte, so the lead reads two bytes forward and the
+ *  uppercase flag is carried one lane to the second-byte rewrite and two lanes to the third-byte offset:
+ *  lead E1->E2, second 82/83->B4, third -0x20 (E1 82) or +0x20 (E1 83). Non-Georgian E1 second bytes and
+ *  any non-E1 lead are stops routed to serial. Same `e8m4` strip / stop-and-serial contract. */
+SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+    size_t vl = __riscv_vsetvl_e8m4(remaining);
+    vuint8m4_t source = __riscv_vle8_v_u8m4(source_ptr, vl);
+    sz_u8_t carry1 = (vl < remaining) ? source_ptr[vl] : 0;
+    sz_u8_t carry2 = (vl + 1 < remaining) ? source_ptr[vl + 1] : 0;
+    vuint8m4_t next = __riscv_vslide1down_vx_u8m4(source, carry1, vl);
+    vuint8m4_t next_next = __riscv_vslide1down_vx_u8m4(next, carry2, vl);
+
+    vbool2_t is_continuation = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(source, 0xC0, vl), 0x80, vl);
+    vbool2_t is_e1 = __riscv_vmseq_vx_u8m4_b2(source, 0xE1, vl);
+    vbool2_t is_lead = __riscv_vmandn_mm_b2(__riscv_vmsgtu_vx_u8m4_b2(source, 0x7F, vl), is_continuation, vl);
+    vbool2_t is_foreign_lead = __riscv_vmandn_mm_b2(is_lead, is_e1, vl);
+    vbool2_t is_82_lead = __riscv_vmand_mm_b2(is_e1, __riscv_vmseq_vx_u8m4_b2(next, 0x82, vl), vl);
+    vbool2_t is_83_lead = __riscv_vmand_mm_b2(is_e1, __riscv_vmseq_vx_u8m4_b2(next, 0x83, vl), vl);
+    vbool2_t is_foreign_e1 = __riscv_vmandn_mm_b2(is_e1, __riscv_vmor_mm_b2(is_82_lead, is_83_lead, vl), vl);
+    vbool2_t stop = __riscv_vmor_mm_b2(is_foreign_lead, is_foreign_e1, vl);
+
+    // Uppercase keyed by the third byte: E1 82 third >= A0; E1 83 third in 80-85, or 87, or 8D.
+    vbool2_t is_82_upper_lead = __riscv_vmand_mm_b2(is_82_lead, __riscv_vmsgeu_vx_u8m4_b2(next_next, 0xA0, vl), vl);
+    vbool2_t third_83_range = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next_next, 0x80, vl), 0x06, vl);
+    vbool2_t third_83_extra = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(next_next, 0x87, vl),
+                                                 __riscv_vmseq_vx_u8m4_b2(next_next, 0x8D, vl), vl);
+    vbool2_t is_83_upper_lead = __riscv_vmand_mm_b2(is_83_lead, __riscv_vmor_mm_b2(third_83_range, third_83_extra, vl),
+                                                    vl);
+
+    // Carry the per-block uppercase flag forward as a 0/1 byte: lane +1 (second) and lane +2 (third).
+    vuint8m4_t flag82_lead = __riscv_vmerge_vxm_u8m4(__riscv_vmv_v_x_u8m4(0, vl), 1, is_82_upper_lead, vl);
+    vuint8m4_t flag83_lead = __riscv_vmerge_vxm_u8m4(__riscv_vmv_v_x_u8m4(0, vl), 1, is_83_upper_lead, vl);
+    vuint8m4_t flag82_second = __riscv_vslide1up_vx_u8m4(flag82_lead, 0, vl);
+    vuint8m4_t flag83_second = __riscv_vslide1up_vx_u8m4(flag83_lead, 0, vl);
+    vuint8m4_t flag82_third = __riscv_vslide1up_vx_u8m4(flag82_second, 0, vl);
+    vuint8m4_t flag83_third = __riscv_vslide1up_vx_u8m4(flag83_second, 0, vl);
+
+    vbool2_t is_upper_lead = __riscv_vmor_mm_b2(is_82_upper_lead, is_83_upper_lead, vl);
+    vbool2_t is_upper_second = __riscv_vmsne_vx_u8m4_b2(__riscv_vor_vv_u8m4(flag82_second, flag83_second, vl), 0, vl);
+    vbool2_t is_82_upper_third = __riscv_vmsne_vx_u8m4_b2(flag82_third, 0, vl);
+    vbool2_t is_83_upper_third = __riscv_vmsne_vx_u8m4_b2(flag83_third, 0, vl);
+
+    vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
+    vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
+    folded = __riscv_vmerge_vxm_u8m4(folded, 0xE2, is_upper_lead, vl);    // lead E1 -> E2
+    folded = __riscv_vmerge_vxm_u8m4(folded, 0xB4, is_upper_second, vl);  // second 82/83 -> B4
+    folded = __riscv_vadd_vx_u8m4_m(is_82_upper_third, folded, 0xE0, vl); // third -0x20
+    folded = __riscv_vadd_vx_u8m4_m(is_83_upper_third, folded, 0x20, vl); // third +0x20
+
+    long first_stop = __riscv_vfirst_m_b2(stop, vl);
+    sz_size_t consumed;
+    if (first_stop >= 0) {
+        consumed = (sz_size_t)first_stop;
+        while (consumed && (source_ptr[consumed] & 0xC0) == 0x80) --consumed;
+        *needs_serial = 1;
+    }
+    else {
+        consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vl, remaining);
+        *needs_serial = 0;
+    }
+    if (consumed) __riscv_vse8_v_u8m4(destination_ptr, folded, consumed);
+    return consumed;
+}
+
+/*  Byte-for-byte equivalent to `sz_utf8_case_fold_serial`. Maximal ASCII runs are folded at `e8m8`, Latin /
+ *  Cyrillic / Greek / Armenian / Georgian text are folded in place by their `_strip_rvv_` handlers
+ *  (dispatched on the lead byte), and any other script / length-changing fold is handled by the value-exact
+ *  serial decode/fold/encode for that one codepoint before re-entering the vector path. These folds are 1:1
+ *  in length, so the destination tracks the source for those runs. */
 SZ_PUBLIC sz_size_t sz_utf8_case_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
-    return sz_utf8_case_fold_serial(source, source_length, destination);
+    sz_u8_t const *source_ptr = (sz_u8_t const *)source;
+    sz_u8_t const *source_end = source_ptr + source_length;
+    sz_u8_t *destination_ptr = (sz_u8_t *)destination;
+
+    while (source_ptr < source_end) {
+        // Fold a maximal ASCII run in vector strips, stopping at the first non-ASCII byte.
+        sz_size_t ascii_bytes = (sz_size_t)(source_end - source_ptr);
+        while (ascii_bytes) {
+            size_t vl = __riscv_vsetvl_e8m8(ascii_bytes);
+            vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vl);
+            long first_non_ascii = __riscv_vfirst_m_b1(__riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vl), vl);
+            size_t ascii_run = first_non_ascii < 0 ? vl : (size_t)first_non_ascii;
+            if (ascii_run) __riscv_vse8_v_u8m8(destination_ptr, sz_utf8_fold_ascii_rvv_(source_u8m8, vl), ascii_run);
+            source_ptr += ascii_run;
+            destination_ptr += ascii_run;
+            ascii_bytes -= ascii_run;
+            if (first_non_ascii >= 0) break; // hit a non-ASCII lead
+        }
+        if (source_ptr >= source_end) break;
+
+        // Dispatch the non-ASCII region to the matching vectorized script handler by its lead byte.
+        int needs_serial = 1;
+        sz_size_t consumed = 0;
+        sz_size_t remaining = (sz_size_t)(source_end - source_ptr);
+        sz_u8_t lead = source_ptr[0];
+        if (lead >= 0xC2 && lead <= 0xC6)
+            consumed = sz_utf8_fold_latin_strip_rvv_(source_ptr, remaining, destination_ptr, &needs_serial);
+        else if (lead == 0xD0 || lead == 0xD1)
+            consumed = sz_utf8_fold_cyrillic_strip_rvv_(source_ptr, remaining, destination_ptr, &needs_serial);
+        else if (lead == 0xCE || lead == 0xCF)
+            consumed = sz_utf8_fold_greek_strip_rvv_(source_ptr, remaining, destination_ptr, &needs_serial);
+        else if (lead == 0xD4 || lead == 0xD5 || lead == 0xD6)
+            consumed = sz_utf8_fold_armenian_strip_rvv_(source_ptr, remaining, destination_ptr, &needs_serial);
+        else if (lead == 0xE1)
+            consumed = sz_utf8_fold_georgian_strip_rvv_(source_ptr, remaining, destination_ptr, &needs_serial);
+        source_ptr += consumed;
+        destination_ptr += consumed;
+        if (!needs_serial && consumed) continue; // a clean vectorized strip (or trailing-incomplete trim)
+
+        // One codepoint that the vector path can't fold in place: full decode / Unicode fold / encode.
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune, &rune_length);
+        source_ptr += rune_length;
+        sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
+        for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
+            destination_ptr += sz_rune_export(folded_runes[rune_index], destination_ptr);
+    }
+    return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
 }
 
 #if defined(__clang__)
