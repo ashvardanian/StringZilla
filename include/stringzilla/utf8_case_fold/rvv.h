@@ -180,7 +180,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr
     vbool2_t next_80_8f = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0x80, vl), 0x10, vl);
     vbool2_t next_a0_af = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0xA0, vl), 0x10, vl);
     vbool2_t needs_d1 = __riscv_vmand_mm_b2(is_d0, __riscv_vmor_mm_b2(next_80_8f, next_a0_af, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(needs_d1, folded, 1, vl);
+    folded = __riscv_vadd_vx_u8m4_mu(needs_d1, folded, folded, 1, vl);
 
     long first_stop = __riscv_vfirst_m_b2(stop, vl);
     sz_size_t consumed;
@@ -234,13 +234,13 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, s
     vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
     vbool2_t basic_upper = __riscv_vmand_mm_b2(
         after_ce, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x91, vl), 0x0F, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(basic_upper, folded, 0x20, vl);
+    folded = __riscv_vadd_vx_u8m4_mu(basic_upper, folded, folded, 0x20, vl);
     vbool2_t promoting_upper = __riscv_vmand_mm_b2(after_ce, __riscv_vmor_mm_b2(in_promote_a0, in_promote_a3, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(promoting_upper, folded, 0xE0, vl); // -0x20
+    folded = __riscv_vadd_vx_u8m4_mu(promoting_upper, folded, folded, 0xE0, vl); // -0x20
     vbool2_t final_sigma = __riscv_vmand_mm_b2(after_cf, __riscv_vmseq_vx_u8m4_b2(source, 0x82, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(final_sigma, folded, 0x01, vl);
+    folded = __riscv_vadd_vx_u8m4_mu(final_sigma, folded, folded, 0x01, vl);
     vbool2_t promotes_lead = __riscv_vmand_mm_b2(is_ce, __riscv_vmor_mm_b2(next_promote_a0, next_promote_a3, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(promotes_lead, folded, 0x01, vl); // CE -> CF
+    folded = __riscv_vadd_vx_u8m4_mu(promotes_lead, folded, folded, 0x01, vl); // CE -> CF
 
     long first_stop = __riscv_vfirst_m_b2(stop, vl);
     sz_size_t consumed;
@@ -290,13 +290,13 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr
         after_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x80, vl), 0x10, vl), vl);
     vbool2_t d5_minus10 = __riscv_vmand_mm_b2(
         after_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 0x90, vl), 0x07, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(__riscv_vmor_mm_b2(d4_second, d5_minus10, vl), folded, 0xF0, vl); // -0x10
-    folded = __riscv_vadd_vx_u8m4_m(d5_plus30, folded, 0x30, vl);
+    folded = __riscv_vadd_vx_u8m4_mu(__riscv_vmor_mm_b2(d4_second, d5_minus10, vl), folded, folded, 0xF0, vl); // -0x10
+    folded = __riscv_vadd_vx_u8m4_mu(d5_plus30, folded, folded, 0x30, vl);
     // Lead +1 rewrites D4->D5 and D5->D6.
     vbool2_t promotes_d4 = __riscv_vmand_mm_b2(is_d4, __riscv_vmsgeu_vx_u8m4_b2(next, 0xB1, vl), vl);
     vbool2_t promotes_d5 = __riscv_vmand_mm_b2(
         is_d5, __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(next, 0x90, vl), 0x07, vl), vl);
-    folded = __riscv_vadd_vx_u8m4_m(__riscv_vmor_mm_b2(promotes_d4, promotes_d5, vl), folded, 0x01, vl);
+    folded = __riscv_vadd_vx_u8m4_mu(__riscv_vmor_mm_b2(promotes_d4, promotes_d5, vl), folded, folded, 0x01, vl);
 
     long first_stop = __riscv_vfirst_m_b2(stop, vl);
     sz_size_t consumed;
@@ -359,10 +359,10 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr
 
     vbool2_t is_upper = __riscv_vmsleu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(source, 'A', vl), 25, vl);
     vuint8m4_t folded = __riscv_vmerge_vvm_u8m4(source, __riscv_vadd_vx_u8m4(source, 0x20, vl), is_upper, vl);
-    folded = __riscv_vmerge_vxm_u8m4(folded, 0xE2, is_upper_lead, vl);    // lead E1 -> E2
-    folded = __riscv_vmerge_vxm_u8m4(folded, 0xB4, is_upper_second, vl);  // second 82/83 -> B4
-    folded = __riscv_vadd_vx_u8m4_m(is_82_upper_third, folded, 0xE0, vl); // third -0x20
-    folded = __riscv_vadd_vx_u8m4_m(is_83_upper_third, folded, 0x20, vl); // third +0x20
+    folded = __riscv_vmerge_vxm_u8m4(folded, 0xE2, is_upper_lead, vl);             // lead E1 -> E2
+    folded = __riscv_vmerge_vxm_u8m4(folded, 0xB4, is_upper_second, vl);           // second 82/83 -> B4
+    folded = __riscv_vadd_vx_u8m4_mu(is_82_upper_third, folded, folded, 0xE0, vl); // third -0x20
+    folded = __riscv_vadd_vx_u8m4_mu(is_83_upper_third, folded, folded, 0x20, vl); // third +0x20
 
     long first_stop = __riscv_vfirst_m_b2(stop, vl);
     sz_size_t consumed;
