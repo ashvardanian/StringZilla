@@ -57,6 +57,10 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *const table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
     sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
+    // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
+    // It must be a 64-bit constant, NOT `SZ_SIZE_MAX` - on 32-bit targets (e.g. wasm32) `sz_size_t` is
+    // 32-bit, so `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
+    sz_u64_t const empty_slot = ~(sz_u64_t)0;
 
     // Hash the smaller set into the hash table using the default available backend.
     for (sz_size_t small_position = 0; small_position < small_sequence->count; ++small_position) {
@@ -66,7 +70,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         sz_size_t hash_slot = hash & (hash_table_slots - 1);
         // Implement linear probing to find the first free slot.
         // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
-        while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
+        while (table_hashes[hash_slot] != empty_slot) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
         table_hashes[hash_slot] = hash;
         table_positions[hash_slot] = small_position;
     }
@@ -80,7 +84,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         sz_size_t hash_slot = hash & (hash_table_slots - 1);
 
         // Implement linear probing to resolve collisions.
-        for (; table_hashes[hash_slot] != SZ_SIZE_MAX; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
+        for (; table_hashes[hash_slot] != empty_slot; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
             sz_u64_t small_hash = table_hashes[hash_slot];
             if (small_hash != hash) continue;
 

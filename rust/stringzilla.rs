@@ -406,12 +406,7 @@ extern "C" {
     pub(crate) fn sz_fill(target: *const c_void, length: usize, value: u8);
     pub(crate) fn sz_move(target: *const c_void, source: *const c_void, length: usize);
     pub(crate) fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
-    pub(crate) fn sz_lookup(
-        target: *const c_void,
-        length: usize,
-        source: *const c_void,
-        lut: *const u8,
-    ) -> *const c_void;
+    pub(crate) fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8);
 
     pub(crate) fn sz_find(
         haystack: *const c_void,
