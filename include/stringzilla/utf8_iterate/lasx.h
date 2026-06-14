@@ -44,15 +44,15 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_lasx(sz_cptr_t text, sz_size_t length, 
     // We need to check if the ASCII chars in [10,13] ('\n', '\v', '\f', '\r') are present.
     // '\r' needs special handling to differentiate between "\r" and "\r\n".
     __m256i newline_u8x32 = __lasx_xvreplgr2vr_b('\n');
-    __m256i v_vec = __lasx_xvreplgr2vr_b('\v');
-    __m256i f_vec = __lasx_xvreplgr2vr_b('\f');
-    __m256i r_vec = __lasx_xvreplgr2vr_b('\r');
+    __m256i vertical_tab_vec = __lasx_xvreplgr2vr_b('\v');
+    __m256i form_feed_vec = __lasx_xvreplgr2vr_b('\f');
+    __m256i carriage_return_vec = __lasx_xvreplgr2vr_b('\r');
 
     // 2-byte newline 0xC285 (NEL), 3-byte 0xE280A8 (LS) and 0xE280A9 (PS).
-    __m256i x_c2_vec = __lasx_xvreplgr2vr_b((char)0xC2);
+    __m256i lead_c2_vec = __lasx_xvreplgr2vr_b((char)0xC2);
     __m256i x_85_vec = __lasx_xvreplgr2vr_b((char)0x85);
-    __m256i x_e2_vec = __lasx_xvreplgr2vr_b((char)0xE2);
-    __m256i x_80_vec = __lasx_xvreplgr2vr_b((char)0x80);
+    __m256i lead_e2_vec = __lasx_xvreplgr2vr_b((char)0xE2);
+    __m256i byte_80_vec = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i x_a8_vec = __lasx_xvreplgr2vr_b((char)0xA8);
     __m256i x_a9_vec = __lasx_xvreplgr2vr_b((char)0xA9);
 
@@ -60,23 +60,24 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_lasx(sz_cptr_t text, sz_size_t length, 
         __m256i text_vec = __lasx_xvld(text, 0);
 
         sz_u32_t newline_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, newline_u8x32));
-        sz_u32_t v_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, v_vec));
-        sz_u32_t f_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, f_vec));
-        sz_u32_t r_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, r_vec)) & 0x7FFFFFFF; // Ignore last byte
-        sz_u32_t one_byte_mask = newline_mask | v_mask | f_mask | r_mask;
+        sz_u32_t vertical_tab_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, vertical_tab_vec));
+        sz_u32_t form_feed_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, form_feed_vec));
+        sz_u32_t carriage_return_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, carriage_return_vec)) &
+                                        0x7FFFFFFF; // Ignore last byte
+        sz_u32_t one_byte_mask = newline_mask | vertical_tab_mask | form_feed_mask | carriage_return_mask;
 
-        sz_u32_t x_c2_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_c2_vec));
+        sz_u32_t lead_c2_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, lead_c2_vec));
         sz_u32_t x_85_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_85_vec));
-        sz_u32_t x_e2_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_e2_vec));
-        sz_u32_t x_80_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_80_vec));
+        sz_u32_t lead_e2_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, lead_e2_vec));
+        sz_u32_t byte_80_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, byte_80_vec));
         sz_u32_t x_a8_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_a8_vec));
         sz_u32_t x_a9_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_a9_vec));
 
-        sz_u32_t rn_match_mask = r_mask & (newline_mask >> 1);
-        sz_u32_t x_c285_mask = x_c2_mask & (x_85_mask >> 1);
-        sz_u32_t two_byte_mask = rn_match_mask | x_c285_mask;
+        sz_u32_t rn_match_mask = carriage_return_mask & (newline_mask >> 1);
+        sz_u32_t nel_c2_85_mask = lead_c2_mask & (x_85_mask >> 1);
+        sz_u32_t two_byte_mask = rn_match_mask | nel_c2_85_mask;
 
-        sz_u32_t x_e280_mask = x_e2_mask & (x_80_mask >> 1);
+        sz_u32_t x_e280_mask = lead_e2_mask & (byte_80_mask >> 1);
         sz_u32_t x_e280a8_mask = x_e280_mask & (x_a8_mask >> 2);
         sz_u32_t x_e280a9_mask = x_e280_mask & (x_a9_mask >> 2);
         sz_u32_t three_byte_mask = x_e280a8_mask | x_e280a9_mask;
@@ -101,15 +102,15 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
 
     __m256i x_20_vec = __lasx_xvreplgr2vr_b(' ');
 
-    __m256i x_c2_vec = __lasx_xvreplgr2vr_b((char)0xC2);
+    __m256i lead_c2_vec = __lasx_xvreplgr2vr_b((char)0xC2);
     __m256i x_85_vec = __lasx_xvreplgr2vr_b((char)0x85);
     __m256i x_a0_vec = __lasx_xvreplgr2vr_b((char)0xA0);
 
     __m256i x_e1_vec = __lasx_xvreplgr2vr_b((char)0xE1);
-    __m256i x_e2_vec = __lasx_xvreplgr2vr_b((char)0xE2);
+    __m256i lead_e2_vec = __lasx_xvreplgr2vr_b((char)0xE2);
     __m256i x_e3_vec = __lasx_xvreplgr2vr_b((char)0xE3);
     __m256i x_9a_vec = __lasx_xvreplgr2vr_b((char)0x9A);
-    __m256i x_80_vec = __lasx_xvreplgr2vr_b((char)0x80);
+    __m256i byte_80_vec = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i x_81_vec = __lasx_xvreplgr2vr_b((char)0x81);
     __m256i x_a8_vec = __lasx_xvreplgr2vr_b((char)0xA8);
     __m256i x_a9_vec = __lasx_xvreplgr2vr_b((char)0xA9);
@@ -122,22 +123,22 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
         // 1-byte indicators & matches. Range [9,13] covers \t, \n, \v, \f, \r.
         __m256i x_20_cmp = __lasx_xvseq_b(text_vec, x_20_vec);
         // `cmpgt_epi8(text, 0x08)` → signed `0x08 < text`; `cmpgt_epi8(0x0E, text)` → signed `text < 0x0E`.
-        __m256i t_cmp = __lasx_xvslt_b(__lasx_xvreplgr2vr_b((char)0x08), text_vec);
-        __m256i r_cmp = __lasx_xvslt_b(text_vec, __lasx_xvreplgr2vr_b((char)0x0E));
-        __m256i tr_range = __lasx_xvand_v(t_cmp, r_cmp);
-        __m256i one_byte_cmp = __lasx_xvor_v(x_20_cmp, tr_range);
+        __m256i tab_lower_bound_cmp = __lasx_xvslt_b(__lasx_xvreplgr2vr_b((char)0x08), text_vec);
+        __m256i carriage_return_upper_bound_cmp = __lasx_xvslt_b(text_vec, __lasx_xvreplgr2vr_b((char)0x0E));
+        __m256i tab_carriage_return_range = __lasx_xvand_v(tab_lower_bound_cmp, carriage_return_upper_bound_cmp);
+        __m256i one_byte_cmp = __lasx_xvor_v(x_20_cmp, tab_carriage_return_range);
         sz_u32_t one_byte_mask = sz_xvmovemask_b_utf8_lasx_(one_byte_cmp);
 
-        __m256i x_c2_cmp = __lasx_xvseq_b(text_vec, x_c2_vec);
+        __m256i lead_c2_cmp = __lasx_xvseq_b(text_vec, lead_c2_vec);
         __m256i x_e1_cmp = __lasx_xvseq_b(text_vec, x_e1_vec);
-        __m256i x_e2_cmp = __lasx_xvseq_b(text_vec, x_e2_vec);
+        __m256i lead_e2_cmp = __lasx_xvseq_b(text_vec, lead_e2_vec);
         __m256i x_e3_cmp = __lasx_xvseq_b(text_vec, x_e3_vec);
 
-        sz_u32_t x_c2_mask = sz_xvmovemask_b_utf8_lasx_(x_c2_cmp) & 0x7FFFFFFF;
+        sz_u32_t lead_c2_mask = sz_xvmovemask_b_utf8_lasx_(lead_c2_cmp) & 0x7FFFFFFF;
         sz_u32_t x_e1_mask = sz_xvmovemask_b_utf8_lasx_(x_e1_cmp) & 0x3FFFFFFF;
-        sz_u32_t x_e2_mask = sz_xvmovemask_b_utf8_lasx_(x_e2_cmp) & 0x3FFFFFFF;
+        sz_u32_t lead_e2_mask = sz_xvmovemask_b_utf8_lasx_(lead_e2_cmp) & 0x3FFFFFFF;
         sz_u32_t x_e3_mask = sz_xvmovemask_b_utf8_lasx_(x_e3_cmp) & 0x3FFFFFFF;
-        sz_u32_t prefix_byte_mask = x_c2_mask | x_e1_mask | x_e2_mask | x_e3_mask;
+        sz_u32_t prefix_byte_mask = lead_c2_mask | x_e1_mask | lead_e2_mask | x_e3_mask;
 
         // Fast path: a one-byte match before any multi-byte prefix.
         if (one_byte_mask) {
@@ -159,16 +160,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
         // 2-byte suffixes.
         sz_u32_t x_85_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_85_vec));
         sz_u32_t x_a0_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_a0_vec));
-        sz_u32_t x_c285_mask = x_c2_mask & (x_85_mask >> 1); // U+0085 NEL
-        sz_u32_t x_c2a0_mask = x_c2_mask & (x_a0_mask >> 1); // U+00A0 NBSP
-        sz_u32_t two_byte_mask = x_c285_mask | x_c2a0_mask;
+        sz_u32_t nel_c2_85_mask = lead_c2_mask & (x_85_mask >> 1); // U+0085 NEL
+        sz_u32_t x_c2a0_mask = lead_c2_mask & (x_a0_mask >> 1);    // U+00A0 NBSP
+        sz_u32_t two_byte_mask = nel_c2_85_mask | x_c2a0_mask;
 
         // 3-byte suffixes.
         sz_u32_t x_9a_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_9a_vec));
-        sz_u32_t x_80_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_80_vec));
+        sz_u32_t byte_80_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, byte_80_vec));
         sz_u32_t x_81_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_81_vec));
         // [0x80, 0x8D] range: unsigned `text >= 0x80` AND `text <= 0x8D`.
-        __m256i x_80_ge_cmp = __lasx_xvsle_bu(x_80_vec, text_vec);
+        __m256i x_80_ge_cmp = __lasx_xvsle_bu(byte_80_vec, text_vec);
         __m256i x_8d_le_cmp = __lasx_xvsle_bu(text_vec, __lasx_xvreplgr2vr_b((char)0x8D));
         __m256i x_8d_range = __lasx_xvand_v(x_80_ge_cmp, x_8d_le_cmp);
         sz_u32_t x_8d_range_mask = sz_xvmovemask_b_utf8_lasx_(x_8d_range);
@@ -177,13 +178,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_lasx(sz_cptr_t text, sz_size_t lengt
         sz_u32_t x_af_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_af_vec));
         sz_u32_t x_9f_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(text_vec, x_9f_vec));
 
-        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (x_80_mask >> 2);            // E1 9A 80
-        sz_u32_t range_e280_mask = x_e2_mask & (x_80_mask >> 1) & (x_8d_range_mask >> 2); // E2 80 [80-8D]
-        sz_u32_t line_mask = x_e2_mask & (x_80_mask >> 1) & (x_a8_mask >> 2);             // E2 80 A8
-        sz_u32_t paragraph_mask = x_e2_mask & (x_80_mask >> 1) & (x_a9_mask >> 2);        // E2 80 A9
-        sz_u32_t nnbsp_mask = x_e2_mask & (x_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
-        sz_u32_t mmsp_mask = x_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);             // E2 81 9F
-        sz_u32_t ideographic_mask = x_e3_mask & (x_80_mask >> 1) & (x_80_mask >> 2);      // E3 80 80
+        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);               // E1 9A 80
+        sz_u32_t range_e280_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_8d_range_mask >> 2); // E2 80 [80-8D]
+        sz_u32_t line_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_a8_mask >> 2);             // E2 80 A8
+        sz_u32_t paragraph_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_a9_mask >> 2);        // E2 80 A9
+        sz_u32_t nnbsp_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
+        sz_u32_t mmsp_mask = lead_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);                // E2 81 9F
+        sz_u32_t ideographic_mask = x_e3_mask & (byte_80_mask >> 1) & (byte_80_mask >> 2);      // E3 80 80
         sz_u32_t three_byte_mask = ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask |
                                    ideographic_mask;
 

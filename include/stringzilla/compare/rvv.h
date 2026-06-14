@@ -26,13 +26,13 @@ SZ_PUBLIC sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t a_u8m8 = __riscv_vle8_v_u8m8(a_u8, vl);
-        vuint8m8_t b_u8m8 = __riscv_vle8_v_u8m8(b_u8, vl);
-        vbool1_t ne_mask_b1 = __riscv_vmsne_vv_u8m8_b1(a_u8m8, b_u8m8, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t a_u8m8 = __riscv_vle8_v_u8m8(a_u8, vector_length);
+        vuint8m8_t b_u8m8 = __riscv_vle8_v_u8m8(b_u8, vector_length);
+        vbool1_t ne_mask_b1 = __riscv_vmsne_vv_u8m8_b1(a_u8m8, b_u8m8, vector_length);
         // `vfirst` returns the index of the first set bit, or -1 if none is set.
-        if (__riscv_vfirst_m_b1(ne_mask_b1, vl) >= 0) return sz_false_k;
-        a_u8 += vl, b_u8 += vl, length -= vl;
+        if (__riscv_vfirst_m_b1(ne_mask_b1, vector_length) >= 0) return sz_false_k;
+        a_u8 += vector_length, b_u8 += vector_length, length -= vector_length;
     }
     return sz_true_k;
 }

@@ -68,7 +68,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
     lut.val[2] = vld1q_u8(sz_utf8_norm_lead_lut_ + 32);
     lut.val[3] = vld1q_u8(sz_utf8_norm_lead_lut_ + 48);
     uint8x16_t const flag_vec = vdupq_n_u8(flag);
-    sz_u8_t prev_ccc = 0;
+    sz_u8_t previous_canonical_combining_class = 0;
 
     // 64-byte superchunk gate: one horizontal reduction per 64B for the (overwhelmingly common) inert
     // case. All-ASCII blocks skip with zero LUT work; otherwise the flagged-lead OR is reduced once.
@@ -77,7 +77,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
         uint8x16_t v2 = vld1q_u8(ptr + 32), v3 = vld1q_u8(ptr + 48);
         uint8x16_t any = vorrq_u8(vorrq_u8(v0, v1), vorrq_u8(v2, v3));
         if (vmaxvq_u8(any) < 0x80) {
-            ptr += 64, prev_ccc = 0;
+            ptr += 64, previous_canonical_combining_class = 0;
             continue;
         } // all 64 bytes ASCII: inert
         uint8x16_t flagged = vorrq_u8(vorrq_u8(sz_utf8_norm_classify_neon_lead_(v0, lut, flag_vec),
@@ -85,18 +85,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
                                       vorrq_u8(sz_utf8_norm_classify_neon_lead_(v2, lut, flag_vec),
                                                sz_utf8_norm_classify_neon_lead_(v3, lut, flag_vec)));
         if (vmaxvq_u8(flagged) == 0) { // 64 bytes inert for the form
-            ptr += 64, prev_ccc = 0;
+            ptr += 64, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue;
         }
         // A candidate lead is somewhere in the block; verify exactly, codepoint by codepoint.
         sz_u8_t const *block_end = ptr + 64;
         while (ptr < block_end) {
-            sz_u8_t const *cp_start = ptr;
+            sz_u8_t const *codepoint_start = ptr;
             sz_u8_t b = *ptr;
             sz_u16_t value;
             if (b < 0x80) {
-                prev_ccc = 0, ++ptr;
+                previous_canonical_combining_class = 0, ++ptr;
                 continue;
             }
             else if (b >= 0xE0) { // 3-/4-byte (CJK/Indic/Thai): general parse + 3-stage trie
@@ -110,10 +110,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
                 value = sz_utf8_norm_twobyte_[((sz_rune_t)(b & 0x1Fu) << 6) | (ptr[1] & 0x3Fu)];
                 ptr += 2;
             }
-            sz_u8_t ccc = (sz_u8_t)(value & 0xFFu);
-            if (ccc != 0 && ccc < prev_ccc) return (sz_cptr_t)cp_start;
-            if ((sz_u8_t)(value >> 8) & flag) return (sz_cptr_t)cp_start;
-            prev_ccc = ccc;
+            sz_u8_t canonical_combining_class = (sz_u8_t)(value & 0xFFu);
+            if (canonical_combining_class != 0 && canonical_combining_class < previous_canonical_combining_class)
+                return (sz_cptr_t)codepoint_start;
+            if ((sz_u8_t)(value >> 8) & flag) return (sz_cptr_t)codepoint_start;
+            previous_canonical_combining_class = canonical_combining_class;
         }
     }
 
@@ -122,7 +123,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
         // After a skip, realign to a codepoint boundary - a 16-byte step can land mid-sequence, and the
         // straddling codepoint's lead was already classified inert in the chunk we are leaving.
         if (vmaxvq_u8(v) < 0x80) {
-            ptr += 16, prev_ccc = 0;
+            ptr += 16, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue; // all-ASCII: inert
         }
@@ -133,7 +134,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
         uint8x16_t families = vqtbl4q_u8(lut, vandq_u8(v, vdupq_n_u8(0x3F)));
         uint8x16_t flagged = vandq_u8(vandq_u8(families, flag_vec), is_lead);
         if (vmaxvq_u8(flagged) == 0) { // no flagged lead: inert for form
-            ptr += 16, prev_ccc = 0;
+            ptr += 16, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue;
         }
@@ -142,46 +143,46 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
         sz_u8_t const *chunk_end = ptr + 16;
         while (ptr < chunk_end) {
             if (*ptr < 0x80) {
-                prev_ccc = 0, ++ptr;
+                previous_canonical_combining_class = 0, ++ptr;
                 continue;
             }
             sz_rune_t rune;
             sz_rune_length_t rune_length;
             sz_rune_parse((sz_cptr_t)ptr, (sz_cptr_t)end, &rune, &rune_length);
             sz_u16_t value = sz_utf8_norm_value_(rune);
-            sz_u8_t ccc = (sz_u8_t)(value & 0xFFu);
-            if (ccc != 0 && ccc < prev_ccc) return (sz_cptr_t)ptr;
+            sz_u8_t canonical_combining_class = (sz_u8_t)(value & 0xFFu);
+            if (canonical_combining_class != 0 && canonical_combining_class < previous_canonical_combining_class)
+                return (sz_cptr_t)ptr;
             if ((sz_u8_t)(value >> 8) & flag) return (sz_cptr_t)ptr;
-            prev_ccc = ccc;
+            previous_canonical_combining_class = canonical_combining_class;
             ptr += rune_length;
         }
     }
 
-    // Tail (< 16 bytes), carrying the combining class across the last chunk boundary.
+    // Tail (< 16 bytes), carrying the canonical combining class across the last chunk boundary.
     while (ptr < end) {
         if (*ptr < 0x80) {
-            prev_ccc = 0, ++ptr;
+            previous_canonical_combining_class = 0, ++ptr;
             continue;
         }
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse((sz_cptr_t)ptr, (sz_cptr_t)end, &rune, &rune_length);
         sz_u16_t value = sz_utf8_norm_value_(rune);
-        sz_u8_t ccc = (sz_u8_t)(value & 0xFFu);
-        if (ccc != 0 && ccc < prev_ccc) return (sz_cptr_t)ptr;
+        sz_u8_t canonical_combining_class = (sz_u8_t)(value & 0xFFu);
+        if (canonical_combining_class != 0 && canonical_combining_class < previous_canonical_combining_class)
+            return (sz_cptr_t)ptr;
         if ((sz_u8_t)(value >> 8) & flag) return (sz_cptr_t)ptr;
-        prev_ccc = ccc;
+        previous_canonical_combining_class = canonical_combining_class;
         ptr += rune_length;
     }
     return SZ_NULL_CHAR;
 }
 
-/** @copydoc sz_utf8_norm */
 SZ_PUBLIC sz_size_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_neon_);
 }
 
-/** @copydoc sz_utf8_norm_violation */
 SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_neon_);
 }

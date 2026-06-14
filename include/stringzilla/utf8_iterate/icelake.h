@@ -28,19 +28,19 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_icelake(sz_cptr_t text, sz_size_t lengt
 
     // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
     // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    sz_u512_vec_t newline_vec, v_vec, f_vec, r_vec;
+    sz_u512_vec_t newline_vec, vertical_tab_vec, form_feed_vec, carriage_return_vec;
     newline_vec.zmm = _mm512_set1_epi8('\n');
-    v_vec.zmm = _mm512_set1_epi8('\v');
-    f_vec.zmm = _mm512_set1_epi8('\f');
-    r_vec.zmm = _mm512_set1_epi8('\r');
+    vertical_tab_vec.zmm = _mm512_set1_epi8('\v');
+    form_feed_vec.zmm = _mm512_set1_epi8('\f');
+    carriage_return_vec.zmm = _mm512_set1_epi8('\r');
 
     // We also need to match the 2-byte newline character 0xC285 (NEL),
     // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
-    sz_u512_vec_t x_c2_vec, x_85_vec, x_e2_vec, x_80_vec, x_a8_vec, x_a9_vec;
-    x_c2_vec.zmm = _mm512_set1_epi8('\xC2');
+    sz_u512_vec_t lead_c2_vec, x_85_vec, lead_e2_vec, byte_80_vec, x_a8_vec, x_a9_vec;
+    lead_c2_vec.zmm = _mm512_set1_epi8('\xC2');
     x_85_vec.zmm = _mm512_set1_epi8('\x85');
-    x_e2_vec.zmm = _mm512_set1_epi8('\xE2');
-    x_80_vec.zmm = _mm512_set1_epi8('\x80');
+    lead_e2_vec.zmm = _mm512_set1_epi8('\xE2');
+    byte_80_vec.zmm = _mm512_set1_epi8('\x80');
     x_a8_vec.zmm = _mm512_set1_epi8('\xA8');
     x_a9_vec.zmm = _mm512_set1_epi8('\xA9');
 
@@ -51,29 +51,30 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_icelake(sz_cptr_t text, sz_size_t lengt
 
         // 1-byte indicators & matches
         __mmask64 newline_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, newline_vec.zmm);
-        __mmask64 v_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, v_vec.zmm);
-        __mmask64 f_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, f_vec.zmm);
-        __mmask64 r_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, r_vec.zmm); // Ignore last
-        sz_u64_t one_byte_mask = _cvtmask64_u64(
-            _kor_mask64(_kor_mask64(newline_mask, v_mask), _kor_mask64(f_mask, r_mask)));
+        __mmask64 vertical_tab_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, vertical_tab_vec.zmm);
+        __mmask64 form_feed_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, form_feed_vec.zmm);
+        __mmask64 carriage_return_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm,
+                                                                     carriage_return_vec.zmm); // Ignore last
+        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(_kor_mask64(newline_mask, vertical_tab_mask),
+                                                            _kor_mask64(form_feed_mask, carriage_return_mask)));
 
         // 2-byte indicators
-        __mmask64 x_c2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_c2_vec.zmm);
+        __mmask64 lead_c2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, lead_c2_vec.zmm);
         __mmask64 x_85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_85_vec.zmm);
-        __mmask64 x_e2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_e2_vec.zmm);
-        __mmask64 x_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_80_vec.zmm);
+        __mmask64 lead_e2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, lead_e2_vec.zmm);
+        __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, byte_80_vec.zmm);
         __mmask64 x_a8_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a8_vec.zmm);
         __mmask64 x_a9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a9_vec.zmm);
 
         // 2-byte matches
-        __mmask64 rn_match_mask = _kand_mask64(r_mask, _kshiftri_mask64(newline_mask, 1));
-        __mmask64 x_c285_mask = _kand_mask64(x_c2_mask, _kshiftri_mask64(x_85_mask, 1));
-        sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(rn_match_mask, x_c285_mask));
+        __mmask64 rn_match_mask = _kand_mask64(carriage_return_mask, _kshiftri_mask64(newline_mask, 1));
+        __mmask64 nel_c2_85_mask = _kand_mask64(lead_c2_mask, _kshiftri_mask64(x_85_mask, 1));
+        sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(rn_match_mask, nel_c2_85_mask));
 
         // 3-byte matches
-        __mmask64 x_e280_mask = _kand_mask64(x_e2_mask, _kshiftri_mask64(x_80_mask, 1));
-        __mmask64 x_e280a8_mask = _kand_mask64(x_e280_mask, _kshiftri_mask64(x_a8_mask, 2));
-        __mmask64 x_e280a9_mask = _kand_mask64(x_e280_mask, _kshiftri_mask64(x_a9_mask, 2));
+        __mmask64 lead_e280_mask = _kand_mask64(lead_e2_mask, _kshiftri_mask64(byte_80_mask, 1));
+        __mmask64 x_e280a8_mask = _kand_mask64(lead_e280_mask, _kshiftri_mask64(x_a8_mask, 2));
+        __mmask64 x_e280a9_mask = _kand_mask64(lead_e280_mask, _kshiftri_mask64(x_a9_mask, 2));
         sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(x_e280a8_mask, x_e280a9_mask));
 
         // Find the earliest match regardless of length
@@ -107,14 +108,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
 
     // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present.
     // There is also the canonical space ' ' (0x20).
-    sz_u512_vec_t t_vec, r_vec, x_20_vec;
-    t_vec.zmm = _mm512_set1_epi8('\t');
-    r_vec.zmm = _mm512_set1_epi8('\r');
+    sz_u512_vec_t tab_vec, carriage_return_vec, x_20_vec;
+    tab_vec.zmm = _mm512_set1_epi8('\t');
+    carriage_return_vec.zmm = _mm512_set1_epi8('\r');
     x_20_vec.zmm = _mm512_set1_epi8(' ');
 
     // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP),
-    sz_u512_vec_t x_c2_vec, x_85_vec, x_a0_vec;
-    x_c2_vec.zmm = _mm512_set1_epi8('\xC2');
+    sz_u512_vec_t lead_c2_vec, x_85_vec, x_a0_vec;
+    lead_c2_vec.zmm = _mm512_set1_epi8('\xC2');
     x_85_vec.zmm = _mm512_set1_epi8('\x85');
     x_a0_vec.zmm = _mm512_set1_epi8('\xA0');
 
@@ -123,14 +124,14 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
     // U+202F (0xE280AF), U+205F (0xE2819F),
     // U+2028 (0xE280A8) LINE SEPARATOR, U+2029 (0xE280A9) PARAGRAPH SEPARATOR,
     // and the 3-byte ideographic space 0xE38080 (IDEOGRAPHIC SPACE).
-    sz_u512_vec_t x_e1_vec, x_e2_vec, x_e3_vec,           // ? possible first byte values
-        x_9a_vec, x_80_vec, x_81_vec,                     // ? possible second byte values
+    sz_u512_vec_t x_e1_vec, lead_e2_vec, x_e3_vec,        // ? possible first byte values
+        x_9a_vec, byte_80_vec, x_81_vec,                  // ? possible second byte values
         x_8d_vec, x_a8_vec, x_a9_vec, x_af_vec, x_9f_vec; // ? third byte values for ranges and specific matches
     x_e1_vec.zmm = _mm512_set1_epi8('\xE1');
-    x_e2_vec.zmm = _mm512_set1_epi8('\xE2');
+    lead_e2_vec.zmm = _mm512_set1_epi8('\xE2');
     x_e3_vec.zmm = _mm512_set1_epi8('\xE3');
     x_9a_vec.zmm = _mm512_set1_epi8('\x9A');
-    x_80_vec.zmm = _mm512_set1_epi8('\x80');
+    byte_80_vec.zmm = _mm512_set1_epi8('\x80');
     x_81_vec.zmm = _mm512_set1_epi8('\x81');
     x_8d_vec.zmm = _mm512_set1_epi8('\x8D');
     x_a8_vec.zmm = _mm512_set1_epi8('\xA8');
@@ -146,23 +147,24 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
         // 1-byte indicators & matches
         // Range [9,13] covers \t, \n, \v, \f, \r
         __mmask64 x_20_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_20_vec.zmm);
-        __mmask64 t_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, t_vec.zmm);
-        __mmask64 r_mask = _mm512_cmple_epu8_mask(text_vec.zmm, r_vec.zmm);
-        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(x_20_mask, _kand_mask64(t_mask, r_mask)));
+        __mmask64 tab_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, tab_vec.zmm);
+        __mmask64 carriage_return_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, carriage_return_vec.zmm);
+        sz_u64_t one_byte_mask = _cvtmask64_u64(
+            _kor_mask64(x_20_mask, _kand_mask64(tab_ge_mask, carriage_return_le_mask)));
 
         // Instead of immediately checking for 2-byte and 3-byte matches with a ridiculous number of masks and
         // comparisons, let's define a "fast path" for following cases:
         // - no whitespaces are found in the range
         // - a one-byte match comes before any possible prefix byte of a multi-byte match
-        __mmask64 x_c2_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, x_c2_vec.zmm);
+        __mmask64 lead_c2_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, lead_c2_vec.zmm);
         __mmask64 x_e1_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, x_e1_vec.zmm);
-        __mmask64 x_e2_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, x_e2_vec.zmm);
+        __mmask64 lead_e2_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, lead_e2_vec.zmm);
         __mmask64 x_e3_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, x_e3_vec.zmm);
 
         // Check if we matched the "fast path"
         if (one_byte_mask) {
             sz_u64_t prefix_byte_mask = _cvtmask64_u64(
-                _kor_mask64(_kor_mask64(x_c2_mask, x_e1_mask), _kor_mask64(x_e2_mask, x_e3_mask)));
+                _kor_mask64(_kor_mask64(lead_c2_mask, x_e1_mask), _kor_mask64(lead_e2_mask, x_e3_mask)));
             if (prefix_byte_mask) {
                 int first_one_byte_offset = sz_u64_ctz(one_byte_mask);
                 int first_prefix_offset = sz_u64_ctz(prefix_byte_mask);
@@ -182,7 +184,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
         __mmask64 x_85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_85_vec.zmm);
         __mmask64 x_a0_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a0_vec.zmm);
         sz_u64_t two_byte_mask = _cvtmask64_u64(             //
-            _kand_mask64(x_c2_mask,                          //
+            _kand_mask64(lead_c2_mask,                       //
                          _kor_mask64(                        //
                              _kshiftri_mask64(x_85_mask, 1), // U+0085 NEL
                              _kshiftri_mask64(x_a0_mask, 1)  // U+00A0 NBSP
@@ -190,9 +192,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
 
         // 3-byte indicators suffixes
         __mmask64 x_9a_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_9a_vec.zmm);
-        __mmask64 x_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_80_vec.zmm);
+        __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, byte_80_vec.zmm);
         __mmask64 x_81_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_81_vec.zmm);
-        __mmask64 x_80_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, x_80_vec.zmm);
+        __mmask64 x_80_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, byte_80_vec.zmm);
         __mmask64 x_8d_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, x_8d_vec.zmm);
         __mmask64 x_a8_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a8_vec.zmm);
         __mmask64 x_a9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a9_vec.zmm);
@@ -201,25 +203,26 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t le
 
         // 3-byte matches
         __mmask64 ogham_mask = _kand_mask64(
-            x_e1_mask, _kand_mask64(_kshiftri_mask64(x_9a_mask, 1), _kshiftri_mask64(x_80_mask, 2)));
+            x_e1_mask, _kand_mask64(_kshiftri_mask64(x_9a_mask, 1), _kshiftri_mask64(byte_80_mask, 2)));
         // U+2000 to U+200D: E2 80 [80-8D]
         __mmask64 range_e280_mask = _kand_mask64(
-            x_e2_mask, _kand_mask64(_kshiftri_mask64(x_80_mask, 1), _kand_mask64(_kshiftri_mask64(x_80_ge_mask, 2),
-                                                                                 _kshiftri_mask64(x_8d_le_mask, 2))));
+            lead_e2_mask,
+            _kand_mask64(_kshiftri_mask64(byte_80_mask, 1),
+                         _kand_mask64(_kshiftri_mask64(x_80_ge_mask, 2), _kshiftri_mask64(x_8d_le_mask, 2))));
         // U+202F: E2 80 AF (NARROW NO-BREAK SPACE)
         __mmask64 nnbsp_mask = _kand_mask64(
-            x_e2_mask, _kand_mask64(_kshiftri_mask64(x_80_mask, 1), _kshiftri_mask64(x_af_mask, 2)));
+            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_af_mask, 2)));
         // U+205F: E2 81 9F (MEDIUM MATHEMATICAL SPACE)
         __mmask64 mmsp_mask = _kand_mask64(
-            x_e2_mask, _kand_mask64(_kshiftri_mask64(x_81_mask, 1), _kshiftri_mask64(x_9f_mask, 2)));
+            lead_e2_mask, _kand_mask64(_kshiftri_mask64(x_81_mask, 1), _kshiftri_mask64(x_9f_mask, 2)));
         // U+2028: E2 80 A8 (LINE SEPARATOR)
         __mmask64 line_mask = _kand_mask64(
-            x_e2_mask, _kand_mask64(_kshiftri_mask64(x_80_mask, 1), _kshiftri_mask64(x_a8_mask, 2)));
+            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_a8_mask, 2)));
         // U+2029: E2 80 A9 (PARAGRAPH SEPARATOR)
         __mmask64 paragraph_mask = _kand_mask64(
-            x_e2_mask, _kand_mask64(_kshiftri_mask64(x_80_mask, 1), _kshiftri_mask64(x_a9_mask, 2)));
+            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_a9_mask, 2)));
         __mmask64 ideographic_mask = _kand_mask64(
-            x_e3_mask, _kand_mask64(_kshiftri_mask64(x_80_mask, 1), _kshiftri_mask64(x_80_mask, 2)));
+            x_e3_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(byte_80_mask, 2)));
         sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(
             _kor_mask64(_kor_mask64(_kor_mask64(ogham_mask, range_e280_mask), _kor_mask64(nnbsp_mask, mmsp_mask)),
                         _kor_mask64(line_mask, paragraph_mask)),
@@ -530,21 +533,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
-#if defined(__clang__)
-#pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
-#endif
-
-#if defined(__clang__)
-#pragma clang attribute push(                                                                          \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
-    apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
-#endif
-
 /*  UAX-29 word boundary detection (Ice Lake / AVX-512).
  *
  *  The UAX-29 word-break algorithm is a stateful machine: the decision at a candidate position can
@@ -707,10 +695,10 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake( //
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
     // `_mm512_set_epi8` takes lane 63 first, so the arguments descend (GCC has no `_mm512_setr_epi8`).
-    __m512i const lane_identity = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46,
-                                                  45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28,
-                                                  27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
-                                                  9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    __m512i const lane_identity = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47,
+                                                  46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30,
+                                                  29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13,
+                                                  12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 
     while (position > 0) {
         // Oracle-free fast path: a window [position-62, position+2) gives lanes [2,62] full +/-2 context,

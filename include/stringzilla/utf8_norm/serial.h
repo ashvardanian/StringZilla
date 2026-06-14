@@ -41,77 +41,85 @@ extern "C" {
 #define SZ_UTF8_NORM_HANGUL_T_COUNT_ 28u
 #define SZ_UTF8_NORM_HANGUL_N_COUNT_ 588u // V_COUNT * T_COUNT
 
-/** @brief 3-stage trie index for @p cp (0 for out-of-range / default). Shared by the props and scan lookups. */
-SZ_INTERNAL sz_u16_t sz_utf8_norm_index_(sz_rune_t cp) {
-    if (cp >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
-    sz_size_t leaf = cp >> SZ_UTF8_NORM_LOW_BITS_;
+/** @brief 3-stage trie index for @p codepoint (0 for out-of-range / default). Shared by the props and scan lookups. */
+SZ_INTERNAL sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
+    if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
+    sz_size_t leaf = codepoint >> SZ_UTF8_NORM_LOW_BITS_;
     sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> SZ_UTF8_NORM_MID_BITS_];
     sz_u16_t block = sz_utf8_norm_stage2_[(sz_size_t)mid * SZ_UTF8_NORM_MID_ + (leaf & SZ_UTF8_NORM_MID_MASK_)];
-    return sz_utf8_norm_stage3_[(sz_size_t)block * SZ_UTF8_NORM_LOW_ + (cp & SZ_UTF8_NORM_LOW_MASK_)];
+    return sz_utf8_norm_stage3_[(sz_size_t)block * SZ_UTF8_NORM_LOW_ + (codepoint & SZ_UTF8_NORM_LOW_MASK_)];
 }
 
-/** @brief Look up the per-codepoint normalization properties (ccc, quick-check, decomposition, compose). */
-SZ_INTERNAL sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t cp) {
-    return sz_utf8_norm_props_[sz_utf8_norm_index_(cp)];
+/** @brief Look up the per-codepoint normalization properties (canonical combining class, quick-check, decomposition, compose). */
+SZ_INTERNAL sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
+    return sz_utf8_norm_props_[sz_utf8_norm_index_(codepoint)];
 }
 
 /**
- *  @brief Cold-verify value `(qc_flags << 8) | ccc` for @p cp, via the compact scan trie.
+ *  @brief Cold-verify value `(quick_check_flags << 8) | canonical_combining_class` for @p codepoint, via the compact scan trie.
  *
  *  A dedicated palette trie (u8 stage3 + a small u16 palette) keeps this cache-tight: the props trie's
  *  stage3 is u16 (it indexes 4k+ records), and walking it for a full-CJK scan doubled the working set
  *  (~20% slower). Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
  *  test is needed here.
  */
-SZ_INTERNAL sz_u16_t sz_utf8_norm_value_(sz_rune_t cp) {
-    if (cp >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
-    sz_size_t leaf = cp >> SZ_UTF8_NORM_SCAN_LOW_BITS_;
+SZ_INTERNAL sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
+    if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
+    sz_size_t leaf = codepoint >> SZ_UTF8_NORM_SCAN_LOW_BITS_;
     sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> SZ_UTF8_NORM_SCAN_MID_BITS_];
     sz_u16_t block =
         sz_utf8_norm_scan_stage2_[(sz_size_t)mid * SZ_UTF8_NORM_SCAN_MID_ + (leaf & SZ_UTF8_NORM_SCAN_MID_MASK_)];
-    sz_u8_t pal =
-        sz_utf8_norm_scan_stage3_[(sz_size_t)block * SZ_UTF8_NORM_SCAN_LOW_ + (cp & SZ_UTF8_NORM_SCAN_LOW_MASK_)];
-    return sz_utf8_norm_scan_palette_[pal];
+    sz_u8_t palette_index = sz_utf8_norm_scan_stage3_[(sz_size_t)block * SZ_UTF8_NORM_SCAN_LOW_ +
+                                                      (codepoint & SZ_UTF8_NORM_SCAN_LOW_MASK_)];
+    return sz_utf8_norm_scan_palette_[palette_index];
 }
 
 /** @brief Canonical_Combining_Class of a codepoint (0 for starters and all Hangul jamo). */
-SZ_INTERNAL sz_u8_t sz_utf8_norm_ccc_(sz_rune_t cp) { return sz_utf8_norm_lookup_(cp).ccc; }
+SZ_INTERNAL sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
+    return sz_utf8_norm_lookup_(codepoint).canonical_combining_class;
+}
 
 /**
  *  @brief Decompose one codepoint into 1-18 runes and their combining classes in a single lookup.
  *
  *  Fusing decomposition with the combining-class read avoids a second trie probe per codepoint on the
  *  common (non-decomposing) path - which is every base letter and every Hangul jamo.
- *  @return Number of runes written to @p out / @p out_ccc (>= 1).
+ *  @return Number of runes written to @p out / @p out_canonical_combining_class (>= 1).
  */
-SZ_INTERNAL sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t cp, sz_bool_t compat, sz_rune_t *out, sz_u8_t *out_ccc) {
+SZ_INTERNAL sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
+                                                   sz_u8_t *out_canonical_combining_class) {
     // Hangul syllables decompose algorithmically - they are absent from the tables; jamo are starters.
-    if (cp >= SZ_UTF8_NORM_HANGUL_S_BASE_ && cp < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_) {
-        sz_u32_t s = cp - SZ_UTF8_NORM_HANGUL_S_BASE_;
-        out[0] = SZ_UTF8_NORM_HANGUL_L_BASE_ + s / SZ_UTF8_NORM_HANGUL_N_COUNT_, out_ccc[0] = 0;
-        out[1] = SZ_UTF8_NORM_HANGUL_V_BASE_ + (s % SZ_UTF8_NORM_HANGUL_N_COUNT_) / SZ_UTF8_NORM_HANGUL_T_COUNT_,
-        out_ccc[1] = 0;
-        sz_u32_t t = s % SZ_UTF8_NORM_HANGUL_T_COUNT_;
-        if (t) {
-            out[2] = SZ_UTF8_NORM_HANGUL_T_BASE_ + t, out_ccc[2] = 0;
+    if (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
+        codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_) {
+        sz_u32_t syllable = codepoint - SZ_UTF8_NORM_HANGUL_S_BASE_;
+        out[0] = SZ_UTF8_NORM_HANGUL_L_BASE_ + syllable / SZ_UTF8_NORM_HANGUL_N_COUNT_,
+        out_canonical_combining_class[0] = 0;
+        out[1] = SZ_UTF8_NORM_HANGUL_V_BASE_ + (syllable % SZ_UTF8_NORM_HANGUL_N_COUNT_) / SZ_UTF8_NORM_HANGUL_T_COUNT_,
+        out_canonical_combining_class[1] = 0;
+        sz_u32_t trailing = syllable % SZ_UTF8_NORM_HANGUL_T_COUNT_;
+        if (trailing) {
+            out[2] = SZ_UTF8_NORM_HANGUL_T_BASE_ + trailing, out_canonical_combining_class[2] = 0;
             return 3;
         }
         return 2;
     }
-    sz_utf8_norm_props_t p = sz_utf8_norm_lookup_(cp);
-    sz_u16_t index = compat ? p.nfkd : p.nfd;
+    sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(codepoint);
+    sz_u16_t index = compat ? properties.nfkd : properties.nfd;
     if (index == 0) { // no decomposition: emit self with its own combining class (no second lookup)
-        out[0] = cp, out_ccc[0] = p.ccc;
+        out[0] = codepoint, out_canonical_combining_class[0] = properties.canonical_combining_class;
         return 1;
     }
-    sz_utf8_norm_decomp_t d = sz_utf8_norm_decomp_[index];
-    for (sz_size_t i = 0; i != d.length; ++i) {
-        sz_u16_t v = sz_utf8_norm_pool_[d.offset + i];
-        sz_rune_t r = v < SZ_UTF8_NORM_POOL_ASTRAL_ ? (sz_rune_t)v
-                                                    : sz_utf8_norm_pool_astral_[v - SZ_UTF8_NORM_POOL_ASTRAL_];
-        out[i] = r, out_ccc[i] = sz_utf8_norm_ccc_(r); // decomposed runes are atomic; their class is a real lookup
+    sz_utf8_norm_decomp_t decomposition = sz_utf8_norm_decomp_[index];
+    for (sz_size_t i = 0; i != decomposition.length; ++i) {
+        sz_u16_t value = sz_utf8_norm_pool_[decomposition.offset + i];
+        sz_rune_t rune = value < SZ_UTF8_NORM_POOL_ASTRAL_
+                             ? (sz_rune_t)value
+                             : sz_utf8_norm_pool_astral_[value - SZ_UTF8_NORM_POOL_ASTRAL_];
+        out[i] = rune,
+        out_canonical_combining_class[i] = sz_utf8_norm_ccc_(
+            rune); // decomposed runes are atomic; their class is a real lookup
     }
-    return d.length;
+    return decomposition.length;
 }
 
 /**
@@ -122,8 +130,9 @@ SZ_INTERNAL sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     // Hangul: leading + vowel jamo → LV syllable.
     if (a >= SZ_UTF8_NORM_HANGUL_L_BASE_ && a < SZ_UTF8_NORM_HANGUL_L_BASE_ + SZ_UTF8_NORM_HANGUL_L_COUNT_ && //
         b >= SZ_UTF8_NORM_HANGUL_V_BASE_ && b < SZ_UTF8_NORM_HANGUL_V_BASE_ + SZ_UTF8_NORM_HANGUL_V_COUNT_) {
-        sz_u32_t l = a - SZ_UTF8_NORM_HANGUL_L_BASE_, v = b - SZ_UTF8_NORM_HANGUL_V_BASE_;
-        return SZ_UTF8_NORM_HANGUL_S_BASE_ + (l * SZ_UTF8_NORM_HANGUL_V_COUNT_ + v) * SZ_UTF8_NORM_HANGUL_T_COUNT_;
+        sz_u32_t leading = a - SZ_UTF8_NORM_HANGUL_L_BASE_, vowel = b - SZ_UTF8_NORM_HANGUL_V_BASE_;
+        return SZ_UTF8_NORM_HANGUL_S_BASE_ +
+               (leading * SZ_UTF8_NORM_HANGUL_V_COUNT_ + vowel) * SZ_UTF8_NORM_HANGUL_T_COUNT_;
     }
     // Hangul: LV syllable + trailing jamo → LVT syllable.
     if (a >= SZ_UTF8_NORM_HANGUL_S_BASE_ && a < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_ && //
@@ -134,34 +143,36 @@ SZ_INTERNAL sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     // Primary-composite table (#3): the starter exposes a dense slice of partner ids; the combiner
     // carries its own dense partner id. A small range search keyed on the partner replaces the old
     // 42-bit `(a<<21)|b` probe - no runtime key pack, and the search space is per-starter tiny.
-    sz_utf8_norm_props_t pa = sz_utf8_norm_lookup_(a), pb = sz_utf8_norm_lookup_(b);
-    if (pa.starter == 0xFFFF || pb.partner == 0xFFFF) return 0;
-    sz_utf8_norm_compose_starter_t s = sz_utf8_norm_compose_starters_[pa.starter];
-    sz_size_t lo = s.offset, hi = (sz_size_t)s.offset + s.count;
+    sz_utf8_norm_props_t props_a = sz_utf8_norm_lookup_(a), props_b = sz_utf8_norm_lookup_(b);
+    if (props_a.starter == 0xFFFF || props_b.partner == 0xFFFF) return 0;
+    sz_utf8_norm_compose_starter_t starter_entry = sz_utf8_norm_compose_starters_[props_a.starter];
+    sz_size_t lo = starter_entry.offset, hi = (sz_size_t)starter_entry.offset + starter_entry.count;
     while (lo < hi) {
-        sz_size_t m = lo + ((hi - lo) >> 1);
-        if (sz_utf8_norm_compose_partner_[m] < pb.partner) { lo = m + 1; }
-        else { hi = m; }
+        sz_size_t middle = lo + ((hi - lo) >> 1);
+        if (sz_utf8_norm_compose_partner_[middle] < props_b.partner) { lo = middle + 1; }
+        else { hi = middle; }
     }
-    if (lo < (sz_size_t)((sz_size_t)s.offset + s.count) && sz_utf8_norm_compose_partner_[lo] == pb.partner)
+    if (lo < (sz_size_t)((sz_size_t)starter_entry.offset + starter_entry.count) &&
+        sz_utf8_norm_compose_partner_[lo] == props_b.partner)
         return sz_utf8_norm_compose_value_[lo];
     return 0;
 }
 
-/** @brief Stable insertion sort of a combining segment by combining class (canonical ordering). */
-SZ_INTERNAL void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *cccs, sz_size_t count) {
+/** @brief Stable insertion sort of a combining segment by canonical combining class (canonical ordering). */
+SZ_INTERNAL void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
+                                               sz_size_t count) {
     for (sz_size_t i = 1; i < count; ++i) {
         sz_rune_t rune = runes[i];
-        sz_u8_t cc = cccs[i];
-        if (cc == 0) continue; // starters never move (only the leading one can be a starter)
+        sz_u8_t canonical_combining_class = canonical_combining_classes[i];
+        if (canonical_combining_class == 0) continue; // starters never move (only the leading one can be a starter)
         sz_size_t j = i;
-        while (j > 0 && cccs[j - 1] > cc) {
+        while (j > 0 && canonical_combining_classes[j - 1] > canonical_combining_class) {
             runes[j] = runes[j - 1];
-            cccs[j] = cccs[j - 1];
+            canonical_combining_classes[j] = canonical_combining_classes[j - 1];
             --j;
         }
         runes[j] = rune;
-        cccs[j] = cc;
+        canonical_combining_classes[j] = canonical_combining_class;
     }
 }
 
@@ -192,30 +203,31 @@ SZ_INTERNAL void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
 }
 
 /** @brief Order, optionally compose, and emit one buffered combining segment. */
-SZ_INTERNAL void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *cccs, sz_size_t count, sz_bool_t compose,
-                                     sz_utf8_norm_out_t *out) {
+SZ_INTERNAL void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes, sz_size_t count,
+                                     sz_bool_t compose, sz_utf8_norm_out_t *out) {
     if (count == 0) return;
-    sz_utf8_norm_canonical_order_(runes, cccs, count);
+    sz_utf8_norm_canonical_order_(runes, canonical_combining_classes, count);
 
-    if (compose && cccs[0] == 0) {
+    if (compose && canonical_combining_classes[0] == 0) {
         // Standard canonical composition: fold each non-blocked non-starter into the active starter.
         sz_rune_t starter = runes[0];
         sz_size_t produced = 1;
-        int last_cc = 0;
+        int last_canonical_combining_class = 0;
         for (sz_size_t i = 1; i < count; ++i) {
-            sz_rune_t ch = runes[i];
-            sz_u8_t cc = cccs[i];
-            if ((last_cc < (int)cc || last_cc == 0)) {
-                sz_rune_t composed = sz_utf8_norm_compose_pair_(starter, ch);
+            sz_rune_t codepoint = runes[i];
+            sz_u8_t canonical_combining_class = canonical_combining_classes[i];
+            if ((last_canonical_combining_class < (int)canonical_combining_class ||
+                 last_canonical_combining_class == 0)) {
+                sz_rune_t composed = sz_utf8_norm_compose_pair_(starter, codepoint);
                 if (composed) {
                     starter = composed;
                     runes[0] = composed;
                     continue; // composed away: do not append, do not advance the blocking class
                 }
             }
-            last_cc = cc;
-            runes[produced] = ch;
-            cccs[produced] = cc;
+            last_canonical_combining_class = canonical_combining_class;
+            runes[produced] = codepoint;
+            canonical_combining_classes[produced] = canonical_combining_class;
             ++produced;
         }
         count = produced;
@@ -233,66 +245,68 @@ SZ_INTERNAL void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
 
-    sz_rune_t seg[SZ_UTF8_NORM_SEG_CAP_];
-    sz_u8_t seg_ccc[SZ_UTF8_NORM_SEG_CAP_];
-    sz_size_t seg_len = 0;
+    sz_rune_t segment[SZ_UTF8_NORM_SEG_CAP_];
+    sz_u8_t segment_canonical_combining_classes[SZ_UTF8_NORM_SEG_CAP_];
+    sz_size_t segment_length = 0;
 
     sz_rune_t decomposed[SZ_UTF8_NORM_DECOMP_MAX_];
-    sz_u8_t decomposed_ccc[SZ_UTF8_NORM_DECOMP_MAX_];
+    sz_u8_t decomposed_canonical_combining_classes[SZ_UTF8_NORM_DECOMP_MAX_];
     while (source_ptr < source_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune, &rune_length);
         source_ptr += rune_length;
 
-        sz_size_t parts = sz_utf8_norm_decompose_rune_(rune, compat, decomposed, decomposed_ccc);
+        sz_size_t parts = sz_utf8_norm_decompose_rune_(rune, compat, decomposed,
+                                                       decomposed_canonical_combining_classes);
         for (sz_size_t p = 0; p != parts; ++p) {
-            sz_rune_t r = decomposed[p];
-            sz_u8_t cc = decomposed_ccc[p];
-            if (cc == 0) {
+            sz_rune_t rune_part = decomposed[p];
+            sz_u8_t canonical_combining_class = decomposed_canonical_combining_classes[p];
+            if (canonical_combining_class == 0) {
                 // A starter ends the current segment - unless it can merge with a lone adjacent starter.
-                if (compose && seg_len == 1 && seg_ccc[0] == 0) {
-                    sz_rune_t merged = sz_utf8_norm_compose_pair_(seg[0], r);
+                if (compose && segment_length == 1 && segment_canonical_combining_classes[0] == 0) {
+                    sz_rune_t merged = sz_utf8_norm_compose_pair_(segment[0], rune_part);
                     if (merged) {
-                        seg[0] = merged;
+                        segment[0] = merged;
                         continue;
                     }
                 }
-                sz_utf8_norm_flush_(seg, seg_ccc, seg_len, compose, out);
-                seg[0] = r, seg_ccc[0] = 0, seg_len = 1;
+                sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
+                segment[0] = rune_part, segment_canonical_combining_classes[0] = 0, segment_length = 1;
             }
             else {
-                if (seg_len >= SZ_UTF8_NORM_SEG_CAP_) { // pathological overflow: flush and restart
-                    sz_utf8_norm_flush_(seg, seg_ccc, seg_len, compose, out);
-                    seg_len = 0;
+                if (segment_length >= SZ_UTF8_NORM_SEG_CAP_) { // pathological overflow: flush and restart
+                    sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
+                    segment_length = 0;
                 }
-                seg[seg_len] = r, seg_ccc[seg_len] = cc, ++seg_len;
+                segment[segment_length] = rune_part,
+                segment_canonical_combining_classes[segment_length] = canonical_combining_class, ++segment_length;
             }
         }
     }
-    sz_utf8_norm_flush_(seg, seg_ccc, seg_len, compose, out);
+    sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
 }
 
 /**
- *  @brief Is @p cp a normalization-safe break boundary for @p form?
+ *  @brief Is @p codepoint a normalization-safe break boundary for @p form?
  *
- *  A boundary is safe to split before iff @p cp is a starter (ccc == 0) AND its Quick_Check for the
+ *  A boundary is safe to split before iff @p codepoint is a starter (canonical combining class == 0) AND its Quick_Check for the
  *  form is Yes. The Quick_Check=Yes condition is essential: a starter that is QC=Maybe (e.g. a Hangul
  *  vowel/trailing jamo, which composes backward) must NOT be a split point, or `가` + `ᆨ` would be
  *  separated mid-composition.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t cp, sz_normal_form_t form) {
-    sz_bool_t hangul = (cp >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
-                        cp < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
+SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
+    sz_bool_t hangul = (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
+                        codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
                            ? sz_true_k
                            : sz_false_k;
-    sz_utf8_norm_props_t p = sz_utf8_norm_lookup_(cp);
-    if (p.ccc != 0) return sz_false_k;
+    sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(codepoint);
+    if (properties.canonical_combining_class != 0) return sz_false_k;
     switch (form) {
-    case sz_normal_form_nfc_k: return (p.qc & 3) ? sz_false_k : sz_true_k;        // NFC_QC == Yes
-    case sz_normal_form_nfkc_k: return (p.qc & 12) ? sz_false_k : sz_true_k;      // NFKC_QC == Yes
-    case sz_normal_form_nfd_k: return (p.nfd || hangul) ? sz_false_k : sz_true_k; // no canonical decomp
-    default: return (p.nfkd || hangul) ? sz_false_k : sz_true_k;                  // no compat decomp
+    case sz_normal_form_nfc_k: return (properties.quick_check & 3) ? sz_false_k : sz_true_k;   // NFC_QC == Yes
+    case sz_normal_form_nfkc_k: return (properties.quick_check & 12) ? sz_false_k : sz_true_k; // NFKC_QC == Yes
+    case sz_normal_form_nfd_k: return (properties.nfd || hangul) ? sz_false_k : sz_true_k;     // no canonical decomp
+    default: return (properties.nfkd || hangul) ? sz_false_k : sz_true_k;                      // no compat decomp
     }
 }
 
@@ -300,7 +314,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t cp, sz_normal_for
  *  @brief Scan primitive shared by both public entry points - the single point a NEON backend overrides.
  *
  *  Returns the first byte that begins a codepoint that is NOT provably inert for @p form (QC != Yes,
- *  or ccc != 0, or has a relevant decomposition for the D-forms), or @b SZ_NULL_CHAR if the whole span
+ *  or canonical combining class != 0, or has a relevant decomposition for the D-forms), or @b SZ_NULL_CHAR if the whole span
  *  is inert. This is the scalar reference; the NEON backend will replace just this with a `vqtbl4q`
  *  lead-classify plus a 64-byte gate. Semantics match the old module's `sz_utf8_find_denormalized`,
  *  but computed from the unified props trie - no dependency on `utf8_iterate`.
@@ -317,19 +331,19 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t le
                             rune < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
                                ? sz_true_k
                                : sz_false_k;
-        sz_utf8_norm_props_t p = sz_utf8_norm_lookup_(rune);
+        sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(rune);
         switch (form) {
         case sz_normal_form_nfc_k:
-            if ((p.qc & 3) || p.ccc != 0) return (sz_cptr_t)ptr;
+            if ((properties.quick_check & 3) || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
         case sz_normal_form_nfkc_k:
-            if ((p.qc & 12) || p.ccc != 0) return (sz_cptr_t)ptr;
+            if ((properties.quick_check & 12) || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
         case sz_normal_form_nfd_k:
-            if (p.nfd || hangul || p.ccc != 0) return (sz_cptr_t)ptr;
+            if (properties.nfd || hangul || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
         default: // sz_normal_form_nfkd_k
-            if (p.nfkd || hangul || p.ccc != 0) return (sz_cptr_t)ptr;
+            if (properties.nfkd || hangul || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
         }
         ptr += rune_length;
@@ -366,10 +380,10 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
             while (ptr < end) *out++ = *ptr++;
             break;
         }
-        sz_u8_t const *p = (sz_u8_t const *)dirty;
+        sz_u8_t const *dirty_ptr = (sz_u8_t const *)dirty;
 
-        // Back up to the safe boundary that begins the affected segment (a Yes-starter at/before p).
-        sz_u8_t const *segment = p;
+        // Back up to the safe boundary that begins the affected segment (a Yes-starter at/before dirty_ptr).
+        sz_u8_t const *segment = dirty_ptr;
         while (segment > ptr) {
             sz_rune_t rune;
             sz_rune_length_t rune_length;
@@ -381,8 +395,8 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
             segment -= prev_length;
         }
 
-        // Find the next safe boundary strictly after p - the end of the dirty region.
-        sz_u8_t const *tail = p;
+        // Find the next safe boundary strictly after dirty_ptr - the end of the dirty region.
+        sz_u8_t const *tail = dirty_ptr;
         {
             sz_rune_t rune;
             sz_rune_length_t rune_length;
@@ -414,7 +428,7 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
  *  @brief Find the first byte that proves @p source is not in @p form, or @b SZ_NULL_CHAR if it is.
  *  Shared across ISAs; the dirty runs are located by the @p scan primitive.
  *
- *  The @p scan scanner is a conservative superset (it flags every `ccc != 0` byte so the normalizer
+ *  The @p scan scanner is a conservative superset (it flags every `canonical combining class != 0` byte so the normalizer
  *  can blindly re-fix), so a stop is not by itself a violation - a well-ordered bare combining mark is
  *  valid NFD. We therefore verify exactly: a combining segment (delimited by safe boundaries, so the
  *  check is compositional) is in @p form @b iff normalizing it reproduces it byte-for-byte. If it
@@ -437,32 +451,32 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_violation_engine_(sz_cptr_t source, sz_size_t
         if (stop == SZ_NULL_CHAR) return SZ_NULL_CHAR;
 
         // Resolve the flagged byte exactly by normalizing its combining segment and comparing.
-        sz_u8_t const *p = (sz_u8_t const *)stop;
-        sz_u8_t const *segment = p;
+        sz_u8_t const *stop_ptr = (sz_u8_t const *)stop;
+        sz_u8_t const *segment = stop_ptr;
         while (segment > cur) {
-            sz_rune_t r;
-            sz_rune_length_t rl;
-            sz_rune_parse((sz_cptr_t)segment, (sz_cptr_t)end, &r, &rl);
-            if (sz_utf8_norm_is_safe_boundary_(r, form)) break;
-            sz_rune_t pr;
-            sz_rune_length_t pl;
-            sz_rune_rparse((sz_cptr_t)segment, &pr, &pl);
-            segment -= pl;
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)segment, (sz_cptr_t)end, &rune, &rune_length);
+            if (sz_utf8_norm_is_safe_boundary_(rune, form)) break;
+            sz_rune_t previous_rune;
+            sz_rune_length_t previous_length;
+            sz_rune_rparse((sz_cptr_t)segment, &previous_rune, &previous_length);
+            segment -= previous_length;
         }
         // The next safe boundary strictly after the flagged codepoint ends the segment.
-        sz_u8_t const *tail = p;
+        sz_u8_t const *tail = stop_ptr;
         {
-            sz_rune_t r;
-            sz_rune_length_t rl;
-            sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &r, &rl);
-            tail += rl;
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune, &rune_length);
+            tail += rune_length;
         }
         while (tail < end) {
-            sz_rune_t r;
-            sz_rune_length_t rl;
-            sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &r, &rl);
-            if (sz_utf8_norm_is_safe_boundary_(r, form)) break;
-            tail += rl;
+            sz_rune_t rune;
+            sz_rune_length_t rune_length;
+            sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune, &rune_length);
+            if (sz_utf8_norm_is_safe_boundary_(rune, form)) break;
+            tail += rune_length;
         }
         sz_utf8_norm_out_t out;
         out.dst = SZ_NULL;
@@ -475,13 +489,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_violation_engine_(sz_cptr_t source, sz_size_t
     return SZ_NULL_CHAR;
 }
 
-/** @copydoc sz_utf8_norm */
 SZ_PUBLIC sz_size_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                         sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, source_length, form, destination, &sz_utf8_norm_classify_serial_);
 }
 
-/** @copydoc sz_utf8_norm_violation */
 SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form) {
     return sz_utf8_norm_violation_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
 }

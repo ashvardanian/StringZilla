@@ -40,13 +40,13 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u64_t bytesum = 0;
     while (length) {
         sz_size_t want = length < 256 ? length : 256;
-        sz_size_t vl = __riscv_vsetvl_e8m8(want);
-        vuint8m8_t text_u8m8 = __riscv_vle8_v_u8m8(text_u8, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(want);
+        vuint8m8_t text_u8m8 = __riscv_vle8_v_u8m8(text_u8, vector_length);
         // Seed the reduction accumulator with zero; widen u8 lanes and reduce into one u16 lane.
         vuint16m1_t zero = __riscv_vmv_v_x_u16m1(0, __riscv_vsetvl_e16m1(1));
-        vuint16m1_t partial = __riscv_vwredsumu_vs_u8m8_u16m1(text_u8m8, zero, vl);
+        vuint16m1_t partial = __riscv_vwredsumu_vs_u8m8_u16m1(text_u8m8, zero, vector_length);
         bytesum += (sz_u64_t)__riscv_vmv_x_s_u16m1_u16(partial);
-        text_u8 += vl, length -= vl;
+        text_u8 += vector_length, length -= vector_length;
     }
     return bytesum;
 }
@@ -61,7 +61,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
  *  byte permutes and finite-field arithmetic, using Mike Hamburg's "vector permute AES" technique:
  *  the GF(2^8) S-box is evaluated through the composite (tower) field GF((2^4)^2), turning every
  *  256-entry table into a handful of 16-entry nibble lookups served by `vrgather.vv` over a single
- *  16-lane `u8m1` register (`vsetvl e8m1, vl = 16`).
+ *  16-lane `u8m1` register (`vsetvl e8m1, vector_length = 16`).
  *
  *  Pipeline of one round, all on the 16 bytes of state:
  *    1. SubBytes  - map each byte into the tower field via two nibble gathers (a GF(2)-linear basis
@@ -119,16 +119,17 @@ SZ_INTERNAL sz_u8_t const *sz_aes_rot1_rvv_(void) {
  *  reduced modulo 15 so the antilog gather index stays inside the 16 active lanes, and a zero-select
  *  for the `0 * x` and `x * 0` cases. */
 SZ_INTERNAL vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
-                                        vuint8m1_t antilog_table_u8m1, sz_size_t vl) {
-    vuint8m1_t log_a_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vl);
-    vuint8m1_t log_b_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vl);
-    vuint8m1_t log_sum_vec = __riscv_vadd_vv_u8m1(log_a_vec, log_b_vec, vl);
-    vbool8_t overflow_mask = __riscv_vmsgeu_vx_u8m1_b8(log_sum_vec, 15, vl);
-    log_sum_vec = __riscv_vmerge_vvm_u8m1(log_sum_vec, __riscv_vsub_vx_u8m1(log_sum_vec, 15, vl), overflow_mask, vl);
-    vuint8m1_t product_vec = __riscv_vrgather_vv_u8m1(antilog_table_u8m1, log_sum_vec, vl);
-    vbool8_t zero_mask = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a_u8m1, 0, vl),
-                                            __riscv_vmseq_vx_u8m1_b8(b_u8m1, 0, vl), vl);
-    return __riscv_vmerge_vvm_u8m1(product_vec, __riscv_vmv_v_x_u8m1(0, vl), zero_mask, vl);
+                                        vuint8m1_t antilog_table_u8m1, sz_size_t vector_length) {
+    vuint8m1_t log_a_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vector_length);
+    vuint8m1_t log_b_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vector_length);
+    vuint8m1_t log_sum_vec = __riscv_vadd_vv_u8m1(log_a_vec, log_b_vec, vector_length);
+    vbool8_t overflow_mask = __riscv_vmsgeu_vx_u8m1_b8(log_sum_vec, 15, vector_length);
+    log_sum_vec = __riscv_vmerge_vvm_u8m1(log_sum_vec, __riscv_vsub_vx_u8m1(log_sum_vec, 15, vector_length),
+                                          overflow_mask, vector_length);
+    vuint8m1_t product_vec = __riscv_vrgather_vv_u8m1(antilog_table_u8m1, log_sum_vec, vector_length);
+    vbool8_t zero_mask = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a_u8m1, 0, vector_length),
+                                            __riscv_vmseq_vx_u8m1_b8(b_u8m1, 0, vector_length), vector_length);
+    return __riscv_vmerge_vvm_u8m1(product_vec, __riscv_vmv_v_x_u8m1(0, vector_length), zero_mask, vector_length);
 }
 
 /**
@@ -138,83 +139,91 @@ SZ_INTERNAL vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vu
  *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions" (CHES 2009).
  */
 SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    sz_size_t vl = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
+    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
     sz_u8_t const *tables = sz_aes_tables_rvv_();
 
-    vuint8m1_t state_bytes_vec = __riscv_vle8_v_u8m1(state_vec.u8s, vl);
-    vuint8m1_t key_vec = __riscv_vle8_v_u8m1(round_key_vec.u8s, vl);
-    vuint8m1_t mlow_vec = __riscv_vle8_v_u8m1(tables + 16 * 0, vl);
-    vuint8m1_t mhigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 1, vl);
-    vuint8m1_t glow_vec = __riscv_vle8_v_u8m1(tables + 16 * 2, vl);
-    vuint8m1_t ghigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 3, vl);
-    vuint8m1_t square_vec = __riscv_vle8_v_u8m1(tables + 16 * 4, vl);
-    vuint8m1_t inverse4_vec = __riscv_vle8_v_u8m1(tables + 16 * 5, vl);
-    vuint8m1_t log_vec = __riscv_vle8_v_u8m1(tables + 16 * 6, vl);
-    vuint8m1_t antilog_vec = __riscv_vle8_v_u8m1(tables + 16 * 7, vl);
-    vuint8m1_t mul_a_vec = __riscv_vle8_v_u8m1(tables + 16 * 8, vl);
-    vuint8m1_t mul_b_vec = __riscv_vle8_v_u8m1(tables + 16 * 9, vl);
+    vuint8m1_t state_bytes_vec = __riscv_vle8_v_u8m1(state_vec.u8s, vector_length);
+    vuint8m1_t key_vec = __riscv_vle8_v_u8m1(round_key_vec.u8s, vector_length);
+    vuint8m1_t mlow_vec = __riscv_vle8_v_u8m1(tables + 16 * 0, vector_length);
+    vuint8m1_t mhigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 1, vector_length);
+    vuint8m1_t glow_vec = __riscv_vle8_v_u8m1(tables + 16 * 2, vector_length);
+    vuint8m1_t ghigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 3, vector_length);
+    vuint8m1_t square_vec = __riscv_vle8_v_u8m1(tables + 16 * 4, vector_length);
+    vuint8m1_t inverse4_vec = __riscv_vle8_v_u8m1(tables + 16 * 5, vector_length);
+    vuint8m1_t log_vec = __riscv_vle8_v_u8m1(tables + 16 * 6, vector_length);
+    vuint8m1_t antilog_vec = __riscv_vle8_v_u8m1(tables + 16 * 7, vector_length);
+    vuint8m1_t mul_a_vec = __riscv_vle8_v_u8m1(tables + 16 * 8, vector_length);
+    vuint8m1_t mul_b_vec = __riscv_vle8_v_u8m1(tables + 16 * 9, vector_length);
 
     // SubBytes via tower-field inversion + affine.
     // Map each byte into GF((2^4)^2) as a packed nibble pair (hi << 4 | lo).
-    vuint8m1_t low_nibble_vec = __riscv_vand_vx_u8m1(state_bytes_vec, 0x0f, vl);
-    vuint8m1_t high_nibble_vec = __riscv_vsrl_vx_u8m1(state_bytes_vec, 4, vl);
-    vuint8m1_t tower_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(mlow_vec, low_nibble_vec, vl),
-                                                __riscv_vrgather_vv_u8m1(mhigh_vec, high_nibble_vec, vl), vl);
-    vuint8m1_t tower_high_vec = __riscv_vsrl_vx_u8m1(tower_vec, 4, vl);
-    vuint8m1_t tower_low_vec = __riscv_vand_vx_u8m1(tower_vec, 0x0f, vl);
+    vuint8m1_t low_nibble_vec = __riscv_vand_vx_u8m1(state_bytes_vec, 0x0f, vector_length);
+    vuint8m1_t high_nibble_vec = __riscv_vsrl_vx_u8m1(state_bytes_vec, 4, vector_length);
+    vuint8m1_t tower_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(mlow_vec, low_nibble_vec, vector_length),
+                                                __riscv_vrgather_vv_u8m1(mhigh_vec, high_nibble_vec, vector_length),
+                                                vector_length);
+    vuint8m1_t tower_high_vec = __riscv_vsrl_vx_u8m1(tower_vec, 4, vector_length);
+    vuint8m1_t tower_low_vec = __riscv_vand_vx_u8m1(tower_vec, 0x0f, vector_length);
 
     // Norm: norm = lo^2 + lo*hi*A + hi^2*B  (all in GF(2^4)).
-    vuint8m1_t low_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_low_vec, vl);
-    vuint8m1_t high_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_high_vec, vl);
-    vuint8m1_t low_high_vec = sz_gf16_mul_rvv_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vl);
-    vuint8m1_t low_high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, low_high_vec, vl);
-    vuint8m1_t high_squared_b_vec = __riscv_vrgather_vv_u8m1(mul_b_vec, high_squared_vec, vl);
-    vuint8m1_t norm_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vl),
-                                               high_squared_b_vec, vl);
-    vuint8m1_t norm_inverse_vec = __riscv_vrgather_vv_u8m1(inverse4_vec, norm_vec, vl);
+    vuint8m1_t low_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_low_vec, vector_length);
+    vuint8m1_t high_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_high_vec, vector_length);
+    vuint8m1_t low_high_vec = sz_gf16_mul_rvv_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vector_length);
+    vuint8m1_t low_high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, low_high_vec, vector_length);
+    vuint8m1_t high_squared_b_vec = __riscv_vrgather_vv_u8m1(mul_b_vec, high_squared_vec, vector_length);
+    vuint8m1_t norm_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vector_length),
+                                               high_squared_b_vec, vector_length);
+    vuint8m1_t norm_inverse_vec = __riscv_vrgather_vv_u8m1(inverse4_vec, norm_vec, vector_length);
 
     // Inverse in the tower: new_high = hi*norm_inverse, new_low = (lo + hi*A) * norm_inverse.
-    vuint8m1_t new_high_vec = sz_gf16_mul_rvv_(tower_high_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
-    vuint8m1_t high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, tower_high_vec, vl);
-    vuint8m1_t low_xor_high_a_vec = __riscv_vxor_vv_u8m1(tower_low_vec, high_a_vec, vl);
-    vuint8m1_t new_low_vec = sz_gf16_mul_rvv_(low_xor_high_a_vec, norm_inverse_vec, log_vec, antilog_vec, vl);
+    vuint8m1_t new_high_vec = sz_gf16_mul_rvv_(tower_high_vec, norm_inverse_vec, log_vec, antilog_vec, vector_length);
+    vuint8m1_t high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, tower_high_vec, vector_length);
+    vuint8m1_t low_xor_high_a_vec = __riscv_vxor_vv_u8m1(tower_low_vec, high_a_vec, vector_length);
+    vuint8m1_t new_low_vec = sz_gf16_mul_rvv_(low_xor_high_a_vec, norm_inverse_vec, log_vec, antilog_vec,
+                                              vector_length);
 
     // Map back out of the tower and apply the AES affine transform (linear part + 0x63).
-    vuint8m1_t packed_inverse_vec = __riscv_vor_vv_u8m1(__riscv_vsll_vx_u8m1(new_high_vec, 4, vl), new_low_vec, vl);
-    vuint8m1_t packed_low_vec = __riscv_vand_vx_u8m1(packed_inverse_vec, 0x0f, vl);
-    vuint8m1_t packed_high_vec = __riscv_vsrl_vx_u8m1(packed_inverse_vec, 4, vl);
-    vuint8m1_t sbox_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(glow_vec, packed_low_vec, vl),
-                                               __riscv_vrgather_vv_u8m1(ghigh_vec, packed_high_vec, vl), vl);
-    sbox_vec = __riscv_vxor_vx_u8m1(sbox_vec, 0x63, vl);
+    vuint8m1_t packed_inverse_vec = __riscv_vor_vv_u8m1(__riscv_vsll_vx_u8m1(new_high_vec, 4, vector_length),
+                                                        new_low_vec, vector_length);
+    vuint8m1_t packed_low_vec = __riscv_vand_vx_u8m1(packed_inverse_vec, 0x0f, vector_length);
+    vuint8m1_t packed_high_vec = __riscv_vsrl_vx_u8m1(packed_inverse_vec, 4, vector_length);
+    vuint8m1_t sbox_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(glow_vec, packed_low_vec, vector_length),
+                                               __riscv_vrgather_vv_u8m1(ghigh_vec, packed_high_vec, vector_length),
+                                               vector_length);
+    sbox_vec = __riscv_vxor_vx_u8m1(sbox_vec, 0x63, vector_length);
 
     // ShiftRows (combined ordering): premix[j] = sbox[shiftrows[j]].
-    vuint8m1_t shiftrows_index_vec = __riscv_vle8_v_u8m1(sz_aes_shiftrows_rvv_(), vl);
-    vuint8m1_t premix_vec = __riscv_vrgather_vv_u8m1(sbox_vec, shiftrows_index_vec, vl);
+    vuint8m1_t shiftrows_index_vec = __riscv_vle8_v_u8m1(sz_aes_shiftrows_rvv_(), vector_length);
+    vuint8m1_t premix_vec = __riscv_vrgather_vv_u8m1(sbox_vec, shiftrows_index_vec, vector_length);
 
     // MixColumns over groups of 4: out[j] = premix[j] ^ group_xor ^ xtime(premix[j] ^ premix[(j+1)%4]).
-    vuint8m1_t rot1_index_vec = __riscv_vle8_v_u8m1(sz_aes_rot1_rvv_(), vl);
-    vuint8m1_t premix_next_vec = __riscv_vrgather_vv_u8m1(premix_vec, rot1_index_vec, vl);
-    vuint8m1_t diff_vec = __riscv_vxor_vv_u8m1(premix_vec, premix_next_vec, vl);
-    vuint8m1_t shifted_vec = __riscv_vsll_vx_u8m1(diff_vec, 1, vl);
-    vbool8_t high_bit_mask = __riscv_vmsne_vx_u8m1_b8(__riscv_vand_vx_u8m1(diff_vec, 0x80, vl), 0, vl);
-    vuint8m1_t shifted_reduced_vec = __riscv_vxor_vx_u8m1(shifted_vec, 0x1b, vl);
-    vuint8m1_t xtime_vec = __riscv_vmerge_vvm_u8m1(shifted_vec, shifted_reduced_vec, high_bit_mask, vl);
+    vuint8m1_t rot1_index_vec = __riscv_vle8_v_u8m1(sz_aes_rot1_rvv_(), vector_length);
+    vuint8m1_t premix_next_vec = __riscv_vrgather_vv_u8m1(premix_vec, rot1_index_vec, vector_length);
+    vuint8m1_t diff_vec = __riscv_vxor_vv_u8m1(premix_vec, premix_next_vec, vector_length);
+    vuint8m1_t shifted_vec = __riscv_vsll_vx_u8m1(diff_vec, 1, vector_length);
+    vbool8_t high_bit_mask = __riscv_vmsne_vx_u8m1_b8(__riscv_vand_vx_u8m1(diff_vec, 0x80, vector_length), 0,
+                                                      vector_length);
+    vuint8m1_t shifted_reduced_vec = __riscv_vxor_vx_u8m1(shifted_vec, 0x1b, vector_length);
+    vuint8m1_t xtime_vec = __riscv_vmerge_vvm_u8m1(shifted_vec, shifted_reduced_vec, high_bit_mask, vector_length);
 
     // group_xor = xor of the 4 lanes in each group, broadcast across the group via successive rotations.
     vuint8m1_t group_xor_vec = premix_vec;
-    group_xor_vec = __riscv_vxor_vv_u8m1(group_xor_vec, premix_next_vec, vl);
-    vuint8m1_t rot2_index_vec = __riscv_vrgather_vv_u8m1(rot1_index_vec, rot1_index_vec, vl);
-    group_xor_vec = __riscv_vxor_vv_u8m1(group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot2_index_vec, vl), vl);
-    vuint8m1_t rot3_index_vec = __riscv_vrgather_vv_u8m1(rot2_index_vec, rot1_index_vec, vl);
-    group_xor_vec = __riscv_vxor_vv_u8m1(group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot3_index_vec, vl), vl);
+    group_xor_vec = __riscv_vxor_vv_u8m1(group_xor_vec, premix_next_vec, vector_length);
+    vuint8m1_t rot2_index_vec = __riscv_vrgather_vv_u8m1(rot1_index_vec, rot1_index_vec, vector_length);
+    group_xor_vec = __riscv_vxor_vv_u8m1(
+        group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot2_index_vec, vector_length), vector_length);
+    vuint8m1_t rot3_index_vec = __riscv_vrgather_vv_u8m1(rot2_index_vec, rot1_index_vec, vector_length);
+    group_xor_vec = __riscv_vxor_vv_u8m1(
+        group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot3_index_vec, vector_length), vector_length);
 
-    vuint8m1_t out_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(premix_vec, group_xor_vec, vl), xtime_vec, vl);
+    vuint8m1_t out_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(premix_vec, group_xor_vec, vector_length), xtime_vec,
+                                              vector_length);
 
     // AddRoundKey.
-    out_vec = __riscv_vxor_vv_u8m1(out_vec, key_vec, vl);
+    out_vec = __riscv_vxor_vv_u8m1(out_vec, key_vec, vector_length);
 
     sz_u128_vec_t result;
-    __riscv_vse8_v_u8m1(result.u8s, out_vec, vl);
+    __riscv_vse8_v_u8m1(result.u8s, out_vec, vector_length);
     return result;
 }
 
@@ -289,8 +298,8 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_t const *state) {
 /** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target->u8s`,
  *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
 SZ_INTERNAL void sz_hash_load_block_rvv_(sz_u128_vec_t *target, sz_cptr_t source) {
-    sz_size_t vl = __riscv_vsetvl_e8m1(sizeof(target->u8s));
-    __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vl), vl);
+    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target->u8s));
+    __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -301,8 +310,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t 
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
         // A length-agnostic load drops the zero pad and the scalar byte loop: VL covers the partial bytes.
-        sz_size_t vl = __riscv_vsetvl_e8m1(length);
-        __riscv_vse8_v_u8m1(data_vec.u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)start, vl), vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m1(length);
+        __riscv_vse8_v_u8m1(data_vec.u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)start, vector_length), vector_length);
         sz_hash_minimal_update_rvv_(&state, data_vec);
         return sz_hash_minimal_finalize_rvv_(&state, length);
     }
@@ -350,8 +359,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t 
         sz_size_t const window = sizeof(state.ins); // the 64-byte hashing window
         sz_hash_state_init_serial(&state, seed);
         for (; state.ins_length + window <= length; state.ins_length += window) {
-            sz_size_t vl = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
-            __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vl), vl);
+            sz_size_t vector_length = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
+            __riscv_vse8_v_u8m8(state.ins,
+                                __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vector_length),
+                                vector_length);
             sz_hash_state_update_rvv_(&state);
         }
         if (state.ins_length < length) {

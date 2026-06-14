@@ -26,10 +26,10 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-SZ_INTERNAL v128_t sz_utf8_rotate1_wasm_(v128_t v) {
+SZ_INTERNAL v128_t sz_utf8_rotate1_v128_(v128_t v) {
     return wasm_i8x16_shuffle(v, v, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0);
 }
-SZ_INTERNAL v128_t sz_utf8_rotate2_wasm_(v128_t v) {
+SZ_INTERNAL v128_t sz_utf8_rotate2_v128_(v128_t v) {
     return wasm_i8x16_shuffle(v, v, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1);
 }
 
@@ -37,12 +37,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
 
     sz_u128_vec_t text_vec;
     v128_t newline_u8x16 = wasm_i8x16_splat('\n');
-    v128_t f_vec = wasm_i8x16_splat('\f');
-    v128_t r_vec = wasm_i8x16_splat('\r');
-    v128_t x_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
+    v128_t form_feed_vec = wasm_i8x16_splat('\f');
+    v128_t carriage_return_vec = wasm_i8x16_splat('\r');
+    v128_t lead_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
     v128_t x_85_vec = wasm_i8x16_splat((sz_i8_t)0x85);
-    v128_t x_e2_vec = wasm_i8x16_splat((sz_i8_t)0xE2);
-    v128_t x_80_vec = wasm_i8x16_splat((sz_i8_t)0x80);
+    v128_t lead_e2_vec = wasm_i8x16_splat((sz_i8_t)0xE2);
+    v128_t byte_80_vec = wasm_i8x16_splat((sz_i8_t)0x80);
     v128_t x_a8_vec = wasm_i8x16_splat((sz_i8_t)0xA8);
     v128_t x_a9_vec = wasm_i8x16_splat((sz_i8_t)0xA9);
 
@@ -56,18 +56,19 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
         // 1-byte matches: the contiguous control range '\n'..'\f' as one range compare (instead of
         // three separate equalities), plus '\r' which is masked at the last lane for the `\r\n` rule.
         v128_t newline_range_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, newline_u8x16),
-                                                 wasm_u8x16_le(text_vec.v128, f_vec));
-        v128_t r_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, r_vec), drop1_vec); // mask out \r at pos 15
-        v128_t one_byte_cmp = wasm_v128_or(newline_range_cmp, r_cmp);
+                                                 wasm_u8x16_le(text_vec.v128, form_feed_vec));
+        v128_t carriage_return_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, carriage_return_vec),
+                                                   drop1_vec); // mask out \r at pos 15
+        v128_t one_byte_cmp = wasm_v128_or(newline_range_cmp, carriage_return_cmp);
 
         // 2- & 3-byte matches with shifted views
-        v128_t text1 = sz_utf8_rotate1_wasm_(text_vec.v128);
-        v128_t text2 = sz_utf8_rotate2_wasm_(text_vec.v128);
-        v128_t rn_match_u8x16 = wasm_v128_and(r_cmp, wasm_i8x16_eq(text1, newline_u8x16));
-        v128_t x_c285_vec = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_c2_vec), wasm_i8x16_eq(text1, x_85_vec));
+        v128_t text1 = sz_utf8_rotate1_v128_(text_vec.v128);
+        v128_t text2 = sz_utf8_rotate2_v128_(text_vec.v128);
+        v128_t rn_match_u8x16 = wasm_v128_and(carriage_return_cmp, wasm_i8x16_eq(text1, newline_u8x16));
+        v128_t x_c285_vec = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, lead_c2_vec), wasm_i8x16_eq(text1, x_85_vec));
         v128_t two_byte_cmp = wasm_v128_and(wasm_v128_or(rn_match_u8x16, x_c285_vec), drop1_vec);
 
-        v128_t x_e280_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_e2_vec), wasm_i8x16_eq(text1, x_80_vec));
+        v128_t x_e280_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, lead_e2_vec), wasm_i8x16_eq(text1, byte_80_vec));
         v128_t x_e280ax_cmp = wasm_v128_and(
             x_e280_cmp, wasm_v128_or(wasm_i8x16_eq(text2, x_a8_vec), wasm_i8x16_eq(text2, x_a9_vec)));
         v128_t three_byte_cmp = wasm_v128_and(x_e280ax_cmp, drop2_vec);
@@ -97,17 +98,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128(sz_cptr_t text, sz_size_t length, 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
     sz_u128_vec_t text_vec;
-    v128_t t_vec = wasm_i8x16_splat('\t');
-    v128_t r_vec = wasm_i8x16_splat('\r');
+    v128_t tab_vec = wasm_i8x16_splat('\t');
+    v128_t carriage_return_vec = wasm_i8x16_splat('\r');
     v128_t x_20_vec = wasm_i8x16_splat(' ');
-    v128_t x_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
+    v128_t lead_c2_vec = wasm_i8x16_splat((sz_i8_t)0xC2);
     v128_t x_85_vec = wasm_i8x16_splat((sz_i8_t)0x85);
     v128_t x_a0_vec = wasm_i8x16_splat((sz_i8_t)0xA0);
     v128_t x_e1_vec = wasm_i8x16_splat((sz_i8_t)0xE1);
-    v128_t x_e2_vec = wasm_i8x16_splat((sz_i8_t)0xE2);
+    v128_t lead_e2_vec = wasm_i8x16_splat((sz_i8_t)0xE2);
     v128_t x_e3_vec = wasm_i8x16_splat((sz_i8_t)0xE3);
     v128_t x_9a_vec = wasm_i8x16_splat((sz_i8_t)0x9A);
-    v128_t x_80_vec = wasm_i8x16_splat((sz_i8_t)0x80);
+    v128_t byte_80_vec = wasm_i8x16_splat((sz_i8_t)0x80);
     v128_t x_81_vec = wasm_i8x16_splat((sz_i8_t)0x81);
     v128_t x_8d_vec = wasm_i8x16_splat((sz_i8_t)0x8D);
     v128_t x_a8_vec = wasm_i8x16_splat((sz_i8_t)0xA8);
@@ -123,16 +124,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
 
         // 1-byte matches: ' ' or the contiguous range '\t'..'\r'.
         v128_t x_20_cmp = wasm_i8x16_eq(text_vec.v128, x_20_vec);
-        v128_t range_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, t_vec), wasm_u8x16_le(text_vec.v128, r_vec));
+        v128_t range_cmp = wasm_v128_and(wasm_u8x16_ge(text_vec.v128, tab_vec),
+                                         wasm_u8x16_le(text_vec.v128, carriage_return_vec));
         v128_t one_byte_cmp = wasm_v128_or(x_20_cmp, range_cmp);
 
         // 2-byte and 3-byte prefix indicators.
-        v128_t x_c2_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_c2_vec), drop1_vec);
+        v128_t lead_c2_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, lead_c2_vec), drop1_vec);
         v128_t x_e1_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_e1_vec), drop2_vec);
-        v128_t x_e2_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_e2_vec), drop2_vec);
+        v128_t lead_e2_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, lead_e2_vec), drop2_vec);
         v128_t x_e3_cmp = wasm_v128_and(wasm_i8x16_eq(text_vec.v128, x_e3_vec), drop2_vec);
         v128_t prefix_byte_cmp = wasm_v128_or(
-            one_byte_cmp, wasm_v128_or(wasm_v128_or(x_c2_cmp, x_e1_cmp), wasm_v128_or(x_e2_cmp, x_e3_cmp)));
+            one_byte_cmp, wasm_v128_or(wasm_v128_or(lead_c2_cmp, x_e1_cmp), wasm_v128_or(lead_e2_cmp, x_e3_cmp)));
 
         sz_u32_t one_byte_mask = (sz_u32_t)wasm_i8x16_bitmask(one_byte_cmp);
         sz_u32_t prefix_byte_mask = (sz_u32_t)wasm_i8x16_bitmask(prefix_byte_cmp);
@@ -152,29 +154,29 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128(sz_cptr_t text, sz_size_t lengt
         }
 
         // 2-byte matches.
-        v128_t text1 = sz_utf8_rotate1_wasm_(text_vec.v128);
-        v128_t two_vec = wasm_v128_or(wasm_v128_and(x_c2_cmp, wasm_i8x16_eq(text1, x_85_vec)),
-                                      wasm_v128_and(x_c2_cmp, wasm_i8x16_eq(text1, x_a0_vec)));
+        v128_t text1 = sz_utf8_rotate1_v128_(text_vec.v128);
+        v128_t two_vec = wasm_v128_or(wasm_v128_and(lead_c2_cmp, wasm_i8x16_eq(text1, x_85_vec)),
+                                      wasm_v128_and(lead_c2_cmp, wasm_i8x16_eq(text1, x_a0_vec)));
 
         // 3-byte matches.
-        v128_t text2 = sz_utf8_rotate2_wasm_(text_vec.v128);
-        v128_t x_80_ge_cmp = wasm_u8x16_ge(text2, x_80_vec);
+        v128_t text2 = sz_utf8_rotate2_v128_(text_vec.v128);
+        v128_t x_80_ge_cmp = wasm_u8x16_ge(text2, byte_80_vec);
         v128_t x_8d_le_cmp = wasm_u8x16_le(text2, x_8d_vec);
 
-        v128_t ogham_cmp = wasm_v128_and(x_e1_cmp,
-                                         wasm_v128_and(wasm_i8x16_eq(text1, x_9a_vec), wasm_i8x16_eq(text2, x_80_vec)));
+        v128_t ogham_cmp = wasm_v128_and(
+            x_e1_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_9a_vec), wasm_i8x16_eq(text2, byte_80_vec)));
         v128_t range_e280_cmp = wasm_v128_and(
-            x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_v128_and(x_80_ge_cmp, x_8d_le_cmp)));
-        v128_t line_cmp = wasm_v128_and(x_e2_cmp,
-                                        wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a8_vec)));
+            lead_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, byte_80_vec), wasm_v128_and(x_80_ge_cmp, x_8d_le_cmp)));
+        v128_t line_cmp = wasm_v128_and(
+            lead_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, byte_80_vec), wasm_i8x16_eq(text2, x_a8_vec)));
         v128_t paragraph_cmp = wasm_v128_and(
-            x_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_a9_vec)));
-        v128_t nnbsp_cmp = wasm_v128_and(x_e2_cmp,
-                                         wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_af_vec)));
-        v128_t mmsp_cmp = wasm_v128_and(x_e2_cmp,
+            lead_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, byte_80_vec), wasm_i8x16_eq(text2, x_a9_vec)));
+        v128_t nnbsp_cmp = wasm_v128_and(
+            lead_e2_cmp, wasm_v128_and(wasm_i8x16_eq(text1, byte_80_vec), wasm_i8x16_eq(text2, x_af_vec)));
+        v128_t mmsp_cmp = wasm_v128_and(lead_e2_cmp,
                                         wasm_v128_and(wasm_i8x16_eq(text1, x_81_vec), wasm_i8x16_eq(text2, x_9f_vec)));
         v128_t ideographic_vec = wasm_v128_and(
-            x_e3_cmp, wasm_v128_and(wasm_i8x16_eq(text1, x_80_vec), wasm_i8x16_eq(text2, x_80_vec)));
+            x_e3_cmp, wasm_v128_and(wasm_i8x16_eq(text1, byte_80_vec), wasm_i8x16_eq(text2, byte_80_vec)));
         v128_t three_vec = wasm_v128_and(
             wasm_v128_or(wasm_v128_or(wasm_v128_or(ogham_cmp, range_e280_cmp), wasm_v128_or(line_cmp, paragraph_cmp)),
                          wasm_v128_or(wasm_v128_or(nnbsp_cmp, mmsp_cmp), ideographic_vec)),

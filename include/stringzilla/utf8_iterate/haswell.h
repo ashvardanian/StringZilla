@@ -29,23 +29,25 @@ extern "C" {
  *  This uses the identity: a >= b  ⟺  max(a, b) == a
  *  Since `_mm256_max_epu8` treats bytes as unsigned, this gives correct results.
  */
-SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_(__m256i a, __m256i b) { return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a); }
+SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a);
+}
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
     // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
     // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    __m256i n_u8x32 = _mm256_set1_epi8('\n');
-    __m256i v_u8x32 = _mm256_set1_epi8('\v');
-    __m256i f_u8x32 = _mm256_set1_epi8('\f');
-    __m256i r_u8x32 = _mm256_set1_epi8('\r');
+    __m256i newline_u8x32 = _mm256_set1_epi8('\n');
+    __m256i vertical_tab_u8x32 = _mm256_set1_epi8('\v');
+    __m256i form_feed_u8x32 = _mm256_set1_epi8('\f');
+    __m256i carriage_return_u8x32 = _mm256_set1_epi8('\r');
 
     // We also need to match the 2-byte newline character 0xC285 (NEL),
     // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
-    __m256i x_c2_u8x32 = _mm256_set1_epi8('\xC2');
+    __m256i lead_c2_u8x32 = _mm256_set1_epi8('\xC2');
     __m256i x_85_u8x32 = _mm256_set1_epi8('\x85');
-    __m256i x_e2_u8x32 = _mm256_set1_epi8('\xE2');
-    __m256i x_80_u8x32 = _mm256_set1_epi8('\x80');
+    __m256i lead_e2_u8x32 = _mm256_set1_epi8('\xE2');
+    __m256i byte_80_u8x32 = _mm256_set1_epi8('\x80');
     __m256i x_a8_u8x32 = _mm256_set1_epi8('\xA8');
     __m256i x_a9_u8x32 = _mm256_set1_epi8('\xA9');
 
@@ -54,41 +56,42 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t lengt
         __m256i text_u8x32 = _mm256_loadu_si256((__m256i const *)text);
 
         // 1-byte indicators & matches
-        __m256i n_cmp = _mm256_cmpeq_epi8(text_u8x32, n_u8x32);
-        __m256i v_cmp = _mm256_cmpeq_epi8(text_u8x32, v_u8x32);
-        __m256i f_cmp = _mm256_cmpeq_epi8(text_u8x32, f_u8x32);
-        __m256i r_cmp = _mm256_cmpeq_epi8(text_u8x32, r_u8x32);
+        __m256i newline_cmp = _mm256_cmpeq_epi8(text_u8x32, newline_u8x32);
+        __m256i vertical_tab_cmp = _mm256_cmpeq_epi8(text_u8x32, vertical_tab_u8x32);
+        __m256i form_feed_cmp = _mm256_cmpeq_epi8(text_u8x32, form_feed_u8x32);
+        __m256i carriage_return_cmp = _mm256_cmpeq_epi8(text_u8x32, carriage_return_u8x32);
 
-        sz_u32_t n_mask = (sz_u32_t)_mm256_movemask_epi8(n_cmp);
-        sz_u32_t v_mask = (sz_u32_t)_mm256_movemask_epi8(v_cmp);
-        sz_u32_t f_mask = (sz_u32_t)_mm256_movemask_epi8(f_cmp);
-        sz_u32_t r_mask = (sz_u32_t)_mm256_movemask_epi8(r_cmp) & 0x7FFFFFFF; // Ignore last byte
-        sz_u32_t one_byte_mask = n_mask | v_mask | f_mask | r_mask;
+        sz_u32_t newline_mask = (sz_u32_t)_mm256_movemask_epi8(newline_cmp);
+        sz_u32_t vertical_tab_mask = (sz_u32_t)_mm256_movemask_epi8(vertical_tab_cmp);
+        sz_u32_t form_feed_mask = (sz_u32_t)_mm256_movemask_epi8(form_feed_cmp);
+        sz_u32_t carriage_return_mask = (sz_u32_t)_mm256_movemask_epi8(carriage_return_cmp) &
+                                        0x7FFFFFFF; // Ignore last byte
+        sz_u32_t one_byte_mask = newline_mask | vertical_tab_mask | form_feed_mask | carriage_return_mask;
 
         // 2-byte indicators
-        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_c2_u8x32);
+        __m256i lead_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, lead_c2_u8x32);
         __m256i x_85_cmp = _mm256_cmpeq_epi8(text_u8x32, x_85_u8x32);
-        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e2_u8x32);
-        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_u8x32, x_80_u8x32);
+        __m256i lead_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, lead_e2_u8x32);
+        __m256i byte_80_cmp = _mm256_cmpeq_epi8(text_u8x32, byte_80_u8x32);
         __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a8_u8x32);
         __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a9_u8x32);
 
-        sz_u32_t x_c2_mask = (sz_u32_t)_mm256_movemask_epi8(x_c2_cmp);
+        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(lead_c2_cmp);
         sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(x_85_cmp);
-        sz_u32_t x_e2_mask = (sz_u32_t)_mm256_movemask_epi8(x_e2_cmp);
-        sz_u32_t x_80_mask = (sz_u32_t)_mm256_movemask_epi8(x_80_cmp);
+        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(lead_e2_cmp);
+        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(byte_80_cmp);
         sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(x_a8_cmp);
         sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(x_a9_cmp);
 
         // 2-byte matches
-        sz_u32_t rn_mask = r_mask & (n_mask >> 1);
-        sz_u32_t x_c285_mask = x_c2_mask & (x_85_mask >> 1);
-        sz_u32_t two_byte_mask = rn_mask | x_c285_mask;
+        sz_u32_t rn_mask = carriage_return_mask & (newline_mask >> 1);
+        sz_u32_t nel_c2_85_mask = lead_c2_mask & (x_85_mask >> 1);
+        sz_u32_t two_byte_mask = rn_mask | nel_c2_85_mask;
 
         // 3-byte matches
-        sz_u32_t x_e280_mask = x_e2_mask & (x_80_mask >> 1);
-        sz_u32_t x_e280a8_mask = x_e280_mask & (x_a8_mask >> 2);
-        sz_u32_t x_e280a9_mask = x_e280_mask & (x_a9_mask >> 2);
+        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);
+        sz_u32_t x_e280a8_mask = lead_e280_mask & (x_a8_mask >> 2);
+        sz_u32_t x_e280a9_mask = lead_e280_mask & (x_a9_mask >> 2);
         sz_u32_t three_byte_mask = x_e280a8_mask | x_e280a9_mask;
 
         // Find the earliest match regardless of length
@@ -120,16 +123,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
     __m256i x_20_u8x32 = _mm256_set1_epi8(' ');
 
     // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP)
-    __m256i x_c2_u8x32 = _mm256_set1_epi8('\xC2');
+    __m256i lead_c2_u8x32 = _mm256_set1_epi8('\xC2');
     __m256i x_85_u8x32 = _mm256_set1_epi8('\x85');
     __m256i x_a0_u8x32 = _mm256_set1_epi8('\xA0');
 
     // 3-byte character prefixes and suffixes
     __m256i x_e1_u8x32 = _mm256_set1_epi8('\xE1');
-    __m256i x_e2_u8x32 = _mm256_set1_epi8('\xE2');
+    __m256i lead_e2_u8x32 = _mm256_set1_epi8('\xE2');
     __m256i x_e3_u8x32 = _mm256_set1_epi8('\xE3');
     __m256i x_9a_u8x32 = _mm256_set1_epi8('\x9A');
-    __m256i x_80_u8x32 = _mm256_set1_epi8('\x80');
+    __m256i byte_80_u8x32 = _mm256_set1_epi8('\x80');
     __m256i x_81_u8x32 = _mm256_set1_epi8('\x81');
     __m256i x_a8_u8x32 = _mm256_set1_epi8('\xA8');
     __m256i x_a9_u8x32 = _mm256_set1_epi8('\xA9');
@@ -143,24 +146,25 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         // 1-byte indicators & matches
         // Range [9,13] covers \t, \n, \v, \f, \r
         __m256i x_20_cmp = _mm256_cmpeq_epi8(text_u8x32, x_20_u8x32);
-        __m256i t_cmp = _mm256_cmpgt_epi8(text_u8x32, _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
-        __m256i r_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E), text_u8x32); // <= '\r' (0x0D)
-        __m256i tr_range = _mm256_and_si256(t_cmp, r_cmp);
-        __m256i one_byte_cmp = _mm256_or_si256(x_20_cmp, tr_range);
+        __m256i tab_lower_bound_cmp = _mm256_cmpgt_epi8(text_u8x32, _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
+        __m256i carriage_return_upper_bound_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E),
+                                                                    text_u8x32); // <= '\r' (0x0D)
+        __m256i tab_carriage_return_range = _mm256_and_si256(tab_lower_bound_cmp, carriage_return_upper_bound_cmp);
+        __m256i one_byte_cmp = _mm256_or_si256(x_20_cmp, tab_carriage_return_range);
 
         sz_u32_t one_byte_mask = (sz_u32_t)_mm256_movemask_epi8(one_byte_cmp);
 
         // 2-byte and 3-byte prefix indicators
-        __m256i x_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_c2_u8x32);
+        __m256i lead_c2_cmp = _mm256_cmpeq_epi8(text_u8x32, lead_c2_u8x32);
         __m256i x_e1_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e1_u8x32);
-        __m256i x_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e2_u8x32);
+        __m256i lead_e2_cmp = _mm256_cmpeq_epi8(text_u8x32, lead_e2_u8x32);
         __m256i x_e3_cmp = _mm256_cmpeq_epi8(text_u8x32, x_e3_u8x32);
 
-        sz_u32_t x_c2_mask = (sz_u32_t)_mm256_movemask_epi8(x_c2_cmp) & 0x7FFFFFFF;
+        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(lead_c2_cmp) & 0x7FFFFFFF;
         sz_u32_t x_e1_mask = (sz_u32_t)_mm256_movemask_epi8(x_e1_cmp) & 0x3FFFFFFF;
-        sz_u32_t x_e2_mask = (sz_u32_t)_mm256_movemask_epi8(x_e2_cmp) & 0x3FFFFFFF;
+        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(lead_e2_cmp) & 0x3FFFFFFF;
         sz_u32_t x_e3_mask = (sz_u32_t)_mm256_movemask_epi8(x_e3_cmp) & 0x3FFFFFFF;
-        sz_u32_t prefix_byte_mask = x_c2_mask | x_e1_mask | x_e2_mask | x_e3_mask;
+        sz_u32_t prefix_byte_mask = lead_c2_mask | x_e1_mask | lead_e2_mask | x_e3_mask;
 
         // Check for fast path: one-byte match before any prefix
         if (one_byte_mask) {
@@ -185,16 +189,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(x_85_cmp);
         sz_u32_t x_a0_mask = (sz_u32_t)_mm256_movemask_epi8(x_a0_cmp);
 
-        sz_u32_t x_c285_mask = x_c2_mask & (x_85_mask >> 1); // U+0085 NEL
-        sz_u32_t x_c2a0_mask = x_c2_mask & (x_a0_mask >> 1); // U+00A0 NBSP
-        sz_u32_t two_byte_mask = x_c285_mask | x_c2a0_mask;
+        sz_u32_t nel_c2_85_mask = lead_c2_mask & (x_85_mask >> 1); // U+0085 NEL
+        sz_u32_t x_c2a0_mask = lead_c2_mask & (x_a0_mask >> 1);    // U+00A0 NBSP
+        sz_u32_t two_byte_mask = nel_c2_85_mask | x_c2a0_mask;
 
         // 3-byte suffixes
         __m256i x_9a_cmp = _mm256_cmpeq_epi8(text_u8x32, x_9a_u8x32);
-        __m256i x_80_cmp = _mm256_cmpeq_epi8(text_u8x32, x_80_u8x32);
+        __m256i byte_80_cmp = _mm256_cmpeq_epi8(text_u8x32, byte_80_u8x32);
         __m256i x_81_cmp = _mm256_cmpeq_epi8(text_u8x32, x_81_u8x32);
-        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_(text_u8x32, x_80_u8x32);                   // >= 0x80
-        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_(_mm256_set1_epi8((char)0x8D), text_u8x32); // <= 0x8D
+        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_haswell_(text_u8x32, byte_80_u8x32);                // >= 0x80
+        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_haswell_(_mm256_set1_epi8((char)0x8D), text_u8x32); // <= 0x8D
         __m256i x_8d_range = _mm256_and_si256(x_80_ge_cmp, x_8d_le_cmp);
         __m256i x_a8_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a8_u8x32);
         __m256i x_a9_cmp = _mm256_cmpeq_epi8(text_u8x32, x_a9_u8x32);
@@ -202,7 +206,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         __m256i x_9f_cmp = _mm256_cmpeq_epi8(text_u8x32, x_9f_u8x32);
 
         sz_u32_t x_9a_mask = (sz_u32_t)_mm256_movemask_epi8(x_9a_cmp);
-        sz_u32_t x_80_mask = (sz_u32_t)_mm256_movemask_epi8(x_80_cmp);
+        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(byte_80_cmp);
         sz_u32_t x_81_mask = (sz_u32_t)_mm256_movemask_epi8(x_81_cmp);
         sz_u32_t x_8d_range_mask = (sz_u32_t)_mm256_movemask_epi8(x_8d_range);
         sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(x_a8_cmp);
@@ -211,13 +215,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t le
         sz_u32_t x_9f_mask = (sz_u32_t)_mm256_movemask_epi8(x_9f_cmp);
 
         // 3-byte matches
-        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (x_80_mask >> 2);            // E1 9A 80
-        sz_u32_t range_e280_mask = x_e2_mask & (x_80_mask >> 1) & (x_8d_range_mask >> 2); // E2 80 [80-8D]
-        sz_u32_t line_mask = x_e2_mask & (x_80_mask >> 1) & (x_a8_mask >> 2);             // E2 80 A8
-        sz_u32_t paragraph_mask = x_e2_mask & (x_80_mask >> 1) & (x_a9_mask >> 2);        // E2 80 A9
-        sz_u32_t nnbsp_mask = x_e2_mask & (x_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
-        sz_u32_t mmsp_mask = x_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);             // E2 81 9F
-        sz_u32_t ideographic_mask = x_e3_mask & (x_80_mask >> 1) & (x_80_mask >> 2);      // E3 80 80
+        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);               // E1 9A 80
+        sz_u32_t range_e280_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_8d_range_mask >> 2); // E2 80 [80-8D]
+        sz_u32_t line_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_a8_mask >> 2);             // E2 80 A8
+        sz_u32_t paragraph_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_a9_mask >> 2);        // E2 80 A9
+        sz_u32_t nnbsp_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
+        sz_u32_t mmsp_mask = lead_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);                // E2 81 9F
+        sz_u32_t ideographic_mask = x_e3_mask & (byte_80_mask >> 1) & (byte_80_mask >> 2);      // E3 80 80
         sz_u32_t three_byte_mask = ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | paragraph_mask |
                                    ideographic_mask;
 
@@ -315,19 +319,6 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
     // Process remaining bytes with serial
     return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
-#endif
-
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("avx2,bmi,bmi2,popcnt")
-#endif
 
 /*  UAX-29 word boundary detection (vectorized).
  *

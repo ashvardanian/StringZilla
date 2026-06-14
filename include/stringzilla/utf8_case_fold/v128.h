@@ -32,20 +32,20 @@ extern "C" {
 /** @brief Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's low
  *  6 bits: 0x00 identity, 0x01 fold by +1, 0x80 irregular (route to serial). Identical to the RVV/NEON LUTs. */
 static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c4_deltas_v128_[64] = {
-    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,   //
-    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,   //
-    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,   //
+    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
+    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
+    1,    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, //
     0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80};
 static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c5_deltas_v128_[64] = {
-    0, 1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0,   //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    1, 0, 1, 0, 1, 0,   //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    1, 0, 1, 0, 1, 0,   //
-    1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, 0x80};
+    0, 1, 0, 1, 0, 1, 0, 1, 0,    0x80, 1, 0, 1, 0, 1, 0, //
+    1, 0, 1, 0, 1, 0, 1, 0, 1,    0,    1, 0, 1, 0, 1, 0, //
+    1, 0, 1, 0, 1, 0, 1, 0, 1,    0,    1, 0, 1, 0, 1, 0, //
+    1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1,    0, 1, 0, 1, 0, 0x80};
 static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c6_deltas_v128_[64] = {
-    0,    0x80, 1, 0,    1,    0,    0x80, 1,    0, 0x80, 0x80, 1, 0,    0,    0x80, 0x80, //
-    0x80, 1,    0, 0x80, 0x80, 0,    0x80, 0x80, 1, 0,    0,    0, 0x80, 0x80, 0,    0x80, //
-    1,    0,    1, 0,    1,    0,    0x80, 1,    0, 0x80, 0,    0, 1,    0,    0x80, 1,    //
-    0,    0x80, 0x80, 1,  0,    1,    0,    0x80, 1, 0,    0,    0, 1,    0,    0,    0};
+    0,    0x80, 1,    0,    1,    0, 0x80, 1,    0, 0x80, 0x80, 1, 0,    0,    0x80, 0x80, //
+    0x80, 1,    0,    0x80, 0x80, 0, 0x80, 0x80, 1, 0,    0,    0, 0x80, 0x80, 0,    0x80, //
+    1,    0,    1,    0,    1,    0, 0x80, 1,    0, 0x80, 0,    0, 1,    0,    0x80, 1,    //
+    0,    0x80, 0x80, 1,    0,    1, 0,    0x80, 1, 0,    0,    0, 1,    0,    0,    0};
 
 /** @brief Fold 16 ASCII bytes: lowercase `A`..`Z` by +0x20, identical to `sz_ascii_fold_`. */
 SZ_INTERNAL v128_t sz_ascii_fold_v128_(v128_t bytes) {
@@ -54,14 +54,14 @@ SZ_INTERNAL v128_t sz_ascii_fold_v128_(v128_t bytes) {
     return wasm_i8x16_add(bytes, wasm_v128_and(is_upper, wasm_i8x16_splat(0x20)));
 }
 
-/** @brief `result[0] = 0`, `result[i] = v[i-1]` — the constant-shuffle twin of RVV `vslide1up(v, 0)`. */
-SZ_INTERNAL v128_t sz_utf8_slide1up_v128_(v128_t v) {
-    return wasm_i8x16_shuffle(v, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+/** @brief `result[0] = 0`, `result[i] = vector[i-1]` — the constant-shuffle twin of RVV `vslide1up(vector, 0)`. */
+SZ_INTERNAL v128_t sz_utf8_slide1up_v128_(v128_t vector) {
+    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 }
-/** @brief `result[i] = v[i+1]`, `result[15] = carry` — the twin of RVV `vslide1down(v, carry)`. */
-SZ_INTERNAL v128_t sz_utf8_slide1down_v128_(v128_t v, sz_u8_t carry) {
-    return wasm_i8x16_shuffle(v, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                              16);
+/** @brief `result[i] = vector[i+1]`, `result[15] = carry` — the twin of RVV `vslide1down(vector, carry)`. */
+SZ_INTERNAL v128_t sz_utf8_slide1down_v128_(v128_t vector, sz_u8_t carry) {
+    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                              15, 16);
 }
 
 /** @brief 0xFF where `(byte - start)` is unsigned-`< length`, i.e. `byte` in `[start, start+length)`. */
@@ -86,9 +86,9 @@ SZ_INTERNAL v128_t sz_utf8_gather64_v128_(v128_t lut0, v128_t lut1, v128_t lut2,
 }
 
 /** @brief Index of the first set lane in `mask` among the low `valid` lanes, or -1 — twin of RVV `vfirst_m`. */
-SZ_INTERNAL int sz_utf8_first_set_v128_(v128_t mask, sz_size_t valid) {
+SZ_INTERNAL int sz_utf8_first_set_v128_(v128_t mask, sz_size_t vector_length) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(mask);
-    if (valid < 16) bits &= ((sz_u32_t)1 << valid) - 1;
+    if (vector_length < 16) bits &= ((sz_u32_t)1 << vector_length) - 1;
     return bits ? (int)sz_u32_ctz(bits) : -1;
 }
 
@@ -98,20 +98,21 @@ SZ_INTERNAL v128_t sz_utf8_load_window_v128_(sz_u8_t const *source_ptr, sz_size_
 }
 
 /** @brief Largest prefix of a window that does not split a trailing multi-byte sequence (twin of RVV trim). */
-SZ_INTERNAL sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_ptr, sz_size_t vl, sz_size_t remaining) {
-    if (vl >= remaining) return vl;
-    sz_size_t boundary = vl;
+SZ_INTERNAL sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                    sz_size_t remaining) {
+    if (vector_length >= remaining) return vector_length;
+    sz_size_t boundary = vector_length;
     while (boundary && (source_ptr[boundary - 1] & 0xC0) == 0x80) --boundary; // back up to the last lead
-    if (!boundary) return vl;
+    if (!boundary) return vector_length;
     sz_u8_t lead = source_ptr[boundary - 1];
     sz_size_t needed = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
-    return ((boundary - 1) + needed > vl) ? (boundary - 1) : vl;
+    return ((boundary - 1) + needed > vector_length) ? (boundary - 1) : vector_length;
 }
 
 /** @brief Common tail of every strip handler: resolve `consumed` from the first stop, store, set the flag. */
-SZ_INTERNAL sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_size_t vl, sz_size_t remaining,
-                                                 v128_t folded, int first_stop, sz_u8_t *destination_ptr,
-                                                 int *needs_serial) {
+SZ_INTERNAL sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                 sz_size_t remaining, v128_t folded, int first_stop,
+                                                 sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -119,7 +120,7 @@ SZ_INTERNAL sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_s
         *needs_serial = 1;
     }
     else {
-        consumed = sz_utf8_trim_incomplete_v128_(source_ptr, vl, remaining);
+        consumed = sz_utf8_trim_incomplete_v128_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
     if (consumed) sz_store_partial_v128_((sz_ptr_t)destination_ptr, folded, consumed);
@@ -133,10 +134,10 @@ SZ_INTERNAL sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_s
 /** @brief Fold one window of Latin (ASCII + Latin-1 C2/C3 + Latin Extended-A/B C4-C6). @sa RVV latin strip. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                      sz_u8_t *destination_ptr, int *needs_serial) {
-    sz_size_t vl = remaining < 16 ? remaining : 16;
+    sz_size_t vector_length = remaining < 16 ? remaining : 16;
     v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
     v128_t previous = sz_utf8_slide1up_v128_(source);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vl < remaining) ? source_ptr[vl] : 0);
+    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
 
     v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                            wasm_i8x16_splat((sz_i8_t)0x80));
@@ -195,18 +196,19 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, 
     v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_family_lead);
     v128_t stop = wasm_v128_or(is_foreign_lead, is_irregular);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vl);
-    return sz_utf8_strip_finish_v128_(source_ptr, vl, remaining, folded, first_stop, destination_ptr, needs_serial);
+    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+                                      needs_serial);
 }
 
 /** @brief Fold one window of basic Cyrillic (D0/D1 leads). @sa RVV cyrillic strip. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                         sz_u8_t *destination_ptr, int *needs_serial) {
-    static sz_align_(16) sz_u8_t const second_byte_offsets[16] = {0, 0,    0,    0, 0, 0, 0, 0,
-                                                                  0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
-    sz_size_t vl = remaining < 16 ? remaining : 16;
+    static
+        sz_align_(16) sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    sz_size_t vector_length = remaining < 16 ? remaining : 16;
     v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vl < remaining) ? source_ptr[vl] : 0);
+    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
     v128_t previous = sz_utf8_slide1up_v128_(source);
 
     v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
@@ -233,16 +235,17 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source_pt
     v128_t needs_d1 = wasm_v128_and(is_d0, wasm_v128_or(next_80_8f, next_a0_af));
     folded = sz_utf8_masked_add_v128_(folded, needs_d1, 1);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vl);
-    return sz_utf8_strip_finish_v128_(source_ptr, vl, remaining, folded, first_stop, destination_ptr, needs_serial);
+    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+                                      needs_serial);
 }
 
 /** @brief Fold one window of basic Greek (CE/CF leads). @sa RVV greek strip. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                      sz_u8_t *destination_ptr, int *needs_serial) {
-    sz_size_t vl = remaining < 16 ? remaining : 16;
+    sz_size_t vector_length = remaining < 16 ? remaining : 16;
     v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vl < remaining) ? source_ptr[vl] : 0);
+    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
     v128_t previous = sz_utf8_slide1up_v128_(source);
 
     v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
@@ -255,9 +258,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, 
     v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
     v128_t is_foreign_lead = wasm_v128_andnot(is_lead, wasm_v128_or(is_ce, is_cf));
     // CE excluded: next < 0x91 (accented uppercase) or next == 0xB0 ('ΰ' expands). CF excluded: next >= 0x8F.
-    v128_t ce_excluded = wasm_v128_and(
-        is_ce, wasm_v128_or(wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x91)),
-                            wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB0))));
+    v128_t ce_excluded = wasm_v128_and(is_ce, wasm_v128_or(wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x91)),
+                                                           wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB0))));
     v128_t cf_excluded = wasm_v128_and(is_cf, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0x8F)));
     v128_t stop = wasm_v128_or(is_foreign_lead, wasm_v128_or(ce_excluded, cf_excluded));
 
@@ -277,16 +279,17 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, 
     v128_t promotes_lead = wasm_v128_and(is_ce, wasm_v128_or(next_promote_a0, next_promote_a3));
     folded = sz_utf8_masked_add_v128_(folded, promotes_lead, 0x01); // CE -> CF
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vl);
-    return sz_utf8_strip_finish_v128_(source_ptr, vl, remaining, folded, first_stop, destination_ptr, needs_serial);
+    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+                                      needs_serial);
 }
 
 /** @brief Fold one window of Armenian (D4/D5/D6 leads). @sa RVV armenian strip. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                         sz_u8_t *destination_ptr, int *needs_serial) {
-    sz_size_t vl = remaining < 16 ? remaining : 16;
+    sz_size_t vector_length = remaining < 16 ? remaining : 16;
     v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vl < remaining) ? source_ptr[vl] : 0);
+    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
     v128_t previous = sz_utf8_slide1up_v128_(source);
 
     v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
@@ -316,17 +319,19 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source_pt
     v128_t promotes_d5 = wasm_v128_and(is_d5, sz_utf8_in_range_v128_(next, 0x90, 0x07));
     folded = sz_utf8_masked_add_v128_(folded, wasm_v128_or(promotes_d4, promotes_d5), 0x01);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vl);
-    return sz_utf8_strip_finish_v128_(source_ptr, vl, remaining, folded, first_stop, destination_ptr, needs_serial);
+    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+                                      needs_serial);
 }
 
 /** @brief Fold one window of Georgian (3-byte E1 82/83 sequences, uppercase keyed by the third byte). @sa RVV. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                         sz_u8_t *destination_ptr, int *needs_serial) {
-    sz_size_t vl = remaining < 16 ? remaining : 16;
+    sz_size_t vector_length = remaining < 16 ? remaining : 16;
     v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vl < remaining) ? source_ptr[vl] : 0);
-    v128_t next_next = sz_utf8_slide1down_v128_(next, (vl + 1 < remaining) ? source_ptr[vl + 1] : 0);
+    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t next_next = sz_utf8_slide1down_v128_(next,
+                                                (vector_length + 1 < remaining) ? source_ptr[vector_length + 1] : 0);
 
     v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                            wasm_i8x16_splat((sz_i8_t)0x80));
@@ -365,8 +370,9 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_pt
     folded = sz_utf8_masked_add_v128_(folded, is_82_upper_third, 0xE0);                     // third -0x20
     folded = sz_utf8_masked_add_v128_(folded, is_83_upper_third, 0x20);                     // third +0x20
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vl);
-    return sz_utf8_strip_finish_v128_(source_ptr, vl, remaining, folded, first_stop, destination_ptr, needs_serial);
+    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+                                      needs_serial);
 }
 
 #pragma endregion // Per-script strip handlers

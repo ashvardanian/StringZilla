@@ -29,7 +29,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon(  //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
-SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_(uint8x16_t vec) {
+SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
@@ -39,13 +39,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, 
 
     sz_u128_vec_t text_vec;
     uint8x16_t newline_u8x16 = vdupq_n_u8('\n');
-    uint8x16_t v_u8x16 = vdupq_n_u8('\v');
-    uint8x16_t f_u8x16 = vdupq_n_u8('\f');
-    uint8x16_t r_u8x16 = vdupq_n_u8('\r');
-    uint8x16_t x_c2_u8x16 = vdupq_n_u8(0xC2);
+    uint8x16_t vertical_tab_u8x16 = vdupq_n_u8('\v');
+    uint8x16_t form_feed_u8x16 = vdupq_n_u8('\f');
+    uint8x16_t carriage_return_u8x16 = vdupq_n_u8('\r');
+    uint8x16_t lead_c2_u8x16 = vdupq_n_u8(0xC2);
     uint8x16_t x_85_u8x16 = vdupq_n_u8(0x85);
-    uint8x16_t x_e2_u8x16 = vdupq_n_u8(0xE2);
-    uint8x16_t x_80_u8x16 = vdupq_n_u8(0x80);
+    uint8x16_t lead_e2_u8x16 = vdupq_n_u8(0xE2);
+    uint8x16_t byte_80_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t x_a8_u8x16 = vdupq_n_u8(0xA8);
     uint8x16_t x_a9_u8x16 = vdupq_n_u8(0xA9);
 
@@ -57,20 +57,22 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, 
 
         // 1-byte matches
         uint8x16_t newline_cmp = vceqq_u8(text_vec.u8x16, newline_u8x16);
-        uint8x16_t v_cmp = vceqq_u8(text_vec.u8x16, v_u8x16);
-        uint8x16_t f_cmp = vceqq_u8(text_vec.u8x16, f_u8x16);
-        uint8x16_t r_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, r_u8x16), drop1_u8x16); // Mask out \r at position 15
-        uint8x16_t one_byte_cmp = vorrq_u8(vorrq_u8(newline_cmp, v_cmp), vorrq_u8(f_cmp, r_cmp));
+        uint8x16_t vertical_tab_cmp = vceqq_u8(text_vec.u8x16, vertical_tab_u8x16);
+        uint8x16_t form_feed_cmp = vceqq_u8(text_vec.u8x16, form_feed_u8x16);
+        uint8x16_t carriage_return_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, carriage_return_u8x16),
+                                                  drop1_u8x16); // Mask out \r at position 15
+        uint8x16_t one_byte_cmp = vorrq_u8(vorrq_u8(newline_cmp, vertical_tab_cmp),
+                                           vorrq_u8(form_feed_cmp, carriage_return_cmp));
 
         // 2- & 3-byte matches with shifted views
         uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
         uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
-        uint8x16_t rn_match_u8x16 = vandq_u8(r_cmp, vceqq_u8(text1, newline_u8x16));
-        uint8x16_t x_c285_u8x16 = vandq_u8(vceqq_u8(text_vec.u8x16, x_c2_u8x16), vceqq_u8(text1, x_85_u8x16));
+        uint8x16_t rn_match_u8x16 = vandq_u8(carriage_return_cmp, vceqq_u8(text1, newline_u8x16));
+        uint8x16_t x_c285_u8x16 = vandq_u8(vceqq_u8(text_vec.u8x16, lead_c2_u8x16), vceqq_u8(text1, x_85_u8x16));
         uint8x16_t two_byte_cmp = vandq_u8(vorrq_u8(rn_match_u8x16, x_c285_u8x16),
                                            drop1_u8x16); // Ignore last split match
 
-        uint8x16_t x_e280_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, x_e2_u8x16), vceqq_u8(text1, x_80_u8x16));
+        uint8x16_t x_e280_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, lead_e2_u8x16), vceqq_u8(text1, byte_80_u8x16));
         uint8x16_t x_e280ax_cmp = vandq_u8(x_e280_cmp,
                                            vorrq_u8(vceqq_u8(text2, x_a8_u8x16), vceqq_u8(text2, x_a9_u8x16)));
         uint8x16_t three_byte_cmp = vandq_u8(x_e280ax_cmp, drop2_u8x16); // Ignore last two split matches
@@ -80,9 +82,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, 
         if (vmaxvq_u8(combined_vec)) {
 
             // Late mask extraction only when a match exists
-            sz_u64_t one_byte_mask = sz_utf8_vreinterpretq_u8_u4_(one_byte_cmp);
-            sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_(two_byte_cmp);
-            sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_(three_byte_cmp);
+            sz_u64_t one_byte_mask = sz_utf8_vreinterpretq_u8_u4_neon_(one_byte_cmp);
+            sz_u64_t two_mask = sz_utf8_vreinterpretq_u8_u4_neon_(two_byte_cmp);
+            sz_u64_t three_mask = sz_utf8_vreinterpretq_u8_u4_neon_(three_byte_cmp);
             sz_u64_t combined_mask = one_byte_mask | two_mask | three_mask;
 
             int bit_index = sz_u64_ctz(combined_mask);
@@ -103,17 +105,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
 
     sz_u128_vec_t text_vec;
-    uint8x16_t t_u8x16 = vdupq_n_u8('\t');
-    uint8x16_t r_u8x16 = vdupq_n_u8('\r');
+    uint8x16_t tab_u8x16 = vdupq_n_u8('\t');
+    uint8x16_t carriage_return_u8x16 = vdupq_n_u8('\r');
     uint8x16_t x_20_u8x16 = vdupq_n_u8(' ');
-    uint8x16_t x_c2_u8x16 = vdupq_n_u8(0xC2);
+    uint8x16_t lead_c2_u8x16 = vdupq_n_u8(0xC2);
     uint8x16_t x_85_u8x16 = vdupq_n_u8(0x85);
     uint8x16_t x_a0_u8x16 = vdupq_n_u8(0xA0);
     uint8x16_t x_e1_u8x16 = vdupq_n_u8(0xE1);
-    uint8x16_t x_e2_u8x16 = vdupq_n_u8(0xE2);
+    uint8x16_t lead_e2_u8x16 = vdupq_n_u8(0xE2);
     uint8x16_t x_e3_u8x16 = vdupq_n_u8(0xE3);
     uint8x16_t x_9a_u8x16 = vdupq_n_u8(0x9A);
-    uint8x16_t x_80_u8x16 = vdupq_n_u8(0x80);
+    uint8x16_t byte_80_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t x_81_u8x16 = vdupq_n_u8(0x81);
     uint8x16_t x_8d_u8x16 = vdupq_n_u8(0x8D);
     uint8x16_t x_a8_u8x16 = vdupq_n_u8(0xA8);
@@ -129,19 +131,20 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t lengt
 
         // 1-byte matches
         uint8x16_t x_20_cmp = vceqq_u8(text_vec.u8x16, x_20_u8x16);
-        uint8x16_t range_cmp = vandq_u8(vcgeq_u8(text_vec.u8x16, t_u8x16), vcleq_u8(text_vec.u8x16, r_u8x16));
+        uint8x16_t range_cmp = vandq_u8(vcgeq_u8(text_vec.u8x16, tab_u8x16),
+                                        vcleq_u8(text_vec.u8x16, carriage_return_u8x16));
         uint8x16_t one_byte_cmp = vorrq_u8(x_20_cmp, range_cmp);
 
         // 2-byte and 3-byte prefix indicators
-        uint8x16_t x_c2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, x_c2_u8x16), drop1_u8x16);
+        uint8x16_t lead_c2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, lead_c2_u8x16), drop1_u8x16);
         uint8x16_t x_e1_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, x_e1_u8x16), drop2_u8x16);
-        uint8x16_t x_e2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, x_e2_u8x16), drop2_u8x16);
+        uint8x16_t lead_e2_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, lead_e2_u8x16), drop2_u8x16);
         uint8x16_t x_e3_cmp = vandq_u8(vceqq_u8(text_vec.u8x16, x_e3_u8x16), drop2_u8x16);
-        uint8x16_t prefix_byte_cmp = vorrq_u8(one_byte_cmp,
-                                              vorrq_u8(vorrq_u8(x_c2_cmp, x_e1_cmp), vorrq_u8(x_e2_cmp, x_e3_cmp)));
+        uint8x16_t prefix_byte_cmp = vorrq_u8(
+            one_byte_cmp, vorrq_u8(vorrq_u8(lead_c2_cmp, x_e1_cmp), vorrq_u8(lead_e2_cmp, x_e3_cmp)));
 
-        sz_u64_t one_byte_mask = sz_utf8_vreinterpretq_u8_u4_(one_byte_cmp);
-        sz_u64_t prefix_byte_mask = sz_utf8_vreinterpretq_u8_u4_(prefix_byte_cmp);
+        sz_u64_t one_byte_mask = sz_utf8_vreinterpretq_u8_u4_neon_(one_byte_cmp);
+        sz_u64_t prefix_byte_mask = sz_utf8_vreinterpretq_u8_u4_neon_(prefix_byte_cmp);
 
         // Check for fast path - no whitespaces in this chunk
         if (!prefix_byte_mask) {
@@ -161,31 +164,34 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t lengt
 
         // 2-byte matches
         uint8x16_t text1 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 1);
-        uint8x16_t two_u8x16 = vorrq_u8(vandq_u8(x_c2_cmp, vceqq_u8(text1, x_85_u8x16)),
-                                        vandq_u8(x_c2_cmp, vceqq_u8(text1, x_a0_u8x16)));
+        uint8x16_t two_u8x16 = vorrq_u8(vandq_u8(lead_c2_cmp, vceqq_u8(text1, x_85_u8x16)),
+                                        vandq_u8(lead_c2_cmp, vceqq_u8(text1, x_a0_u8x16)));
 
         // 3-byte matches
         uint8x16_t text2 = vextq_u8(text_vec.u8x16, text_vec.u8x16, 2);
-        uint8x16_t x_80_ge_cmp = vcgeq_u8(text2, x_80_u8x16);
+        uint8x16_t x_80_ge_cmp = vcgeq_u8(text2, byte_80_u8x16);
         uint8x16_t x_8d_le_cmp = vcleq_u8(text2, x_8d_u8x16);
 
-        uint8x16_t ogham_cmp = vandq_u8(x_e1_cmp, vandq_u8(vceqq_u8(text1, x_9a_u8x16), vceqq_u8(text2, x_80_u8x16)));
-        uint8x16_t range_e280_cmp = vandq_u8(x_e2_cmp,
-                                             vandq_u8(vceqq_u8(text1, x_80_u8x16), vandq_u8(x_80_ge_cmp, x_8d_le_cmp)));
-        uint8x16_t line_cmp = vandq_u8(x_e2_cmp, vandq_u8(vceqq_u8(text1, x_80_u8x16), vceqq_u8(text2, x_a8_u8x16)));
-        uint8x16_t paragraph_cmp = vandq_u8(x_e2_cmp,
-                                            vandq_u8(vceqq_u8(text1, x_80_u8x16), vceqq_u8(text2, x_a9_u8x16)));
-        uint8x16_t nnbsp_cmp = vandq_u8(x_e2_cmp, vandq_u8(vceqq_u8(text1, x_80_u8x16), vceqq_u8(text2, x_af_u8x16)));
-        uint8x16_t mmsp_cmp = vandq_u8(x_e2_cmp, vandq_u8(vceqq_u8(text1, x_81_u8x16), vceqq_u8(text2, x_9f_u8x16)));
-        uint8x16_t ideographic_u8x16 = vandq_u8(x_e3_cmp,
-                                                vandq_u8(vceqq_u8(text1, x_80_u8x16), vceqq_u8(text2, x_80_u8x16)));
+        uint8x16_t ogham_cmp = vandq_u8(x_e1_cmp,
+                                        vandq_u8(vceqq_u8(text1, x_9a_u8x16), vceqq_u8(text2, byte_80_u8x16)));
+        uint8x16_t range_e280_cmp = vandq_u8(
+            lead_e2_cmp, vandq_u8(vceqq_u8(text1, byte_80_u8x16), vandq_u8(x_80_ge_cmp, x_8d_le_cmp)));
+        uint8x16_t line_cmp = vandq_u8(lead_e2_cmp,
+                                       vandq_u8(vceqq_u8(text1, byte_80_u8x16), vceqq_u8(text2, x_a8_u8x16)));
+        uint8x16_t paragraph_cmp = vandq_u8(lead_e2_cmp,
+                                            vandq_u8(vceqq_u8(text1, byte_80_u8x16), vceqq_u8(text2, x_a9_u8x16)));
+        uint8x16_t nnbsp_cmp = vandq_u8(lead_e2_cmp,
+                                        vandq_u8(vceqq_u8(text1, byte_80_u8x16), vceqq_u8(text2, x_af_u8x16)));
+        uint8x16_t mmsp_cmp = vandq_u8(lead_e2_cmp, vandq_u8(vceqq_u8(text1, x_81_u8x16), vceqq_u8(text2, x_9f_u8x16)));
+        uint8x16_t ideographic_u8x16 = vandq_u8(
+            x_e3_cmp, vandq_u8(vceqq_u8(text1, byte_80_u8x16), vceqq_u8(text2, byte_80_u8x16)));
         uint8x16_t three_u8x16 = vandq_u8(
             vorrq_u8(vorrq_u8(vorrq_u8(ogham_cmp, range_e280_cmp), vorrq_u8(line_cmp, paragraph_cmp)),
                      vorrq_u8(vorrq_u8(nnbsp_cmp, mmsp_cmp), ideographic_u8x16)),
             drop2_u8x16);
 
-        sz_u64_t two_byte_mask = sz_utf8_vreinterpretq_u8_u4_(two_u8x16);
-        sz_u64_t three_byte_mask = sz_utf8_vreinterpretq_u8_u4_(three_u8x16);
+        sz_u64_t two_byte_mask = sz_utf8_vreinterpretq_u8_u4_neon_(two_u8x16);
+        sz_u64_t three_byte_mask = sz_utf8_vreinterpretq_u8_u4_neon_(three_u8x16);
         sz_u64_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
 
         if (combined_mask) {
@@ -310,7 +316,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_boundary_mask_neon_(uint8x16_t window_by
     static sz_u8_t const trusted_lanes[16] = {0,    0,    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                                               0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
     boundary = vandq_u8(boundary, vld1q_u8(trusted_lanes));
-    return sz_utf8_vreinterpretq_u8_u4_(boundary) & 0x8888888888888888ull;
+    return sz_utf8_vreinterpretq_u8_u4_neon_(boundary) & 0x8888888888888888ull;
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //

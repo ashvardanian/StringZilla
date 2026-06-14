@@ -26,10 +26,10 @@ SZ_PUBLIC void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vl);
-        __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vl);
-        target_cursor += vl, source_cursor += vl, length -= vl;
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+        __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vector_length);
+        target_cursor += vector_length, source_cursor += vector_length, length -= vector_length;
     }
 }
 
@@ -40,11 +40,11 @@ SZ_PUBLIC void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         sz_u8_t *target_cursor = (sz_u8_t *)target + length;
         sz_u8_t const *source_cursor = (sz_u8_t const *)source + length;
         while (length) {
-            sz_size_t vl = __riscv_vsetvl_e8m8(length);
-            target_cursor -= vl, source_cursor -= vl;
-            vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vl);
-            __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vl);
-            length -= vl;
+            sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+            target_cursor -= vector_length, source_cursor -= vector_length;
+            vuint8m8_t data_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+            __riscv_vse8_v_u8m8(target_cursor, data_u8m8, vector_length);
+            length -= vector_length;
         }
     }
 }
@@ -52,10 +52,10 @@ SZ_PUBLIC void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
 SZ_PUBLIC void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t fill_u8m8 = __riscv_vmv_v_x_u8m8(value, vl);
-        __riscv_vse8_v_u8m8(target_cursor, fill_u8m8, vl);
-        target_cursor += vl, length -= vl;
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t fill_u8m8 = __riscv_vmv_v_x_u8m8(value, vector_length);
+        __riscv_vse8_v_u8m8(target_cursor, fill_u8m8, vector_length);
+        target_cursor += vector_length, length -= vector_length;
     }
 }
 
@@ -68,11 +68,11 @@ SZ_PUBLIC void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t index_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vl);
-        vuint8m8_t result_u8m8 = __riscv_vluxei8_v_u8m8(lut_u8, index_u8m8, vl);
-        __riscv_vse8_v_u8m8(target_cursor, result_u8m8, vl);
-        target_cursor += vl, source_cursor += vl, length -= vl;
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t index_u8m8 = __riscv_vle8_v_u8m8(source_cursor, vector_length);
+        vuint8m8_t result_u8m8 = __riscv_vluxei8_v_u8m8(lut_u8, index_u8m8, vector_length);
+        __riscv_vse8_v_u8m8(target_cursor, result_u8m8, vector_length);
+        target_cursor += vector_length, source_cursor += vector_length, length -= vector_length;
     }
 }
 

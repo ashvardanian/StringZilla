@@ -49,22 +49,22 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_rvv(   //
 
         sz_size_t ascii_run = 0;
         while (ascii_run < want) {
-            sz_size_t vl = __riscv_vsetvl_e8m8(want - ascii_run);
-            vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_cursor + ascii_run, vl);
+            sz_size_t vector_length = __riscv_vsetvl_e8m8(want - ascii_run);
+            vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_cursor + ascii_run, vector_length);
             // Non-ASCII iff the high bit is set, i.e. byte >= 0x80.
-            vbool1_t non_ascii = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0x7F, vl);
-            long first_match_index = __riscv_vfirst_m_b1(non_ascii, vl);
-            sz_size_t take = first_match_index < 0 ? vl : (sz_size_t)first_match_index;
+            vbool1_t non_ascii = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0x7F, vector_length);
+            long first_match_index = __riscv_vfirst_m_b1(non_ascii, vector_length);
+            sz_size_t take = first_match_index < 0 ? vector_length : (sz_size_t)first_match_index;
             // Widen the ASCII bytes (u8 -> u16 -> u32) and store them as runes.
             if (take) {
                 sz_size_t done = 0;
                 while (done < take) {
-                    sz_size_t wvl = __riscv_vsetvl_e8m2(take - done);
-                    vuint8m2_t ascii_u8m2 = __riscv_vle8_v_u8m2(text_cursor + ascii_run + done, wvl);
-                    vuint16m4_t ascii_u16m4 = __riscv_vwcvtu_x_x_v_u16m4(ascii_u8m2, wvl);
-                    vuint32m8_t ascii_u32m8 = __riscv_vwcvtu_x_x_v_u32m8(ascii_u16m4, wvl);
-                    __riscv_vse32_v_u32m8(runes + runes_written + ascii_run + done, ascii_u32m8, wvl);
-                    done += wvl;
+                    sz_size_t widened_vector_length = __riscv_vsetvl_e8m2(take - done);
+                    vuint8m2_t ascii_u8m2 = __riscv_vle8_v_u8m2(text_cursor + ascii_run + done, widened_vector_length);
+                    vuint16m4_t ascii_u16m4 = __riscv_vwcvtu_x_x_v_u16m4(ascii_u8m2, widened_vector_length);
+                    vuint32m8_t ascii_u32m8 = __riscv_vwcvtu_x_x_v_u32m8(ascii_u16m4, widened_vector_length);
+                    __riscv_vse32_v_u32m8(runes + runes_written + ascii_run + done, ascii_u32m8, widened_vector_length);
+                    done += widened_vector_length;
                 }
             }
             ascii_run += take;
@@ -98,13 +98,13 @@ SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t count = 0;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8, vector_length);
         // Leading byte iff `(c & 0xC0) != 0x80`.
-        vuint8m8_t masked = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vl);
-        vbool1_t lead_mask = __riscv_vmsne_vx_u8m8_b1(masked, 0x80, vl);
-        count += (sz_size_t)__riscv_vcpop_m_b1(lead_mask, vl);
-        text_u8 += vl, length -= vl;
+        vuint8m8_t masked = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vector_length);
+        vbool1_t lead_mask = __riscv_vmsne_vx_u8m8_b1(masked, 0x80, vector_length);
+        count += (sz_size_t)__riscv_vcpop_m_b1(lead_mask, vector_length);
+        text_u8 += vector_length, length -= vector_length;
     }
     return count;
 }
@@ -122,18 +122,20 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_si
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {
-        sz_size_t vl = __riscv_vsetvl_e8m4(length);
-        vuint8m4_t bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8, vl);
-        vbool2_t lead_mask = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(bytes_u8m4, 0xC0, vl), 0x80, vl);
-        sz_size_t strip_leads = (sz_size_t)__riscv_vcpop_m_b2(lead_mask, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m4(length);
+        vuint8m4_t bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8, vector_length);
+        vbool2_t lead_mask = __riscv_vmsne_vx_u8m4_b2(__riscv_vand_vx_u8m4(bytes_u8m4, 0xC0, vector_length), 0x80,
+                                                      vector_length);
+        sz_size_t strip_leads = (sz_size_t)__riscv_vcpop_m_b2(lead_mask, vector_length);
         if (seen + strip_leads > n) {
             sz_u16_t target = (sz_u16_t)(n - seen); // 0-based index of the wanted lead byte within this strip
-            vuint16m8_t prefix = __riscv_viota_m_u16m8(lead_mask, vl);
-            vbool2_t hit = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u16m8_b2(prefix, target, vl), lead_mask, vl);
-            return (sz_cptr_t)(text_u8 + __riscv_vfirst_m_b2(hit, vl));
+            vuint16m8_t prefix = __riscv_viota_m_u16m8(lead_mask, vector_length);
+            vbool2_t hit = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u16m8_b2(prefix, target, vector_length), lead_mask,
+                                               vector_length);
+            return (sz_cptr_t)(text_u8 + __riscv_vfirst_m_b2(hit, vector_length));
         }
         seen += strip_leads;
-        text_u8 += vl, length -= vl;
+        text_u8 += vector_length, length -= vector_length;
     }
     return SZ_NULL_CHAR;
 }
@@ -148,40 +150,46 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_rvv(sz_cptr_t text, sz_size_t length, s
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
-        sz_u8_t carry_first = (offset + vl < length) ? text_u8[offset + vl] : 0;
-        sz_u8_t carry_second = (offset + vl + 1 < length) ? text_u8[offset + vl + 1] : 0;
-        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vl);
-        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vector_length);
+        sz_u8_t carry_first = (offset + vector_length < length) ? text_u8[offset + vector_length] : 0;
+        sz_u8_t carry_second = (offset + vector_length + 1 < length) ? text_u8[offset + vector_length + 1] : 0;
+        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vector_length);
+        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vector_length);
 
-        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vl);
+        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
         // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
-        vbool1_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x0A, vl), 3, vl);
-        vbool1_t is_cr = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x0D, vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, __riscv_vmor_mm_b1(is_lf_vt_ff, is_cr, vl), vl);
+        vbool1_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x0A, vector_length), 3,
+                                                         vector_length);
+        vbool1_t is_cr = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x0D, vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, __riscv_vmor_mm_b1(is_lf_vt_ff, is_cr, vector_length),
+                                              vector_length);
         // '\r\n': length 2 (overrides the lone-'\r').
-        vbool1_t is_cr_lf = __riscv_vmand_mm_b1(is_cr, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x0A, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_cr_lf, vl);
+        vbool1_t is_cr_lf = __riscv_vmand_mm_b1(is_cr, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x0A, vector_length),
+                                                vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_cr_lf, vector_length);
         // U+0085 NEL (C2 85): length 2.
-        vbool1_t is_nel = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vl),
-                                              __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_nel, vl);
+        vbool1_t is_nel = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vector_length),
+                                              __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vector_length), vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_nel, vector_length);
         // U+2028 / U+2029 (E2 80 A8 / E2 80 A9): length 3.
-        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vl),
-                                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl);
-        vbool1_t is_a8_a9 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vl),
-                                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmand_mm_b1(is_e2_80, is_a8_a9, vl), vl);
+        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vector_length),
+                                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length),
+                                                vector_length);
+        vbool1_t is_a8_a9 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vector_length),
+                                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vector_length),
+                                               vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmand_mm_b1(is_e2_80, is_a8_a9, vector_length),
+                                              vector_length);
 
-        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vl);
-        long match_index = __riscv_vfirst_m_b1(match_mask, vl);
+        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vector_length);
+        long match_index = __riscv_vfirst_m_b1(match_mask, vector_length);
         if (match_index >= 0) {
-            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vl);
+            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vector_length);
             *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
             return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
         }
-        offset += vl;
+        offset += vector_length;
     }
     *matched_length = 0;
     return SZ_NULL_CHAR;
@@ -194,57 +202,64 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
-        sz_u8_t carry_first = (offset + vl < length) ? text_u8[offset + vl] : 0;
-        sz_u8_t carry_second = (offset + vl + 1 < length) ? text_u8[offset + vl + 1] : 0;
-        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vl);
-        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vector_length);
+        sz_u8_t carry_first = (offset + vector_length < length) ? text_u8[offset + vector_length] : 0;
+        sz_u8_t carry_second = (offset + vector_length + 1 < length) ? text_u8[offset + vector_length + 1] : 0;
+        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vector_length);
+        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vector_length);
 
-        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vl);
+        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
         // ASCII whitespace: '\t'-'\r' (0x09-0x0D) and ' ' (0x20): length 1.
         vbool1_t is_ascii_ws = __riscv_vmor_mm_b1(
-            __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x09, vl), 5, vl),
-            __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x20, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, is_ascii_ws, vl);
+            __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x09, vector_length), 5, vector_length),
+            __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x20, vector_length), vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, is_ascii_ws, vector_length);
         // U+0085 NEL (C2 85) and U+00A0 NBSP (C2 A0): length 2.
-        vbool1_t is_c2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vl);
-        vbool1_t next_85_a0 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vl),
-                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xA0, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, __riscv_vmand_mm_b1(is_c2, next_85_a0, vl), vl);
+        vbool1_t is_c2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vector_length);
+        vbool1_t next_85_a0 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vector_length),
+                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xA0, vector_length),
+                                                 vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, __riscv_vmand_mm_b1(is_c2, next_85_a0, vector_length),
+                                              vector_length);
         // U+1680 Ogham space mark (E1 9A 80): length 3.
-        vbool1_t is_ogham = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE1, vl),
-                                                                    __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9A, vl), vl),
-                                                __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_ogham, vl);
+        vbool1_t is_ogham = __riscv_vmand_mm_b1(
+            __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE1, vector_length),
+                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9A, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vector_length), vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_ogham, vector_length);
         // U+2000-U+200D, U+2028, U+2029, U+202F (E2 80 {80-8D, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
-        vbool1_t is_e2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vl);
-        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl);
-        vbool1_t third_2000_200d = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(after_next_u8m8, 0x80, vl), 0x0E, vl);
+        vbool1_t is_e2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vector_length);
+        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length),
+                                                vector_length);
+        vbool1_t third_2000_200d = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(after_next_u8m8, 0x80, vector_length),
+                                                             0x0E, vector_length);
         vbool1_t third_a8_a9_af = __riscv_vmor_mm_b1(
-            __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vl),
-                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vl), vl),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xAF, vl), vl);
-        vbool1_t is_e2_80_ws = __riscv_vmand_mm_b1(is_e2_80, __riscv_vmor_mm_b1(third_2000_200d, third_a8_a9_af, vl),
-                                                   vl);
+            __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vector_length),
+                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xAF, vector_length), vector_length);
+        vbool1_t is_e2_80_ws = __riscv_vmand_mm_b1(
+            is_e2_80, __riscv_vmor_mm_b1(third_2000_200d, third_a8_a9_af, vector_length), vector_length);
         vbool1_t is_e2_81_9f = __riscv_vmand_mm_b1(
-            __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x81, vl), vl),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x9F, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmor_mm_b1(is_e2_80_ws, is_e2_81_9f, vl), vl);
+            __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x81, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x9F, vector_length), vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(
+            length_u8m8, 3, __riscv_vmor_mm_b1(is_e2_80_ws, is_e2_81_9f, vector_length), vector_length);
         // U+3000 ideographic space (E3 80 80): length 3.
-        vbool1_t is_e3 = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE3, vl),
-                                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vl), vl),
-                                             __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vl), vl);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_e3, vl);
+        vbool1_t is_e3 = __riscv_vmand_mm_b1(
+            __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE3, vector_length),
+                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vector_length), vector_length);
+        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_e3, vector_length);
 
-        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vl);
-        long match_index = __riscv_vfirst_m_b1(match_mask, vl);
+        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vector_length);
+        long match_index = __riscv_vfirst_m_b1(match_mask, vector_length);
         if (match_index >= 0) {
-            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vl);
+            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vector_length);
             *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
             return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
         }
-        offset += vl;
+        offset += vector_length;
     }
     *matched_length = 0;
     return SZ_NULL_CHAR;
@@ -290,30 +305,32 @@ SZ_INTERNAL void sz_utf8_word_break_classify_properties_rvv_(sz_rune_t const *ru
     // `VLEN` — no register-group capacity ceiling and no scalar fallback for the ASCII prefix.
     sz_size_t codepoint_index = 0;
     while (codepoint_index < count) {
-        sz_size_t vl = __riscv_vsetvl_e32m8(count - codepoint_index);
-        vuint32m8_t runes_u32m8 = __riscv_vle32_v_u32m8(runes + codepoint_index, vl);
-        vbool4_t is_ascii = __riscv_vmsltu_vx_u32m8_b4(runes_u32m8, 0x80, vl);
-        long first_non_ascii = __riscv_vfirst_m_b4(__riscv_vmnot_m_b4(is_ascii, vl), vl);
+        sz_size_t vector_length = __riscv_vsetvl_e32m8(count - codepoint_index);
+        vuint32m8_t runes_u32m8 = __riscv_vle32_v_u32m8(runes + codepoint_index, vector_length);
+        vbool4_t is_ascii = __riscv_vmsltu_vx_u32m8_b4(runes_u32m8, 0x80, vector_length);
+        long first_non_ascii = __riscv_vfirst_m_b4(__riscv_vmnot_m_b4(is_ascii, vector_length), vector_length);
 
         if (first_non_ascii != 0) {
             // Gather ASCII properties for the whole strip; non-ASCII lanes get garbage we overwrite below.
             // Narrow the low byte of each rune (ASCII lanes are < 0x80) to a byte index, then load the
             // table entry per lane. Index EEW (8) matches the u8m2 data, one element per e32m8 lane.
-            vuint16m4_t runes_u16m4 = __riscv_vncvt_x_x_w_u16m4(runes_u32m8, vl);
-            vuint8m2_t gather_indices = __riscv_vncvt_x_x_w_u8m2(runes_u16m4, vl);
-            vuint8m2_t idx_clamped = __riscv_vand_vx_u8m2(gather_indices, 0x7F, vl); // keep indices in [0,127]
-            vuint8m2_t gathered = __riscv_vluxei8_v_u8m2(&sz_utf8_word_break_property_ascii_[0], idx_clamped, vl);
-            __riscv_vse8_v_u8m2(props + codepoint_index, gathered, vl);
+            vuint16m4_t runes_u16m4 = __riscv_vncvt_x_x_w_u16m4(runes_u32m8, vector_length);
+            vuint8m2_t gather_indices = __riscv_vncvt_x_x_w_u8m2(runes_u16m4, vector_length);
+            vuint8m2_t idx_clamped = __riscv_vand_vx_u8m2(gather_indices, 0x7F,
+                                                          vector_length); // keep indices in [0,127]
+            vuint8m2_t gathered = __riscv_vluxei8_v_u8m2(&sz_utf8_word_break_property_ascii_[0], idx_clamped,
+                                                         vector_length);
+            __riscv_vse8_v_u8m2(props + codepoint_index, gathered, vector_length);
         }
 
         // Determine how many leading lanes are ASCII (and thus already correctly classified).
-        sz_size_t ascii_run = (first_non_ascii < 0) ? vl : (sz_size_t)first_non_ascii;
+        sz_size_t ascii_run = (first_non_ascii < 0) ? vector_length : (sz_size_t)first_non_ascii;
 
         // Scalar-classify any lane that is not part of the fully-vectorized ASCII prefix.
-        for (sz_size_t lane_index = ascii_run; lane_index < vl; ++lane_index)
+        for (sz_size_t lane_index = ascii_run; lane_index < vector_length; ++lane_index)
             props[codepoint_index + lane_index] = sz_rune_word_break_property(runes[codepoint_index + lane_index]);
 
-        codepoint_index += vl;
+        codepoint_index += vector_length;
     }
 }
 
@@ -332,29 +349,29 @@ SZ_INTERNAL int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     while (offset < length) {
-        sz_size_t vl = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vl);
+        sz_size_t vector_length = __riscv_vsetvl_e8m8(length - offset);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vector_length);
         // Continuation bytes: (c & 0xC0) == 0x80.
-        vuint8m8_t top_two_bits_u8m8 = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vl);
-        vbool1_t is_cont = __riscv_vmseq_vx_u8m8_b1(top_two_bits_u8m8, 0x80, vl);
+        vuint8m8_t top_two_bits_u8m8 = __riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vector_length);
+        vbool1_t is_cont = __riscv_vmseq_vx_u8m8_b1(top_two_bits_u8m8, 0x80, vector_length);
         // Lead bytes: not a continuation byte. For each lead, derive the declared length and verify the
         // following (length-1) bytes are continuations and stay in-bounds — done scalar over the few leads.
         // Cheap structural rejects first (vectorized): any byte in 0xF8..0xFF is always malformed.
-        vbool1_t is_bad = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0xF7, vl);
-        if (__riscv_vfirst_m_b1(is_bad, vl) >= 0) return 0;
+        vbool1_t is_bad = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0xF7, vector_length);
+        if (__riscv_vfirst_m_b1(is_bad, vector_length) >= 0) return 0;
         (void)is_cont;
-        offset += vl;
+        offset += vector_length;
     }
     // Structural pass done; now confirm sequence framing with a single linear walk (decode vs char-length).
     offset = 0;
     while (offset < length) {
         sz_u8_t lead = text_u8[offset];
-        sz_size_t clen = sz_utf8_codepoint_length_(lead);
-        if ((lead & 0xC0) == 0x80) return 0;  // stray continuation byte at a lead position
-        if (offset + clen > length) return 0; // truncated trailing sequence
-        for (sz_size_t byte_index = 1; byte_index < clen; ++byte_index)
+        sz_size_t codepoint_length = sz_utf8_codepoint_length_(lead);
+        if ((lead & 0xC0) == 0x80) return 0;              // stray continuation byte at a lead position
+        if (offset + codepoint_length > length) return 0; // truncated trailing sequence
+        for (sz_size_t byte_index = 1; byte_index < codepoint_length; ++byte_index)
             if ((text_u8[offset + byte_index] & 0xC0) != 0x80) return 0; // missing continuation byte
-        offset += clen;
+        offset += codepoint_length;
     }
     return 1;
 }
@@ -447,8 +464,9 @@ enum { sz_utf8_word_break_tile_codepoints_k_ = 256, sz_utf8_word_break_pending_c
 
 /*  Emit the word `[*word_start, boundary_offset)` and advance `*word_start`. Returns 1 if the output is full
  *  (caller must stop and report `*word_start` as the resume point), 0 otherwise. */
-SZ_INTERNAL int sz_utf8_word_break_emit_forward_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                            sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_start) {
+SZ_INTERNAL int sz_utf8_word_break_emit_forward_(sz_size_t boundary_offset, sz_size_t *word_starts,
+                                                 sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *words,
+                                                 sz_size_t *word_start) {
     if (*words == words_capacity) return 1;
     word_starts[*words] = *word_start;
     word_lengths[*words] = boundary_offset - *word_start;
@@ -460,8 +478,8 @@ SZ_INTERNAL int sz_utf8_word_break_emit_forward_(sz_size_t boundary_offset, sz_s
 /*  Forward streaming scan. Sets `*overflowed` when an ignorable run exceeds the pending cap so the caller can
  *  defer to the (value-identical) serial reference. */
 SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                     sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
+                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                          sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
     sz_rune_t tile_runes[sz_utf8_word_break_tile_codepoints_k_];
     sz_size_t tile_offsets[sz_utf8_word_break_tile_codepoints_k_];
     sz_u8_t tile_props[sz_utf8_word_break_tile_codepoints_k_];
@@ -511,12 +529,14 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_siz
             // A non-ignorable codepoint resolves the deferred ignorable run: their effective forward property
             // is exactly this codepoint's property. Decide each deferred boundary in order, then this one.
             for (sz_size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
-                int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index], this_prop);
+                int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, pending_raw[pending_index],
+                                                                      this_prop);
                 sz_bool_t is_boundary = (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length,
                                                                                          pending_offsets[pending_index])
                                                        : (sz_bool_t)decision;
-                if (is_boundary && sz_utf8_word_break_emit_forward_(pending_offsets[pending_index], word_starts,
-                                                               word_lengths, words_capacity, &words, &word_start)) {
+                if (is_boundary &&
+                    sz_utf8_word_break_emit_forward_(pending_offsets[pending_index], word_starts, word_lengths,
+                                                     words_capacity, &words, &word_start)) {
                     if (bytes_consumed) *bytes_consumed = word_start;
                     return words;
                 }
@@ -526,8 +546,8 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_siz
                 int decision = sz_utf8_word_break_local_decision_rvv_(backward_carry, this_prop, this_prop);
                 sz_bool_t is_boundary = (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length, this_offset)
                                                        : (sz_bool_t)decision;
-                if (is_boundary && sz_utf8_word_break_emit_forward_(this_offset, word_starts, word_lengths, words_capacity,
-                                                               &words, &word_start)) {
+                if (is_boundary && sz_utf8_word_break_emit_forward_(this_offset, word_starts, word_lengths,
+                                                                    words_capacity, &words, &word_start)) {
                     if (bytes_consumed) *bytes_consumed = word_start;
                     return words;
                 }
@@ -543,7 +563,7 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_siz
                                     ? sz_utf8_is_word_boundary_serial(text, length, pending_offsets[pending_index])
                                     : (sz_bool_t)decision;
         if (is_boundary && sz_utf8_word_break_emit_forward_(pending_offsets[pending_index], word_starts, word_lengths,
-                                                       words_capacity, &words, &word_start)) {
+                                                            words_capacity, &words, &word_start)) {
             if (bytes_consumed) *bytes_consumed = word_start;
             return words;
         }
@@ -562,8 +582,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_find_stream_rvv_(sz_cptr_t text, sz_siz
 
 /*  Emit the reverse word `[boundary_offset, *word_end)` and lower `*word_end`. Returns 1 when the output is
  *  full (caller stops and reports `*word_end` as the resume point), 0 otherwise. */
-SZ_INTERNAL int sz_utf8_word_break_emit_reverse_(sz_size_t boundary_offset, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                            sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_end) {
+SZ_INTERNAL int sz_utf8_word_break_emit_reverse_(sz_size_t boundary_offset, sz_size_t *word_starts,
+                                                 sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *words,
+                                                 sz_size_t *word_end) {
     if (*words == words_capacity) return 1;
     word_starts[*words] = boundary_offset;
     word_lengths[*words] = *word_end - boundary_offset;
@@ -575,18 +596,18 @@ SZ_INTERNAL int sz_utf8_word_break_emit_reverse_(sz_size_t boundary_offset, sz_s
 /*  Resolve a deferred run of (higher-index) codepoints now that their nearest non-ignorable below is known
  *  (`prev_prop`). Emits boundaries high-to-low. Returns 1 if the output filled mid-run. */
 SZ_INTERNAL int sz_utf8_word_break_resolve_reverse_(sz_cptr_t text, sz_size_t length, sz_u8_t prev_prop,
-                                               sz_size_t const *pending_offsets, sz_u8_t const *pending_raw,
-                                               sz_u8_t const *pending_after, sz_size_t pending_count,
-                                               sz_size_t *word_starts, sz_size_t *word_lengths,
-                                               sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_end) {
+                                                    sz_size_t const *pending_offsets, sz_u8_t const *pending_raw,
+                                                    sz_u8_t const *pending_after, sz_size_t pending_count,
+                                                    sz_size_t *word_starts, sz_size_t *word_lengths,
+                                                    sz_size_t words_capacity, sz_size_t *words, sz_size_t *word_end) {
     for (sz_size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
         int decision = sz_utf8_word_break_local_decision_rvv_(prev_prop, pending_raw[pending_index],
-                                                         pending_after[pending_index]);
+                                                              pending_after[pending_index]);
         sz_bool_t is_boundary = (decision < 0)
                                     ? sz_utf8_is_word_boundary_serial(text, length, pending_offsets[pending_index])
                                     : (sz_bool_t)decision;
         if (is_boundary && sz_utf8_word_break_emit_reverse_(pending_offsets[pending_index], word_starts, word_lengths,
-                                                       words_capacity, words, word_end))
+                                                            words_capacity, words, word_end))
             return 1;
     }
     return 0;
@@ -597,8 +618,8 @@ SZ_INTERNAL int sz_utf8_word_break_resolve_reverse_(sz_cptr_t text, sz_size_t le
  *  codepoint's decision until the nearest non-ignorable BELOW it is reached. Because it emits from the end
  *  and stops at `words_capacity`, it only ever touches the needed suffix — matching the serial reference. */
 SZ_INTERNAL sz_size_t sz_utf8_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                      sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
+                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                           sz_size_t *bytes_consumed, sz_bool_t *overflowed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_rune_t tile_runes[sz_utf8_word_break_tile_codepoints_k_];
     sz_size_t tile_offsets[sz_utf8_word_break_tile_codepoints_k_];
@@ -645,9 +666,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_si
             sz_u8_t after_prop;
             if (!sz_utf8_word_break_is_ignorable_(this_prop)) {
                 // This non-ignorable is the nearest-below for every still-pending higher codepoint.
-                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
-                                                   pending_count, word_starts, word_lengths, words_capacity, &words,
-                                                   &word_end)) {
+                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw,
+                                                        pending_after, pending_count, word_starts, word_lengths,
+                                                        words_capacity, &words, &word_end)) {
                     if (bytes_consumed) *bytes_consumed = word_end;
                     return words;
                 }
@@ -670,9 +691,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_si
             else {
                 // Codepoint 0: start of text is always a boundary (no decision), and it is the floor
                 // nearest-below (`prop[0]`) for every remaining pending codepoint.
-                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw, pending_after,
-                                                   pending_count, word_starts, word_lengths, words_capacity, &words,
-                                                   &word_end)) {
+                if (sz_utf8_word_break_resolve_reverse_(text, length, this_prop, pending_offsets, pending_raw,
+                                                        pending_after, pending_count, word_starts, word_lengths,
+                                                        words_capacity, &words, &word_end)) {
                     if (bytes_consumed) *bytes_consumed = word_end;
                     return words;
                 }
@@ -698,8 +719,8 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_rfind_stream_rvv_(sz_cptr_t text, sz_si
  *  malformed UTF-8 (whose mixed stepping a codepoint scan cannot reproduce) and for pathological ignorable
  *  runs that overflow the pending buffer. */
 SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                              sz_size_t *word_lengths, sz_size_t words_capacity,
-                                              sz_size_t *bytes_consumed, int reverse) {
+                                                   sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                   sz_size_t *bytes_consumed, int reverse) {
     if (length == 0 || words_capacity == 0) {
         if (bytes_consumed) *bytes_consumed = (length == 0) ? 0 : (reverse ? length : 0);
         return 0;
@@ -711,10 +732,10 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t len
                                                              bytes_consumed);
 
     sz_bool_t overflowed = sz_false_k;
-    sz_size_t words = reverse ? sz_utf8_word_break_rfind_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
-                                                                bytes_consumed, &overflowed)
-                              : sz_utf8_word_break_find_stream_rvv_(text, length, word_starts, word_lengths, words_capacity,
-                                                               bytes_consumed, &overflowed);
+    sz_size_t words = reverse ? sz_utf8_word_break_rfind_stream_rvv_(text, length, word_starts, word_lengths,
+                                                                     words_capacity, bytes_consumed, &overflowed)
+                              : sz_utf8_word_break_find_stream_rvv_(text, length, word_starts, word_lengths,
+                                                                    words_capacity, bytes_consumed, &overflowed);
     if (overflowed)
         return reverse ? sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
                                                               bytes_consumed)

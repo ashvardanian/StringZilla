@@ -34,10 +34,10 @@ extern "C" {
 
 #pragma region Helpers
 
-/** @brief `result[0] = carry`, `result[i] = v[i-1]` — slide-up carrying a real predecessor across windows. */
-SZ_INTERNAL v128_t sz_utf8_ci_slide1up_v128_(v128_t v, sz_u8_t carry) {
-    return wasm_i8x16_shuffle(v, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
-                              14);
+/** @brief `result[0] = carry`, `result[i] = vector[i-1]` — slide-up carrying a real predecessor across windows. */
+SZ_INTERNAL v128_t sz_utf8_ci_slide1up_v128_(v128_t vector, sz_u8_t carry) {
+    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+                              13, 14);
 }
 
 /** @brief 0/1 byte (not 0xFF): 1 where `bytes == value`. */
@@ -100,16 +100,16 @@ SZ_INTERNAL sz_utf8_ci_window_v128_t_ sz_utf8_ci_load_window_v128_(sz_u8_t const
 
 #pragma region Per-script fold strips
 
-SZ_INTERNAL void sz_utf8_ci_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+SZ_INTERNAL void sz_utf8_ci_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_store_partial_v128_((sz_ptr_t)(dst + pos), sz_ascii_fold_v128_(wasm_v128_load(src + pos)), window);
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+SZ_INTERNAL void sz_utf8_ci_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t after_c3 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC3));
@@ -126,9 +126,9 @@ SZ_INTERNAL void sz_utf8_ci_fold_western_europe_strip_v128_(sz_u8_t const *src, 
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+SZ_INTERNAL void sz_utf8_ci_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         (void)next;
@@ -148,11 +148,11 @@ SZ_INTERNAL void sz_utf8_ci_fold_central_europe_strip_v128_(sz_u8_t const *src, 
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
+SZ_INTERNAL void sz_utf8_ci_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
     static sz_align_(16) sz_u8_t const offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     v128_t offsets_lut = wasm_v128_load(offsets);
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t after_d0 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD0));
@@ -167,7 +167,7 @@ SZ_INTERNAL void sz_utf8_ci_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_siz
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
+SZ_INTERNAL void sz_utf8_ci_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
     // Greek monotonic second-byte deltas after a CE lead, indexed by `text & 0x3F`.
     static sz_align_(16) sz_u8_t const ce_deltas[64] = {
         0,    0,    0,    0,    0,    0,    0x26, 0,    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
@@ -180,8 +180,8 @@ SZ_INTERNAL void sz_utf8_ci_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F stay
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // CE A0-AB promote
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
@@ -223,9 +223,9 @@ SZ_INTERNAL void sz_utf8_ci_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+SZ_INTERNAL void sz_utf8_ci_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t is_d4 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD4));
@@ -245,9 +245,9 @@ SZ_INTERNAL void sz_utf8_ci_fold_armenian_strip_v128_(sz_u8_t const *src, sz_siz
     }
 }
 
-SZ_INTERNAL void sz_utf8_ci_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vl, sz_u8_t *dst) {
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+SZ_INTERNAL void sz_utf8_ci_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
         v128_t previous = sz_utf8_ci_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
         v128_t previous2 = sz_utf8_ci_slide1up_v128_(previous, pos > 1 ? src[pos - 2] : 0);
@@ -291,10 +291,10 @@ SZ_INTERNAL void sz_utf8_ci_alarm_window_(v128_t danger_second, sz_size_t pos, s
     }
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t after_c3 = sz_utf8_ci_eq01_v128_(previous, 0xC3);
@@ -317,10 +317,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_western_europe_strip_v128_(sz_u8_t const *src,
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
         v128_t previous = sz_utf8_ci_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
         v128_t after_c3 = sz_utf8_ci_eq01_v128_(previous, 0xC3);
@@ -340,10 +340,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_central_europe_strip_v128_(sz_u8_t const *src,
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t danger = wasm_v128_and(
@@ -355,10 +355,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_si
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1, blanket = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
         v128_t previous = sz_utf8_ci_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
         v128_t after_ce = sz_utf8_ci_eq01_v128_(previous, 0xCE);
@@ -390,10 +390,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_
     return best < blanket ? best : blanket;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
         v128_t previous = sz_utf8_ci_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
         v128_t danger = wasm_v128_and(sz_utf8_ci_eq01_v128_(source, 0x87), sz_utf8_ci_eq01_v128_(previous, 0xD6));
@@ -405,10 +405,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_si
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t danger = wasm_v128_and(
@@ -437,10 +437,10 @@ SZ_INTERNAL long sz_utf8_ci_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_ci_alarm_georgian_strip_v128_(sz_u8_t const *src, sz_size_t vl) {
+SZ_INTERNAL long sz_utf8_ci_alarm_georgian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
-    for (sz_size_t pos = 0; pos < vl; pos += 16) {
-        sz_size_t window = vl - pos < 16 ? vl - pos : 16;
+    for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
+        sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_ci_window_v128_t_ chunk = sz_utf8_ci_load_window_v128_(src, pos);
         v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
         v128_t after_e1 = sz_utf8_ci_eq01_v128_(previous, 0xE1);
