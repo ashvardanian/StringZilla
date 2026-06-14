@@ -38,6 +38,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_find_update_(caps);
     sz_dispatch_sort_update_(caps);
     sz_dispatch_intersect_update_(caps);
+    sz_dispatch_utf8_norm_update_(caps);
     sz_dispatch_utf8_iterate_update_(caps);
     sz_dispatch_utf8_case_fold_update_(caps);
     sz_dispatch_utf8_case_insensitive_update_(caps);

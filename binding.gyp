@@ -11,6 +11,7 @@
         "c/stringzilla/find.c",
         "c/stringzilla/sort.c",
         "c/stringzilla/intersect.c",
+        "c/stringzilla/utf8_norm.c",
         "c/stringzilla/utf8_iterate.c",
         "c/stringzilla/utf8_case_fold.c",
         "c/stringzilla/utf8_case_insensitive.c"
