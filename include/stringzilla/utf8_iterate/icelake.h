@@ -555,7 +555,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
  *  1. Vectorized property classification. For a 64-byte chunk that is pure ASCII (the dominant case
  *     for English text and source code, where every byte is its own codepoint), we look up each
  *     byte's `sz_tr29_word_break_t` class through a single `_mm512_permutexvar_epi8` over the
- *     128-entry `sz_wb_prop_ascii_` table (each rune < 0x80 maps directly).
+ *     128-entry `sz_word_break_prop_ascii_` table (each rune < 0x80 maps directly).
  *
  *  2. Local "definitely-not-a-boundary" mask. From the class vector and its shift-by-one neighbor we
  *     compute, with masked compares, the set of adjacencies that the *unconditional* local rules
@@ -575,11 +575,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
  *  (3) intentionally stay serial — only classification and candidate filtering are vectorized. */
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
-SZ_INTERNAL __m512i sz_wb_classify_ascii_icelake_(__m512i ascii_bytes) {
-    // The 128-entry `sz_wb_prop_ascii_` table fits in two ZMM registers; a 7-bit index (ASCII) selects
+SZ_INTERNAL __m512i sz_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
+    // The 128-entry `sz_word_break_prop_ascii_` table fits in two ZMM registers; a 7-bit index (ASCII) selects
     // via `_mm512_permutexvar_epi8` from a 64-lane table, so we need a two-table blend on bit 6.
-    __m512i low_table = _mm512_loadu_epi8(sz_wb_prop_ascii_);       // entries 0..63
-    __m512i high_table = _mm512_loadu_epi8(sz_wb_prop_ascii_ + 64); // entries 64..127
+    __m512i low_table = _mm512_loadu_epi8(sz_word_break_prop_ascii_);       // entries 0..63
+    __m512i high_table = _mm512_loadu_epi8(sz_word_break_prop_ascii_ + 64); // entries 64..127
     __mmask64 high_half = _mm512_test_epi8_mask(ascii_bytes, _mm512_set1_epi8(0x40));
     __m512i low_result = _mm512_permutexvar_epi8(ascii_bytes, low_table);
     __m512i high_result = _mm512_permutexvar_epi8(ascii_bytes, high_table);
@@ -587,7 +587,7 @@ SZ_INTERNAL __m512i sz_wb_classify_ascii_icelake_(__m512i ascii_bytes) {
 }
 
 /** @brief  Mask of class==v lanes. */
-SZ_INTERNAL __mmask64 sz_wb_is_(__m512i cls, int v) { return _mm512_cmpeq_epi8_mask(cls, _mm512_set1_epi8((char)v)); }
+SZ_INTERNAL __mmask64 sz_word_break_is_(__m512i cls, int v) { return _mm512_cmpeq_epi8_mask(cls, _mm512_set1_epi8((char)v)); }
 
 /**
  *  @brief Compute, for an all-ASCII chunk, the per-position "guaranteed non-boundary" mask.
@@ -596,13 +596,13 @@ SZ_INTERNAL __mmask64 sz_wb_is_(__m512i cls, int v) { return _mm512_cmpeq_epi8_m
  *  unconditional local rule (WB5/8/9/10/13a/13b). Such positions can never be boundaries and are
  *  skipped; all other positions are candidates verified by the serial oracle.
  */
-SZ_INTERNAL sz_u64_t sz_wb_nonboundary_mask_ascii_(__m512i cls) {
+SZ_INTERNAL sz_u64_t sz_word_break_nonboundary_mask_ascii_(__m512i cls) {
     // Class membership masks for the current lanes.
-    __mmask64 is_aletter = sz_wb_is_(cls, sz_tr29_word_break_aletter_k);
-    __mmask64 is_hebrew = sz_wb_is_(cls, sz_tr29_word_break_hebrew_letter_k);
-    __mmask64 is_numeric = sz_wb_is_(cls, sz_tr29_word_break_numeric_k);
-    __mmask64 is_katakana = sz_wb_is_(cls, sz_tr29_word_break_katakana_k); // not in ASCII, but kept for clarity
-    __mmask64 is_extnumlet = sz_wb_is_(cls, sz_tr29_word_break_extendnumlet_k);
+    __mmask64 is_aletter = sz_word_break_is_(cls, sz_tr29_word_break_aletter_k);
+    __mmask64 is_hebrew = sz_word_break_is_(cls, sz_tr29_word_break_hebrew_letter_k);
+    __mmask64 is_numeric = sz_word_break_is_(cls, sz_tr29_word_break_numeric_k);
+    __mmask64 is_katakana = sz_word_break_is_(cls, sz_tr29_word_break_katakana_k); // not in ASCII, but kept for clarity
+    __mmask64 is_extnumlet = sz_word_break_is_(cls, sz_tr29_word_break_extendnumlet_k);
     __mmask64 is_ahletter = _kor_mask64(is_aletter, is_hebrew);
     // "cur" predicates as 64-bit integers; "prev" predicates are the same masks shifted left by 1 bit
     // (so that bit i carries the predicate of lane i-1).
@@ -651,8 +651,8 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake( //
             __m512i window = _mm512_loadu_epi8(text_u8 + position - 1); // lane 0 = byte at position-1
             __mmask64 non_ascii = _mm512_movepi8_mask(window);
             if (non_ascii == 0) {
-                __m512i cls = sz_wb_classify_ascii_icelake_(window);
-                sz_u64_t nonboundary = sz_wb_nonboundary_mask_ascii_(cls);
+                __m512i cls = sz_word_break_classify_ascii_icelake_(window);
+                sz_u64_t nonboundary = sz_word_break_nonboundary_mask_ascii_(cls);
                 // Candidate positions correspond to lanes 1..63 (== text positions position..position+62).
                 // Lane i is a candidate boundary unless it's in `nonboundary`. We restrict to lanes >=1.
                 sz_u64_t candidates = (~nonboundary) & 0xFFFFFFFFFFFFFFFEull;
@@ -727,8 +727,8 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake( //
             __m512i window = _mm512_loadu_epi8(text_u8 + base - 1); // lane i = position (base-1)+i, i in 0..63
             __mmask64 non_ascii = _mm512_movepi8_mask(window);
             if (non_ascii == 0) {
-                __m512i cls = sz_wb_classify_ascii_icelake_(window);
-                sz_u64_t nonboundary = sz_wb_nonboundary_mask_ascii_(cls);
+                __m512i cls = sz_word_break_classify_ascii_icelake_(window);
+                sz_u64_t nonboundary = sz_word_break_nonboundary_mask_ascii_(cls);
                 sz_u64_t candidates = (~nonboundary) & 0xFFFFFFFFFFFFFFFEull; // lanes 1..63
                 // Scan candidates from the highest lane (closest to `position`) downward.
                 while (candidates) {

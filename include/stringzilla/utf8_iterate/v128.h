@@ -296,7 +296,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
  *  yet the serial scanner pays a full property lookup + rule cascade per byte.
  *
  *  We accelerate exactly that case. The word-interior set is exactly the ASCII bytes {A-Z, a-z, 0-9,
- *  '_' = ExtendNumLet}, which `sz_wb_interior_mask_v128_` detects directly. For a candidate at byte
+ *  '_' = ExtendNumLet}, which `sz_word_break_interior_mask_v128_` detects directly. For a candidate at byte
  *  offset `i`, if both `byte[i-1]` and `byte[i]` are word-interior, then *every* UAX-29 rule that could
  *  fire (WB5/8/9/10/13a/13b and their context-needing siblings) resolves to "do NOT break" — verified
  *  exhaustively against the serial decision table — because ASCII contains no Extend/Format/ZWJ/RI/
@@ -306,7 +306,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
  *  is bit-for-bit identical to the serial reference (the hard, stateful sub-rules stay serial). */
 
 /** @brief Per-byte mask (0xFF) where a byte is ASCII and word-interior {ALetter,Numeric,ExtendNumLet}. */
-SZ_INTERNAL v128_t sz_wb_interior_mask_v128_(v128_t bytes) {
+SZ_INTERNAL v128_t sz_word_break_interior_mask_v128_(v128_t bytes) {
     // The interior set is exactly {A-Z, a-z, 0-9, '_'}, so we test it directly instead of running the
     // full Word_Break classifier and then matching three property values. ASCII letters fold to a-z
     // by OR-ing 0x20; the `is_ascii` guard rejects any high byte that the fold might alias into range.
@@ -343,7 +343,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
         // 16-byte window anchored one byte BEFORE `position`, so lane 0 = byte[position-1] and lane 1 = byte[position].
         if (position >= 1 && position + 16 <= length) {
             v128_t window = wasm_v128_load(text_u8 + position - 1);
-            v128_t interior = sz_wb_interior_mask_v128_(window);
+            v128_t interior = sz_word_break_interior_mask_v128_(window);
             // Pair[i] interior iff lane i and lane i-1 both interior. Shift interior right by one lane
             // (lane i gets lane i-1's value); zero the wrapped lane 0 so it never claims a pair.
             v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
@@ -412,7 +412,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
         if (position >= 15 && position + 1 <= length) {
             sz_size_t base = position - 15;
             v128_t window = wasm_v128_load(text_u8 + base);
-            v128_t interior = sz_wb_interior_mask_v128_(window);
+            v128_t interior = sz_word_break_interior_mask_v128_(window);
             v128_t previous = wasm_i8x16_shuffle(wasm_i8x16_splat(0), interior, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
                                                  25, 26, 27, 28, 29, 30);
             v128_t pair = wasm_v128_and(interior, previous);
