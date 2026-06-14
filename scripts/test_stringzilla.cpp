@@ -4803,6 +4803,10 @@ void test_sort_backends() {
     test_sort_backend_equivalence(sz_sequence_argsort_neon, sz_sequence_argsort_utf8_case_insensitive_neon,
                                   sz_pgrams_sort_neon);
 #endif
+#if SZ_USE_RVV
+    test_sort_backend_equivalence(sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_case_insensitive_rvv,
+                                  sz_pgrams_sort_rvv);
+#endif
 }
 
 #pragma endregion // Per-ISA Sort Equivalence

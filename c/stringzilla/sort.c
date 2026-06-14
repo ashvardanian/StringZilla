@@ -42,6 +42,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps) {
         impl->sequence_argsort_utf8_case_insensitive = sz_sequence_argsort_utf8_case_insensitive_neon;
     }
 #endif
+#if SZ_USE_RVV
+    if (caps & sz_cap_rvv_k) {
+        impl->sequence_argsort = sz_sequence_argsort_rvv;
+        impl->sequence_argsort_utf8_case_insensitive = sz_sequence_argsort_utf8_case_insensitive_rvv;
+    }
+#endif
 }
 
 SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order,

@@ -204,6 +204,23 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
 
 #endif
 
+#if SZ_USE_RVV
+
+/** @copydoc sz_sequence_argsort */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                              sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_rvv( //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
+    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+
+/** @copydoc sz_pgrams_sort_serial */
+SZ_PUBLIC sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                         sz_sorted_idx_t *order);
+
+#endif
+
 #pragma endregion
 
 #include "stringzilla/sort/serial.h"
@@ -211,6 +228,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
 #include "stringzilla/sort/skylake.h"
 #include "stringzilla/sort/sve.h"
 #include "stringzilla/sort/neon.h"
+#include "stringzilla/sort/rvv.h"
 
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
@@ -228,6 +246,8 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
     return sz_sequence_argsort_sve(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_NEON
     return sz_sequence_argsort_neon(sequence, alloc, order, top_count, reverse);
+#elif SZ_USE_RVV
+    return sz_sequence_argsort_rvv(sequence, alloc, order, top_count, reverse);
 #else
     return sz_sequence_argsort_serial(sequence, alloc, order, top_count, reverse);
 #endif
@@ -244,6 +264,8 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
     return sz_sequence_argsort_utf8_case_insensitive_sve(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_NEON
     return sz_sequence_argsort_utf8_case_insensitive_neon(sequence, alloc, order, top_count, reverse);
+#elif SZ_USE_RVV
+    return sz_sequence_argsort_utf8_case_insensitive_rvv(sequence, alloc, order, top_count, reverse);
 #else
     return sz_sequence_argsort_utf8_case_insensitive_serial(sequence, alloc, order, top_count, reverse);
 #endif

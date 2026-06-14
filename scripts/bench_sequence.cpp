@@ -235,6 +235,10 @@ void bench_sequencing_strings(environment_t const &env) {
     auto neon_call = argsort_strings_via_sz<sz_sequence_argsort_neon> {env.tokens, permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_neon", base_call, neon_call).log(base);
 #endif
+#if SZ_USE_RVV
+    auto rvv_call = argsort_strings_via_sz<sz_sequence_argsort_rvv> {env.tokens, permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_rvv", base_call, rvv_call).log(base);
+#endif
 
     // Include POSIX and WinAPI functionality
 #if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
@@ -347,6 +351,11 @@ void bench_sequencing_strings_case_insensitive(environment_t const &env) {
                                                                                                 permute_buffer};
     bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_neon", base_call, neon_call).log(base);
 #endif
+#if SZ_USE_RVV
+    auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_rvv> {env.tokens, folded,
+                                                                                              permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_rvv", base_call, rvv_call).log(base);
+#endif
 }
 
 #pragma endregion
@@ -435,6 +444,10 @@ void bench_sequencing_pgrams(environment_t const &env) {
 #if SZ_USE_SVE
     auto sve_call = sort_pgrams_via_sz<sz_pgrams_sort_sve> {pgrams_buffer, pgrams_sorted, permute_buffer};
     bench_nullary(env, "sz_pgrams_sort_sve", base_call, sve_call).log(base);
+#endif
+#if SZ_USE_RVV
+    auto rvv_call = sort_pgrams_via_sz<sz_pgrams_sort_rvv> {pgrams_buffer, pgrams_sorted, permute_buffer};
+    bench_nullary(env, "sz_pgrams_sort_rvv", base_call, rvv_call).log(base);
 #endif
 }
 
