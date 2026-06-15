@@ -14,142 +14,122 @@
 extern "C" {
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    // TODO: Optimize with a SWAR variant
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_u8_t const *end_u8 = text_u8 + length;
-    while (text_u8 != end_u8) {
-        sz_u8_t const c = *text_u8;
-        switch (c) {
+/**
+ *  @brief Scalar multistep newline scan: classify each codepoint inline and emit every delimiter.
+ *
+ *  Writes the byte offset and byte length of each newline delimiter into the parallel `match_offsets` /
+ *  `match_lengths` arrays; a @c "\r\n" CRLF is one match of length 2 and its trailing LF is never emitted
+ *  alone. `base` is added to every emitted offset and to `*bytes_consumed` so a SIMD backend can call this for
+ *  its sub-vector tail with absolute coordinates. Non-delimiter bytes advance the cursor by one (byte-for-byte
+ *  parity with the historical single-match walk, which keeps results identical on malformed UTF-8). Stops at
+ *  `matches_capacity`; `*bytes_consumed` is the resume offset, always a true delimiter boundary.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_find_newlines_serial_(             //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,            //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_bytes = (sz_u8_t const *)text;
+    sz_size_t match_count = 0, position = 0;
+    while (position < length && match_count < matches_capacity) {
+        sz_u8_t const lead_byte = text_bytes[position];
+        sz_size_t match_length = 0; // 0 means "no delimiter starts at this position"
+        switch (lead_byte) {
         case '\n':
         case '\v':
-        case '\f': *matched_length = 1; return (sz_cptr_t)text_u8;
-        // Differentiate between "\r" and "\r\n"
-        case '\r':
-            if (text_u8 + 1 != end_u8 && text_u8[1] == '\n') {
-                *matched_length = 2;
-                return (sz_cptr_t)text_u8;
-            }
-            else {
-                *matched_length = 1;
-                return (sz_cptr_t)text_u8;
-            }
-        // Matching the 0xC285 character
-        case 0xC2:
-            if (text_u8 + 1 != end_u8 && text_u8[1] == 0x85) {
-                *matched_length = 2;
-                return (sz_cptr_t)text_u8;
-            }
-            else {
-                ++text_u8;
-                continue;
-            }
-        // Matching 3-byte newline characters
-        case 0xE2:
-            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
-                *matched_length = 3;
-                return (sz_cptr_t)text_u8;
-            }
-            else if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
-                *matched_length = 3;
-                return (sz_cptr_t)text_u8;
-            }
-            else {
-                ++text_u8;
-                continue;
-            }
-        default: ++text_u8; continue;
+        case '\f': match_length = 1; break;
+        case '\r': match_length = (position + 1 < length && text_bytes[position + 1] == '\n') ? 2 : 1; break;
+        case 0xC2: // U+0085 NEXT LINE
+            if (position + 1 < length && text_bytes[position + 1] == 0x85) match_length = 2;
+            break;
+        case 0xE2: // U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR
+            if (position + 2 < length && text_bytes[position + 1] == 0x80 &&
+                (text_bytes[position + 2] == 0xA8 || text_bytes[position + 2] == 0xA9))
+                match_length = 3;
+            break;
+        default: break;
         }
+        if (match_length) {
+            match_offsets[match_count] = base + position, match_lengths[match_count] = match_length, ++match_count;
+            position += match_length;
+        }
+        else { position += 1; }
     }
-    *matched_length = 0;
-    return SZ_NULL_CHAR;
+    if (bytes_consumed) *bytes_consumed = base + position;
+    return match_count;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    // TODO: Optimize with a SWAR variant
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_u8_t const *end_u8 = text_u8 + length;
-    while (text_u8 != end_u8) {
-        sz_u8_t const c = *text_u8;
-        switch (c) {
+/**
+ *  @brief Scalar multistep whitespace scan: classify each codepoint inline and emit every delimiter.
+ *
+ *  Same contract as `sz_utf8_find_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
+ *  merging here - CR and LF are independent length-1 matches.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_find_whitespaces_serial_(         //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,           //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,         //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_bytes = (sz_u8_t const *)text;
+    sz_size_t match_count = 0, position = 0;
+    while (position < length && match_count < matches_capacity) {
+        sz_u8_t const lead_byte = text_bytes[position];
+        sz_size_t match_length = 0;
+        switch (lead_byte) {
         case ' ':
         case '\t':
         case '\n':
         case '\v':
         case '\f':
-        case '\r': *matched_length = 1; return (sz_cptr_t)text_u8;
-        // Matching 2-byte whitespace characters
-        case 0xC2:
-            if (text_u8 + 1 != end_u8) {
-                // U+0085: NEXT LINE (NEL)
-                if (text_u8[1] == 0x85) {
-                    *matched_length = 2;
-                    return (sz_cptr_t)text_u8;
-                }
-                // U+00A0: NO-BREAK SPACE
-                else if (text_u8[1] == 0xA0) {
-                    *matched_length = 2;
-                    return (sz_cptr_t)text_u8;
-                }
+        case '\r': match_length = 1; break;
+        case 0xC2: // U+0085 NEL, U+00A0 NBSP
+            if (position + 1 < length && (text_bytes[position + 1] == 0x85 || text_bytes[position + 1] == 0xA0))
+                match_length = 2;
+            break;
+        case 0xE1: // U+1680 OGHAM SPACE MARK (E1 9A 80)
+            if (position + 2 < length && text_bytes[position + 1] == 0x9A && text_bytes[position + 2] == 0x80)
+                match_length = 3;
+            break;
+        case 0xE2: // U+2000..U+200A, U+2028, U+2029, U+202F, U+205F
+            if (position + 2 < length) {
+                sz_u8_t const second = text_bytes[position + 1], third = text_bytes[position + 2];
+                if (second == 0x80 && ((third >= 0x80 && third <= 0x8D) || third == 0xA8 || third == 0xA9 ||
+                                       third == 0xAF))
+                    match_length = 3;
+                else if (second == 0x81 && third == 0x9F)
+                    match_length = 3;
             }
-            ++text_u8;
-            continue;
-        // Matching the 0xE19A80 ogham space mark
-        case 0xE1:
-            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x9A && text_u8[2] == 0x80) {
-                *matched_length = 3;
-                return (sz_cptr_t)text_u8;
-            }
-            else {
-                ++text_u8;
-                continue;
-            }
-        // Match the 3-byte whitespace characters starting with 0xE2
-        case 0xE2:
-            if (text_u8 + 2 < end_u8) {
-                // U+2000 to U+200D: 0xE28080 to 0xE2808D
-                if (text_u8[1] == 0x80 && text_u8[2] >= 0x80 && text_u8[2] <= 0x8D) {
-                    *matched_length = 3;
-                    return (sz_cptr_t)text_u8;
-                }
-                // U+2028: LINE SEPARATOR (0xE280A8)
-                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA8) {
-                    *matched_length = 3;
-                    return (sz_cptr_t)text_u8;
-                }
-                // U+2029: PARAGRAPH SEPARATOR (0xE280A9)
-                else if (text_u8[1] == 0x80 && text_u8[2] == 0xA9) {
-                    *matched_length = 3;
-                    return (sz_cptr_t)text_u8;
-                }
-                // U+202F: NARROW NO-BREAK SPACE (0xE280AF)
-                else if (text_u8[1] == 0x80 && text_u8[2] == 0xAF) {
-                    *matched_length = 3;
-                    return (sz_cptr_t)text_u8;
-                }
-                // U+205F: MEDIUM MATHEMATICAL SPACE (0xE2819F)
-                else if (text_u8[1] == 0x81 && text_u8[2] == 0x9F) {
-                    *matched_length = 3;
-                    return (sz_cptr_t)text_u8;
-                }
-            }
-            ++text_u8;
-            continue;
-        // Match the 3-byte ideographic space
-        case 0xE3:
-            if (text_u8 + 2 < end_u8 && text_u8[1] == 0x80 && text_u8[2] == 0x80) {
-                *matched_length = 3;
-                return (sz_cptr_t)text_u8;
-            }
-            else {
-                ++text_u8;
-                continue;
-            }
+            break;
+        case 0xE3: // U+3000 IDEOGRAPHIC SPACE (E3 80 80)
+            if (position + 2 < length && text_bytes[position + 1] == 0x80 && text_bytes[position + 2] == 0x80)
+                match_length = 3;
+            break;
+        default: break;
         }
-        ++text_u8;
+        if (match_length) {
+            match_offsets[match_count] = base + position, match_lengths[match_count] = match_length, ++match_count;
+            position += match_length;
+        }
+        else { position += 1; }
     }
-    *matched_length = 0;
-    return SZ_NULL_CHAR;
+    if (bytes_consumed) *bytes_consumed = base + position;
+    return match_count;
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_serial(           //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_find_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
+                                         bytes_consumed);
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_serial(       //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,    //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_find_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
+                                            bytes_consumed);
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length) {

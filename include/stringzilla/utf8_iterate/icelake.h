@@ -24,235 +24,210 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+/*  Multistep newline / whitespace iteration (Ice Lake / AVX-512).
+ *
+ *  Each 64-byte window is classified branchlessly into a `starts` mask (every delimiter start) plus a
+ *  per-lane byte-length vector; one `vpcompressb` (`_mm512_mask_compressstoreu_epi8`) peels the matching
+ *  lane indices and a second peels the lengths, then bounded `_mm512_cvtepu8_epi64` widens write absolute
+ *  `(offset, length)` pairs with NO per-match branch or bit-peel loop. We trust starts in lanes [0,61] and
+ *  step 62 so any 2-/3-byte delimiter is fully loaded; a 1-byte `t[pos-1] == '\r'` carry suppresses an LF
+ *  that completes a CRLF straddling the window edge (the only delimiter whose tail is itself a match). */
 
-    // We need to check if the ASCII chars in [10,13] (same as '\n', '\v', '\f', '\r') are present.
-    // The last one - '\r' - needs special handling to differentiate between "\r" and "\r\n".
-    sz_u512_vec_t newline_vec, vertical_tab_vec, form_feed_vec, carriage_return_vec;
-    newline_vec.zmm = _mm512_set1_epi8('\n');
-    vertical_tab_vec.zmm = _mm512_set1_epi8('\v');
-    form_feed_vec.zmm = _mm512_set1_epi8('\f');
-    carriage_return_vec.zmm = _mm512_set1_epi8('\r');
-
-    // We also need to match the 2-byte newline character 0xC285 (NEL),
-    // as well as the 3-byte characters 0xE280A8 (PS) and 0xE280A9 (LS).
-    sz_u512_vec_t lead_c2_vec, x_85_vec, lead_e2_vec, byte_80_vec, x_a8_vec, x_a9_vec;
-    lead_c2_vec.zmm = _mm512_set1_epi8('\xC2');
-    x_85_vec.zmm = _mm512_set1_epi8('\x85');
-    lead_e2_vec.zmm = _mm512_set1_epi8('\xE2');
-    byte_80_vec.zmm = _mm512_set1_epi8('\x80');
-    x_a8_vec.zmm = _mm512_set1_epi8('\xA8');
-    x_a9_vec.zmm = _mm512_set1_epi8('\xA9');
-
-    // We check 64 bytes of data at once, but only step forward by 62 bytes for split-register matches.
-    sz_u512_vec_t text_vec;
-    while (length >= 64) {
-        text_vec.zmm = _mm512_loadu_epi8(text);
-
-        // 1-byte indicators & matches
-        __mmask64 newline_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, newline_vec.zmm);
-        __mmask64 vertical_tab_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, vertical_tab_vec.zmm);
-        __mmask64 form_feed_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, form_feed_vec.zmm);
-        __mmask64 carriage_return_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm,
-                                                                     carriage_return_vec.zmm); // Ignore last
-        sz_u64_t one_byte_mask = _cvtmask64_u64(_kor_mask64(_kor_mask64(newline_mask, vertical_tab_mask),
-                                                            _kor_mask64(form_feed_mask, carriage_return_mask)));
-
-        // 2-byte indicators
-        __mmask64 lead_c2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, lead_c2_vec.zmm);
-        __mmask64 x_85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_85_vec.zmm);
-        __mmask64 lead_e2_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, lead_e2_vec.zmm);
-        __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, byte_80_vec.zmm);
-        __mmask64 x_a8_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a8_vec.zmm);
-        __mmask64 x_a9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a9_vec.zmm);
-
-        // 2-byte matches
-        __mmask64 rn_match_mask = _kand_mask64(carriage_return_mask, _kshiftri_mask64(newline_mask, 1));
-        __mmask64 nel_c2_85_mask = _kand_mask64(lead_c2_mask, _kshiftri_mask64(x_85_mask, 1));
-        sz_u64_t two_byte_mask = _cvtmask64_u64(_kor_mask64(rn_match_mask, nel_c2_85_mask));
-
-        // 3-byte matches
-        __mmask64 lead_e280_mask = _kand_mask64(lead_e2_mask, _kshiftri_mask64(byte_80_mask, 1));
-        __mmask64 x_e280a8_mask = _kand_mask64(lead_e280_mask, _kshiftri_mask64(x_a8_mask, 2));
-        __mmask64 x_e280a9_mask = _kand_mask64(lead_e280_mask, _kshiftri_mask64(x_a9_mask, 2));
-        sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(x_e280a8_mask, x_e280a9_mask));
-
-        // Find the earliest match regardless of length
-        sz_u64_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
-        if (combined_mask) {
-            int first_offset = sz_u64_ctz(combined_mask);
-            sz_u64_t first_match_mask = (sz_u64_t)(1) << first_offset;
-
-            // We don't want to produce too much divergent control flow,
-            // but need to achieve a behavior similar to this:
-            //
-            //  if (first_match_mask & three_byte_mask) { *matched_length = 3; }
-            //  else if (first_match_mask & two_byte_mask) { *matched_length = 2; }
-            //  else { *matched_length = 1; }
-            sz_size_t length_value = 1;
-            length_value += (first_match_mask & (two_byte_mask | three_byte_mask)) != 0;
-            length_value += (first_match_mask & (three_byte_mask)) != 0;
-            *matched_length = length_value;
-            return text + first_offset;
-        }
-        else {
-            text += 62;
-            length -= 62;
-        }
-    }
-
-    return sz_utf8_find_newline_serial(text, length, matched_length);
+SZ_INTERNAL __m512i sz_utf8_iterate_lane_identity_icelake_(void) {
+    return _mm512_set_epi8(                                             //
+        63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
+        47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
+/**
+ *  @brief Peel a window's first `emit` (<= 8) matches in-register: `vpcompressb` + one masked widen-store.
+ *
+ *  `vpcompressb` packs the matching lane indices and their byte lengths into the low bytes of two ZMM registers;
+ *  one `vpmovzxbq` of the low 128 bits (`_mm512_castsi512_si128`, no extract) widens the first 8 and a masked
+ *  `_mm512_mask_storeu_epi64` writes absolute `(offset, length)` pairs. The caller emits at most 8 per window and
+ *  resumes past the last emitted match to re-classify when a dense window held more, so the peel is a single
+ *  straight-line wave with no register-shift loop (re-classify is cheaper than the shift scaffolding a wider peel
+ *  would need on the rare > 8-per-window case).
+ */
+SZ_INTERNAL void sz_utf8_iterate_peel_icelake_(                                  //
+    sz_u64_t start_bits, __mmask64 two_byte_starts, __mmask64 three_byte_starts, //
+    sz_size_t emit, sz_size_t position, __m512i lane_identity,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths) {
+    __mmask64 const compress_mask = _cvtu64_mask64(start_bits);
 
-    // We need to check if the ASCII chars in [9,13] (same as '\t', '\n', '\v', '\f', '\r') are present.
-    // There is also the canonical space ' ' (0x20).
-    sz_u512_vec_t tab_vec, carriage_return_vec, x_20_vec;
-    tab_vec.zmm = _mm512_set1_epi8('\t');
-    carriage_return_vec.zmm = _mm512_set1_epi8('\r');
-    x_20_vec.zmm = _mm512_set1_epi8(' ');
+    // Per-lane byte length: 1, plus 1 on a 2-byte start, plus 2 on a 3-byte start (the masks are disjoint).
+    __m512i length_per_lane = _mm512_set1_epi8(1);
+    length_per_lane = _mm512_mask_add_epi8(length_per_lane, two_byte_starts, length_per_lane, _mm512_set1_epi8(1));
+    length_per_lane = _mm512_mask_add_epi8(length_per_lane, three_byte_starts, length_per_lane, _mm512_set1_epi8(2));
 
-    // We also need to match the 2-byte characters 0xC285 (NEL) and 0xC2A0 (NBSP),
-    sz_u512_vec_t lead_c2_vec, x_85_vec, x_a0_vec;
-    lead_c2_vec.zmm = _mm512_set1_epi8('\xC2');
-    x_85_vec.zmm = _mm512_set1_epi8('\x85');
-    x_a0_vec.zmm = _mm512_set1_epi8('\xA0');
+    __m512i const compressed_offsets = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
+    __m512i const compressed_lengths = _mm512_maskz_compress_epi8(compress_mask, length_per_lane);
+    __m512i const position_broadcast = _mm512_set1_epi64((long long)position);
+    __mmask8 const store_mask = sz_u8_clamp_mask_until_(emit);
 
-    // We also need to match 3-byte ogham space mark 0xE19A80 (OGHAM SPACE MARK),
-    // a range of 3-byte characters from 0xE28080 to 0xE2808D (various spaces),
-    // U+202F (0xE280AF), U+205F (0xE2819F),
-    // U+2028 (0xE280A8) LINE SEPARATOR, U+2029 (0xE280A9) PARAGRAPH SEPARATOR,
-    // and the 3-byte ideographic space 0xE38080 (IDEOGRAPHIC SPACE).
-    sz_u512_vec_t x_e1_vec, lead_e2_vec, x_e3_vec,        // ? possible first byte values
-        x_9a_vec, byte_80_vec, x_81_vec,                  // ? possible second byte values
-        x_8d_vec, x_a8_vec, x_a9_vec, x_af_vec, x_9f_vec; // ? third byte values for ranges and specific matches
-    x_e1_vec.zmm = _mm512_set1_epi8('\xE1');
-    lead_e2_vec.zmm = _mm512_set1_epi8('\xE2');
-    x_e3_vec.zmm = _mm512_set1_epi8('\xE3');
-    x_9a_vec.zmm = _mm512_set1_epi8('\x9A');
-    byte_80_vec.zmm = _mm512_set1_epi8('\x80');
-    x_81_vec.zmm = _mm512_set1_epi8('\x81');
-    x_8d_vec.zmm = _mm512_set1_epi8('\x8D');
-    x_a8_vec.zmm = _mm512_set1_epi8('\xA8');
-    x_a9_vec.zmm = _mm512_set1_epi8('\xA9');
-    x_af_vec.zmm = _mm512_set1_epi8('\xAF');
-    x_9f_vec.zmm = _mm512_set1_epi8('\x9F');
+    _mm512_mask_storeu_epi64(
+        (void *)match_offsets, store_mask,
+        _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_offsets)), position_broadcast));
+    _mm512_mask_storeu_epi64((void *)match_lengths, store_mask,
+                             _mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lengths)));
+}
 
-    // We check 64 bytes of data at once, but only step forward by 62 bytes for split-register matches.
-    sz_u512_vec_t text_vec;
-    while (length >= 64) {
-        text_vec.zmm = _mm512_loadu_epi8(text);
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
-        // 1-byte indicators & matches
-        // Range [9,13] covers \t, \n, \v, \f, \r
-        __mmask64 x_20_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_20_vec.zmm);
-        __mmask64 tab_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, tab_vec.zmm);
-        __mmask64 carriage_return_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, carriage_return_vec.zmm);
-        sz_u64_t one_byte_mask = _cvtmask64_u64(
-            _kor_mask64(x_20_mask, _kand_mask64(tab_ge_mask, carriage_return_le_mask)));
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t count = 0, position = 0;
+    __m512i newline_vec = _mm512_set1_epi8('\n'), vertical_tab_vec = _mm512_set1_epi8('\v'),
+            form_feed_vec = _mm512_set1_epi8('\f'), carriage_return_vec = _mm512_set1_epi8('\r'),
+            lead_c2_vec = _mm512_set1_epi8('\xC2'), x_85_vec = _mm512_set1_epi8('\x85'),
+            lead_e2_vec = _mm512_set1_epi8('\xE2'), byte_80_vec = _mm512_set1_epi8('\x80'),
+            x_a8_vec = _mm512_set1_epi8('\xA8'), x_a9_vec = _mm512_set1_epi8('\xA9');
+    __m512i const lane_identity = sz_utf8_iterate_lane_identity_icelake_();
 
-        // Instead of immediately checking for 2-byte and 3-byte matches with a ridiculous number of masks and
-        // comparisons, let's define a "fast path" for following cases:
-        // - no whitespaces are found in the range
-        // - a one-byte match comes before any possible prefix byte of a multi-byte match
-        __mmask64 lead_c2_mask = _mm512_mask_cmpeq_epi8_mask(0x7FFFFFFFFFFFFFFF, text_vec.zmm, lead_c2_vec.zmm);
-        __mmask64 x_e1_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, x_e1_vec.zmm);
-        __mmask64 lead_e2_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, lead_e2_vec.zmm);
-        __mmask64 x_e3_mask = _mm512_mask_cmpeq_epi8_mask(0x3FFFFFFFFFFFFFFF, text_vec.zmm, x_e3_vec.zmm);
-
-        // Check if we matched the "fast path"
-        if (one_byte_mask) {
-            sz_u64_t prefix_byte_mask = _cvtmask64_u64(
-                _kor_mask64(_kor_mask64(lead_c2_mask, x_e1_mask), _kor_mask64(lead_e2_mask, x_e3_mask)));
-            if (prefix_byte_mask) {
-                int first_one_byte_offset = sz_u64_ctz(one_byte_mask);
-                int first_prefix_offset = sz_u64_ctz(prefix_byte_mask);
-                if (first_one_byte_offset < first_prefix_offset) {
-                    *matched_length = 1;
-                    return text + first_one_byte_offset;
-                }
-            }
-            else {
-                int first_one_byte_offset = sz_u64_ctz(one_byte_mask);
-                *matched_length = 1;
-                return text + first_one_byte_offset;
-            }
-        }
-
-        // 2-byte indicators suffixes & matches
-        __mmask64 x_85_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_85_vec.zmm);
-        __mmask64 x_a0_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a0_vec.zmm);
-        sz_u64_t two_byte_mask = _cvtmask64_u64(             //
-            _kand_mask64(lead_c2_mask,                       //
-                         _kor_mask64(                        //
-                             _kshiftri_mask64(x_85_mask, 1), // U+0085 NEL
-                             _kshiftri_mask64(x_a0_mask, 1)  // U+00A0 NBSP
-                             )));
-
-        // 3-byte indicators suffixes
-        __mmask64 x_9a_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_9a_vec.zmm);
-        __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, byte_80_vec.zmm);
-        __mmask64 x_81_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_81_vec.zmm);
-        __mmask64 x_80_ge_mask = _mm512_cmpge_epu8_mask(text_vec.zmm, byte_80_vec.zmm);
-        __mmask64 x_8d_le_mask = _mm512_cmple_epu8_mask(text_vec.zmm, x_8d_vec.zmm);
-        __mmask64 x_a8_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a8_vec.zmm);
-        __mmask64 x_a9_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_a9_vec.zmm);
-        __mmask64 x_af_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_af_vec.zmm);
-        __mmask64 x_9f_mask = _mm512_cmpeq_epi8_mask(text_vec.zmm, x_9f_vec.zmm);
-
-        // 3-byte matches
-        __mmask64 ogham_mask = _kand_mask64(
-            x_e1_mask, _kand_mask64(_kshiftri_mask64(x_9a_mask, 1), _kshiftri_mask64(byte_80_mask, 2)));
-        // U+2000 to U+200D: E2 80 [80-8D]
-        __mmask64 range_e280_mask = _kand_mask64(
-            lead_e2_mask,
-            _kand_mask64(_kshiftri_mask64(byte_80_mask, 1),
-                         _kand_mask64(_kshiftri_mask64(x_80_ge_mask, 2), _kshiftri_mask64(x_8d_le_mask, 2))));
-        // U+202F: E2 80 AF (NARROW NO-BREAK SPACE)
-        __mmask64 nnbsp_mask = _kand_mask64(
-            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_af_mask, 2)));
-        // U+205F: E2 81 9F (MEDIUM MATHEMATICAL SPACE)
-        __mmask64 mmsp_mask = _kand_mask64(
-            lead_e2_mask, _kand_mask64(_kshiftri_mask64(x_81_mask, 1), _kshiftri_mask64(x_9f_mask, 2)));
-        // U+2028: E2 80 A8 (LINE SEPARATOR)
-        __mmask64 line_mask = _kand_mask64(
-            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_a8_mask, 2)));
-        // U+2029: E2 80 A9 (PARAGRAPH SEPARATOR)
-        __mmask64 paragraph_mask = _kand_mask64(
-            lead_e2_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(x_a9_mask, 2)));
-        __mmask64 ideographic_mask = _kand_mask64(
-            x_e3_mask, _kand_mask64(_kshiftri_mask64(byte_80_mask, 1), _kshiftri_mask64(byte_80_mask, 2)));
-        sz_u64_t three_byte_mask = _cvtmask64_u64(_kor_mask64(
-            _kor_mask64(_kor_mask64(_kor_mask64(ogham_mask, range_e280_mask), _kor_mask64(nnbsp_mask, mmsp_mask)),
-                        _kor_mask64(line_mask, paragraph_mask)),
-            ideographic_mask));
-
-        // Find the earliest match regardless of length
-        sz_u64_t combined_mask = one_byte_mask | two_byte_mask | three_byte_mask;
-        if (combined_mask) {
-            int first_offset = sz_u64_ctz(combined_mask);
-            sz_u64_t first_match_mask = (sz_u64_t)(1) << first_offset;
-
-            // We don't want to produce too much divergent control flow,
-            // but need to achieve a behavior similar to this:
-            //
-            //  if (first_match_mask & three_byte_mask) { *matched_length = 3; }
-            //  else if (first_match_mask & two_byte_mask) { *matched_length = 2; }
-            //  else { *matched_length = 1; }
-            sz_size_t length_value = 1;
-            length_value += (first_match_mask & (two_byte_mask | three_byte_mask)) != 0;
-            length_value += (first_match_mask & (three_byte_mask)) != 0;
-            *matched_length = length_value;
-            return text + first_offset;
-        }
+    while (position < length && count < matches_capacity) {
+        sz_size_t const valid_lanes = length - position;
+        // Plain load + trust [0,61] on a full window (the hot path); a masked load clips the final partial window
+        // to its valid lanes (zero-filled past `length`, so a truncated multi-byte delimiter cannot match).
+        __m512i window;
+        sz_u64_t trusted_bits;
+        if (valid_lanes >= 64) { window = _mm512_loadu_epi8(text_u8 + position), trusted_bits = (1ull << 62) - 1; }
         else {
-            text += 62;
-            length -= 62;
+            __mmask64 const load_mask = sz_u64_mask_until_(valid_lanes);
+            window = _mm512_maskz_loadu_epi8(load_mask, text_u8 + position), trusted_bits = _cvtmask64_u64(load_mask);
         }
+        __mmask64 newline_mask = _mm512_cmpeq_epi8_mask(window, newline_vec);
+        __mmask64 carriage_return_mask = _mm512_cmpeq_epi8_mask(window, carriage_return_vec);
+        __mmask64 one_byte_mask = _kor_mask64(
+            _kor_mask64(newline_mask, _mm512_cmpeq_epi8_mask(window, vertical_tab_vec)),
+            _kor_mask64(_mm512_cmpeq_epi8_mask(window, form_feed_vec), carriage_return_mask));
+        // 2-byte NEL (C2 85); 3-byte LS/PS (E2 80 A8/A9) - computed unconditionally (cheaper than a data-dependent gate).
+        __mmask64 nel_mask = _kand_mask64(_mm512_cmpeq_epi8_mask(window, lead_c2_vec),
+                                          _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_85_vec), 1));
+        __mmask64 lead_e280_mask = _kand_mask64(_mm512_cmpeq_epi8_mask(window, lead_e2_vec),
+                                                _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, byte_80_vec), 1));
+        __mmask64 line_para_mask = _kand_mask64(
+            lead_e280_mask,
+            _kshiftri_mask64(
+                _kor_mask64(_mm512_cmpeq_epi8_mask(window, x_a8_vec), _mm512_cmpeq_epi8_mask(window, x_a9_vec)), 2));
+        // CRLF: a CR whose next lane is LF is a single 2-byte match; its trailing LF must not also be emitted.
+        __mmask64 crlf_mask = _kand_mask64(carriage_return_mask, _kshiftri_mask64(newline_mask, 1));
+        __mmask64 lf_of_crlf_mask = _kand_mask64(newline_mask, _kshiftli_mask64(carriage_return_mask, 1));
+
+        __mmask64 two_byte_starts = _kor_mask64(crlf_mask, nel_mask);
+        __mmask64 three_byte_starts = line_para_mask;
+        __mmask64 starts = _kandn_mask64(lf_of_crlf_mask,
+                                         _kor_mask64(_kor_mask64(one_byte_mask, nel_mask), line_para_mask));
+        sz_u64_t start_bits = _cvtmask64_u64(starts) & trusted_bits;
+        // Suppress a leading LF already consumed by a CRLF that straddled the previous window edge.
+        if (position != 0 && text_u8[position - 1] == '\r') start_bits &= ~(_cvtmask64_u64(newline_mask) & 1ull);
+
+        sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
+        sz_size_t const emit = sz_min_of_three(window_matches, matches_capacity - count, 8);
+        if (emit)
+            sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
+                                          match_offsets + count, match_lengths + count);
+        count += emit;
+        if (count == matches_capacity) { // output buffer full: resume past the last emitted match
+            position = match_offsets[count - 1] + match_lengths[count - 1];
+            break;
+        }
+        if (emit == window_matches) position += valid_lanes >= 64 ? 62 : valid_lanes;
+        else position = match_offsets[count - 1] + match_lengths[count - 1]; // window held > 8: resume + re-classify
     }
 
-    return sz_utf8_find_whitespace_serial(text, length, matched_length);
+    // If the loop stopped on the LF of an already-emitted CRLF, resume past it (the CR carried the length-2 match).
+    if (position != 0 && position < length && text_u8[position - 1] == '\r' && text_u8[position] == '\n') ++position;
+    if (bytes_consumed) *bytes_consumed = position;
+    return count;
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t count = 0, position = 0;
+    __m512i tab_vec = _mm512_set1_epi8('\t'), carriage_return_vec = _mm512_set1_epi8('\r'),
+            x_20_vec = _mm512_set1_epi8(' '), lead_c2_vec = _mm512_set1_epi8('\xC2'),
+            x_85_vec = _mm512_set1_epi8('\x85'), x_a0_vec = _mm512_set1_epi8('\xA0'),
+            x_e1_vec = _mm512_set1_epi8('\xE1'), lead_e2_vec = _mm512_set1_epi8('\xE2'),
+            x_e3_vec = _mm512_set1_epi8('\xE3'), x_9a_vec = _mm512_set1_epi8('\x9A'),
+            byte_80_vec = _mm512_set1_epi8('\x80'), x_81_vec = _mm512_set1_epi8('\x81'),
+            x_8d_vec = _mm512_set1_epi8('\x8D'), x_a8_vec = _mm512_set1_epi8('\xA8'),
+            x_a9_vec = _mm512_set1_epi8('\xA9'), x_af_vec = _mm512_set1_epi8('\xAF'),
+            x_9f_vec = _mm512_set1_epi8('\x9F');
+    __m512i const lane_identity = sz_utf8_iterate_lane_identity_icelake_();
+
+    while (position < length && count < matches_capacity) {
+        sz_size_t const valid_lanes = length - position;
+        __m512i window;
+        sz_u64_t trusted_bits;
+        if (valid_lanes >= 64) { window = _mm512_loadu_epi8(text_u8 + position), trusted_bits = (1ull << 62) - 1; }
+        else {
+            __mmask64 const load_mask = sz_u64_mask_until_(valid_lanes);
+            window = _mm512_maskz_loadu_epi8(load_mask, text_u8 + position), trusted_bits = _cvtmask64_u64(load_mask);
+        }
+        // 1-byte: space, plus the contiguous range [\t, \r] == [9, 13].
+        __mmask64 one_byte_mask = _kor_mask64(
+            _mm512_cmpeq_epi8_mask(window, x_20_vec),
+            _kand_mask64(_mm512_cmpge_epu8_mask(window, tab_vec), _mm512_cmple_epu8_mask(window, carriage_return_vec)));
+
+        // 2-byte: C2 85 (NEL), C2 A0 (NBSP).
+        __mmask64 lead_c2_mask = _mm512_cmpeq_epi8_mask(window, lead_c2_vec);
+        __mmask64 two_byte_starts = _kand_mask64(
+            lead_c2_mask, _kor_mask64(_kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_85_vec), 1),
+                                      _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_a0_vec), 1)));
+
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(window, byte_80_vec);
+        __mmask64 lead_e2_mask = _mm512_cmpeq_epi8_mask(window, lead_e2_vec);
+        __mmask64 lead_e280_mask = _kand_mask64(lead_e2_mask, _kshiftri_mask64(byte_80_mask, 1));
+        __mmask64 ogham_mask = _kand_mask64(_mm512_cmpeq_epi8_mask(window, x_e1_vec),
+                                            _kand_mask64(_kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_9a_vec), 1),
+                                                         _kshiftri_mask64(byte_80_mask, 2)));
+        __mmask64 range_e280_mask = _kand_mask64(
+            lead_e280_mask, _kand_mask64(_kshiftri_mask64(_mm512_cmpge_epu8_mask(window, byte_80_vec), 2),
+                                         _kshiftri_mask64(_mm512_cmple_epu8_mask(window, x_8d_vec), 2)));
+        __mmask64 nnbsp_mask = _kand_mask64(lead_e280_mask,
+                                            _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_af_vec), 2));
+        __mmask64 mmsp_mask = _kand_mask64(
+            _kand_mask64(lead_e2_mask, _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_81_vec), 1)),
+            _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_9f_vec), 2));
+        __mmask64 line_mask = _kand_mask64(lead_e280_mask,
+                                           _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_a8_vec), 2));
+        __mmask64 para_mask = _kand_mask64(lead_e280_mask,
+                                           _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_a9_vec), 2));
+        __mmask64 ideographic_mask = _kand_mask64(
+            _kand_mask64(_mm512_cmpeq_epi8_mask(window, x_e3_vec), _kshiftri_mask64(byte_80_mask, 1)),
+            _kshiftri_mask64(byte_80_mask, 2));
+        __mmask64 three_byte_starts = _kor_mask64(
+            _kor_mask64(_kor_mask64(ogham_mask, range_e280_mask), _kor_mask64(nnbsp_mask, mmsp_mask)),
+            _kor_mask64(_kor_mask64(line_mask, para_mask), ideographic_mask));
+
+        __mmask64 starts = _kor_mask64(_kor_mask64(one_byte_mask, two_byte_starts), three_byte_starts);
+        sz_u64_t start_bits = _cvtmask64_u64(starts) & trusted_bits;
+
+        sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
+        sz_size_t const emit = sz_min_of_three(window_matches, matches_capacity - count, 8);
+        if (emit)
+            sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
+                                          match_offsets + count, match_lengths + count);
+        count += emit;
+        if (count == matches_capacity) {
+            position = match_offsets[count - 1] + match_lengths[count - 1];
+            break;
+        }
+        if (emit == window_matches) position += valid_lanes >= 64 ? 62 : valid_lanes;
+        else position = match_offsets[count - 1] + match_lengths[count - 1]; // window held > 8: resume + re-classify
+    }
+
+    if (bytes_consumed) *bytes_consumed = position;
+    return count;
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length) {
@@ -625,45 +600,51 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_icelake( //
         31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
         15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 
-    // Oracle-free fast path: a window [position-2, position+62) gives lanes [2,62] full +/-2 context, so an
-    // all-ASCII window resolves boundaries at positions [position, position+60] directly from the mask.
+    // Oracle-free fast path: an all-ASCII window [position-2, position+62) resolves boundaries at positions
+    // [position, position+60]; `vpcompressb` packs their lane offsets and a shifted-difference emits the words.
     while (position < length) {
-        if (position >= 2 && position + 62 <= length) {
-            __m512i window = _mm512_loadu_epi8(text_u8 + position - 2); // lane j = byte position-2+j
-            if (_mm512_movepi8_mask(window) == 0) {
-                __m512i classes = sz_utf8_word_break_classify_ascii_icelake_(window);
-                sz_u64_t join = sz_utf8_word_break_join_mask_ascii_(classes);
-                sz_u64_t boundary = (~join) & 0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
-                sz_u8_t boundary_lanes[64];
-                _mm512_mask_compressstoreu_epi8(boundary_lanes, boundary, lane_identity);
-                sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
-                for (sz_size_t i = 0; i < boundary_count; ++i) {
-                    sz_size_t boundary_position = position - 2 + (sz_size_t)boundary_lanes[i];
-                    if (words == words_capacity) {
-                        if (bytes_consumed) *bytes_consumed = word_start;
-                        return words;
-                    }
-                    word_starts[words] = word_start;
-                    word_lengths[words] = boundary_position - word_start;
-                    ++words;
-                    word_start = boundary_position;
+        int ascii_window = position >= 2 && position + 62 <= length;
+        __m512i window = _mm512_setzero_si512();
+        if (ascii_window) {
+            window = _mm512_loadu_epi8(text_u8 + position - 2); // lane j = byte position-2+j
+            ascii_window = _mm512_movepi8_mask(window) == 0;
+        }
+        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
+            // `position == word_start` only after a re-classify resume: the open word's start is not a word end.
+            if (position != word_start && sz_utf8_is_word_boundary_serial(text, length, position)) {
+                if (words == words_capacity) {
+                    if (bytes_consumed) *bytes_consumed = word_start;
+                    return words;
                 }
-                position += 61; // Resolved [position, position+60]; next unresolved boundary is at position+61.
-                continue;
+                word_starts[words] = word_start, word_lengths[words] = position - word_start, ++words;
+                word_start = position;
             }
+            position += sz_utf8_codepoint_length_(text_u8[position]);
+            continue;
         }
-        // Scalar step (non-ASCII window, or near the leading/trailing edges).
-        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_start;
-                return words;
-            }
-            word_starts[words] = word_start;
-            word_lengths[words] = position - word_start;
-            ++words;
-            word_start = position;
+
+        sz_u64_t boundary = (~sz_utf8_word_break_join_mask_ascii_(sz_utf8_word_break_classify_ascii_icelake_(window))) &
+                            0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
+        // After a re-classify resume the open word's own start lands in lane 2; it is a word start, not a word end.
+        if (position == word_start) boundary &= ~(1ull << 2);
+        sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
+        sz_size_t emit = sz_min_of_three(boundary_count, words_capacity - words, 8);
+
+        __m512i compressed_lanes = _mm512_maskz_compress_epi8(boundary, lane_identity);
+        __m512i boundary_positions = _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lanes)),
+                                                      _mm512_set1_epi64((long long)position - 2));
+        __m512i starts = _mm512_alignr_epi64(boundary_positions, _mm512_set1_epi64((long long)word_start), 7);
+        __mmask8 store_mask = sz_u8_clamp_mask_until_(emit);
+        _mm512_mask_storeu_epi64((void *)(word_starts + words), store_mask, starts);
+        _mm512_mask_storeu_epi64((void *)(word_lengths + words), store_mask,
+                                 _mm512_sub_epi64(boundary_positions, starts));
+        words += emit;
+        if (emit) word_start = word_starts[words - 1] + word_lengths[words - 1];
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_start;
+            return words;
         }
-        position += sz_utf8_codepoint_length_(text_u8[position]);
+        position = emit < boundary_count ? word_start : position + 61; // re-classify past the 8th, else full step
     }
 
     if (words == words_capacity) {
@@ -695,51 +676,61 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake( //
     while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
 
     // `_mm512_set_epi8` takes lane 63 first, so the arguments descend (GCC has no `_mm512_setr_epi8`).
-    __m512i const lane_identity = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47,
-                                                  46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30,
-                                                  29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13,
-                                                  12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    // The descending identity holds `63 - lane`, so pairing it with the bit-reversed boundary mask lets
+    // `vpcompressb` pack the boundary lane offsets high-to-low (the emission order this kernel needs).
+    __m512i const lane_identity_descending = _mm512_set_epi8(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,           //
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, //
+        32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, //
+        48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63);
 
+    // Oracle-free fast path: an all-ASCII window [position-62, position+2) resolves boundaries at positions
+    // [position-60, position]; the descending identity + bit-reversed mask pack them high-to-low for emission.
     while (position > 0) {
-        // Oracle-free fast path: a window [position-62, position+2) gives lanes [2,62] full +/-2 context,
-        // resolving boundaries at positions [position-60, position]; emit them high-to-low.
-        if (position >= 62 && position + 2 <= length) {
-            sz_size_t base = position - 62; // lane j = byte base+j; trusted lanes [2,62] → [position-60, position]
-            __m512i window = _mm512_loadu_epi8(text_u8 + base);
-            if (_mm512_movepi8_mask(window) == 0) {
-                __m512i classes = sz_utf8_word_break_classify_ascii_icelake_(window);
-                sz_u64_t join = sz_utf8_word_break_join_mask_ascii_(classes);
-                sz_u64_t boundary = (~join) & 0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
-                sz_u8_t boundary_lanes[64];
-                _mm512_mask_compressstoreu_epi8(boundary_lanes, boundary, lane_identity);
-                sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
-                for (sz_size_t i = boundary_count; i-- > 0;) { // descending position (highest lane first)
-                    sz_size_t boundary_position = base + (sz_size_t)boundary_lanes[i];
-                    if (words == words_capacity) {
-                        if (bytes_consumed) *bytes_consumed = word_end;
-                        return words;
-                    }
-                    word_starts[words] = boundary_position;
-                    word_lengths[words] = word_end - boundary_position;
-                    ++words;
-                    word_end = boundary_position;
+        sz_size_t base = position - 62; // lane j = byte base+j; trusted lanes [2,62] → [position-60, position]
+        int ascii_window = position >= 62 && position + 2 <= length;
+        __m512i window = _mm512_setzero_si512();
+        if (ascii_window) {
+            window = _mm512_loadu_epi8(text_u8 + base);
+            ascii_window = _mm512_movepi8_mask(window) == 0;
+        }
+        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
+            // `position == word_end` only after a re-classify resume: the open word's end is not a new break.
+            if (position != word_end && sz_utf8_is_word_boundary_serial(text, length, position)) {
+                if (words == words_capacity) {
+                    if (bytes_consumed) *bytes_consumed = word_end;
+                    return words;
                 }
-                position = base + 1; // Resolved down to position-60; next unresolved boundary is at position-61.
-                continue;
+                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
+                word_end = position;
             }
+            position--;
+            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
+            continue;
         }
-        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-            word_starts[words] = position;
-            word_lengths[words] = word_end - position;
-            ++words;
-            word_end = position;
+
+        sz_u64_t boundary = (~sz_utf8_word_break_join_mask_ascii_(sz_utf8_word_break_classify_ascii_icelake_(window))) &
+                            0x7FFFFFFFFFFFFFFCull; // trusted lanes [2,62]
+        // After a re-classify resume the open word's own end lands in lane 62; it is a word end, not a new break.
+        if (position == word_end) boundary &= ~(1ull << 62);
+        sz_size_t boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
+        sz_size_t emit = sz_min_of_three(boundary_count, words_capacity - words, 8);
+
+        __m512i compressed_lanes = _mm512_maskz_compress_epi8(sz_u64_bits_reverse(boundary), lane_identity_descending);
+        __m512i boundary_positions = _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lanes)),
+                                                      _mm512_set1_epi64((long long)base));
+        __m512i previous = _mm512_alignr_epi64(boundary_positions, _mm512_set1_epi64((long long)word_end), 7);
+        __mmask8 store_mask = sz_u8_clamp_mask_until_(emit);
+        _mm512_mask_storeu_epi64((void *)(word_starts + words), store_mask, boundary_positions);
+        _mm512_mask_storeu_epi64((void *)(word_lengths + words), store_mask,
+                                 _mm512_sub_epi64(previous, boundary_positions));
+        words += emit;
+        if (emit) word_end = word_starts[words - 1];
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_end;
+            return words;
         }
-        position--;
-        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
+        position = emit < boundary_count ? word_end : base + 1; // re-classify past the 8th, else full step
     }
 
     if (words == words_capacity) {

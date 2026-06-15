@@ -460,11 +460,57 @@ void test_sha256_equivalence(                                                   
  */
 void test_utf8_equivalence(                                 //
     sz_utf8_count_t count_base, sz_utf8_count_t count_simd, //
-    sz_utf8_find_boundary_t newline_base,                   //
-    sz_utf8_find_boundary_t newline_simd,                   //
-    sz_utf8_find_boundary_t whitespace_base,                //
-    sz_utf8_find_boundary_t whitespace_simd,                //
+    sz_utf8_find_boundaries_t newlines_base,                   //
+    sz_utf8_find_boundaries_t newlines_simd,                   //
+    sz_utf8_find_boundaries_t whitespaces_base,                //
+    sz_utf8_find_boundaries_t whitespaces_simd,                //
     std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
+
+    // Enumerate every delimiter via repeated streaming calls (resuming from `bytes_consumed`), so a small
+    // `capacity` exercises the SIMD vector loop, its resume logic, and the serial tail handoff.
+    auto enumerate = [](sz_utf8_find_boundaries_t matcher, sz_cptr_t data, sz_size_t length, sz_size_t capacity,
+                        std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
+        offsets.clear(), lengths.clear();
+        std::vector<sz_size_t> batch_offsets(capacity), batch_lengths(capacity);
+        sz_size_t base = 0;
+        while (base < length) {
+            sz_size_t consumed = 0;
+            sz_size_t got = matcher(data + base, length - base, batch_offsets.data(), batch_lengths.data(), capacity,
+                                    &consumed);
+            for (sz_size_t i = 0; i < got; ++i)
+                offsets.push_back(base + batch_offsets[i]), lengths.push_back(batch_lengths[i]);
+            if (got == 0 && consumed == 0) break;
+            base += consumed;
+        }
+    };
+
+    // Reconstruct the SEGMENTS the C++/Python/Rust split iterators would yield (gap before each delimiter, plus the
+    // trailing segment to end-of-text), advancing the suffix by `bytes_consumed`. This is the consumer's view: it
+    // catches a `bytes_consumed` that overshoots the last emitted delimiter (which the raw-delimiter enumeration
+    // above cannot see, since the skipped span has no delimiters), e.g. a batch that fills exactly at a window edge.
+    auto reconstruct_segments = [](sz_utf8_find_boundaries_t matcher, sz_cptr_t data, sz_size_t length,
+                                   sz_size_t capacity, std::vector<sz_size_t> &seg_offsets,
+                                   std::vector<sz_size_t> &seg_lengths) {
+        seg_offsets.clear(), seg_lengths.clear();
+        std::vector<sz_size_t> batch_offsets(capacity), batch_lengths(capacity);
+        sz_size_t suffix = 0;
+        for (;;) {
+            sz_size_t region = length - suffix, consumed = 0;
+            sz_size_t delimiters =
+                matcher(data + suffix, region, batch_offsets.data(), batch_lengths.data(), capacity, &consumed);
+            sz_size_t previous_end = 0;
+            for (sz_size_t i = 0; i < delimiters; ++i) {
+                seg_offsets.push_back(suffix + previous_end), seg_lengths.push_back(batch_offsets[i] - previous_end);
+                previous_end = batch_offsets[i] + batch_lengths[i];
+            }
+            if (consumed == region) { // exhausted: the trailing segment runs to end-of-text
+                seg_offsets.push_back(suffix + previous_end), seg_lengths.push_back(region - previous_end);
+                break;
+            }
+            suffix += consumed;
+            if (consumed == 0) break;
+        }
+    };
 
     auto check = [&](std::string const &text) {
         sz_cptr_t data = text.data();
@@ -475,34 +521,29 @@ void test_utf8_equivalence(                                 //
         sz_size_t count_result_simd = count_simd(data, length);
         assert(count_result_base == count_result_simd);
 
-        // Test `sz_utf8_find_newline` equivalence by scanning the entire string
-        sz_cptr_t cursor = data;
-        sz_size_t remaining = length;
-        while (remaining > 0) {
-            sz_size_t matched_base = 0, matched_simd = 0;
-            sz_cptr_t found_base = newline_base(cursor, remaining, &matched_base);
-            sz_cptr_t found_simd = newline_simd(cursor, remaining, &matched_simd);
-            assert(found_base == found_simd && "Mismatch in newline detection");
-            if (found_base == SZ_NULL_CHAR) break;
-            assert(matched_base == matched_simd);
-            sz_size_t offset = (found_base - cursor) + matched_base;
-            cursor += offset;
-            remaining -= offset;
-        }
+        // Sweep capacities: one huge (one-shot), the awkward 65/63 straddling the 64-byte AVX-512 window, the
+        // binding default 16, and tiny 3/1 - stressing the per-window / mid-window capacity cut at every boundary.
+        sz_size_t const capacities[] = {length + 64, 65, 63, 16, 3, 1};
+        std::vector<sz_size_t> base_offsets, base_lengths, simd_offsets, simd_lengths;
+        for (sz_size_t capacity : capacities) {
+            if (capacity == 0) continue;
+            enumerate(newlines_base, data, length, capacity, base_offsets, base_lengths);
+            enumerate(newlines_simd, data, length, capacity, simd_offsets, simd_lengths);
+            assert(base_offsets == simd_offsets && "Mismatch in newline offsets");
+            assert(base_lengths == simd_lengths && "Mismatch in newline lengths");
 
-        // Test `sz_utf8_find_whitespace` equivalence by scanning the entire string
-        cursor = data;
-        remaining = length;
-        while (remaining > 0) {
-            sz_size_t matched_base = 0, matched_simd = 0;
-            sz_cptr_t found_base = whitespace_base(cursor, remaining, &matched_base);
-            sz_cptr_t found_simd = whitespace_simd(cursor, remaining, &matched_simd);
-            assert(found_base == found_simd && "Mismatched position in whitespace detection");
-            if (found_base == SZ_NULL_CHAR) break;
-            assert(matched_base == matched_simd);
-            sz_size_t offset = (found_base - cursor) + matched_base;
-            cursor += offset;
-            remaining -= offset;
+            enumerate(whitespaces_base, data, length, capacity, base_offsets, base_lengths);
+            enumerate(whitespaces_simd, data, length, capacity, simd_offsets, simd_lengths);
+            assert(base_offsets == simd_offsets && "Mismatch in whitespace offsets");
+            assert(base_lengths == simd_lengths && "Mismatch in whitespace lengths");
+
+            // Segment-level (iterator) equivalence: catches a `bytes_consumed` overshoot at a window-aligned fill.
+            reconstruct_segments(newlines_base, data, length, capacity, base_offsets, base_lengths);
+            reconstruct_segments(newlines_simd, data, length, capacity, simd_offsets, simd_lengths);
+            assert(base_offsets == simd_offsets && base_lengths == simd_lengths && "Mismatch in newline segments");
+            reconstruct_segments(whitespaces_base, data, length, capacity, base_offsets, base_lengths);
+            reconstruct_segments(whitespaces_simd, data, length, capacity, simd_offsets, simd_lengths);
+            assert(base_offsets == simd_offsets && base_lengths == simd_lengths && "Mismatch in whitespace segments");
         }
     };
 
@@ -1703,10 +1744,10 @@ void test_equivalence() {
 #if SZ_USE_HASWELL
     test_utf8_equivalence(                           //
         sz_utf8_count_serial, sz_utf8_count_haswell, //
-        sz_utf8_find_newline_serial,                 //
-        sz_utf8_find_newline_haswell,                //
-        sz_utf8_find_whitespace_serial,              //
-        sz_utf8_find_whitespace_haswell);
+        sz_utf8_find_newlines_serial,                 //
+        sz_utf8_find_newlines_haswell,                //
+        sz_utf8_find_whitespaces_serial,              //
+        sz_utf8_find_whitespaces_haswell);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
@@ -1727,10 +1768,10 @@ void test_equivalence() {
 #if SZ_USE_ICELAKE
     test_utf8_equivalence(                           //
         sz_utf8_count_serial, sz_utf8_count_icelake, //
-        sz_utf8_find_newline_serial,                 //
-        sz_utf8_find_newline_icelake,                //
-        sz_utf8_find_whitespace_serial,              //
-        sz_utf8_find_whitespace_icelake);
+        sz_utf8_find_newlines_serial,                 //
+        sz_utf8_find_newlines_icelake,                //
+        sz_utf8_find_whitespaces_serial,              //
+        sz_utf8_find_whitespaces_icelake);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
@@ -1762,10 +1803,10 @@ void test_equivalence() {
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
         sz_utf8_count_serial, sz_utf8_count_neon, //
-        sz_utf8_find_newline_serial,              //
-        sz_utf8_find_newline_neon,                //
-        sz_utf8_find_whitespace_serial,           //
-        sz_utf8_find_whitespace_neon);
+        sz_utf8_find_newlines_serial,              //
+        sz_utf8_find_newlines_neon,                //
+        sz_utf8_find_whitespaces_serial,           //
+        sz_utf8_find_whitespaces_neon);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
@@ -1786,18 +1827,18 @@ void test_equivalence() {
 #if SZ_USE_SVE2
     test_utf8_equivalence(                        //
         sz_utf8_count_serial, sz_utf8_count_sve2, //
-        sz_utf8_find_newline_serial,              //
-        sz_utf8_find_newline_sve2,                //
-        sz_utf8_find_whitespace_serial,           //
-        sz_utf8_find_whitespace_sve2);
+        sz_utf8_find_newlines_serial,              //
+        sz_utf8_find_newlines_sve2,                //
+        sz_utf8_find_whitespaces_serial,           //
+        sz_utf8_find_whitespaces_sve2);
 #endif
 #if SZ_USE_V128
     test_utf8_equivalence(                        //
         sz_utf8_count_serial, sz_utf8_count_v128, //
-        sz_utf8_find_newline_serial,              //
-        sz_utf8_find_newline_v128,                //
-        sz_utf8_find_whitespace_serial,           //
-        sz_utf8_find_whitespace_v128);
+        sz_utf8_find_newlines_serial,              //
+        sz_utf8_find_newlines_v128,                //
+        sz_utf8_find_whitespaces_serial,           //
+        sz_utf8_find_whitespaces_v128);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
@@ -1818,18 +1859,18 @@ void test_equivalence() {
 #if SZ_USE_V128RELAXED
     test_utf8_equivalence(                               //
         sz_utf8_count_serial, sz_utf8_count_v128relaxed, //
-        sz_utf8_find_newline_serial,                     //
-        sz_utf8_find_newline_v128relaxed,                //
-        sz_utf8_find_whitespace_serial,                  //
-        sz_utf8_find_whitespace_v128relaxed);
+        sz_utf8_find_newlines_serial,                     //
+        sz_utf8_find_newlines_v128relaxed,                //
+        sz_utf8_find_whitespaces_serial,                  //
+        sz_utf8_find_whitespaces_v128relaxed);
 #endif
 #if SZ_USE_RVV
     test_utf8_equivalence(                       //
         sz_utf8_count_serial, sz_utf8_count_rvv, //
-        sz_utf8_find_newline_serial,             //
-        sz_utf8_find_newline_rvv,                //
-        sz_utf8_find_whitespace_serial,          //
-        sz_utf8_find_whitespace_rvv);
+        sz_utf8_find_newlines_serial,             //
+        sz_utf8_find_newlines_rvv,                //
+        sz_utf8_find_whitespaces_serial,          //
+        sz_utf8_find_whitespaces_rvv);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
@@ -1850,10 +1891,10 @@ void test_equivalence() {
 #if SZ_USE_LASX
     test_utf8_equivalence(                        //
         sz_utf8_count_serial, sz_utf8_count_lasx, //
-        sz_utf8_find_newline_serial,              //
-        sz_utf8_find_newline_lasx,                //
-        sz_utf8_find_whitespace_serial,           //
-        sz_utf8_find_whitespace_lasx);
+        sz_utf8_find_newlines_serial,              //
+        sz_utf8_find_newlines_lasx,                //
+        sz_utf8_find_whitespaces_serial,           //
+        sz_utf8_find_whitespaces_lasx);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
@@ -1874,10 +1915,10 @@ void test_equivalence() {
 #if SZ_USE_POWERVSX
     test_utf8_equivalence(                            //
         sz_utf8_count_serial, sz_utf8_count_powervsx, //
-        sz_utf8_find_newline_serial,                  //
-        sz_utf8_find_newline_powervsx,                //
-        sz_utf8_find_whitespace_serial,               //
-        sz_utf8_find_whitespace_powervsx);
+        sz_utf8_find_newlines_serial,                  //
+        sz_utf8_find_newlines_powervsx,                //
+        sz_utf8_find_whitespaces_serial,               //
+        sz_utf8_find_whitespaces_powervsx);
 
     test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
     test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);

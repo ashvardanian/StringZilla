@@ -440,6 +440,100 @@ extension StringZillaViewable {
         return ranges
     }
 
+    /// Splits the content on UTF-8 newline delimiters (the 7 line-break characters plus a CRLF pair).
+    ///
+    /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N newlines
+    /// yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), which mirrors the
+    /// cross-language KEEP policy and matches `"a\n\nb\n".utf8Lines()` -> `["a", "", "b", ""]`.
+    ///
+    /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
+    ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
+    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted (default: `false`).
+    /// - Returns: Byte-accurate ranges into the receiver, one per segment.
+    public func utf8Lines(skipEmpty: Bool = false) -> [Range<Index>] {
+        return utf8Split(skipEmpty: skipEmpty, onNewlines: true)
+    }
+
+    /// Splits the content on UTF-8 whitespace delimiters (all 25 Unicode `White_Space` characters).
+    ///
+    /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N whitespace
+    /// characters yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), which mirrors
+    /// the cross-language KEEP policy. Pass `skipEmpty: true` to drop runs of whitespace as separators, e.g.
+    /// `"  hi  ".utf8Whitespace(skipEmpty: true)` -> `["hi"]`.
+    ///
+    /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
+    ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
+    /// - Parameter skipEmpty: When `true`, zero-length segments are omitted (default: `false`).
+    /// - Returns: Byte-accurate ranges into the receiver, one per segment.
+    public func utf8Whitespace(skipEmpty: Bool = false) -> [Range<Index>] {
+        return utf8Split(skipEmpty: skipEmpty, onNewlines: false)
+    }
+
+    /// Shared driver for delimiter-based UTF-8 splitting (`utf8Lines` / `utf8Whitespace`).
+    ///
+    /// Buffers delimiter boundaries through the multistep FFI kernel (just like `utf8Words()`), but whereas
+    /// words *tile* the input, the delimiters here are discarded and the *gaps* between them become the
+    /// segments: delimiter `d` spans `[start, start + length)`, and the segment preceding it runs from the
+    /// previous delimiter's end up to this delimiter's start. When the kernel reports it consumed the whole
+    /// remaining region, the trailing segment after the last delimiter (possibly empty) is appended too, so
+    /// N delimiters always produce N+1 segments.
+    ///
+    /// - Parameters:
+    ///   - skipEmpty: When `true`, zero-length segments are omitted.
+    ///   - onNewlines: When `true`, drives `sz_utf8_find_newlines`; otherwise `sz_utf8_find_whitespaces`.
+    /// - Returns: Byte-accurate ranges into the receiver, one per segment.
+    private func utf8Split(skipEmpty: Bool, onNewlines: Bool) -> [Range<Index>] {
+        var ranges: [Range<Index>] = []
+        withStringZillaScope { pointer, length in
+            // Buffer a handful of delimiters per FFI call, then transform them into segment gaps.
+            let steps = Int(sz_iterators_default_steps_k)
+            var offsets = [sz_size_t](repeating: 0, count: steps)
+            var lengths = [sz_size_t](repeating: 0, count: steps)
+            var suffix: sz_size_t = 0 // Byte offset of the not-yet-segmented suffix within `pointer`.
+
+            // Emits one segment `[begin, end)` (offsets relative to `pointer`), honoring `skipEmpty`.
+            func appendSegment(_ begin: sz_size_t, _ end: sz_size_t) {
+                if skipEmpty && end == begin { return }
+                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(begin)), after: pointer)
+                let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
+                ranges.append(lo..<hi)
+            }
+
+            while suffix <= length {
+                let region = length - suffix
+                var consumed: sz_size_t = 0
+                let delimiters = offsets.withUnsafeMutableBufferPointer { offsetsBuffer in
+                    lengths.withUnsafeMutableBufferPointer { lengthsBuffer in
+                        onNewlines
+                            ? sz_utf8_find_newlines(
+                                pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
+                                lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
+                            : sz_utf8_find_whitespaces(
+                                pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
+                                lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
+                    }
+                }
+                // Each delimiter's gap (the segment before it) becomes one output range; offsets are
+                // relative to `pointer.advanced(by: suffix)`, so re-base them onto `pointer` via `suffix`.
+                var previousEnd: sz_size_t = 0
+                for delimiter in 0..<Int(delimiters) {
+                    let delimiterStart = offsets[delimiter]
+                    let delimiterLength = lengths[delimiter]
+                    appendSegment(suffix + previousEnd, suffix + delimiterStart)
+                    previousEnd = delimiterStart + delimiterLength
+                }
+                if consumed == region {
+                    // Reached end-of-text: append the trailing segment after the last delimiter, then stop.
+                    appendSegment(suffix + previousEnd, suffix + region)
+                    break
+                }
+                if consumed == 0 { break } // Defensive: never spin in place on a non-advancing batch.
+                suffix += consumed
+            }
+        }
+        return ranges
+    }
+
     /// Lexicographic (byte-order) comparison, SIMD-accelerated via `sz_order`.
     /// - Parameter other: The string to compare against.
     /// - Returns: `.ascending`, `.equal`, or `.descending`.

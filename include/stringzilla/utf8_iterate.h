@@ -126,12 +126,24 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_
  *        These are data structure delimiters used in formats like USV (Unicode Separated Values),
  *        not line breaks. Use @c sz_find_byte() if you need to find these separators.
  *
+ *  Enumerates every newline delimiter in a single sweep, mirroring `sz_utf8_word_find_boundaries`: writes the
+ *  byte offset and byte length of each match into the parallel `match_offsets` / `match_lengths` arrays (a
+ *  @c "\r\n" CRLF is one match of length 2). Returns the number of delimiters emitted. When the output fills
+ *  before the input is exhausted, `*bytes_consumed` is set to the resume offset - always past the last emitted
+ *  delimiter and at a byte that begins fresh content - so a caller resumes from `text + *bytes_consumed` and
+ *  obtains the identical remainder.
+ *
  *  @param text String to be scanned.
  *  @param length Number of bytes in the string.
- *  @param matched_length Number of bytes in the matched newline delimiter.
- *  @return Pointer to the first matching newline character from @p text, or @c SZ_NULL_CHAR if not found.
+ *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
+ *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
+ *  @param matches_capacity Capacity of the output arrays.
+ *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @return Number of delimiters written to the output arrays.
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+SZ_DYNAMIC sz_size_t sz_utf8_find_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                           sz_size_t *bytes_consumed);
 
 /**
  *  @brief Skips to the first occurrence of a UTF-8 whitespace character in a string.
@@ -180,12 +192,22 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_s
  *      These are Format characters, not whitespace. They have no width and affect rendering,
  *      not spacing.
  *
+ *  Enumerates every whitespace delimiter in a single sweep, with the same contract as `sz_utf8_find_newlines`:
+ *  writes the byte offset and byte length of each match into the parallel `match_offsets` / `match_lengths`
+ *  arrays, returns the count, and sets `*bytes_consumed` to the resume offset. Each whitespace codepoint is one
+ *  match (CR and LF are independent length-1 matches; there is no CRLF merging in the whitespace set).
+ *
  *  @param text String to be scanned.
  *  @param length Number of bytes in the string.
- *  @param matched_length Number of bytes in the matched whitespace character.
- *  @return Pointer to the first matching whitespace character from @p text, or @c SZ_NULL_CHAR if not found.
+ *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
+ *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
+ *  @param matches_capacity Capacity of the output arrays.
+ *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @return Number of delimiters written to the output arrays.
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+SZ_DYNAMIC sz_size_t sz_utf8_find_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                              sz_size_t *bytes_consumed);
 
 /**
  *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
@@ -243,13 +265,13 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
- *  @brief Suggested default batch size for callers that stream words through `sz_utf8_word_*_boundaries`.
+ *  @brief Suggested default batch size for callers that stream boundaries through the `sz_utf8_find_*` kernels.
  *
- *  Iterators that emit one word at a time (the Python and C++ bindings) buffer this many boundaries per call
- *  so the per-word overhead amortizes without an unbounded output buffer. It is only a default — any capacity
- *  works, and the kernels report `bytes_consumed` so the caller can resume past a full buffer.
+ *  Iterators that emit one segment/delimiter at a time (the Python and C++ bindings) buffer this many boundaries
+ *  per call so the per-item overhead amortizes without an unbounded output buffer. It is only a default - any
+ *  capacity works, and the kernels report `bytes_consumed` so the caller can resume past a full buffer.
  */
-enum { sz_utf8_word_boundaries_batch_k = 16 };
+enum { sz_iterators_default_steps_k = 16 };
 
 /**
  *  @brief Segment UTF-8 text into UAX-29 words in a single pass (dispatch function).
@@ -323,10 +345,14 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
 SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
-/** @copydoc sz_utf8_find_newline */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_find_whitespace */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                 sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                 sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                    sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                    sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_unpack_chunk */
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     sz_cptr_t text, sz_size_t length,            //
@@ -346,10 +372,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_serial(sz_cptr_t text, sz_size
 SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
-/** @copydoc sz_utf8_find_newline */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_find_whitespace */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                     sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -365,10 +395,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell(sz_cptr_t text, sz_siz
 SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
-/** @copydoc sz_utf8_find_newline */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_find_whitespace */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                     sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                     sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_unpack_chunk */
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     sz_cptr_t text, sz_size_t length,             //
@@ -388,10 +422,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_icelake(sz_cptr_t text, sz_siz
 SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
-/** @copydoc sz_utf8_find_newline */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_find_whitespace */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_unpack_chunk */
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon( //
     sz_cptr_t text, sz_size_t length,          //
@@ -417,10 +455,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_neon(sz_cptr_t text, sz_size_t
 SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_find_nth */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
-/** @copydoc sz_utf8_find_newline */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-/** @copydoc sz_utf8_find_whitespace */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -432,6 +474,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_sve2(sz_cptr_t text, sz_size_t
 #endif
 
 #if SZ_USE_V128
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_v128(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -443,6 +493,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128(sz_cptr_t text, sz_size_t
 #endif
 
 #if SZ_USE_RVV
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                              sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                 sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                 sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -454,6 +512,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_rvv(sz_cptr_t text, sz_size_t 
 #endif
 
 #if SZ_USE_LASX
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                       sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -465,6 +531,14 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx(sz_cptr_t text, sz_size_t
 #endif
 
 #if SZ_USE_POWERVSX
+/** @copydoc sz_utf8_find_newlines */
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                   sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                   sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_whitespaces */
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                      sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                      sz_size_t *bytes_consumed);
 /** @copydoc sz_utf8_word_find_boundaries */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
@@ -562,51 +636,55 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_r
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_newline(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-#if SZ_USE_V128RELAXED
-    return sz_utf8_find_newline_v128relaxed(text, length, matched_length);
-#elif SZ_USE_V128
-    return sz_utf8_find_newline_v128(text, length, matched_length);
+SZ_DYNAMIC sz_size_t sz_utf8_find_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                           sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                           sz_size_t *bytes_consumed) {
+#if SZ_USE_V128
+    return sz_utf8_find_newlines_v128(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_RVV
-    return sz_utf8_find_newline_rvv(text, length, matched_length);
+    return sz_utf8_find_newlines_rvv(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_LASX
-    return sz_utf8_find_newline_lasx(text, length, matched_length);
+    return sz_utf8_find_newlines_lasx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_find_newline_powervsx(text, length, matched_length);
+    return sz_utf8_find_newlines_powervsx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_ICELAKE
-    return sz_utf8_find_newline_icelake(text, length, matched_length);
+    return sz_utf8_find_newlines_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_find_newline_haswell(text, length, matched_length);
+    return sz_utf8_find_newlines_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_SVE2 && SZ_ENFORCE_SVE_OVER_NEON
-    return sz_utf8_find_newline_sve2(text, length, matched_length);
+    return sz_utf8_find_newlines_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_find_newline_neon(text, length, matched_length);
+    return sz_utf8_find_newlines_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
-    return sz_utf8_find_newline_serial(text, length, matched_length);
+    return sz_utf8_find_newlines_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_whitespace(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-#if SZ_USE_V128RELAXED
-    return sz_utf8_find_whitespace_v128relaxed(text, length, matched_length);
-#elif SZ_USE_V128
-    return sz_utf8_find_whitespace_v128(text, length, matched_length);
+SZ_DYNAMIC sz_size_t sz_utf8_find_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                              sz_size_t *bytes_consumed) {
+#if SZ_USE_V128
+    return sz_utf8_find_whitespaces_v128(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_RVV
-    return sz_utf8_find_whitespace_rvv(text, length, matched_length);
+    return sz_utf8_find_whitespaces_rvv(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_LASX
-    return sz_utf8_find_whitespace_lasx(text, length, matched_length);
+    return sz_utf8_find_whitespaces_lasx(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_find_whitespace_powervsx(text, length, matched_length);
+    return sz_utf8_find_whitespaces_powervsx(text, length, match_offsets, match_lengths, matches_capacity,
+                                             bytes_consumed);
 #elif SZ_USE_ICELAKE
-    return sz_utf8_find_whitespace_icelake(text, length, matched_length);
+    return sz_utf8_find_whitespaces_icelake(text, length, match_offsets, match_lengths, matches_capacity,
+                                            bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_find_whitespace_haswell(text, length, matched_length);
+    return sz_utf8_find_whitespaces_haswell(text, length, match_offsets, match_lengths, matches_capacity,
+                                            bytes_consumed);
 #elif SZ_USE_SVE2 && SZ_ENFORCE_SVE_OVER_NEON
-    return sz_utf8_find_whitespace_sve2(text, length, matched_length);
+    return sz_utf8_find_whitespaces_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_find_whitespace_neon(text, length, matched_length);
+    return sz_utf8_find_whitespaces_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
-    return sz_utf8_find_whitespace_serial(text, length, matched_length);
+    return sz_utf8_find_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity,
+                                           bytes_consumed);
 #endif
 }
 

@@ -20,10 +20,10 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-/*  The UTF-8 kernels are built from `wasm_i8x16_eq`, range compares, `wasm_i8x16_shuffle` rotations,
- *  and `wasm_i8x16_bitmask`. None of these map onto a relaxed-simd op that would be a win (the
- *  rotations use compile-time-constant shuffles, not data-dependent swizzles), so every kernel
- *  delegates to the baseline SIMD128 implementation. */
+/*  Relaxed-SIMD offers no win for the count / find-nth kernels (they use `wasm_i8x16_eq`, range compares,
+ *  compile-time-constant `wasm_i8x16_shuffle` rotations, and `wasm_i8x16_bitmask` - none of which map onto a
+ *  relaxed op), so they delegate to the baseline SIMD128. The multistep newline/whitespace iterators are not
+ *  defined here at all: the dispatch table routes the `v128relaxed` capability straight to the `v128` kernels. */
 
 SZ_PUBLIC sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_v128(text, length);
@@ -31,14 +31,6 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) 
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     return sz_utf8_find_nth_v128(text, length, n);
-}
-
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_utf8_find_newline_v128(text, length, matched_length);
-}
-
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_utf8_find_whitespace_v128(text, length, matched_length);
 }
 
 #if defined(__clang__)

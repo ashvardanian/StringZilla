@@ -184,24 +184,29 @@ typedef struct {
     /// @brief  Indicates that we've already reported the tail of the split, and should return NULL next.
     sz_bool_t reached_tail;
 
+    /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
+    sz_bool_t skip_empty;
+
 } SplitIterator;
 
 /**
  *  @brief  Iterator for splitting a UTF-8 string by Unicode newline characters.
  *
- *  Uses sz_utf8_find_newline to find newlines, supporting all 7 Unicode newline
- *  characters plus CRLF sequences.
+ *  Streams lines by refilling a small inline buffer with @c sz_utf8_find_newlines (the multistep delimiter
+ *  kernel), supporting all 7 Unicode newline characters plus CRLF sequences (one length-2 delimiter). The
+ *  delimiter batch is transformed in place into segment (start, length) pairs: segment @c i runs from the end
+ *  of delimiter @c i-1 to the start of delimiter @c i, with the trailing segment reaching end-of-text once the
+ *  batch is exhausted. Mirrors the @c Utf8WordBoundaryIterator batched model.
  *
- *  Termination: when start > end (not start == end, which is a valid state yielding empty segment).
+ *  Termination: @c suffix > end (the suffix base moved past the text) or @c batch_count == 0.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj; //< For reference counting
 
-    sz_cptr_t start;        //< Current position (start of current segment)
-    sz_cptr_t end;          //< End of original text (immutable)
-    sz_size_t match_length; //< Length of current segment to yield
+    sz_cptr_t suffix; //< Start of the not-yet-segmented suffix; segment offsets are relative to this.
+    sz_cptr_t end;    //< End of original text (immutable).
 
     /// @brief  Should we include the newline characters in the resulting slices?
     sz_bool_t keepends;
@@ -209,25 +214,46 @@ typedef struct {
     /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
     sz_bool_t skip_empty;
 
+    /// @brief  Inline batch of segment offsets/lengths relative to @c suffix, refilled on demand.
+    ///         One extra slot beyond @c sz_iterators_default_steps_k holds the trailing end-of-text segment.
+    sz_size_t batch_starts[sz_iterators_default_steps_k + 1];
+    sz_size_t batch_lengths[sz_iterators_default_steps_k + 1];
+    sz_size_t batch_count;   //< Number of segments currently buffered; `batch_count == 0` is the end sentinel.
+    sz_size_t batch_index;   //< Index of the next segment to yield from the buffer.
+    sz_size_t batch_advance; //< Bytes to advance `suffix` by when the batch drains.
+    sz_bool_t primed;        //< Whether the first batch has been filled (lazy on first `__next__`).
+
 } Utf8SplitLinesIterator;
 
 /**
  *  @brief  Iterator for splitting a UTF-8 string by Unicode whitespace characters.
  *
- *  Uses sz_utf8_find_whitespace to find whitespace, supporting all 25 Unicode
- *  White_Space characters. N whitespace delimiters yield N+1 segments (including empties).
+ *  Streams segments by refilling a small inline buffer with @c sz_utf8_find_whitespaces (the multistep
+ *  delimiter kernel), supporting all 25 Unicode White_Space characters. N whitespace delimiters yield N+1
+ *  segments (including empties). The delimiter batch is transformed in place into segment (start, length)
+ *  pairs, mirroring the @c Utf8WordBoundaryIterator batched model.
+ *
+ *  Termination: @c suffix > end (the suffix base moved past the text) or @c batch_count == 0.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj; //< For reference counting
 
-    sz_cptr_t start;        //< Current position in text
-    sz_cptr_t end;          //< End of text (immutable)
-    sz_size_t match_length; //< Length of current segment to yield
+    sz_cptr_t suffix; //< Start of the not-yet-segmented suffix; segment offsets are relative to this.
+    sz_cptr_t end;    //< End of text (immutable).
 
     /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
     sz_bool_t skip_empty;
+
+    /// @brief  Inline batch of segment offsets/lengths relative to @c suffix, refilled on demand.
+    ///         One extra slot beyond @c sz_iterators_default_steps_k holds the trailing end-of-text segment.
+    sz_size_t batch_starts[sz_iterators_default_steps_k + 1];
+    sz_size_t batch_lengths[sz_iterators_default_steps_k + 1];
+    sz_size_t batch_count;   //< Number of segments currently buffered; `batch_count == 0` is the end sentinel.
+    sz_size_t batch_index;   //< Index of the next segment to yield from the buffer.
+    sz_size_t batch_advance; //< Bytes to advance `suffix` by when the batch drains.
+    sz_bool_t primed;        //< Whether the first batch has been filled (lazy on first `__next__`).
 
 } Utf8SplitWhitespaceIterator;
 
@@ -253,8 +279,8 @@ typedef struct {
     sz_bool_t reverse;
 
     /// @brief  Inline batch of word offsets relative to @c start, refilled on demand.
-    sz_size_t batch_starts[sz_utf8_word_boundaries_batch_k];
-    sz_size_t batch_lengths[sz_utf8_word_boundaries_batch_k];
+    sz_size_t batch_starts[sz_iterators_default_steps_k];
+    sz_size_t batch_lengths[sz_iterators_default_steps_k];
     sz_size_t batch_count; //< Number of words currently buffered.
     sz_size_t batch_index; //< Index of the next word to yield from the buffer.
 
@@ -4435,7 +4461,7 @@ static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, P
 static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj,                   //
                                       sz_string_view_t const text, sz_string_view_t const separator, //
                                       int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
-                                      sz_bool_t is_reverse) {
+                                      sz_bool_t is_reverse, int skip_empty) {
 
     // Create a new `SplitIterator` object
     SplitIterator *result_obj = (SplitIterator *)SplitIteratorType.tp_alloc(&SplitIteratorType, 0);
@@ -4453,6 +4479,7 @@ static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_ob
     result_obj->is_reverse = is_reverse;
     result_obj->max_parts = (sz_size_t)maxsplit + 1;
     result_obj->reached_tail = 0;
+    result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
 
     // Increment the reference count of the parent
     Py_INCREF(result_obj->text_obj);
@@ -4465,7 +4492,8 @@ static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_ob
  *          Produces a `Strs` object with `REORDERED_SUBVIEWS` layout.
  */
 static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
-                        int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
+                        int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
+                        int skip_empty) {
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
@@ -4499,23 +4527,26 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
             // Add the part before the separator
             sz_size_t part_length = match - current_start;
 
-            // Reallocate spans array if needed
-            if (spans_count >= spans_capacity) {
-                spans_capacity *= 2;
-                sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans,
-                                                                          spans_capacity * sizeof(sz_string_view_t));
-                if (!new_spans) {
-                    free(spans);
-                    Py_XDECREF(result);
-                    PyErr_NoMemory();
-                    return NULL;
+            // Skip empty segments when requested (the part before this separator is zero-length).
+            if (!skip_empty || part_length > 0) {
+                // Reallocate spans array if needed
+                if (spans_count >= spans_capacity) {
+                    spans_capacity *= 2;
+                    sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity *
+                                                                                         sizeof(sz_string_view_t));
+                    if (!new_spans) {
+                        free(spans);
+                        Py_XDECREF(result);
+                        PyErr_NoMemory();
+                        return NULL;
+                    }
+                    spans = new_spans;
                 }
-                spans = new_spans;
-            }
 
-            spans[spans_count].start = current_start;
-            spans[spans_count].length = keepseparator ? part_length + match_length : part_length;
-            spans_count++;
+                spans[spans_count].start = current_start;
+                spans[spans_count].length = keepseparator ? part_length + match_length : part_length;
+                spans_count++;
+            }
 
             // Move past the separator
             current_start = match + match_length;
@@ -4525,22 +4556,24 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
         else { break; }
     }
 
-    // Add the final part (everything remaining)
-    if (spans_count >= spans_capacity) {
-        spans_capacity++;
-        sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
-        if (!new_spans) {
-            free(spans);
-            Py_XDECREF(result);
-            PyErr_NoMemory();
-            return NULL;
+    // Add the final part (everything remaining), unless it's empty and we're skipping empties.
+    if (!skip_empty || remaining_length > 0) {
+        if (spans_count >= spans_capacity) {
+            spans_capacity++;
+            sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
+            if (!new_spans) {
+                free(spans);
+                Py_XDECREF(result);
+                PyErr_NoMemory();
+                return NULL;
+            }
+            spans = new_spans;
         }
-        spans = new_spans;
-    }
 
-    spans[spans_count].start = current_start;
-    spans[spans_count].length = remaining_length;
-    spans_count++;
+        spans[spans_count].start = current_start;
+        spans[spans_count].length = remaining_length;
+        spans_count++;
+    }
 
     // Set up the result
     result->data.fragmented.spans = spans;
@@ -4555,7 +4588,8 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
  *          Produces a `Strs` object with `REORDERED_SUBVIEWS` layout.
  */
 static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
-                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
+                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
+                         int skip_empty) {
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
@@ -4581,10 +4615,11 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
 
     sz_bool_t reached_tail = 0;
     sz_size_t total_skipped = 0;
+    sz_size_t splits_made = 0;
     sz_size_t max_parts = (maxsplit < 0) ? SIZE_MAX : ((sz_size_t)maxsplit + 1);
 
     while (!reached_tail) {
-        sz_cptr_t match = parts_count + 1 < max_parts
+        sz_cptr_t match = splits_made + 1 < max_parts
                               ? finder(text.start, text.length - total_skipped, separator.start, separator.length)
                               : NULL;
 
@@ -4594,12 +4629,16 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
             part.start = match + match_length * !keepseparator;
             part.length = text.start + text.length - total_skipped - part.start;
             total_skipped = text.start + text.length - match;
+            splits_made++;
         }
         else {
             part.start = text.start;
             part.length = text.length - total_skipped;
             reached_tail = 1;
         }
+
+        // Skip empty segments when requested.
+        if (skip_empty && part.length == 0) continue;
 
         // Reallocate parts array if needed
         if (parts_count >= parts_capacity) {
@@ -4644,7 +4683,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t expected_min_args = !is_member;
-    Py_ssize_t expected_max_args = !is_member + 3;
+    Py_ssize_t expected_max_args = !is_member + 4;
     if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
         PyErr_SetString(PyExc_TypeError, "sz.split() received unsupported number of arguments");
         return NULL;
@@ -4654,6 +4693,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     PyObject *separator_obj = positional_args_count > !is_member + 0 ? args[!is_member + 0] : NULL;
     PyObject *maxsplit_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
     PyObject *keepseparator_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
+    PyObject *skip_empty_obj = positional_args_count > !is_member + 3 ? args[!is_member + 3] : NULL;
 
     if (args_names_tuple) {
         Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
@@ -4665,6 +4705,9 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
             else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0 && !keepseparator_obj) {
                 keepseparator_obj = value;
             }
+            else if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) {
+                skip_empty_obj = value;
+            }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
         }
     }
@@ -4672,6 +4715,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     sz_string_view_t text;
     sz_string_view_t separator;
     int keepseparator;
+    int skip_empty = 0;
     Py_ssize_t maxsplit;
 
     // Validate and convert `text`
@@ -4718,13 +4762,23 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     }
     else { maxsplit = PY_SSIZE_T_MAX; }
 
+    // Validate and convert `skip_empty`
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            PyErr_SetString(PyExc_TypeError, "The skip_empty argument must be a boolean");
+            return NULL;
+        }
+    }
+
     // Dispatch the right backend
     if (is_lazy_iterator)
         return Str_split_iter_(text_obj, separator_obj, text, separator, //
-                               keepseparator, maxsplit, finder, match_length, is_reverse);
+                               keepseparator, maxsplit, finder, match_length, is_reverse, skip_empty);
     else
-        return !is_reverse ? Str_split_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length)
-                           : Str_rsplit_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length);
+        return !is_reverse
+                   ? Str_split_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length, skip_empty)
+                   : Str_rsplit_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length, skip_empty);
 }
 
 static char const doc_split[] =                                                                //
@@ -4735,6 +4789,7 @@ static char const doc_split[] =                                                 
     "  separator (str): The separator to split by (cannot be empty).\n"                        //
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"            //
     "  keepseparator (bool, optional): Include the separator in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                 //
     "Returns:\n"                                                                               //
     "  Strs: A list of strings split by the separator.\n"                                      //
     "Raises:\n"                                                                                //
@@ -4758,6 +4813,7 @@ static char const doc_rsplit[] =                                                
     "  separator (str): The separator to split by (cannot be empty).\n"                        //
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"            //
     "  keepseparator (bool, optional): Include the separator in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                 //
     "Returns:\n"                                                                               //
     "  Strs: A list of strings split by the separator.\n"                                      //
     "Raises:\n"                                                                                //
@@ -4781,6 +4837,7 @@ static char const doc_split_byteset[] =                                         
     "  separators (str): A string containing separator characters.\n"                       //
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"         //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"              //
     "Returns:\n"                                                                            //
     "  Strs: A list of strings split by the character set.\n"                               //
     "\n"                                                                                    //
@@ -4802,6 +4859,7 @@ static char const doc_rsplit_byteset[] =                                        
     "  separators (str): A string containing separator characters.\n"                       //
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"         //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"              //
     "Returns:\n"                                                                            //
     "  Strs: A list of strings split by the character set.\n"                               //
     "\n"                                                                                    //
@@ -4822,6 +4880,7 @@ static char const doc_split_iter[] =                                            
     "  text (Str or str or bytes): The string object.\n"                                           //
     "  separator (str): The separator to split by (cannot be empty).\n"                            //
     "  keepseparator (bool, optional): Include separator in results (default is False).\n"         //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                     //
     "Returns:\n"                                                                                   //
     "  iterator: An iterator yielding split substrings.\n"                                         //
     "Raises:\n"                                                                                    //
@@ -4845,6 +4904,7 @@ static char const doc_rsplit_iter[] =                                           
     "  text (Str or str or bytes): The string object.\n"                                   //
     "  separator (str): The separator to split by (cannot be empty).\n"                    //
     "  keepseparator (bool, optional): Include separator in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"             //
     "Returns:\n"                                                                           //
     "  iterator: An iterator yielding split substrings in reverse.\n"                      //
     "Raises:\n"                                                                            //
@@ -4868,6 +4928,7 @@ static char const doc_split_byteset_iter[] =                                    
     "  text (Str or str or bytes): The string object.\n"                                    //
     "  separators (str): A string containing separator characters.\n"                       //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n" //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"              //
     "Returns:\n"                                                                            //
     "  iterator: An iterator yielding split substrings.\n"                                  //
     "\n"                                                                                    //
@@ -4889,6 +4950,7 @@ static char const doc_rsplit_byteset_iter[] =                                   
     "  text (Str or str or bytes): The string object.\n"                                             //
     "  separators (str): A string containing separator characters.\n"                                //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n"          //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                        //
     "Returns:\n"                                                                                     //
     "  iterator: An iterator yielding split substrings in reverse.\n"                                //
     "\n"                                                                                             //
@@ -5034,17 +5096,15 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->text_obj = text_obj;
-    result_obj->start = text.start;
+    result_obj->suffix = text.start;
     result_obj->end = text.start + text.length;
-    result_obj->keepends = keepends;
-    result_obj->skip_empty = skip_empty;
-
-    // Find first segment length
-    sz_size_t newline_length = 0;
-    sz_cptr_t newline_ptr = sz_utf8_find_newline(result_obj->start, (sz_size_t)(result_obj->end - result_obj->start),
-                                                 &newline_length);
-    result_obj->match_length = newline_ptr ? (sz_size_t)(newline_ptr - result_obj->start)
-                                           : (sz_size_t)(result_obj->end - result_obj->start);
+    result_obj->keepends = keepends ? sz_true_k : sz_false_k;
+    result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+    // The first batch is filled lazily on the first `__next__` (see the batched refill there).
+    result_obj->batch_count = 0;
+    result_obj->batch_index = 0;
+    result_obj->batch_advance = 0;
+    result_obj->primed = sz_false_k;
 
     Py_INCREF(text_obj);
     return (PyObject *)result_obj;
@@ -5121,13 +5181,14 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->text_obj = text_obj;
-    result_obj->start = text.start;
+    result_obj->suffix = text.start;
     result_obj->end = text.start + text.length;
-    result_obj->skip_empty = skip_empty;
-    // Find first segment length
-    sz_size_t ws_len = 0;
-    sz_cptr_t ws = sz_utf8_find_whitespace(result_obj->start, text.length, &ws_len);
-    result_obj->match_length = ws ? (sz_size_t)(ws - result_obj->start) : text.length;
+    result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+    // The first batch is filled lazily on the first `__next__` (see the batched refill there).
+    result_obj->batch_count = 0;
+    result_obj->batch_index = 0;
+    result_obj->batch_advance = 0;
+    result_obj->primed = sz_false_k;
 
     Py_INCREF(text_obj);
     return (PyObject *)result_obj;
@@ -5414,7 +5475,7 @@ static PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_s
     sz_string_view_t separator;
     separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
     separator.length = 8;
-    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_byte_from, 1);
+    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_byte_from, 1, /*skip_empty=*/0);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
@@ -5885,44 +5946,47 @@ static PyTypeObject StrType = {
 #pragma region Split Iterator
 
 static PyObject *SplitIteratorType_next(SplitIterator *self) {
-    // No more data to split
-    if (self->reached_tail) return NULL;
+    sz_string_view_t result_memory;
+
+    // Compute the next segment, looping past zero-length segments when `skip_empty` is set.
+    do {
+        // No more data to split.
+        if (self->reached_tail) return NULL;
+
+        // Find the next needle
+        sz_cptr_t found = self->max_parts > 1 //
+                              ? self->finder(self->text.start, self->text.length, self->separator.start,
+                                             self->separator.length)
+                              : NULL;
+
+        // We've reached the end of the string
+        if (found == NULL) {
+            result_memory.start = self->text.start;
+            result_memory.length = self->text.length;
+            self->text.length = 0;
+            self->reached_tail = 1;
+            self->max_parts = 0;
+        }
+        else {
+            if (self->is_reverse) {
+                result_memory.start = found + self->match_length * !self->include_match;
+                result_memory.length = self->text.start + self->text.length - result_memory.start;
+                self->text.length = found - self->text.start;
+            }
+            else {
+                result_memory.start = self->text.start;
+                result_memory.length = found - self->text.start;
+                self->text.start = found + self->match_length;
+                self->text.length -= result_memory.length + self->match_length;
+                result_memory.length += self->match_length * self->include_match;
+            }
+            self->max_parts--;
+        }
+    } while (self->skip_empty && result_memory.length == 0);
 
     // Create a new `Str` object
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
-
-    sz_string_view_t result_memory;
-
-    // Find the next needle
-    sz_cptr_t found = self->max_parts > 1 //
-                          ? self->finder(self->text.start, self->text.length, self->separator.start,
-                                         self->separator.length)
-                          : NULL;
-
-    // We've reached the end of the string
-    if (found == NULL) {
-        result_memory.start = self->text.start;
-        result_memory.length = self->text.length;
-        self->text.length = 0;
-        self->reached_tail = 1;
-        self->max_parts = 0;
-    }
-    else {
-        if (self->is_reverse) {
-            result_memory.start = found + self->match_length * !self->include_match;
-            result_memory.length = self->text.start + self->text.length - result_memory.start;
-            self->text.length = found - self->text.start;
-        }
-        else {
-            result_memory.start = self->text.start;
-            result_memory.length = found - self->text.start;
-            self->text.start = found + self->match_length;
-            self->text.length -= result_memory.length + self->match_length;
-            result_memory.length += self->match_length * self->include_match;
-        }
-        self->max_parts--;
-    }
 
     // Set its properties based on the slice
     result_obj->memory = result_memory;
@@ -5984,69 +6048,75 @@ static PyTypeObject SplitIteratorType = {
 
 #pragma region UTF8 Split Lines Iterator
 
-static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
-    // Termination: start > end means we're done
-    if (self->start > self->end) return NULL;
+/**
+ *  @brief  Refill the inline batch from `suffix`: fetch a newline-delimiter batch and transform it in place into
+ *          segment (start, length) pairs. Segment `d` runs from the end of delimiter `d-1` to the start of
+ *          delimiter `d`; once the batch reaches end-of-text a trailing segment to `end` is appended. When
+ *          `keepends`, the delimiter bytes are reattached to the preceding segment (matching `str.splitlines`).
+ */
+static void Utf8SplitLinesIterator_refill_(Utf8SplitLinesIterator *self) {
+    sz_size_t region = (sz_size_t)(self->end - self->suffix);
+    sz_size_t consumed = 0;
+    sz_size_t delimiters = sz_utf8_find_newlines(self->suffix, region, self->batch_starts, self->batch_lengths,
+                                                 sz_iterators_default_steps_k, &consumed);
+    // In place: delimiter `d` spans `[batch_starts[d], batch_starts[d] + batch_lengths[d])`; the segment before it
+    // runs from the previous delimiter's end to this delimiter's start. With `keepends`, the delimiter bytes are
+    // appended to that preceding segment.
+    sz_size_t previous_end = 0;
+    for (sz_size_t d = 0; d < delimiters; ++d) {
+        sz_size_t delimiter_start = self->batch_starts[d], delimiter_length = self->batch_lengths[d];
+        self->batch_starts[d] = previous_end;
+        self->batch_lengths[d] = (delimiter_start - previous_end) + (self->keepends ? delimiter_length : 0);
+        previous_end = delimiter_start + delimiter_length;
+    }
+    if (consumed == region) { // batch reached end-of-text: append the trailing segment (never gets a delimiter)
+        self->batch_starts[delimiters] = previous_end;
+        self->batch_lengths[delimiters] = region - previous_end;
+        self->batch_count = delimiters + 1;
+        self->batch_advance = region + 1; // `region + 1` pushes `suffix` past `end` when the batch drains
+    }
+    else {
+        self->batch_count = delimiters;
+        self->batch_advance = consumed;
+    }
+    self->batch_index = 0;
+    self->primed = sz_true_k;
+}
 
-    // Create a new `Str` object
+/**
+ *  @brief  Position `batch_index` on the next yieldable segment, refilling and (when `skip_empty`) skipping
+ *          zero-length segments. Leaves `batch_count == 0` as the end sentinel.
+ */
+static void Utf8SplitLinesIterator_settle_(Utf8SplitLinesIterator *self) {
+    if (!self->primed) Utf8SplitLinesIterator_refill_(self);
+    for (;;) {
+        if (self->skip_empty)
+            while (self->batch_index < self->batch_count && self->batch_lengths[self->batch_index] == 0)
+                ++self->batch_index;
+        if (self->batch_index < self->batch_count || self->batch_count == 0) return;
+        self->suffix += self->batch_advance;
+        if (self->suffix > self->end) {
+            self->batch_count = 0;
+            return;
+        }
+        Utf8SplitLinesIterator_refill_(self);
+    }
+}
+
+static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
+    Utf8SplitLinesIterator_settle_(self);
+    if (self->batch_count == 0) return NULL;
+
+    sz_size_t i = self->batch_index++;
+    sz_cptr_t segment_start = self->suffix + self->batch_starts[i];
+    sz_size_t segment_length = self->batch_lengths[i];
+
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    // Find next non-empty segment (or any segment if skip_empty is false)
-    sz_string_view_t result_memory;
-    do {
-        // Build the result from current state
-        result_memory.start = self->start;
-        result_memory.length = self->match_length;
-
-        // Include newline in result if keepends is set
-        if (self->keepends && self->start + self->match_length < self->end) {
-            sz_size_t newline_length = 0;
-            sz_cptr_t newline_ptr = sz_utf8_find_newline(self->start + self->match_length,
-                                                         (sz_size_t)(self->end - self->start - self->match_length),
-                                                         &newline_length);
-            if (newline_ptr == self->start + self->match_length) { result_memory.length += newline_length; }
-        }
-
-        // Advance to next segment
-        self->start += self->match_length;
-
-        // Skip delimiter at current position (if any)
-        if (self->start < self->end) {
-            sz_size_t newline_length = 0;
-            sz_cptr_t newline_ptr = sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start),
-                                                         &newline_length);
-            if (newline_ptr == self->start) { self->start += newline_length; }
-        }
-        // Handle the case where we're exactly at end after consuming content
-        else if (self->start == self->end) {
-            self->start = self->end + 1;
-            self->match_length = 0;
-        }
-
-        // If we're now past end, we're done after this
-        if (self->start > self->end) { self->match_length = 0; }
-        else {
-            // Find next delimiter to determine segment length
-            sz_size_t newline_length = 0;
-            sz_cptr_t newline_ptr = sz_utf8_find_newline(self->start, (sz_size_t)(self->end - self->start),
-                                                         &newline_length);
-            self->match_length = newline_ptr ? (sz_size_t)(newline_ptr - self->start)
-                                             : (sz_size_t)(self->end - self->start);
-        }
-    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
-
-    // If we exhausted all segments while skipping empties, free and return NULL
-    if (self->skip_empty && result_memory.length == 0) {
-        Py_DECREF(result_obj);
-        return NULL;
-    }
-
-    // Set its properties based on the slice
-    result_obj->memory = result_memory;
+    result_obj->memory.start = segment_start;
+    result_obj->memory.length = segment_length;
     result_obj->parent = self->text_obj;
-
-    // Increment the reference count of the parent
     Py_INCREF(self->text_obj);
     return (PyObject *)result_obj;
 }
@@ -6101,57 +6171,71 @@ static PyTypeObject Utf8SplitLinesIteratorType = {
 
 #pragma region UTF8 Split Whitespace Iterator
 
-static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterator *self) {
-    // Termination: start > end
-    if (self->start > self->end) return NULL;
+/**
+ *  @brief  Refill the inline batch from `suffix`: fetch a whitespace-delimiter batch and transform it in place
+ *          into segment (start, length) pairs. Segment `d` runs from the end of delimiter `d-1` to the start of
+ *          delimiter `d`; once the batch reaches end-of-text a trailing segment to `end` is appended.
+ */
+static void Utf8SplitWhitespaceIterator_refill_(Utf8SplitWhitespaceIterator *self) {
+    sz_size_t region = (sz_size_t)(self->end - self->suffix);
+    sz_size_t consumed = 0;
+    sz_size_t delimiters = sz_utf8_find_whitespaces(self->suffix, region, self->batch_starts, self->batch_lengths,
+                                                    sz_iterators_default_steps_k, &consumed);
+    sz_size_t previous_end = 0;
+    for (sz_size_t d = 0; d < delimiters; ++d) {
+        sz_size_t delimiter_start = self->batch_starts[d], delimiter_length = self->batch_lengths[d];
+        self->batch_starts[d] = previous_end;
+        self->batch_lengths[d] = delimiter_start - previous_end;
+        previous_end = delimiter_start + delimiter_length;
+    }
+    if (consumed == region) { // batch reached end-of-text: append the trailing segment
+        self->batch_starts[delimiters] = previous_end;
+        self->batch_lengths[delimiters] = region - previous_end;
+        self->batch_count = delimiters + 1;
+        self->batch_advance = region + 1; // `region + 1` pushes `suffix` past `end` when the batch drains
+    }
+    else {
+        self->batch_count = delimiters;
+        self->batch_advance = consumed;
+    }
+    self->batch_index = 0;
+    self->primed = sz_true_k;
+}
 
-    // Create a new `Str` object for the current segment
+/**
+ *  @brief  Position `batch_index` on the next yieldable segment, refilling and (when `skip_empty`) skipping
+ *          zero-length segments. Leaves `batch_count == 0` as the end sentinel.
+ */
+static void Utf8SplitWhitespaceIterator_settle_(Utf8SplitWhitespaceIterator *self) {
+    if (!self->primed) Utf8SplitWhitespaceIterator_refill_(self);
+    for (;;) {
+        if (self->skip_empty)
+            while (self->batch_index < self->batch_count && self->batch_lengths[self->batch_index] == 0)
+                ++self->batch_index;
+        if (self->batch_index < self->batch_count || self->batch_count == 0) return;
+        self->suffix += self->batch_advance;
+        if (self->suffix > self->end) {
+            self->batch_count = 0;
+            return;
+        }
+        Utf8SplitWhitespaceIterator_refill_(self);
+    }
+}
+
+static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterator *self) {
+    Utf8SplitWhitespaceIterator_settle_(self);
+    if (self->batch_count == 0) return NULL;
+
+    sz_size_t i = self->batch_index++;
+    sz_cptr_t segment_start = self->suffix + self->batch_starts[i];
+    sz_size_t segment_length = self->batch_lengths[i];
+
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    // Find next non-empty segment (or any segment if skip_empty is false)
-    sz_string_view_t result_memory;
-    do {
-        // Current segment to yield
-        result_memory.start = self->start;
-        result_memory.length = self->match_length;
-
-        // Advance to next segment
-        self->start += self->match_length;
-        if (self->start > self->end) {
-            // Already yielding final segment, mark termination
-            self->match_length = 0;
-        }
-        else if (self->start == self->end) {
-            // At end - move past to terminate after yielding this segment
-            self->start = self->end + 1;
-            self->match_length = 0;
-        }
-        else {
-            // Skip delimiter at current position
-            sz_size_t ws_len = 0;
-            sz_cptr_t ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
-            if (ws == self->start) self->start += ws_len;
-            if (self->start > self->end) { self->match_length = 0; }
-            else {
-                // Find next delimiter
-                ws = sz_utf8_find_whitespace(self->start, (sz_size_t)(self->end - self->start), &ws_len);
-                self->match_length = ws ? (sz_size_t)(ws - self->start) : (sz_size_t)(self->end - self->start);
-            }
-        }
-    } while (self->skip_empty && result_memory.length == 0 && self->start <= self->end);
-
-    // If we exhausted all segments while skipping empties, free and return NULL
-    if (self->skip_empty && result_memory.length == 0) {
-        Py_DECREF(result_obj);
-        return NULL;
-    }
-
-    // Set its properties based on the slice
-    result_obj->memory = result_memory;
+    result_obj->memory.start = segment_start;
+    result_obj->memory.length = segment_length;
     result_obj->parent = self->text_obj;
-
-    // Increment the reference count of the parent
     Py_INCREF(self->text_obj);
     return (PyObject *)result_obj;
 }
@@ -6213,10 +6297,10 @@ static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *sel
         self->batch_count = self->reverse //
                                 ? sz_utf8_word_rfind_boundaries(self->start, (sz_size_t)(self->end - self->start),
                                                                 self->batch_starts, self->batch_lengths,
-                                                                sz_utf8_word_boundaries_batch_k, &consumed)
+                                                                sz_iterators_default_steps_k, &consumed)
                                 : sz_utf8_word_find_boundaries(self->start, (sz_size_t)(self->end - self->start),
                                                                self->batch_starts, self->batch_lengths,
-                                                               sz_utf8_word_boundaries_batch_k, &consumed);
+                                                               sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }

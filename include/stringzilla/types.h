@@ -986,13 +986,10 @@ typedef sz_ordering_t (*sz_utf8_case_insensitive_order_t)(sz_cptr_t, sz_size_t, 
 /** @brief Signature of `sz_utf8_case_agnostic`. */
 typedef sz_bool_t (*sz_utf8_case_agnostic_t)(sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_word_find_boundaries`. */
-typedef sz_size_t (*sz_utf8_word_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-                                                    sz_size_t *);
-
-/** @brief Signature of `sz_utf8_word_rfind_boundaries`. */
-typedef sz_size_t (*sz_utf8_word_rfind_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-                                                     sz_size_t *);
+/** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), newlines, whitespace.
+ *         Emits parallel (offset, length) arrays for each delimiter/segment plus a resume `bytes_consumed`. */
+typedef sz_size_t (*sz_utf8_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
+                                               sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
@@ -1033,8 +1030,6 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
-/** @brief Signature of `sz_utf8_find_newline`, `sz_utf8_find_whitespace`. */
-typedef sz_cptr_t (*sz_utf8_find_boundary_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_case_insensitive`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
@@ -1405,6 +1400,16 @@ SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefin
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
+
+/** @brief Reverse the 64 bits of @p value (bit `i` moves to bit `63 - i`): swap adjacent bits, then bit-pairs
+ *         within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only byte-compress
+ *         (`vpcompressb`) pack lanes in descending order. */
+SZ_INTERNAL sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
+    value = ((value & 0x5555555555555555ull) << 1) | ((value >> 1) & 0x5555555555555555ull);
+    value = ((value & 0x3333333333333333ull) << 2) | ((value >> 2) & 0x3333333333333333ull);
+    value = ((value & 0x0F0F0F0F0F0F0F0Full) << 4) | ((value >> 4) & 0x0F0F0F0F0F0F0F0Full);
+    return sz_u64_bytes_reverse(value);
+}
 
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 

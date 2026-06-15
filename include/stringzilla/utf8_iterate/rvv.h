@@ -140,129 +140,245 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_si
     return SZ_NULL_CHAR;
 }
 
-/*  Fully in-register newline search: per strip, derive each lane's match length (0 = no newline starts
- *  here) and return the first non-zero lane with its length. The 2nd/3rd bytes of multi-byte sequences
- *  come from the original buffer via `vslide1down` carries, so sequences straddling a strip boundary
- *  resolve exactly and an out-of-bounds byte reads as 0 (never matching a non-zero continuation) — which
- *  reproduces serial's `+1 != end` / `+2 < end` bounds. Byte-for-byte equivalent to
- *  `sz_utf8_find_newline_serial`, with no serial remainder. */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_newline_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t offset = 0;
-    while (offset < length) {
-        sz_size_t vector_length = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vector_length);
-        sz_u8_t carry_first = (offset + vector_length < length) ? text_u8[offset + vector_length] : 0;
-        sz_u8_t carry_second = (offset + vector_length + 1 < length) ? text_u8[offset + vector_length + 1] : 0;
-        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vector_length);
-        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vector_length);
+/*  Multistep newline / whitespace iteration (RVV 1.0).
+ *
+ *  Fully masked / streaming: each iteration loads `vl = vsetvl_e8m4(length - position)` lanes, so the final
+ *  iteration is the masked tail (it loads only the remaining `vl` lanes; carry bytes past `length` read as 0,
+ *  so a truncated multi-byte delimiter at EOF never matches). There is NO serial tail call - the natural
+ *  `vsetvl` shrink handles the remainder in-SIMD. The loop runs `while (position < length && count < cap)`.
+ *
+ *  Each tile is classified branchlessly into a per-lane byte-length vector (0 = no delimiter starts here)
+ *  matching the serial delimiter set, with the 2nd/3rd bytes carried from the original buffer via
+ *  `vslide1down`. The 2-/3-byte masks are computed UNCONDITIONALLY (no `if (lead)` gate). `vcpop` of the
+ *  trusted start predicate gives `window_matches`; `emit_count = min(window_matches, cap - count)` bounds the
+ *  `vcompress` + widen-store so exactly `emit_count` absolute `(offset, length)` pairs are written. When
+ *  `emit_count < window_matches` the output buffer full: resume past the last emitted match and break.
+ *
+ *  Delimiter STARTS are trusted only in lanes `[0, vl-3]` on a FULL tile (`vl == tile`) so any =<3-byte
+ *  delimiter from a trusted lane is fully classified; on the final (masked) tile (`vl < tile`) every valid
+ *  lane is trusted (the carried tail bytes are real or the at-EOF 0 that already fails the match). The step is
+ *  `vl >= tile ? tile-2 : vl` - the final tile consumes the whole remainder. For newlines a CRLF is a single
+ *  2-byte match: a lane-0 LF is suppressed when `text[pos-1] == '\r'` (the CR was emitted in the previous
+ *  tile) via the `vslide1up` previous-byte carry (covering in-tile AND tile-straddle), and after the loop a
+ *  `pos` sitting on the LF of a straddling CRLF is advanced. Whitespace does no CRLF merging and needs neither
+ *  fixup. The result is byte-for-byte identical to `sz_utf8_find_newlines_serial` /
+ *  `sz_utf8_find_whitespaces_serial`. */
 
-        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-        // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
-        vbool1_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x0A, vector_length), 3,
-                                                         vector_length);
-        vbool1_t is_cr = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x0D, vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, __riscv_vmor_mm_b1(is_lf_vt_ff, is_cr, vector_length),
-                                              vector_length);
-        // '\r\n': length 2 (overrides the lone-'\r').
-        vbool1_t is_cr_lf = __riscv_vmand_mm_b1(is_cr, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x0A, vector_length),
-                                                vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_cr_lf, vector_length);
-        // U+0085 NEL (C2 85): length 2.
-        vbool1_t is_nel = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vector_length),
-                                              __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vector_length), vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, is_nel, vector_length);
-        // U+2028 / U+2029 (E2 80 A8 / E2 80 A9): length 3.
-        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vector_length),
-                                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length),
-                                                vector_length);
-        vbool1_t is_a8_a9 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vector_length),
-                                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vector_length),
-                                               vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, __riscv_vmand_mm_b1(is_e2_80, is_a8_a9, vector_length),
-                                              vector_length);
-
-        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vector_length);
-        long match_index = __riscv_vfirst_m_b1(match_mask, vector_length);
-        if (match_index >= 0) {
-            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vector_length);
-            *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
-            return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
-        }
-        offset += vector_length;
-    }
-    *matched_length = 0;
-    return SZ_NULL_CHAR;
+/*  Cap the logical tile so a `u16` iota addresses every lane and the trusted-lane bookkeeping stays in
+ *  `sz_size_t`. RVV 1.0 allows `VLEN` up to 64 Kib, i.e. `e8m4` `VLMAX` up to 32768 — well within `u16`. */
+SZ_INTERNAL sz_size_t sz_utf8_iterate_tile_bytes_rvv_(void) {
+    sz_size_t vlmax = __riscv_vsetvlmax_e8m4();
+    return vlmax < 4 ? 4 : vlmax; // need at least 4 lanes so the trusted region [0, tile-3] is non-empty
 }
 
-/*  Fully in-register whitespace search, structured like `sz_utf8_find_newline_rvv`: per-lane match length
- *  with the 2nd/3rd bytes carried from the original buffer via `vslide1down`, byte-for-byte equivalent to
- *  `sz_utf8_find_whitespace_serial` with no serial remainder. */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_whitespace_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t offset = 0;
-    while (offset < length) {
-        sz_size_t vector_length = __riscv_vsetvl_e8m8(length - offset);
-        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(text_u8 + offset, vector_length);
-        sz_u8_t carry_first = (offset + vector_length < length) ? text_u8[offset + vector_length] : 0;
-        sz_u8_t carry_second = (offset + vector_length + 1 < length) ? text_u8[offset + vector_length + 1] : 0;
-        vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(bytes_u8m8, carry_first, vector_length);
-        vuint8m8_t after_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry_second, vector_length);
+/**
+ *  @brief Peel a window's first `emit_count` matches: compress lane offsets + lengths, widen-store absolute pairs.
+ *
+ *  `vcompress` packs the matching lane indices (from a `vid` iota) and their per-lane lengths into the low lanes
+ *  of two register groups; the low `emit_count` of them are widened to 64-bit and stored as absolute
+ *  `(offset, length)` pairs. The store loop is bounded by `emit_count` (not the full window match count), so a
+ *  capacity-limited caller writes exactly `emit_count` entries with no output overshoot.
+ */
+SZ_INTERNAL void sz_utf8_iterate_peel_tile_rvv_(                                      //
+    vuint8m4_t length_u8m4, vbool2_t start_mask, sz_size_t tile_position,             //
+    sz_size_t vector_length, sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
-        vuint8m8_t length_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    if (!emit_count) return;
+
+    // Compress the matching lane indices (from a `vid` iota) and their lengths with the same `vbool2` mask.
+    // `u16m8` and `u8m4` share the SEW/LMUL ratio (2 -> `vbool2`), so one mask drives both compactions; the
+    // `u16` iota addresses every lane (tile <= `e8m4` `VLMAX`) without an 8-bit overflow.
+    vuint16m8_t lane_iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
+    vuint16m8_t compact_indices_u16m8 = __riscv_vcompress_vm_u16m8(lane_iota_u16m8, start_mask, vector_length);
+    vuint8m4_t compact_lengths_u8m4 = __riscv_vcompress_vm_u8m4(length_u8m4, start_mask, vector_length);
+
+    // Widen only the low `emit_count` compacted indices to 64-bit, add the absolute tile base, store both arrays.
+    sz_size_t store_offset = 0;
+    while (store_offset < emit_count) {
+        sz_size_t store_length = __riscv_vsetvl_e64m8(emit_count - store_offset);
+        vuint16m2_t indices_u16m2 = __riscv_vget_v_u16m8_u16m2(
+            __riscv_vslidedown_vx_u16m8(compact_indices_u16m8, store_offset, vector_length), 0);
+        vuint8m1_t lengths_u8m1 = __riscv_vget_v_u8m4_u8m1(
+            __riscv_vslidedown_vx_u8m4(compact_lengths_u8m4, store_offset, vector_length), 0);
+
+        vuint64m8_t offsets_u64m8 = __riscv_vadd_vx_u64m8(
+            __riscv_vwcvtu_x_x_v_u64m8(__riscv_vwcvtu_x_x_v_u32m4(indices_u16m2, store_length), store_length),
+            (sz_u64_t)tile_position, store_length);
+        __riscv_vse64_v_u64m8((sz_u64_t *)match_offsets + store_offset, offsets_u64m8, store_length);
+
+        vuint64m8_t lengths_u64m8 = __riscv_vwcvtu_x_x_v_u64m8(
+            __riscv_vwcvtu_x_x_v_u32m4(__riscv_vwcvtu_x_x_v_u16m2(lengths_u8m1, store_length), store_length),
+            store_length);
+        __riscv_vse64_v_u64m8((sz_u64_t *)match_lengths + store_offset, lengths_u64m8, store_length);
+        store_offset += store_length;
+    }
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_rvv(              //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t count = 0, position = 0;
+    sz_size_t tile = sz_utf8_iterate_tile_bytes_rvv_();
+
+    // Masked streaming: `vsetvl` shrinks to the remainder on the final tile (the masked tail), so there is no
+    // serial fall-through. The loop advances until the input is exhausted or the output capacity is reached.
+    while (position < length && count < matches_capacity) {
+        sz_size_t vector_length = __riscv_vsetvl_e8m4(length - position);
+        vuint8m4_t bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8 + position, vector_length);
+        sz_u8_t carry_first = (position + vector_length < length) ? text_u8[position + vector_length] : 0;
+        sz_u8_t carry_second = (position + vector_length + 1 < length) ? text_u8[position + vector_length + 1] : 0;
+        vuint8m4_t next_u8m4 = __riscv_vslide1down_vx_u8m4(bytes_u8m4, carry_first, vector_length);
+        vuint8m4_t after_next_u8m4 = __riscv_vslide1down_vx_u8m4(next_u8m4, carry_second, vector_length);
+
+        vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
+        // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
+        vbool2_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x0A, vector_length), 3,
+                                                         vector_length);
+        vbool2_t is_cr = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0D, vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, __riscv_vmor_mm_b2(is_lf_vt_ff, is_cr, vector_length),
+                                              vector_length);
+        // '\r\n': length 2 (overrides the lone-'\r').
+        vbool2_t is_cr_lf = __riscv_vmand_mm_b2(is_cr, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x0A, vector_length),
+                                                vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_cr_lf, vector_length);
+        // U+0085 NEL (C2 85): length 2 (computed unconditionally).
+        vbool2_t is_nel = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length),
+                                              __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length), vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_nel, vector_length);
+        // U+2028 / U+2029 (E2 80 A8 / E2 80 A9): length 3 (computed unconditionally).
+        vbool2_t is_e2_80 = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length),
+                                                __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length),
+                                                vector_length);
+        vbool2_t is_a8_a9 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
+                                               __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length),
+                                               vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, __riscv_vmand_mm_b2(is_e2_80, is_a8_a9, vector_length),
+                                              vector_length);
+        // An LF that is the 2nd byte of a CRLF is owned by the CR's 2-byte match, so it must not also start a
+        // match. The previous byte (carried from the buffer via `vslide1up`) being '\r' identifies it; this
+        // also covers a CRLF that straddled the previous tile edge (lane-0 LF with `text[pos-1] == '\r'`).
+        sz_u8_t carry_prev = (position != 0) ? text_u8[position - 1] : 0;
+        vuint8m4_t prev_u8m4 = __riscv_vslide1up_vx_u8m4(bytes_u8m4, carry_prev, vector_length);
+        vbool2_t is_lf_of_crlf = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0A, vector_length),
+                                                     __riscv_vmseq_vx_u8m4_b2(prev_u8m4, 0x0D, vector_length),
+                                                     vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 0, is_lf_of_crlf, vector_length);
+
+        // Trust starts in lanes [0, vl-3] on a full tile so =<3-byte tails are fully loaded; on the final
+        // (masked) tile (`vl < tile`) trust every valid lane - its carried tails are real bytes, or the
+        // at-EOF 0 that already failed the multi-byte match above.
+        sz_size_t trusted_lanes = (vector_length >= tile) ? vector_length - 2 : vector_length;
+        vuint16m8_t lane_iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
+        vbool2_t trusted_mask = __riscv_vmsltu_vx_u16m8_b2(lane_iota_u16m8, (sz_u16_t)trusted_lanes, vector_length);
+        vbool2_t start_mask = __riscv_vmand_mm_b2(__riscv_vmsne_vx_u8m4_b2(length_u8m4, 0, vector_length),
+                                                  trusted_mask, vector_length);
+
+        // Capacity cut: emit only as many of this tile's matches as the output can still hold.
+        sz_size_t window_matches = (sz_size_t)__riscv_vcpop_m_b2(start_mask, vector_length);
+        sz_size_t emit_count = sz_min_of_two(window_matches, matches_capacity - count);
+        sz_utf8_iterate_peel_tile_rvv_(length_u8m4, start_mask, position, vector_length, emit_count,
+                                       match_offsets + count, match_lengths + count);
+        count += emit_count;
+        if (count == matches_capacity) { // output buffer full: resume past the last emitted match
+            position = match_offsets[count - 1] + match_lengths[count - 1];
+            break;
+        }
+        position += (vector_length >= tile) ? tile - 2 : vector_length;
+    }
+
+    // If the loop stopped on the LF of an already-emitted CRLF, resume past it (the CR carried the length-2 match).
+    if (position != 0 && position < length && text_u8[position - 1] == '\r' && text_u8[position] == '\n') ++position;
+    if (bytes_consumed) *bytes_consumed = position;
+    return count;
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_rvv(          //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t count = 0, position = 0;
+    sz_size_t tile = sz_utf8_iterate_tile_bytes_rvv_();
+
+    // Masked streaming: `vsetvl` shrinks to the remainder on the final tile, so there is no serial fall-through.
+    while (position < length && count < matches_capacity) {
+        sz_size_t vector_length = __riscv_vsetvl_e8m4(length - position);
+        vuint8m4_t bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8 + position, vector_length);
+        sz_u8_t carry_first = (position + vector_length < length) ? text_u8[position + vector_length] : 0;
+        sz_u8_t carry_second = (position + vector_length + 1 < length) ? text_u8[position + vector_length + 1] : 0;
+        vuint8m4_t next_u8m4 = __riscv_vslide1down_vx_u8m4(bytes_u8m4, carry_first, vector_length);
+        vuint8m4_t after_next_u8m4 = __riscv_vslide1down_vx_u8m4(next_u8m4, carry_second, vector_length);
+
+        vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
         // ASCII whitespace: '\t'-'\r' (0x09-0x0D) and ' ' (0x20): length 1.
-        vbool1_t is_ascii_ws = __riscv_vmor_mm_b1(
-            __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, 0x09, vector_length), 5, vector_length),
-            __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0x20, vector_length), vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 1, is_ascii_ws, vector_length);
+        vbool2_t is_ascii_ws = __riscv_vmor_mm_b2(
+            __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x09, vector_length), 5, vector_length),
+            __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x20, vector_length), vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, is_ascii_ws, vector_length);
         // U+0085 NEL (C2 85) and U+00A0 NBSP (C2 A0): length 2.
-        vbool1_t is_c2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xC2, vector_length);
-        vbool1_t next_85_a0 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x85, vector_length),
-                                                 __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xA0, vector_length),
+        vbool2_t is_c2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length);
+        vbool2_t next_85_a0 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length),
+                                                 __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0xA0, vector_length),
                                                  vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 2, __riscv_vmand_mm_b1(is_c2, next_85_a0, vector_length),
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, __riscv_vmand_mm_b2(is_c2, next_85_a0, vector_length),
                                               vector_length);
         // U+1680 Ogham space mark (E1 9A 80): length 3.
-        vbool1_t is_ogham = __riscv_vmand_mm_b1(
-            __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE1, vector_length),
-                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9A, vector_length), vector_length),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vector_length), vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_ogham, vector_length);
+        vbool2_t is_ogham = __riscv_vmand_mm_b2(
+            __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE1, vector_length),
+                                __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x9A, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x80, vector_length), vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_ogham, vector_length);
         // U+2000-U+200D, U+2028, U+2029, U+202F (E2 80 {80-8D, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
-        vbool1_t is_e2 = __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE2, vector_length);
-        vbool1_t is_e2_80 = __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length),
+        vbool2_t is_e2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length);
+        vbool2_t is_e2_80 = __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length),
                                                 vector_length);
-        vbool1_t third_2000_200d = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(after_next_u8m8, 0x80, vector_length),
+        vbool2_t third_2000_200d = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(after_next_u8m4, 0x80, vector_length),
                                                              0x0E, vector_length);
-        vbool1_t third_a8_a9_af = __riscv_vmor_mm_b1(
-            __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA8, vector_length),
-                               __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xA9, vector_length), vector_length),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0xAF, vector_length), vector_length);
-        vbool1_t is_e2_80_ws = __riscv_vmand_mm_b1(
-            is_e2_80, __riscv_vmor_mm_b1(third_2000_200d, third_a8_a9_af, vector_length), vector_length);
-        vbool1_t is_e2_81_9f = __riscv_vmand_mm_b1(
-            __riscv_vmand_mm_b1(is_e2, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x81, vector_length), vector_length),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x9F, vector_length), vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(
-            length_u8m8, 3, __riscv_vmor_mm_b1(is_e2_80_ws, is_e2_81_9f, vector_length), vector_length);
+        vbool2_t third_a8_a9_af = __riscv_vmor_mm_b2(
+            __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
+                               __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xAF, vector_length), vector_length);
+        vbool2_t is_e2_80_ws = __riscv_vmand_mm_b2(
+            is_e2_80, __riscv_vmor_mm_b2(third_2000_200d, third_a8_a9_af, vector_length), vector_length);
+        vbool2_t is_e2_81_9f = __riscv_vmand_mm_b2(
+            __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x81, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x9F, vector_length), vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(
+            length_u8m4, 3, __riscv_vmor_mm_b2(is_e2_80_ws, is_e2_81_9f, vector_length), vector_length);
         // U+3000 ideographic space (E3 80 80): length 3.
-        vbool1_t is_e3 = __riscv_vmand_mm_b1(
-            __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(bytes_u8m8, 0xE3, vector_length),
-                                __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x80, vector_length), vector_length),
-            __riscv_vmseq_vx_u8m8_b1(after_next_u8m8, 0x80, vector_length), vector_length);
-        length_u8m8 = __riscv_vmerge_vxm_u8m8(length_u8m8, 3, is_e3, vector_length);
+        vbool2_t is_e3 = __riscv_vmand_mm_b2(
+            __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE3, vector_length),
+                                __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length), vector_length),
+            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x80, vector_length), vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_e3, vector_length);
 
-        vbool1_t match_mask = __riscv_vmsne_vx_u8m8_b1(length_u8m8, 0, vector_length);
-        long match_index = __riscv_vfirst_m_b1(match_mask, vector_length);
-        if (match_index >= 0) {
-            vuint8m8_t at_match = __riscv_vslidedown_vx_u8m8(length_u8m8, (sz_size_t)match_index, vector_length);
-            *matched_length = (sz_size_t)__riscv_vmv_x_s_u8m8_u8(at_match);
-            return (sz_cptr_t)(text_u8 + offset + (sz_size_t)match_index);
+        // Trust starts in lanes [0, vl-3] on a full tile so =<3-byte tails are fully loaded; on the final
+        // (masked) tile trust every valid lane. Whitespace needs no CRLF straddle fixup.
+        sz_size_t trusted_lanes = (vector_length >= tile) ? vector_length - 2 : vector_length;
+        vuint16m8_t lane_iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
+        vbool2_t trusted_mask = __riscv_vmsltu_vx_u16m8_b2(lane_iota_u16m8, (sz_u16_t)trusted_lanes, vector_length);
+        vbool2_t start_mask = __riscv_vmand_mm_b2(__riscv_vmsne_vx_u8m4_b2(length_u8m4, 0, vector_length),
+                                                  trusted_mask, vector_length);
+
+        // Capacity cut: emit only as many of this tile's matches as the output can still hold.
+        sz_size_t window_matches = (sz_size_t)__riscv_vcpop_m_b2(start_mask, vector_length);
+        sz_size_t emit_count = sz_min_of_two(window_matches, matches_capacity - count);
+        sz_utf8_iterate_peel_tile_rvv_(length_u8m4, start_mask, position, vector_length, emit_count,
+                                       match_offsets + count, match_lengths + count);
+        count += emit_count;
+        if (count == matches_capacity) { // output buffer full: resume past the last emitted match
+            position = match_offsets[count - 1] + match_lengths[count - 1];
+            break;
         }
-        offset += vector_length;
+        position += (vector_length >= tile) ? tile - 2 : vector_length;
     }
-    *matched_length = 0;
-    return SZ_NULL_CHAR;
+
+    if (bytes_consumed) *bytes_consumed = position;
+    return count;
 }
 
 /*  UAX-29 word-boundary detection (TR29 Word_Break).

@@ -60,8 +60,8 @@ typedef struct sz_implementations_t {
 
     sz_utf8_count_t utf8_count;
     sz_utf8_find_nth_t utf8_find_nth;
-    sz_utf8_find_boundary_t utf8_find_newline;
-    sz_utf8_find_boundary_t utf8_find_whitespace;
+    sz_utf8_find_boundaries_t utf8_find_newlines;
+    sz_utf8_find_boundaries_t utf8_find_whitespaces;
     sz_utf8_unpack_chunk_t utf8_unpack_chunk;
 
     sz_utf8_norm_t utf8_norm;
@@ -69,8 +69,8 @@ typedef struct sz_implementations_t {
     sz_utf8_case_fold_t utf8_case_fold;
     sz_utf8_case_insensitive_find_t utf8_case_insensitive_find;
 
-    sz_utf8_word_find_boundaries_t utf8_word_find_boundaries;
-    sz_utf8_word_rfind_boundaries_t utf8_word_rfind_boundaries;
+    sz_utf8_find_boundaries_t utf8_word_find_boundaries;
+    sz_utf8_find_boundaries_t utf8_word_rfind_boundaries;
     sz_utf8_case_insensitive_order_t utf8_case_insensitive_order;
 
     sz_sequence_argsort_t sequence_argsort;

@@ -374,6 +374,40 @@ def test_unit_split():
         sz.rsplit_byteset(big, "")
 
 
+def test_unit_split_skip_empty():
+    """`skip_empty=True` drops zero-length segments from byteset/substring splits (default keeps them)."""
+
+    def strs(x):
+        return [str(s) for s in x]
+
+    # Substring separator: leading/middle/trailing empties are dropped.
+    assert strs(Str("a,,b,").split(",", skip_empty=True)) == ["a", "b"]
+    assert strs(Str(",a,,b,").split(",", skip_empty=True)) == ["a", "b"]
+    assert strs(Str("a,,b,").split(",")) == ["a", "", "b", ""]  # default: keep empties
+
+    # Reverse eager split reports source order (reverses internally).
+    assert strs(Str("a,,b,").rsplit(",", skip_empty=True)) == ["a", "b"]
+    assert strs(Str("a,,b,").rsplit(",")) == ["a", "", "b", ""]
+
+    # Byteset variants.
+    assert strs(Str("a,;b;").split_byteset(",;", skip_empty=True)) == ["a", "b"]
+    assert strs(Str("a,;b;").rsplit_byteset(",;", skip_empty=True)) == ["a", "b"]
+    assert strs(Str("a,;b;").split_byteset(",;")) == ["a", "", "b", ""]
+
+    # Lazy iterator variants (rsplit_iter yields reverse order).
+    assert strs(sz.split_iter("a,,b,", ",", skip_empty=True)) == ["a", "b"]
+    assert strs(sz.rsplit_iter("a,,b,", ",", skip_empty=True)) == ["b", "a"]
+    assert strs(sz.split_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["a", "b"]
+    assert strs(sz.rsplit_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["b", "a"]
+
+    # `skip_empty` composes with `maxsplit`: only non-empty leading segments consume the budget.
+    assert strs(Str("a,,b,c").split(",", maxsplit=1, skip_empty=True)) == ["a", ",b,c"]
+
+    # An all-separator string collapses to nothing when skipping empties.
+    assert strs(Str(",,,").split(",", skip_empty=True)) == []
+    assert strs(sz.split_iter(",,,", ",", skip_empty=True)) == []
+
+
 def test_unit_split_iterators():
     """
     Test the iterator-based split methods.

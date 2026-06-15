@@ -71,15 +71,14 @@ pub struct Byteset {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{IndexSpan, find_newline_utf8};
+/// use stringzilla::stringzilla::IndexSpan;
 ///
 /// let text = "Hello\nWorld";
-/// if let Some(span) = find_newline_utf8(text) {
-///     assert_eq!(span.offset, 5);
-///     assert_eq!(span.length, 1);
-///     let matched = span.extract(text.as_bytes());
-///     assert_eq!(matched, b"\n");
-/// }
+/// let span = IndexSpan::new(5, 1);
+/// assert_eq!(span.offset, 5);
+/// assert_eq!(span.length, 1);
+/// let matched = span.extract(text.as_bytes());
+/// assert_eq!(matched, b"\n");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IndexSpan {
@@ -458,13 +457,22 @@ extern "C" {
         runes_capacity: usize,
         runes_unpacked: *mut usize,
     ) -> *const c_void;
-    pub(crate) fn sz_utf8_find_newline(text: *const c_void, length: usize, matched_length: *mut usize)
-        -> *const c_void;
-    pub(crate) fn sz_utf8_find_whitespace(
+    pub(crate) fn sz_utf8_find_newlines(
         text: *const c_void,
         length: usize,
-        matched_length: *mut usize,
-    ) -> *const c_void;
+        match_offsets: *mut usize,
+        match_lengths: *mut usize,
+        matches_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_find_whitespaces(
+        text: *const c_void,
+        length: usize,
+        match_offsets: *mut usize,
+        match_lengths: *mut usize,
+        matches_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
     pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
     pub(crate) fn sz_utf8_norm(
         source: *const c_void,
@@ -1954,142 +1962,6 @@ pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replaceme
     )
 }
 
-/// Finds the first newline character in UTF-8 encoded text.
-///
-/// Searches for any of the 8 Unicode newline characters:
-/// - U+000A (LF - Line Feed `\n`)
-/// - U+000B (VT - Vertical Tab `\v`)
-/// - U+000C (FF - Form Feed `\f`)
-/// - U+000D (CR - Carriage Return `\r`, handles `\r\n` as single newline)
-/// - U+001C (FILE SEPARATOR)
-/// - U+001D (GROUP SEPARATOR)
-/// - U+001E (RECORD SEPARATOR)
-/// - U+0085 (NEL - Next Line)
-/// - U+2028 (LINE SEPARATOR)
-/// - U+2029 (PARAGRAPH SEPARATOR)
-///
-/// # Arguments
-///
-/// * `text`: The UTF-8 encoded byte slice to search.
-///
-/// # Returns
-///
-/// An `Option<IndexSpan>` containing the byte offset and length of the matched newline.
-/// The length can be 1-3 bytes for single characters, or 2 bytes for CRLF sequence.
-///
-/// Returns `None` if no newline is found.
-///
-/// # Examples
-///
-/// ```
-/// use stringzilla::stringzilla as sz;
-///
-/// let text = "Hello\nWorld";
-/// let span = sz::find_newline_utf8(text).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 1);
-///
-/// let text_crlf = "Hello\r\nWorld";
-/// let span = sz::find_newline_utf8(text_crlf).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 2);
-///
-/// let text_unicode = "Hello\u{2028}World"; // LINE SEPARATOR
-/// let span = sz::find_newline_utf8(text_unicode).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 3);
-/// ```
-pub fn find_newline_utf8<T>(text: T) -> Option<IndexSpan>
-where
-    T: AsRef<[u8]>,
-{
-    let text_ref = text.as_ref();
-    let text_pointer = text_ref.as_ptr() as *const c_void;
-    let text_length = text_ref.len();
-    let mut matched_length: usize = 0;
-
-    let result = unsafe { sz_utf8_find_newline(text_pointer, text_length, &mut matched_length as *mut usize) };
-
-    if result.is_null() {
-        None
-    } else {
-        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
-            .try_into()
-            .unwrap();
-        Some(IndexSpan::new(offset, matched_length))
-    }
-}
-
-/// Finds the first whitespace character in UTF-8 encoded text.
-///
-/// Searches for any of the 29 Unicode whitespace characters (includes all newlines
-/// per Unicode standard, plus spaces, tabs, and various Unicode space characters).
-///
-/// The complete set includes:
-/// - All 8 newline characters (see [`find_newline_utf8`])
-/// - U+0009 (CHARACTER TABULATION `\t`)
-/// - U+001F (UNIT SEPARATOR)
-/// - U+0020 (SPACE)
-/// - U+00A0 (NO-BREAK SPACE)
-/// - U+1680 (OGHAM SPACE MARK)
-/// - U+2000-U+200A (11 various spaces)
-/// - U+202F (NARROW NO-BREAK SPACE)
-/// - U+205F (MEDIUM MATHEMATICAL SPACE)
-/// - U+3000 (IDEOGRAPHIC SPACE)
-///
-/// # Arguments
-///
-/// * `text`: The UTF-8 encoded byte slice to search.
-///
-/// # Returns
-///
-/// An `Option<IndexSpan>` containing the byte offset and length of the matched whitespace.
-/// The length can be 1-3 bytes depending on the UTF-8 character.
-///
-/// Returns `None` if no whitespace is found.
-///
-/// # Examples
-///
-/// ```
-/// use stringzilla::stringzilla as sz;
-///
-/// let text = "Hello World";
-/// let span = sz::find_whitespace_utf8(text).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 1);
-///
-/// let text_unicode = "Hello\u{3000}World"; // IDEOGRAPHIC SPACE
-/// let span = sz::find_whitespace_utf8(text_unicode).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 3);
-///
-/// // Whitespace includes newlines
-/// let text_newline = "Hello\nWorld";
-/// let span = sz::find_whitespace_utf8(text_newline).unwrap();
-/// assert_eq!(span.offset, 5);
-/// assert_eq!(span.length, 1);
-/// ```
-pub fn find_whitespace_utf8<T>(text: T) -> Option<IndexSpan>
-where
-    T: AsRef<[u8]>,
-{
-    let text_ref = text.as_ref();
-    let text_pointer = text_ref.as_ptr() as *const c_void;
-    let text_length = text_ref.len();
-    let mut matched_length: usize = 0;
-
-    let result = unsafe { sz_utf8_find_whitespace(text_pointer, text_length, &mut matched_length as *mut usize) };
-
-    if result.is_null() {
-        None
-    } else {
-        let offset = unsafe { (result as *const u8).offset_from(text_pointer as *const u8) }
-            .try_into()
-            .unwrap();
-        Some(IndexSpan::new(offset, matched_length))
-    }
-}
-
 /// Counts the number of UTF-8 characters in the text.
 ///
 /// This function efficiently counts UTF-8 characters by identifying character start bytes
@@ -2825,6 +2697,11 @@ impl<'a> Iterator for RangeMatches<'a> {
 /// An iterator over non-overlapping splits of a string slice by a pattern.
 /// This iterator yields the substrings between the matches of the pattern.
 ///
+/// By default empty segments are **kept** (adjacent delimiters and leading/trailing matches yield empty
+/// slices, mirroring `str::split`). Call [`Self::skip_empty`] to drop zero-length segments. The `STEPS`
+/// const-generic mirrors the UTF-8 split iterators for API uniformity; substring/byteset splits search
+/// match-by-match, so it does not affect the yielded segments.
+///
 /// # Examples
 ///
 /// ```
@@ -2835,29 +2712,42 @@ impl<'a> Iterator for RangeMatches<'a> {
 /// let splits: Vec<&[u8]> = RangeSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
 /// ```
-pub struct RangeSplits<'a> {
+pub struct RangeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
     last_match: Option<usize>,
+    skip_empty: bool,
 }
 
-impl<'a> RangeSplits<'a> {
+impl<'a> RangeSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        Self::with_steps(haystack, matcher)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeSplits<'a, STEPS> {
+    /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
+    pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
             haystack,
             matcher,
             position: 0,
             last_match: None,
+            skip_empty: false,
         }
     }
-}
 
-impl<'a> Iterator for RangeSplits<'a> {
-    type Item = &'a [u8];
+    /// When set, zero-length segments are skipped instead of yielded (opt-in; the default keeps them).
+    pub fn skip_empty(mut self) -> Self {
+        self.skip_empty = true;
+        self
+    }
 
+    /// Yields the next raw segment without the `skip_empty` filter.
     #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_raw(&mut self) -> Option<&'a [u8]> {
         if self.position > self.haystack.len() {
             return None;
         }
@@ -2874,6 +2764,21 @@ impl<'a> Iterator for RangeSplits<'a> {
             Some(&self.haystack[start..])
         } else {
             None
+        }
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeSplits<'a, STEPS> {
+    type Item = &'a [u8];
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let segment = self.next_raw()?;
+            if self.skip_empty && segment.is_empty() {
+                continue;
+            }
+            return Some(segment);
         }
     }
 }
@@ -2937,6 +2842,10 @@ impl<'a> Iterator for RangeRMatches<'a> {
 /// An iterator over non-overlapping splits of a string slice by a pattern, searching from the end.
 /// This iterator yields the substrings between the matches of the pattern in reverse order.
 ///
+/// By default empty segments are **kept** (mirroring `str::rsplit`). Call [`Self::skip_empty`] to drop
+/// zero-length segments. The `STEPS` const-generic mirrors the UTF-8 split iterators for API uniformity;
+/// substring/byteset splits search match-by-match, so it does not affect the yielded segments.
+///
 /// # Examples
 ///
 /// ```
@@ -2947,44 +2856,64 @@ impl<'a> Iterator for RangeRMatches<'a> {
 /// let splits: Vec<&[u8]> = RangeRSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
 /// ```
-pub struct RangeRSplits<'a> {
+pub struct RangeRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
-    position: usize,
+    position: Option<usize>, // End of the not-yet-segmented prefix; `None` once the final segment is yielded
+    skip_empty: bool,
 }
 
-impl<'a> RangeRSplits<'a> {
+impl<'a> RangeRSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        Self::with_steps(haystack, matcher)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeRSplits<'a, STEPS> {
+    /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
+    pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
             haystack,
             matcher,
-            position: haystack.len(),
+            position: Some(haystack.len()),
+            skip_empty: false,
+        }
+    }
+
+    /// When set, zero-length segments are skipped instead of yielded (opt-in; the default keeps them).
+    pub fn skip_empty(mut self) -> Self {
+        self.skip_empty = true;
+        self
+    }
+
+    /// Yields the next raw segment (reverse order) without the `skip_empty` filter.
+    #[inline(always)]
+    fn next_raw(&mut self) -> Option<&'a [u8]> {
+        let position = self.position?;
+        let search_area = &self.haystack[..position];
+        if let Some(index) = self.matcher.find(search_area) {
+            let start = index + self.matcher.needle_length();
+            self.position = Some(index);
+            Some(&self.haystack[start..position])
+        } else {
+            self.position = None;
+            Some(&self.haystack[..position])
         }
     }
 }
 
-impl<'a> Iterator for RangeRSplits<'a> {
+impl<'a, const STEPS: usize> Iterator for RangeRSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position == 0 {
-            return None;
-        }
-
-        let search_area = &self.haystack[..self.position];
-        if let Some(index) = self.matcher.find(search_area) {
-            let end = self.position;
-            let start = index + self.matcher.needle_length();
-            let result = Some(&self.haystack[start..end]);
-
-            self.position = index;
-
-            result
-        } else {
-            let result = Some(&self.haystack[..self.position]);
-            self.position = 0;
-            result
+        loop {
+            let segment = self.next_raw()?;
+            if self.skip_empty && segment.is_empty() {
+                continue;
+            }
+            return Some(segment);
         }
     }
 }
@@ -3004,134 +2933,290 @@ impl<'a> Iterator for RangeRSplits<'a> {
 /// let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
 /// assert_eq!(lines, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
-pub struct RangeUtf8NewlineSplits<'a> {
+pub struct RangeUtf8NewlineSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
-    position: usize,
-    finished: bool,
+    suffix: usize,           // Start of the not-yet-segmented suffix (moves past `text.len()` once done)
+    starts: [usize; STEPS],  // Buffered segment offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered segment lengths
+    trailing: Option<(usize, usize)>, // (start, length) of the end-of-text segment when the batch reached EOF
+    count: usize,            // Number of yieldable segments in the current batch; `count == 0` is the end sentinel
+    index: usize,            // Index of the next segment to yield from the buffer
+    advance: usize,          // Bytes to advance `suffix` by once the batch drains
+    skip_empty: bool,        // When set, `next()` skips zero-length segments
 }
 
-impl<'a> RangeUtf8NewlineSplits<'a> {
+impl<'a> RangeUtf8NewlineSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8NewlineSplits::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
-        Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8NewlineSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` delimiters per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
             text,
-            position: 0,
-            finished: false,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            trailing: None,
+            count: 0,
+            index: 0,
+            advance: 0,
+            skip_empty: false,
+        };
+        splits.refill();
+        splits.settle();
+        splits
+    }
+
+    /// When set, zero-length segments are skipped instead of yielded (opt-in; the default keeps them).
+    pub fn skip_empty(mut self) -> Self {
+        self.skip_empty = true;
+        self.settle();
+        self
+    }
+
+    /// Refill from `suffix`: fetch a delimiter batch and transform it to segments in place.
+    fn refill(&mut self) {
+        let region = self.text.len() - self.suffix;
+        let mut consumed = 0usize;
+        let delimiters = unsafe {
+            sz_utf8_find_newlines(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                region,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        // In place: delimiter `d` spans `[starts[d], starts[d] + lengths[d])`; the segment before it runs
+        // from the previous delimiter's end to this delimiter's start.
+        let mut previous_end = 0usize;
+        for d in 0..delimiters {
+            let delimiter_start = self.starts[d];
+            let delimiter_length = self.lengths[d];
+            self.starts[d] = previous_end;
+            self.lengths[d] = delimiter_start - previous_end;
+            previous_end = delimiter_start + delimiter_length;
+        }
+        if consumed == region {
+            // Batch reached end-of-text: append the trailing segment.
+            self.trailing = Some((previous_end, region - previous_end));
+            self.count = delimiters + 1;
+            self.advance = region + 1; // `region + 1` pushes `suffix` past `text.len()` when drained
+        } else {
+            self.trailing = None;
+            self.count = delimiters;
+            self.advance = consumed;
+        }
+        self.index = 0;
+    }
+
+    /// Offset of the segment at `index` relative to `suffix` (the trailing slot lives just past `STEPS`).
+    #[inline]
+    fn segment(&self, index: usize) -> (usize, usize) {
+        match self.trailing {
+            Some(trailing) if index == self.count - 1 => trailing,
+            _ => (self.starts[index], self.lengths[index]),
+        }
+    }
+
+    /// Position `index` on the next yieldable segment, refilling and (when `skip_empty`) skipping empties.
+    fn settle(&mut self) {
+        loop {
+            if self.skip_empty {
+                while self.index < self.count && self.segment(self.index).1 == 0 {
+                    self.index += 1;
+                }
+            }
+            if self.index < self.count || self.count == 0 {
+                return;
+            }
+            self.suffix += self.advance;
+            if self.suffix > self.text.len() {
+                self.count = 0;
+                return;
+            }
+            self.refill();
         }
     }
 }
 
-impl<'a> Iterator for RangeUtf8NewlineSplits<'a> {
+impl<'a, const STEPS: usize> Iterator for RangeUtf8NewlineSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.finished {
+        if self.count == 0 {
             return None;
         }
-
-        if self.position >= self.text.len() {
-            if self.position == self.text.len() && !self.finished {
-                // Return empty slice for trailing newline case
-                self.finished = true;
-                return Some(&self.text[self.text.len()..]);
-            }
-            return None;
-        }
-
-        let start = self.position;
-
-        // Search for next newline
-        if let Some(span) = find_newline_utf8(&self.text[self.position..]) {
-            let end = self.position + span.offset;
-            self.position = end + span.length;
-            Some(&self.text[start..end])
-        } else {
-            // No more newlines, return rest of text
-            self.finished = true;
-            self.position = self.text.len();
-            Some(&self.text[start..])
-        }
+        let (offset, length) = self.segment(self.index);
+        let begin = self.suffix + offset;
+        let end = begin + length;
+        self.index += 1;
+        self.settle();
+        Some(&self.text[begin..end])
     }
 }
 
-/// Backwards compatibility alias for [`RangeUtf8NewlineSplits`].
-#[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8NewlineSplits")]
-pub type RangeNewlineUtf8Splits<'a> = RangeUtf8NewlineSplits<'a>;
-
-/// An iterator over words in UTF-8 text split by whitespace characters.
+/// An iterator over segments of UTF-8 text split by whitespace characters.
 ///
-/// This iterator yields non-empty slices between whitespace characters. The whitespace
-/// characters themselves are not included. Handles all 29 Unicode whitespace characters.
+/// Splits on all 25 Unicode "White_Space" characters; N whitespace delimiters yield N+1 segments. By
+/// default empty segments are **kept** (matching the C++/Python bindings and `str::split`), so runs of
+/// whitespace and leading/trailing whitespace produce empty slices. Call [`Self::skip_empty`] for the
+/// `str::split_whitespace`-style behavior that drops empties and yields only non-empty tokens.
 ///
 /// # Examples
 ///
 /// ```
 /// use stringzilla::stringzilla::{RangeUtf8WhitespaceSplits};
 ///
-/// let text = b"Hello  World\tRust";
-/// let words: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).collect();
-/// assert_eq!(words, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
+/// // Default KEEP policy: empties around the words are preserved.
+/// let text = b"  hi  ";
+/// let segments: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).collect();
+/// assert_eq!(segments, vec![&b""[..], &b""[..], &b"hi"[..], &b""[..], &b""[..]]);
+///
+/// // Opt in to dropping empties for token-style splitting.
+/// let tokens: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+/// assert_eq!(tokens, vec![&b"hi"[..]]);
 /// ```
-pub struct RangeUtf8WhitespaceSplits<'a> {
+pub struct RangeUtf8WhitespaceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
-    position: usize,
+    suffix: usize,           // Start of the not-yet-segmented suffix (moves past `text.len()` once done)
+    starts: [usize; STEPS],  // Buffered segment offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered segment lengths
+    trailing: Option<(usize, usize)>, // (start, length) of the end-of-text segment when the batch reached EOF
+    count: usize,            // Number of yieldable segments in the current batch; `count == 0` is the end sentinel
+    index: usize,            // Index of the next segment to yield from the buffer
+    advance: usize,          // Bytes to advance `suffix` by once the batch drains
+    skip_empty: bool,        // When set, `next()` skips zero-length segments
 }
 
-impl<'a> RangeUtf8WhitespaceSplits<'a> {
+impl<'a> RangeUtf8WhitespaceSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8WhitespaceSplits::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
-        Self { text, position: 0 }
+        Self::with_steps(text)
     }
 }
 
-impl<'a> Iterator for RangeUtf8WhitespaceSplits<'a> {
+impl<'a, const STEPS: usize> RangeUtf8WhitespaceSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` delimiters per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            trailing: None,
+            count: 0,
+            index: 0,
+            advance: 0,
+            skip_empty: false,
+        };
+        splits.refill();
+        splits.settle();
+        splits
+    }
+
+    /// When set, zero-length segments are skipped, recovering the `str::split_whitespace` token behavior
+    /// (no leading/trailing/inner empties). The default keeps empties to mirror C++/Python.
+    pub fn skip_empty(mut self) -> Self {
+        self.skip_empty = true;
+        self.settle();
+        self
+    }
+
+    /// Refill from `suffix`: fetch a delimiter batch and transform it to segments in place.
+    fn refill(&mut self) {
+        let region = self.text.len() - self.suffix;
+        let mut consumed = 0usize;
+        let delimiters = unsafe {
+            sz_utf8_find_whitespaces(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                region,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        let mut previous_end = 0usize;
+        for d in 0..delimiters {
+            let delimiter_start = self.starts[d];
+            let delimiter_length = self.lengths[d];
+            self.starts[d] = previous_end;
+            self.lengths[d] = delimiter_start - previous_end;
+            previous_end = delimiter_start + delimiter_length;
+        }
+        if consumed == region {
+            self.trailing = Some((previous_end, region - previous_end));
+            self.count = delimiters + 1;
+            self.advance = region + 1;
+        } else {
+            self.trailing = None;
+            self.count = delimiters;
+            self.advance = consumed;
+        }
+        self.index = 0;
+    }
+
+    /// Offset/length of the segment at `index` relative to `suffix` (the trailing slot lives past `STEPS`).
+    #[inline]
+    fn segment(&self, index: usize) -> (usize, usize) {
+        match self.trailing {
+            Some(trailing) if index == self.count - 1 => trailing,
+            _ => (self.starts[index], self.lengths[index]),
+        }
+    }
+
+    /// Position `index` on the next yieldable segment, refilling and (when `skip_empty`) skipping empties.
+    fn settle(&mut self) {
+        loop {
+            if self.skip_empty {
+                while self.index < self.count && self.segment(self.index).1 == 0 {
+                    self.index += 1;
+                }
+            }
+            if self.index < self.count || self.count == 0 {
+                return;
+            }
+            self.suffix += self.advance;
+            if self.suffix > self.text.len() {
+                self.count = 0;
+                return;
+            }
+            self.refill();
+        }
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeUtf8WhitespaceSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.text.len() {
+        if self.count == 0 {
             return None;
         }
-
-        // Skip leading whitespace
-        while self.position < self.text.len() {
-            if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
-                if span.offset == 0 {
-                    // Whitespace at current position, skip it
-                    self.position += span.length;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        if self.position >= self.text.len() {
-            return None;
-        }
-
-        let start = self.position;
-
-        // Find next whitespace or end of text
-        if let Some(span) = find_whitespace_utf8(&self.text[self.position..]) {
-            let end = self.position + span.offset;
-            self.position = end + span.length;
-            Some(&self.text[start..end])
-        } else {
-            // No more whitespace, return rest of text
-            self.position = self.text.len();
-            Some(&self.text[start..])
-        }
+        let (offset, length) = self.segment(self.index);
+        let begin = self.suffix + offset;
+        let end = begin + length;
+        self.index += 1;
+        self.settle();
+        Some(&self.text[begin..end])
     }
 }
 
-/// Backwards compatibility alias for [`RangeUtf8WhitespaceSplits`].
-#[deprecated(since = "4.5.0", note = "Renamed to RangeUtf8WhitespaceSplits")]
-pub type RangeWhitespaceUtf8Splits<'a> = RangeUtf8WhitespaceSplits<'a>;
-
-/// Default batch size for buffering `sz_utf8_word_*_boundaries` output, mirroring the core
-/// `sz_utf8_word_boundaries_batch_k` enum in `include/stringzilla/utf8_iterate.h`. Buffering this many
-/// boundaries per call amortizes the per-word dispatch/FFI overhead without an unbounded buffer; the
+/// Default batch size for buffering the `sz_utf8_*` boundary kernels' output, mirroring the core
+/// `sz_iterators_default_steps_k` enum in `include/stringzilla/utf8_iterate.h`. Buffering this many
+/// boundaries per call amortizes the per-item dispatch/FFI overhead without an unbounded buffer; the
 /// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
-const WORD_BOUNDARIES_BATCH: usize = 16;
+pub const ITERATORS_DEFAULT_STEPS: usize = 16;
 
 /// An iterator over UAX-29 words in UTF-8 text, in order.
 ///
@@ -3146,22 +3231,32 @@ const WORD_BOUNDARIES_BATCH: usize = 16;
 /// let words: Vec<&[u8]> = RangeUtf8WordSplits::new(b"Hi, world").collect();
 /// assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
 /// ```
-pub struct RangeUtf8WordSplits<'a> {
+pub struct RangeUtf8WordSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
-    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets, relative to `suffix`
-    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    starts: [usize; STEPS], // Buffered word offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered word lengths
     count: usize,  // Number of buffered words (0 once exhausted)
     index: usize,  // Index of the next word to yield from the buffer
 }
 
-impl<'a> RangeUtf8WordSplits<'a> {
+impl<'a> RangeUtf8WordSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8WordSplits::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8WordSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` words per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
             text,
             suffix: 0,
-            starts: [0; WORD_BOUNDARIES_BATCH],
-            lengths: [0; WORD_BOUNDARIES_BATCH],
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
             count: 0,
             index: 0,
         };
@@ -3178,7 +3273,7 @@ impl<'a> RangeUtf8WordSplits<'a> {
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
                 self.lengths.as_mut_ptr(),
-                WORD_BOUNDARIES_BATCH,
+                STEPS,
                 &mut consumed,
             )
         };
@@ -3186,7 +3281,7 @@ impl<'a> RangeUtf8WordSplits<'a> {
     }
 }
 
-impl<'a> Iterator for RangeUtf8WordSplits<'a> {
+impl<'a, const STEPS: usize> Iterator for RangeUtf8WordSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3220,22 +3315,32 @@ impl<'a> Iterator for RangeUtf8WordSplits<'a> {
 /// let words: Vec<&[u8]> = RangeUtf8WordRSplits::new(b"Hi, world").collect();
 /// assert_eq!(words, vec![&b"world"[..], &b" "[..], &b","[..], &b"Hi"[..]]);
 /// ```
-pub struct RangeUtf8WordRSplits<'a> {
+pub struct RangeUtf8WordRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
-    starts: [usize; WORD_BOUNDARIES_BATCH], // Buffered word offsets from the text start, last word first
-    lengths: [usize; WORD_BOUNDARIES_BATCH], // Buffered word lengths
+    starts: [usize; STEPS], // Buffered word offsets from the text start, last word first
+    lengths: [usize; STEPS], // Buffered word lengths
     count: usize,  // Number of buffered words (0 once exhausted)
     index: usize,  // Index of the next word to yield from the buffer
 }
 
-impl<'a> RangeUtf8WordRSplits<'a> {
+impl<'a> RangeUtf8WordRSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8WordRSplits::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8WordRSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` words per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
             text,
             prefix: text.len(),
-            starts: [0; WORD_BOUNDARIES_BATCH],
-            lengths: [0; WORD_BOUNDARIES_BATCH],
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
             count: 0,
             index: 0,
         };
@@ -3252,7 +3357,7 @@ impl<'a> RangeUtf8WordRSplits<'a> {
                 self.prefix,
                 self.starts.as_mut_ptr(),
                 self.lengths.as_mut_ptr(),
-                WORD_BOUNDARIES_BATCH,
+                STEPS,
                 &mut consumed,
             )
         };
@@ -3261,7 +3366,7 @@ impl<'a> RangeUtf8WordRSplits<'a> {
     }
 }
 
-impl<'a> Iterator for RangeUtf8WordRSplits<'a> {
+impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3425,43 +3530,6 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_hash(&self) -> u64;
 
-    /// Finds the first newline character in UTF-8 encoded text.
-    ///
-    /// Returns an `IndexSpan` containing the byte offset and length of the matched newline.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::sz::StringZillableUnary;
-    ///
-    /// let text = "Hello\nWorld";
-    /// let span = text.sz_utf8_find_newline().unwrap();
-    /// assert_eq!(span.offset, 5);
-    /// assert_eq!(span.length, 1);
-    ///
-    /// let text_crlf = "Hello\r\nWorld";
-    /// let span = text_crlf.sz_utf8_find_newline().unwrap();
-    /// assert_eq!(span.offset, 5);
-    /// assert_eq!(span.length, 2);
-    /// ```
-    fn sz_utf8_find_newline(&self) -> Option<IndexSpan>;
-
-    /// Finds the first whitespace character in UTF-8 encoded text.
-    ///
-    /// Returns an `IndexSpan` containing the byte offset and length of the matched whitespace.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::sz::StringZillableUnary;
-    ///
-    /// let text = "Hello World";
-    /// let span = text.sz_utf8_find_whitespace().unwrap();
-    /// assert_eq!(span.offset, 5);
-    /// assert_eq!(span.length, 1);
-    /// ```
-    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan>;
-
     /// Returns a lazy UTF-8 character view with SIMD-accelerated operations.
     ///
     /// The view provides:
@@ -3507,21 +3575,31 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_utf8_newline_splits(&self) -> RangeUtf8NewlineSplits<'_>;
 
-    /// Returns an iterator over words split by UTF-8 whitespace characters.
+    /// Returns an iterator over segments split by UTF-8 whitespace characters.
     ///
-    /// The iterator yields non-empty slices between whitespace. Handles all 29 Unicode
-    /// whitespace characters.
+    /// Handles all 25 Unicode "White_Space" characters; N delimiters yield N+1 segments. By default
+    /// **empty segments are kept** (matching the C++/Python bindings and `str::split`), so runs of
+    /// whitespace surface empty slices. Chain `.skip_empty()` on the returned iterator to recover the
+    /// `str::split_whitespace` token behavior that drops empties.
     ///
     /// # Examples
     ///
     /// ```
     /// use stringzilla::sz::StringZillableUnary;
     ///
+    /// // KEEP (default): the double space between "Hello" and "World" yields an empty segment.
     /// let text = "Hello  World\tRust";
-    /// let words: Vec<&str> = text.sz_utf8_whitespace_splits()
-    ///     .map(|word| std::str::from_utf8(word).unwrap())
+    /// let segments: Vec<&str> = text.sz_utf8_whitespace_splits()
+    ///     .map(|segment| std::str::from_utf8(segment).unwrap())
     ///     .collect();
-    /// assert_eq!(words, vec!["Hello", "World", "Rust"]);
+    /// assert_eq!(segments, vec!["Hello", "", "World", "Rust"]);
+    ///
+    /// // skip_empty: drops the empties to yield only the non-empty tokens.
+    /// let tokens: Vec<&str> = text.sz_utf8_whitespace_splits()
+    ///     .skip_empty()
+    ///     .map(|token| std::str::from_utf8(token).unwrap())
+    ///     .collect();
+    /// assert_eq!(tokens, vec!["Hello", "World", "Rust"]);
     /// ```
     fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_>;
 
@@ -3776,14 +3854,6 @@ where
 
     fn sz_hash(&self) -> u64 {
         hash(self)
-    }
-
-    fn sz_utf8_find_newline(&self) -> Option<IndexSpan> {
-        find_newline_utf8(self)
-    }
-
-    fn sz_utf8_find_whitespace(&self) -> Option<IndexSpan> {
-        find_whitespace_utf8(self)
     }
 
     fn sz_utf8_chars(&self) -> Utf8View<'_> {
@@ -4067,6 +4137,40 @@ mod tests {
         let needle = b",";
         let splits: Vec<_> = haystack.sz_splits(needle).collect();
         assert_eq!(splits, vec![b"a", &b""[..], b"b", &b""[..]]);
+    }
+
+    #[test]
+    fn iter_splits_forward_skip_empty() {
+        // Default KEEP yields empties; skip_empty drops every zero-length segment.
+        let haystack = b"a,,b,";
+        let needle = b",";
+        let kept: Vec<_> = haystack.sz_splits(needle).collect();
+        assert_eq!(kept, vec![b"a", &b""[..], b"b", &b""[..]]);
+        let nonempty: Vec<_> = haystack.sz_splits(needle).skip_empty().collect();
+        assert_eq!(nonempty, vec![b"a", b"b"]);
+    }
+
+    #[test]
+    fn iter_splits_reverse_skip_empty() {
+        // KEEP rsplit of "a,,b," is the reverse of the forward split, empties included.
+        let haystack = b"a,,b,";
+        let needle = b",";
+        let kept: Vec<_> = haystack.sz_rsplits(needle).collect();
+        assert_eq!(kept, vec![&b""[..], b"b", &b""[..], b"a"]);
+        let nonempty: Vec<_> = haystack.sz_rsplits(needle).skip_empty().collect();
+        assert_eq!(nonempty, vec![b"b", b"a"]);
+    }
+
+    #[test]
+    fn iter_splits_byteset_skip_empty() {
+        // Byteset matcher (split on any of ",;"): adjacent delimiters yield empties under the KEEP default.
+        let haystack = b",a;;b,";
+        let kept: Vec<_> = RangeSplits::new(haystack, MatcherType::FindFirstOf(b",;")).collect();
+        assert_eq!(kept, vec![&b""[..], b"a", &b""[..], b"b", &b""[..]]);
+        let nonempty: Vec<_> = RangeSplits::new(haystack, MatcherType::FindFirstOf(b",;"))
+            .skip_empty()
+            .collect();
+        assert_eq!(nonempty, vec![b"a", b"b"]);
     }
 
     #[test]
@@ -4543,253 +4647,6 @@ mod tests {
     }
 
     #[test]
-    fn find_newline_utf8_lf() {
-        let text = "Hello\nWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_newline_utf8_crlf() {
-        let text = "Hello\r\nWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 2);
-    }
-
-    #[test]
-    fn find_newline_utf8_vt() {
-        let text = "Hello\x0BWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_newline_utf8_ff() {
-        let text = "Hello\x0CWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_newline_utf8_cr() {
-        let text = "Hello\rWorld";
-        let span = sz::find_newline_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_newline_utf8_file_separator_not_detected() {
-        // U+001C (FILE SEPARATOR) is intentionally NOT detected as a newline
-        // These are data structure delimiters used in formats like USV, not line breaks
-        let text = "Hello\x1CWorld";
-        let span = sz::find_newline_utf8(text);
-        assert!(span.is_none(), "FILE SEPARATOR should not be detected as newline");
-    }
-
-    #[test]
-    fn find_newline_utf8_group_separator_not_detected() {
-        // U+001D (GROUP SEPARATOR) is intentionally NOT detected as a newline
-        // These are data structure delimiters used in formats like USV, not line breaks
-        let text = "Hello\x1DWorld";
-        let span = sz::find_newline_utf8(text);
-        assert!(span.is_none(), "GROUP SEPARATOR should not be detected as newline");
-    }
-
-    #[test]
-    fn find_newline_utf8_record_separator_not_detected() {
-        // U+001E (RECORD SEPARATOR) is intentionally NOT detected as a newline
-        // These are data structure delimiters used in formats like USV, not line breaks
-        let text = "Hello\x1EWorld";
-        let span = sz::find_newline_utf8(text);
-        assert!(span.is_none(), "RECORD SEPARATOR should not be detected as newline");
-    }
-
-    #[test]
-    fn find_newline_utf8_nel() {
-        // U+0085 (NEL - Next Line) is 2 bytes in UTF-8: C2 85
-        let text = "Hello\u{0085}World";
-        let result = sz::find_newline_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 2);
-    }
-
-    #[test]
-    fn find_newline_utf8_line_separator() {
-        // U+2028 (LINE SEPARATOR) is 3 bytes in UTF-8: E2 80 A8
-        let text = "Hello\u{2028}World";
-        let result = sz::find_newline_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 3);
-    }
-
-    #[test]
-    fn find_newline_utf8_paragraph_separator() {
-        // U+2029 (PARAGRAPH SEPARATOR) is 3 bytes in UTF-8: E2 80 A9
-        let text = "Hello\u{2029}World";
-        let result = sz::find_newline_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 3);
-    }
-
-    #[test]
-    fn find_newline_utf8_not_found() {
-        let text = "Hello World";
-        assert_eq!(sz::find_newline_utf8(text), None);
-    }
-
-    #[test]
-    fn find_newline_utf8_empty() {
-        let text = "";
-        assert_eq!(sz::find_newline_utf8(text), None);
-    }
-
-    #[test]
-    fn find_newline_utf8_trait_method() {
-        use crate::sz::StringZillableUnary;
-        let text = "Hello\nWorld";
-        let span = text.sz_utf8_find_newline().unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_newline_utf8_trait_method_string() {
-        use crate::sz::StringZillableUnary;
-        let text = String::from("Hello\nWorld");
-        let span = text.sz_utf8_find_newline().unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_space() {
-        let text = "Hello World";
-        let span = sz::find_whitespace_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_tab() {
-        let text = "Hello\tWorld";
-        let span = sz::find_whitespace_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_newline() {
-        // Whitespace should include newlines
-        let text = "Hello\nWorld";
-        let span = sz::find_whitespace_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_cr() {
-        // Whitespace should include CR (finds CR as 1-byte, not CRLF as 2-byte)
-        let text = "Hello\r\nWorld";
-        let span = sz::find_whitespace_utf8(text).unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_nbsp() {
-        // U+00A0 (NO-BREAK SPACE) is 2 bytes in UTF-8: C2 A0
-        let text = "Hello\u{00A0}World";
-        let result = sz::find_whitespace_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 2);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_ideographic() {
-        // U+3000 (IDEOGRAPHIC SPACE) is 3 bytes in UTF-8: E3 80 80
-        let text = "Hello\u{3000}World";
-        let result = sz::find_whitespace_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 3);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_en_quad() {
-        // U+2000 (EN QUAD) is 3 bytes in UTF-8: E2 80 80
-        let text = "Hello\u{2000}World";
-        let result = sz::find_whitespace_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 3);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_ogham() {
-        // U+1680 (OGHAM SPACE MARK) is 3 bytes in UTF-8: E1 9A 80
-        let text = "Hello\u{1680}World";
-        let result = sz::find_whitespace_utf8(text);
-        assert!(result.is_some());
-        let span = result.unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 3);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_not_found() {
-        let text = "HelloWorld";
-        assert_eq!(sz::find_whitespace_utf8(text), None);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_empty() {
-        let text = "";
-        assert_eq!(sz::find_whitespace_utf8(text), None);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_trait_method() {
-        use crate::sz::StringZillableUnary;
-        let text = "Hello World";
-        let span = text.sz_utf8_find_whitespace().unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_trait_method_string() {
-        use crate::sz::StringZillableUnary;
-        let text = String::from("Hello World");
-        let span = text.sz_utf8_find_whitespace().unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
-    fn find_whitespace_utf8_trait_method_bytes() {
-        use crate::sz::StringZillableUnary;
-        let text = b"Hello World";
-        let span = text.sz_utf8_find_whitespace().unwrap();
-        assert_eq!(span.offset, 5);
-        assert_eq!(span.length, 1);
-    }
-
-    #[test]
     fn iter_newline_utf8_splits() {
         let text = b"a\nb\r\nc\n\nd";
         let lines: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
@@ -4805,16 +4662,129 @@ mod tests {
 
     #[test]
     fn iter_whitespace_utf8_splits() {
+        // KEEP (default): every one of the 8 whitespace delimiters yields a segment, so leading,
+        // trailing, and inner runs all surface empties (str::split semantics, matching C++/Python).
         let text = b"  a \t b\n\nc  ";
-        let words: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
-        assert_eq!(words, vec![b"a", b"b", b"c"]);
+        let segments: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        assert_eq!(
+            segments,
+            vec![
+                &b""[..],
+                &b""[..],
+                b"a",
+                &b""[..],
+                &b""[..],
+                b"b",
+                &b""[..],
+                b"c",
+                &b""[..],
+                &b""[..],
+            ]
+        );
+        // skip_empty: recovers the str::split_whitespace token behavior.
+        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        assert_eq!(tokens, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits_keep_default() {
+        // The simple example from the doc comment: KEEP yields the surrounding empties, skip_empty drops them.
+        let text = b"  hi  ";
+        let kept: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        assert_eq!(kept, vec![&b""[..], &b""[..], b"hi", &b""[..], &b""[..]]);
+        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        assert_eq!(tokens, vec![b"hi"]);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits_unicode() {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
-        let words: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
-        assert_eq!(words, vec![b"a", b"b", b"c"]);
+        let segments: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        assert_eq!(segments, vec![b"a", b"b", b"c"]); // single delimiters between words: no empties
+        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        assert_eq!(tokens, vec![b"a", b"b", b"c"]);
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits_skip_empty_all_whitespace() {
+        let text = b"   \t  ";
+        let kept: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        assert_eq!(kept.len(), 7); // 6 delimiters → 7 (all empty) segments
+        assert!(kept.iter().all(|segment| segment.is_empty()));
+        let tokens: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_skip_empty() {
+        let text = b"a\nb\r\nc\n\nd";
+        // Default KEEP: the back-to-back "\n\n" yields an empty line.
+        let kept: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
+        assert_eq!(kept, vec![b"a", b"b", b"c", &b""[..], b"d"]);
+        // skip_empty: the empty line between "c" and "d" disappears.
+        let nonempty: Vec<_> = RangeUtf8NewlineSplits::new(text).skip_empty().collect();
+        assert_eq!(nonempty, vec![b"a", b"b", b"c", b"d"]);
+    }
+
+    #[test]
+    fn iter_newline_utf8_splits_steps_invariance() {
+        // The yielded segments must be identical regardless of the batch size `STEPS`; a tiny batch
+        // (STEPS == 1) exercises the refill/trailing-segment seam on every delimiter, while large
+        // batches fit the whole input in one call.
+        let text = b"\r\na\r\n\r\nb\r\nc\nd\n";
+        let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b"c", b"d", b""];
+        let from_1: Vec<_> = RangeUtf8NewlineSplits::<1>::with_steps(text).collect();
+        let from_3: Vec<_> = RangeUtf8NewlineSplits::<3>::with_steps(text).collect();
+        let from_65: Vec<_> = RangeUtf8NewlineSplits::<65>::with_steps(text).collect();
+        assert_eq!(from_1, expected);
+        assert_eq!(from_3, expected);
+        assert_eq!(from_65, expected);
+
+        // skip_empty across the same batch sizes.
+        let nonempty: Vec<&[u8]> = vec![b"a", b"b", b"c", b"d"];
+        assert_eq!(
+            RangeUtf8NewlineSplits::<1>::with_steps(text)
+                .skip_empty()
+                .collect::<Vec<_>>(),
+            nonempty
+        );
+        assert_eq!(
+            RangeUtf8NewlineSplits::<3>::with_steps(text)
+                .skip_empty()
+                .collect::<Vec<_>>(),
+            nonempty
+        );
+        assert_eq!(
+            RangeUtf8NewlineSplits::<65>::with_steps(text)
+                .skip_empty()
+                .collect::<Vec<_>>(),
+            nonempty
+        );
+    }
+
+    #[test]
+    fn iter_whitespace_utf8_splits_steps_invariance() {
+        let text = b"  a \t b\n\nc  ";
+        let expected: Vec<&[u8]> = vec![b"", b"", b"a", b"", b"", b"b", b"", b"c", b"", b""];
+        assert_eq!(
+            RangeUtf8WhitespaceSplits::<1>::with_steps(text).collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            RangeUtf8WhitespaceSplits::<3>::with_steps(text).collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            RangeUtf8WhitespaceSplits::<65>::with_steps(text).collect::<Vec<_>>(),
+            expected
+        );
+        let tokens: Vec<&[u8]> = vec![b"a", b"b", b"c"];
+        assert_eq!(
+            RangeUtf8WhitespaceSplits::<1>::with_steps(text)
+                .skip_empty()
+                .collect::<Vec<_>>(),
+            tokens
+        );
     }
 
     #[test]
@@ -4849,6 +4819,30 @@ mod tests {
         let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines, vec![b"", b""]);
+    }
+
+    #[test]
+    fn iter_word_utf8_splits_steps_invariance() {
+        // Words tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
+        // a tiny batch (STEPS == 1) exercises the refill seam on every word boundary.
+        let text = b"Hi, world! A second sentence.";
+        let forward: Vec<&[u8]> = RangeUtf8WordSplits::new(text).collect();
+        assert_eq!(RangeUtf8WordSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8WordSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8WordSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+
+        // The reverse iterator yields the same words last-first, also batch-size invariant.
+        let mut reversed = forward.clone();
+        reversed.reverse();
+        assert_eq!(RangeUtf8WordRSplits::new(text).collect::<Vec<_>>(), reversed);
+        assert_eq!(
+            RangeUtf8WordRSplits::<1>::with_steps(text).collect::<Vec<_>>(),
+            reversed
+        );
+        assert_eq!(
+            RangeUtf8WordRSplits::<65>::with_steps(text).collect::<Vec<_>>(),
+            reversed
+        );
     }
 
     #[test]

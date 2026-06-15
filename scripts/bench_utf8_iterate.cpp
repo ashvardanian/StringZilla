@@ -8,8 +8,8 @@
  *  Benchmarks include:
  *  - Codepoint counting - @b utf8_count.
  *  - Nth-codepoint location - @b utf8_find_nth (the BMI/PDEP "Nth set bit" kernel on x86).
- *  - Newline scanning - @b utf8_find_newline.
- *  - Whitespace scanning - @b utf8_find_whitespace (Unicode White_Space property).
+ *  - Newline enumeration - @b utf8_find_newlines.
+ *  - Whitespace enumeration - @b utf8_find_whitespaces (Unicode White_Space property).
  *  - UAX-29 word-boundary segmentation, forward & reverse - @b utf8_word_find_boundaries / @b _rfind_boundary.
  *  - UTF-8 -> UTF-32 transcoding - @b utf8_unpack_chunk.
  *
@@ -117,29 +117,27 @@ struct utf8_find_nth_from_sz {
     }
 };
 
-/** @brief  Scans every delimiter (newline / whitespace) across each token; checksum = number of delimiters. */
-template <auto func_>
-struct utf8_find_delimiter_from_sz {
+/** @brief  Enumerates every delimiter (newline / whitespace) across each token via the multistep "find
+ *          boundaries" API, resuming through the whole token in `sz_iterators_default_steps_k`-sized batches;
+ *          checksum = total number of delimiters. */
+template <sz_utf8_find_boundaries_t find_func_>
+struct utf8_enumerate_delimiters {
     environment_t const &env;
-    utf8_find_delimiter_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_enumerate_delimiters(environment_t const &env_) : env(env_) {}
     inline call_result_t operator()(std::size_t i) const noexcept {
         token_view_t token = env.tokens[i];
-        sz_cptr_t cursor = token.data();
-        sz_size_t remaining = token.size();
-        std::size_t hits = 0;
-        while (remaining) {
-            sz_size_t matched_length = 0;
-            sz_cptr_t match = func_(cursor, remaining, &matched_length);
-            if (match == SZ_NULL_CHAR) break; // No more delimiters in this token.
-            std::size_t at = static_cast<std::size_t>(match - cursor);
-            ++hits;
-            std::size_t step = at + (matched_length ? matched_length : 1);
-            if (step > remaining) break;
-            cursor += step;
-            remaining -= step;
+        sz_cptr_t text = token.data();
+        sz_size_t len = token.size();
+        sz_size_t offsets[sz_iterators_default_steps_k], lengths[sz_iterators_default_steps_k];
+        sz_size_t pos = 0, total = 0;
+        while (pos < len) {
+            sz_size_t consumed = 0;
+            total += find_func_(text + pos, len - pos, offsets, lengths, sz_iterators_default_steps_k, &consumed);
+            if (consumed == 0) break;
+            pos += consumed;
         }
-        do_not_optimize(hits);
-        return {token.size(), static_cast<check_value_t>(hits)};
+        do_not_optimize(total);
+        return {token.size(), static_cast<check_value_t>(total)};
     }
 };
 
@@ -263,61 +261,61 @@ void bench_utf8_find_nth(environment_t const &env) {
                    .log(base);)
 }
 
-void bench_utf8_find_newline(environment_t const &env) {
-    auto base_v = utf8_find_delimiter_from_sz<sz_utf8_find_newline_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_find_newline_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_newline_haswell", base_v,
-                              utf8_find_delimiter_from_sz<sz_utf8_find_newline_haswell> {env})
+void bench_utf8_find_newlines(environment_t const &env) {
+    auto base_v = utf8_enumerate_delimiters<sz_utf8_find_newlines_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_find_newlines_serial", base_v).log();
+    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_newlines_haswell", base_v,
+                              utf8_enumerate_delimiters<sz_utf8_find_newlines_haswell> {env})
                       .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_newline_icelake", base_v,
-                              utf8_find_delimiter_from_sz<sz_utf8_find_newline_icelake> {env})
+    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_newlines_icelake", base_v,
+                              utf8_enumerate_delimiters<sz_utf8_find_newlines_icelake> {env})
                       .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_newline_neon", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_newline_neon> {env})
+    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_newlines_neon", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_newlines_neon> {env})
                    .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_newline_sve2", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_newline_sve2> {env})
+    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_newlines_sve2", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_newlines_sve2> {env})
                    .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_find_newline_v128", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_newline_v128> {env})
+    SZ_IF_V128(bench_unary(env, "sz_utf8_find_newlines_v128", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_newlines_v128> {env})
                    .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_newline_rvv", base_v,
-                          utf8_find_delimiter_from_sz<sz_utf8_find_newline_rvv> {env})
+    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_newlines_rvv", base_v,
+                          utf8_enumerate_delimiters<sz_utf8_find_newlines_rvv> {env})
                   .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_newline_powervsx", base_v,
-                               utf8_find_delimiter_from_sz<sz_utf8_find_newline_powervsx> {env})
+    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_newlines_powervsx", base_v,
+                               utf8_enumerate_delimiters<sz_utf8_find_newlines_powervsx> {env})
                        .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_newline_lasx", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_newline_lasx> {env})
+    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_newlines_lasx", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_newlines_lasx> {env})
                    .log(base);)
 }
 
-void bench_utf8_find_whitespace(environment_t const &env) {
-    auto base_v = utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_find_whitespace_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_whitespace_haswell", base_v,
-                              utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_haswell> {env})
+void bench_utf8_find_whitespaces(environment_t const &env) {
+    auto base_v = utf8_enumerate_delimiters<sz_utf8_find_whitespaces_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_find_whitespaces_serial", base_v).log();
+    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_whitespaces_haswell", base_v,
+                              utf8_enumerate_delimiters<sz_utf8_find_whitespaces_haswell> {env})
                       .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_whitespace_icelake", base_v,
-                              utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_icelake> {env})
+    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_whitespaces_icelake", base_v,
+                              utf8_enumerate_delimiters<sz_utf8_find_whitespaces_icelake> {env})
                       .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_whitespace_neon", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_neon> {env})
+    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_whitespaces_neon", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_neon> {env})
                    .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_whitespace_sve2", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_sve2> {env})
+    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_whitespaces_sve2", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_sve2> {env})
                    .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_find_whitespace_v128", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_v128> {env})
+    SZ_IF_V128(bench_unary(env, "sz_utf8_find_whitespaces_v128", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_v128> {env})
                    .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_whitespace_rvv", base_v,
-                          utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_rvv> {env})
+    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_whitespaces_rvv", base_v,
+                          utf8_enumerate_delimiters<sz_utf8_find_whitespaces_rvv> {env})
                   .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_whitespace_powervsx", base_v,
-                               utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_powervsx> {env})
+    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_whitespaces_powervsx", base_v,
+                               utf8_enumerate_delimiters<sz_utf8_find_whitespaces_powervsx> {env})
                        .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_whitespace_lasx", base_v,
-                           utf8_find_delimiter_from_sz<sz_utf8_find_whitespace_lasx> {env})
+    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_whitespaces_lasx", base_v,
+                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_lasx> {env})
                    .log(base);)
 }
 
@@ -418,8 +416,8 @@ int main(int argc, char const **argv) {
 
     bench_utf8_count(env);
     bench_utf8_find_nth(env);
-    bench_utf8_find_newline(env);
-    bench_utf8_find_whitespace(env);
+    bench_utf8_find_newlines(env);
+    bench_utf8_find_whitespaces(env);
     bench_utf8_word_find_boundaries(env);
     bench_utf8_word_rfind_boundaries(env);
     bench_utf8_unpack_chunk(env);

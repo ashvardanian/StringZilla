@@ -290,6 +290,65 @@ class StringZillaTests: XCTestCase {
         XCTAssertEqual(reversed.reversed().joined(), text)
     }
 
+    // MARK: - Line / Whitespace Split Tests
+
+    func testUtf8LinesKeepEmpty() {
+        let text = "a\n\nb\n"
+        let segments = text.utf8Lines().map { String(text[$0]) }
+        // N newline delimiters -> N+1 gap segments; the empty line and trailing gap are kept.
+        XCTAssertEqual(segments, ["a", "", "b", ""])
+    }
+
+    func testUtf8LinesSkipEmpty() {
+        let text = "a\n\nb\n"
+        let segments = text.utf8Lines(skipEmpty: true).map { String(text[$0]) }
+        XCTAssertEqual(segments, ["a", "b"])
+    }
+
+    func testUtf8LinesCRLFSingleDelimiter() {
+        // A CR+LF pair is one length-2 newline delimiter, so it yields a single split, not two.
+        let text = "a\r\nb"
+        XCTAssertEqual(text.utf8Lines().map { String(text[$0]) }, ["a", "b"])
+    }
+
+    func testUtf8LinesNoTrailingNewline() {
+        let text = "a\nb"
+        XCTAssertEqual(text.utf8Lines().map { String(text[$0]) }, ["a", "b"])
+    }
+
+    func testUtf8LinesEmptyString() {
+        // Zero delimiters -> exactly one (empty) trailing segment when keeping empties; none when skipping.
+        let empty = ""
+        XCTAssertEqual(empty.utf8Lines().map { String(empty[$0]) }, [""])
+        XCTAssertTrue(empty.utf8Lines(skipEmpty: true).isEmpty)
+    }
+
+    func testUtf8WhitespaceKeepEmpty() {
+        let text = "  hi  "
+        let segments = text.utf8Whitespace().map { String(text[$0]) }
+        // Four spaces -> five gap segments, four of them empty.
+        XCTAssertEqual(segments, ["", "", "hi", "", ""])
+    }
+
+    func testUtf8WhitespaceSkipEmpty() {
+        let text = "  hi  "
+        let segments = text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }
+        XCTAssertEqual(segments, ["hi"])
+    }
+
+    func testUtf8WhitespaceTokenizes() {
+        let text = "the quick\tbrown\nfox"
+        // Mixed space / tab / newline whitespace all act as separators.
+        let tokens = text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }
+        XCTAssertEqual(tokens, ["the", "quick", "brown", "fox"])
+    }
+
+    func testUtf8WhitespaceUnicodeSeparator() {
+        // U+3000 IDEOGRAPHIC SPACE is a 3-byte whitespace codepoint and must split correctly.
+        let text = "a\u{3000}b"
+        XCTAssertEqual(text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }, ["a", "b"])
+    }
+
     // MARK: - Compare / Order Tests
 
     func testCompareByteOrder() {
