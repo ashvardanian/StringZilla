@@ -1229,6 +1229,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     static constexpr index_t lanes_k = 8;
     static constexpr size_t match_masks_bytes_k = sizeof(u64_t) * lanes_k * 256; // ? 16 KB `Peq` table.
 
+    // VPTERNLOGQ truth tables for the Myers booleans; the imm8 is indexed by `(A << 2) | (B << 1) | C`.
+    static constexpr int ternlog_xor_or_k = 0xBE; // ? `(A ^ B) | C` - the diagonal tail `(sum ^ VP) | Eq`.
+    static constexpr int ternlog_or_nor_k = 0xF1; // ? `A | ~(B | C)` - the shared `Ph` and `Pv'` shape.
+
     levenshtein_distance_myers() noexcept {}
 
     /** @brief Compile-time mask of the lanes that begin a pair (every `lanes_per_pair_`-th lane). */
@@ -1246,8 +1250,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      its own 64-bit Myers integer. @p scratch_space holds the `Peq[8][256]` table (`match_masks_bytes_k`)
      *      followed by a transposed-text buffer of at least `max_longer * 8` bytes.
      */
+    template <typename results_writer_>
     status_t distances_8x64_(span<char_t const> const *shorters, span<char_t const> const *longers,
-                             index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+                             size_t const *positions, index_t pairs_active, results_writer_ &results,
+                             scratch_space_t scratch_space) const noexcept {
 
         size_t max_longer = 0;
         for (index_t lane = 0; lane != pairs_active; ++lane)
@@ -1279,7 +1285,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
         }
 
         __m512i const lane_offsets = _mm512_set_epi64(7 * 256, 6 * 256, 5 * 256, 4 * 256, 3 * 256, 2 * 256, 1 * 256, 0);
-        __m512i const ones = _mm512_set1_epi64(-1), one = _mm512_set1_epi64(1);
+        __m512i const one = _mm512_set1_epi64(1);
         __m512i const top_mask = _mm512_load_si512(top_bits), longer_vec = _mm512_load_si512(longer_lengths);
         __m512i const length_vec = _mm512_load_si512(shorter_lengths);
         // VP = the low `shorter_length` bits set (a shift count of 64 yields 0, so `(1 << 64) - 1` == ~0).
@@ -1293,12 +1299,12 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                 _mm_loadl_epi64((__m128i const *)(transposed_text + position * lanes_k)));
             __m512i const equality = _mm512_i64gather_epi64(_mm512_add_epi64(lane_offsets, symbols), match_masks, 8);
             __m512i const carry_in = _mm512_or_si512(equality, vertical_negative);
-            __m512i const diagonal = _mm512_or_si512(
-                _mm512_xor_si512(_mm512_add_epi64(_mm512_and_si512(equality, vertical_positive), vertical_positive),
-                                 vertical_positive),
-                equality);
-            __m512i horizontal_positive = _mm512_or_si512(
-                vertical_negative, _mm512_xor_si512(_mm512_or_si512(diagonal, vertical_positive), ones));
+            // Xh = (((Eq & VP) + VP) ^ VP) | Eq; the trailing `(sum ^ VP) | Eq` folds into one VPTERNLOGQ (0xBE).
+            __m512i const sum = _mm512_add_epi64(_mm512_and_si512(equality, vertical_positive), vertical_positive);
+            __m512i const diagonal = _mm512_ternarylogic_epi64(sum, vertical_positive, equality, ternlog_xor_or_k);
+            // Ph = Mv | ~(Xh | VP) is `A | ~(B | C)` -> VPTERNLOGQ(0xF1).
+            __m512i horizontal_positive = _mm512_ternarylogic_epi64(vertical_negative, diagonal, vertical_positive,
+                                                                    ternlog_or_nor_k);
             __m512i horizontal_negative = _mm512_and_si512(vertical_positive, diagonal);
             score = _mm512_mask_add_epi64(score, active & _mm512_test_epi64_mask(horizontal_positive, top_mask), score,
                                           one);
@@ -1306,8 +1312,9 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                                           one);
             horizontal_positive = _mm512_or_si512(_mm512_slli_epi64(horizontal_positive, 1), one);
             horizontal_negative = _mm512_slli_epi64(horizontal_negative, 1);
-            __m512i const next_positive = _mm512_or_si512(
-                horizontal_negative, _mm512_xor_si512(_mm512_or_si512(carry_in, horizontal_positive), ones));
+            // Pv' = Mh | ~(Xv | Ph), the same `A | ~(B | C)` shape -> VPTERNLOGQ(0xF1).
+            __m512i const next_positive = _mm512_ternarylogic_epi64(horizontal_negative, carry_in, horizontal_positive,
+                                                                    ternlog_or_nor_k);
             __m512i const next_negative = _mm512_and_si512(horizontal_positive, carry_in);
             vertical_positive = _mm512_mask_blend_epi64(active, vertical_positive, next_positive);
             vertical_negative = _mm512_mask_blend_epi64(active, vertical_negative, next_negative);
@@ -1315,7 +1322,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
         alignas(64) u64_t final_scores[lanes_k];
         _mm512_store_si512(final_scores, score);
-        for (index_t lane = 0; lane != pairs_active; ++lane) results[lane] = (size_t)final_scores[lane];
+        for (index_t lane = 0; lane != pairs_active; ++lane) results[positions[lane]] = (size_t)final_scores[lane];
         return status_t::success_k;
     }
 
@@ -1325,9 +1332,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      cross a pair's lanes; both are masked at pair boundaries so the pairs stay independent. `lanes_per_pair_`
      *      = 2/4/8 covers shorter sides <= 128/256/512 (4/2/1 pairs per ZMM).
      */
-    template <index_t lanes_per_pair_>
+    template <index_t lanes_per_pair_, typename results_writer_>
     status_t lockstep_pairs_(span<char_t const> const *shorters, span<char_t const> const *longers,
-                             index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
+                             size_t const *positions, index_t pairs_active, results_writer_ &results,
+                             scratch_space_t scratch_space) const noexcept {
 
         constexpr __mmask8 pair_starts = pair_starts_mask_<lanes_per_pair_>();
         constexpr __mmask8 receivers = (__mmask8)(~pair_starts & 0xFFu); // ? Lanes that take an incoming carry/bit.
@@ -1374,7 +1382,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
         }
 
         __m512i const lane_offsets = _mm512_set_epi64(7 * 256, 6 * 256, 5 * 256, 4 * 256, 3 * 256, 2 * 256, 1 * 256, 0);
-        __m512i const ones = _mm512_set1_epi64(-1), one = _mm512_set1_epi64(1);
+        __m512i const one = _mm512_set1_epi64(1);
         __m512i const shift_up = _mm512_set_epi64(6, 5, 4, 3, 2, 1, 0, 0); // ? Lane i receives lane (i-1)'s top bit.
         __m512i const boundary_one = _mm512_maskz_mov_epi64(pair_starts, one);
         __m512i const top_mask = _mm512_load_si512(top_bits), longer_vec = _mm512_load_si512(longer_lengths);
@@ -1399,9 +1407,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                 carry = _mm512_cmplt_epu64_mask(advanced, sum);
                 sum = advanced;
             }
-            __m512i const diagonal = _mm512_or_si512(_mm512_xor_si512(sum, vertical_positive), equality);
-            __m512i horizontal_positive = _mm512_or_si512(
-                vertical_negative, _mm512_xor_si512(_mm512_or_si512(diagonal, vertical_positive), ones));
+            // Xh = (sum ^ VP) | Eq -> VPTERNLOGQ(0xBE); Ph = Mv | ~(Xh | VP) is `A | ~(B | C)` -> VPTERNLOGQ(0xF1).
+            __m512i const diagonal = _mm512_ternarylogic_epi64(sum, vertical_positive, equality, ternlog_xor_or_k);
+            __m512i horizontal_positive = _mm512_ternarylogic_epi64(vertical_negative, diagonal, vertical_positive,
+                                                                    ternlog_or_nor_k);
             __m512i horizontal_negative = _mm512_and_si512(vertical_positive, diagonal);
             score = _mm512_mask_add_epi64(score, active & _mm512_test_epi64_mask(horizontal_positive, top_mask), score,
                                           one);
@@ -1415,8 +1424,9 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             horizontal_positive = _mm512_or_si512(
                 _mm512_or_si512(_mm512_slli_epi64(horizontal_positive, 1), positive_carry), boundary_one);
             horizontal_negative = _mm512_or_si512(_mm512_slli_epi64(horizontal_negative, 1), negative_carry);
-            __m512i const next_positive = _mm512_or_si512(
-                horizontal_negative, _mm512_xor_si512(_mm512_or_si512(carry_in, horizontal_positive), ones));
+            // Pv' = Mh | ~(Xv | Ph), the same `A | ~(B | C)` shape -> VPTERNLOGQ(0xF1).
+            __m512i const next_positive = _mm512_ternarylogic_epi64(horizontal_negative, carry_in, horizontal_positive,
+                                                                    ternlog_or_nor_k);
             __m512i const next_negative = _mm512_and_si512(horizontal_positive, carry_in);
             vertical_positive = _mm512_mask_blend_epi64(active, vertical_positive, next_positive);
             vertical_negative = _mm512_mask_blend_epi64(active, vertical_negative, next_negative);
@@ -1426,27 +1436,33 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
         _mm512_store_si512(final_scores, score);
         for (index_t pair = 0; pair != pairs_active; ++pair) {
             index_t const top_word = ((index_t)shorters[pair].size() - 1) >> 6;
-            results[pair] = (size_t)final_scores[pair * lanes_per_pair_ + top_word];
+            results[positions[pair]] = (size_t)final_scores[pair * lanes_per_pair_ + top_word];
         }
         return status_t::success_k;
     }
 
     /** @brief Four distances in lockstep, each pair a 128-bit Myers integer over two lanes (shorter side <= 128). */
+    template <typename results_writer_>
     status_t distances_4x128_(span<char_t const> const *shorters, span<char_t const> const *longers,
-                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
-        return lockstep_pairs_<2>(shorters, longers, pairs_active, results, scratch_space);
+                              size_t const *positions, index_t pairs_active, results_writer_ &results,
+                              scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<2>(shorters, longers, positions, pairs_active, results, scratch_space);
     }
 
     /** @brief Two distances in lockstep, each pair a 256-bit Myers integer over four lanes (shorter side <= 256). */
+    template <typename results_writer_>
     status_t distances_2x256_(span<char_t const> const *shorters, span<char_t const> const *longers,
-                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
-        return lockstep_pairs_<4>(shorters, longers, pairs_active, results, scratch_space);
+                              size_t const *positions, index_t pairs_active, results_writer_ &results,
+                              scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<4>(shorters, longers, positions, pairs_active, results, scratch_space);
     }
 
     /** @brief One distance as a single 512-bit Myers integer over all eight lanes (shorter side <= 512). */
+    template <typename results_writer_>
     status_t distances_1x512_(span<char_t const> const *shorters, span<char_t const> const *longers,
-                              index_t pairs_active, size_t *results, scratch_space_t scratch_space) const noexcept {
-        return lockstep_pairs_<8>(shorters, longers, pairs_active, results, scratch_space);
+                              size_t const *positions, index_t pairs_active, results_writer_ &results,
+                              scratch_space_t scratch_space) const noexcept {
+        return lockstep_pairs_<8>(shorters, longers, positions, pairs_active, results, scratch_space);
     }
 };
 
@@ -1612,11 +1628,15 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             size_t const tier_limit = shorter <= 64 ? 64 : shorter <= 128 ? 128 : shorter <= 256 ? 256 : 512;
             index_t const lanes_per_pair = shorter <= 64 ? 1 : shorter <= 128 ? 2 : shorter <= 256 ? 4 : 8;
             index_t const pairs_capacity = myers_t::lanes_k / lanes_per_pair;
+            // The kernel is grouping-agnostic: it takes the per-lane spans plus the original output
+            // `positions` each lane scores into, so a future grouping policy can hand it any set of
+            // indices. This greedy pass still seeds with `i` and extends over consecutive pairs.
             span<char const> shorters[myers_t::lanes_k], longers[myers_t::lanes_k];
-            size_t const group_begin = i;
+            size_t positions[myers_t::lanes_k];
             bool const seed_first_shorter = first.size() <= second.size();
             shorters[0] = seed_first_shorter ? first : second;
             longers[0] = seed_first_shorter ? second : first;
+            positions[0] = i;
             index_t group = 1;
             ++i;
             for (; i != end && group != pairs_capacity; ++i, ++group) {
@@ -1627,18 +1647,17 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 bool const first_is_shorter = f.size() <= s.size();
                 shorters[group] = first_is_shorter ? f : s;
                 longers[group] = first_is_shorter ? s : f;
+                positions[group] = i;
             }
 
-            size_t group_results[myers_t::lanes_k];
             status_t status = status_t::success_k;
             switch (lanes_per_pair) {
-            case 1: status = myers.distances_8x64_(shorters, longers, group, group_results, scratch); break;
-            case 2: status = myers.distances_4x128_(shorters, longers, group, group_results, scratch); break;
-            case 4: status = myers.distances_2x256_(shorters, longers, group, group_results, scratch); break;
-            default: status = myers.distances_1x512_(shorters, longers, group, group_results, scratch); break;
+            case 1: status = myers.distances_8x64_(shorters, longers, positions, group, results, scratch); break;
+            case 2: status = myers.distances_4x128_(shorters, longers, positions, group, results, scratch); break;
+            case 4: status = myers.distances_2x256_(shorters, longers, positions, group, results, scratch); break;
+            default: status = myers.distances_1x512_(shorters, longers, positions, group, results, scratch); break;
             }
             if (status != status_t::success_k) return status;
-            for (index_t pair = 0; pair != group; ++pair) results[group_begin + pair] = group_results[pair];
         }
         return status_t::success_k;
     }
