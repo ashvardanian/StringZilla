@@ -814,6 +814,90 @@ void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t
 }
 
 /**
+ *  @brief Differential fuzz for a UTF-8 normalizer backend: assert it is byte-exact vs the serial
+ *         reference for all four forms (norm output + violation offset). The all-codepoint shuffle
+ *         stresses canonical ordering, every decomposition/composition path, and SIMD-block straddles.
+ */
+void test_utf8_norm_fuzz(sz_utf8_norm_t norm_simd, sz_utf8_norm_violation_t violation_simd,
+                         std::size_t iterations = scale_iterations(25)) {
+    std::printf("  - testing normalization fuzz (%zu iterations x 4 forms)...\n", iterations);
+
+    std::vector<sz_rune_t> all_runes;
+    all_runes.reserve(0x10FFFF);
+    for (sz_rune_t cp = 0; cp <= 0x10FFFF; ++cp) {
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue; // skip surrogates
+        all_runes.push_back(cp);
+    }
+    std::vector<char> input_buffer(all_runes.size() * 4);
+    std::vector<char> output_base(input_buffer.size() * 4 + 64); // decomposition can expand
+    std::vector<char> output_simd(input_buffer.size() * 4 + 64);
+    auto &rng = global_random_generator();
+    static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
+                                                   sz_normal_form_nfkc_k};
+
+    for (std::size_t it = 0; it <= iterations; ++it) {
+        if (it > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
+        char *write_cursor = input_buffer.data();
+        for (sz_rune_t cp : all_runes) write_cursor += sz_rune_export(cp, (sz_u8_t *)write_cursor);
+        sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
+
+        for (sz_normal_form_t form : norm_forms) {
+            sz_size_t len_base = sz_utf8_norm_serial(input_buffer.data(), input_length, form, output_base.data());
+            sz_size_t len_simd = norm_simd(input_buffer.data(), input_length, form, output_simd.data());
+            if (len_base != len_simd || std::memcmp(output_base.data(), output_simd.data(), len_base) != 0) {
+                std::fprintf(stderr, "norm mismatch (form=%d, iter=%zu): base_len=%zu simd_len=%zu\n", (int)form, it,
+                             (size_t)len_base, (size_t)len_simd);
+                assert(false);
+            }
+            sz_cptr_t viol_base = sz_utf8_norm_violation_serial(input_buffer.data(), input_length, form);
+            sz_cptr_t viol_simd = violation_simd(input_buffer.data(), input_length, form);
+            if (viol_base != viol_simd) {
+                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)form, it);
+                assert(false);
+            }
+        }
+    }
+    std::printf("    normalization fuzzing passed!\n");
+}
+
+/** @brief Run the normalization differential fuzz against every compiled SIMD backend. */
+void test_utf8_norm_all() {
+#if SZ_USE_HASWELL
+    test_utf8_norm_fuzz(sz_utf8_norm_haswell, sz_utf8_norm_violation_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    test_utf8_norm_fuzz(sz_utf8_norm_skylake, sz_utf8_norm_violation_skylake);
+#endif
+#if SZ_USE_ICELAKE
+    test_utf8_norm_fuzz(sz_utf8_norm_icelake, sz_utf8_norm_violation_icelake);
+#endif
+#if SZ_USE_NEON
+    test_utf8_norm_fuzz(sz_utf8_norm_neon, sz_utf8_norm_violation_neon);
+#endif
+#if SZ_USE_SVE
+    test_utf8_norm_fuzz(sz_utf8_norm_sve, sz_utf8_norm_violation_sve);
+#endif
+#if SZ_USE_SVE2
+    test_utf8_norm_fuzz(sz_utf8_norm_sve2, sz_utf8_norm_violation_sve2);
+#endif
+#if SZ_USE_RVV
+    test_utf8_norm_fuzz(sz_utf8_norm_rvv, sz_utf8_norm_violation_rvv);
+#endif
+#if SZ_USE_V128
+    test_utf8_norm_fuzz(sz_utf8_norm_v128, sz_utf8_norm_violation_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    test_utf8_norm_fuzz(sz_utf8_norm_v128relaxed, sz_utf8_norm_violation_v128relaxed);
+#endif
+#if SZ_USE_LASX
+    test_utf8_norm_fuzz(sz_utf8_norm_lasx, sz_utf8_norm_violation_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    test_utf8_norm_fuzz(sz_utf8_norm_powervsx, sz_utf8_norm_violation_powervsx);
+#endif
+}
+
+/**
  *  @brief Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
  *
  *  Uses two verification modes:
@@ -1576,6 +1660,8 @@ void test_equivalence() {
     // The serial backend faces the same invalid-input contract as the SIMD ones
     test_utf8_case_invalid_input_safety(sz_utf8_case_fold_serial, sz_utf8_case_insensitive_find_serial,
                                         sz_utf8_case_invariant_serial);
+
+    test_utf8_norm_all();
 
 #if SZ_USE_HASWELL
     test_utf8_equivalence(                           //

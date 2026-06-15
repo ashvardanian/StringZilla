@@ -17,6 +17,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps) {
     impl->utf8_norm = sz_utf8_norm_serial;
     impl->utf8_norm_violation = sz_utf8_norm_violation_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) {
+        impl->utf8_norm = sz_utf8_norm_haswell;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_haswell;
+    }
+#endif
 #if SZ_USE_SKYLAKE
     if (caps & sz_cap_skylake_k) {
         impl->utf8_norm = sz_utf8_norm_skylake;
@@ -33,6 +39,48 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps) {
     if (caps & sz_cap_neon_k) {
         impl->utf8_norm = sz_utf8_norm_neon;
         impl->utf8_norm_violation = sz_utf8_norm_violation_neon;
+    }
+#endif
+#if SZ_USE_SVE
+    if (caps & sz_cap_sve_k) {
+        impl->utf8_norm = sz_utf8_norm_sve;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_sve;
+    }
+#endif
+#if SZ_USE_SVE2
+    if (caps & sz_cap_sve2_k) {
+        impl->utf8_norm = sz_utf8_norm_sve2;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_sve2;
+    }
+#endif
+#if SZ_USE_RVV
+    if (caps & sz_cap_rvv_k) {
+        impl->utf8_norm = sz_utf8_norm_rvv;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_rvv;
+    }
+#endif
+#if SZ_USE_LASX
+    if (caps & sz_cap_lasx_k) {
+        impl->utf8_norm = sz_utf8_norm_lasx;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_lasx;
+    }
+#endif
+#if SZ_USE_POWERVSX
+    if (caps & sz_cap_powervsx_k) {
+        impl->utf8_norm = sz_utf8_norm_powervsx;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_powervsx;
+    }
+#endif
+#if SZ_USE_V128
+    if (caps & sz_cap_v128_k) {
+        impl->utf8_norm = sz_utf8_norm_v128;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_v128;
+    }
+#endif
+#if SZ_USE_V128RELAXED
+    if (caps & sz_cap_v128relaxed_k) {
+        impl->utf8_norm = sz_utf8_norm_v128relaxed;
+        impl->utf8_norm_violation = sz_utf8_norm_violation_v128relaxed;
     }
 #endif
 }

@@ -83,6 +83,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_icelake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_haswell( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_haswell( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_norm */
 SZ_PUBLIC sz_size_t sz_utf8_norm_neon( //
@@ -93,14 +103,92 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
+#if SZ_USE_SVE
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_sve( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_sve2( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve2( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_rvv( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_rvv( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_v128( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_v128relaxed( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128relaxed( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_lasx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_lasx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_utf8_norm */
+SZ_PUBLIC sz_size_t sz_utf8_norm_powervsx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
+
+/** @copydoc sz_utf8_norm_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_powervsx( //
+    sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
+#endif
+
 #pragma endregion // Core API
 
 #pragma region Backends
 
 #include "stringzilla/utf8_norm/serial.h"
+#include "stringzilla/utf8_norm/haswell.h"
 #include "stringzilla/utf8_norm/skylake.h"
 #include "stringzilla/utf8_norm/icelake.h" // includes skylake.h; the guard makes the double-include safe
 #include "stringzilla/utf8_norm/neon.h"
+#include "stringzilla/utf8_norm/sve.h"
+#include "stringzilla/utf8_norm/sve2.h" // includes sve.h; the guard makes the double-include safe
+#include "stringzilla/utf8_norm/rvv.h"
+#include "stringzilla/utf8_norm/v128.h"
+#include "stringzilla/utf8_norm/v128relaxed.h" // includes v128.h; the guard makes the double-include safe
+#include "stringzilla/utf8_norm/lasx.h"
+#include "stringzilla/utf8_norm/powervsx.h"
 
 #pragma endregion // Backends
 
@@ -113,8 +201,24 @@ SZ_DYNAMIC sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_
     return sz_utf8_norm_icelake(source, length, form, destination);
 #elif SZ_USE_SKYLAKE
     return sz_utf8_norm_skylake(source, length, form, destination);
+#elif SZ_USE_HASWELL
+    return sz_utf8_norm_haswell(source, length, form, destination);
+#elif SZ_USE_SVE2
+    return sz_utf8_norm_sve2(source, length, form, destination);
+#elif SZ_USE_SVE
+    return sz_utf8_norm_sve(source, length, form, destination);
 #elif SZ_USE_NEON
     return sz_utf8_norm_neon(source, length, form, destination);
+#elif SZ_USE_RVV
+    return sz_utf8_norm_rvv(source, length, form, destination);
+#elif SZ_USE_LASX
+    return sz_utf8_norm_lasx(source, length, form, destination);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_norm_powervsx(source, length, form, destination);
+#elif SZ_USE_V128RELAXED
+    return sz_utf8_norm_v128relaxed(source, length, form, destination);
+#elif SZ_USE_V128
+    return sz_utf8_norm_v128(source, length, form, destination);
 #else
     return sz_utf8_norm_serial(source, length, form, destination);
 #endif
@@ -125,8 +229,24 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_norm_violation(sz_cptr_t source, sz_size_t length, 
     return sz_utf8_norm_violation_icelake(source, length, form);
 #elif SZ_USE_SKYLAKE
     return sz_utf8_norm_violation_skylake(source, length, form);
+#elif SZ_USE_HASWELL
+    return sz_utf8_norm_violation_haswell(source, length, form);
+#elif SZ_USE_SVE2
+    return sz_utf8_norm_violation_sve2(source, length, form);
+#elif SZ_USE_SVE
+    return sz_utf8_norm_violation_sve(source, length, form);
 #elif SZ_USE_NEON
     return sz_utf8_norm_violation_neon(source, length, form);
+#elif SZ_USE_RVV
+    return sz_utf8_norm_violation_rvv(source, length, form);
+#elif SZ_USE_LASX
+    return sz_utf8_norm_violation_lasx(source, length, form);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_norm_violation_powervsx(source, length, form);
+#elif SZ_USE_V128RELAXED
+    return sz_utf8_norm_violation_v128relaxed(source, length, form);
+#elif SZ_USE_V128
+    return sz_utf8_norm_violation_v128(source, length, form);
 #else
     return sz_utf8_norm_violation_serial(source, length, form);
 #endif
