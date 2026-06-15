@@ -860,6 +860,42 @@ void test_utf8_norm_fuzz(sz_utf8_norm_t norm_simd, sz_utf8_norm_violation_t viol
     std::printf("    normalization fuzzing passed!\n");
 }
 
+/** @brief Smoke-test the C++ binding wrappers for UTF-8 normalization. */
+void test_utf8_norm_bindings() {
+    std::printf("  - testing C++ UTF-8 normalization bindings...\n");
+
+    // Round-trip: NFC -> NFD -> NFC should recover the original NFC string.
+    // "café" in NFC: c a f é(U+00E9 = NFC composed)
+    char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 as two-byte UTF-8
+    sz::string nfc_str {cafe_nfc};
+    assert(nfc_str.try_utf8_normalize(sz_normal_form_nfd_k));
+    assert(nfc_str.try_utf8_normalize(sz_normal_form_nfc_k));
+    assert(nfc_str == cafe_nfc);
+
+    // is_normalized: NFC string is normalized under NFC, not NFD (é decomposes in NFD).
+    sz::string_view nfc_view {cafe_nfc};
+    assert(nfc_view.is_normalized(sz_normal_form_nfc_k));
+    assert(!nfc_view.is_normalized(sz_normal_form_nfd_k));
+
+    // is_normalized on the owning type mirrors the view behaviour.
+    sz::string nfc_own {cafe_nfc};
+    assert(nfc_own.is_normalized(sz_normal_form_nfc_k));
+    assert(!nfc_own.is_normalized(sz_normal_form_nfd_k));
+
+    // utf8_norm_violation returns non-null for a non-normalized string.
+    assert(nfc_view.utf8_norm_violation(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+    assert(nfc_own.utf8_norm_violation(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+
+    // NFKD of "ﬁ" (U+FB01 LATIN SMALL LIGATURE FI) decomposes to "fi".
+    char const ligature_fi[] = "\xEF\xAC\x81"; // U+FB01
+    sz::string fi_str {ligature_fi};
+    assert(fi_str.try_utf8_normalize(sz_normal_form_nfkd_k));
+    assert(fi_str.contains('f'));
+    assert(fi_str.contains('i'));
+
+    std::printf("    C++ normalization bindings passed!\n");
+}
+
 /** @brief Run the normalization differential fuzz against every compiled SIMD backend. */
 void test_utf8_norm_all() {
 #if SZ_USE_HASWELL
@@ -1662,6 +1698,7 @@ void test_equivalence() {
                                         sz_utf8_case_invariant_serial);
 
     test_utf8_norm_all();
+    test_utf8_norm_bindings();
 
 #if SZ_USE_HASWELL
     test_utf8_equivalence(                           //

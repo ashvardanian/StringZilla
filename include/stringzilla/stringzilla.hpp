@@ -2510,6 +2510,25 @@ class basic_string_slice {
     size_type utf8_count() const noexcept { return sz_utf8_count(start_, length_); }
 
     /**
+     *  @brief Return a pointer to the first byte that violates the given Unicode normalization form.
+     *  @param form One of `sz_normal_form_nfd_k`, `sz_normal_form_nfc_k`, `sz_normal_form_nfkd_k`,
+     *              or `sz_normal_form_nfkc_k`.
+     *  @return `SZ_NULL_CHAR` if the string is already in @p form; otherwise a pointer into this
+     *          string at the first offending byte.
+     */
+    sz_cptr_t utf8_norm_violation(sz_normal_form_t form) const noexcept {
+        return sz_utf8_norm_violation(start_, length_, form);
+    }
+
+    /**
+     *  @brief Check whether the string is already in the given Unicode normalization form.
+     *  @param form One of `sz_normal_form_nfd_k`, `sz_normal_form_nfc_k`, `sz_normal_form_nfkd_k`,
+     *              or `sz_normal_form_nfkc_k`.
+     *  @return `true` if the string is in @p form, `false` otherwise.
+     */
+    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_norm_violation(form) == SZ_NULL_CHAR; }
+
+    /**
      *  @brief Find the byte offset of the Nth UTF-8 character.
      *  @param n Zero-indexed character position.
      *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
@@ -4438,6 +4457,57 @@ class basic_string {
         if (!result.try_resize_and_overwrite(string_length * 3,
                                              [string_start, string_length](char_type *buf, size_type) {
                                                  return sz_utf8_case_fold(string_start, string_length, buf);
+                                             }))
+            return false;
+
+        swap(result);
+        return true;
+    }
+
+    /**
+     *  @brief Return a pointer to the first byte that violates the given Unicode normalization form.
+     *  @param form One of `sz_normal_form_nfd_k`, `sz_normal_form_nfc_k`, `sz_normal_form_nfkd_k`,
+     *              or `sz_normal_form_nfkc_k`.
+     *  @return `SZ_NULL_CHAR` if the string is already in @p form; otherwise a pointer into this
+     *          string at the first offending byte.
+     */
+    sz_cptr_t utf8_norm_violation(sz_normal_form_t form) const noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_string_range(&string_, &string_start, &string_length);
+        return sz_utf8_norm_violation(string_start, string_length, form);
+    }
+
+    /**
+     *  @brief Check whether the string is already in the given Unicode normalization form.
+     *  @param form One of `sz_normal_form_nfd_k`, `sz_normal_form_nfc_k`, `sz_normal_form_nfkd_k`,
+     *              or `sz_normal_form_nfkc_k`.
+     *  @return `true` if the string is in @p form, `false` otherwise.
+     */
+    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_norm_violation(form) == SZ_NULL_CHAR; }
+
+    /**
+     *  @brief Transform the string in-place into the given Unicode normalization form.
+     *
+     *  Normalization may expand the byte length (e.g., NFC→NFD decomposes composed characters).
+     *  Worst-case output is 18× the input length.
+     *
+     *  @param form One of `sz_normal_form_nfd_k`, `sz_normal_form_nfc_k`, `sz_normal_form_nfkd_k`,
+     *              or `sz_normal_form_nfkc_k`.
+     *  @return `true` if the operation succeeded, `false` if memory allocation failed.
+     */
+    bool try_utf8_normalize(sz_normal_form_t form) noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_external;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+
+        // Allocate result buffer (worst-case 18x expansion), normalize into it, then swap
+        basic_string result;
+        if (!result.try_resize_and_overwrite(string_length * 18,
+                                             [string_start, string_length, form](char_type *buf, size_type) {
+                                                 return sz_utf8_norm(string_start, string_length, form, buf);
                                              }))
             return false;
 

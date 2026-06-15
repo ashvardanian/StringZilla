@@ -41,6 +41,22 @@ pub enum Status {
     StatusUnknown = -1,
 }
 
+/// Unicode normalization forms for UTF-8 normalization operations.
+///
+/// Corresponds to `sz_normal_form_t` in the C API.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Utf8NormalForm {
+    /// Canonical Decomposition. Decomposes precomposed characters into base + combining marks.
+    Nfd = 0,
+    /// Canonical Decomposition followed by Canonical Composition. The most common Unicode form.
+    Nfc = 1,
+    /// Compatibility Decomposition. Decomposes ligatures and compatibility characters.
+    Nfkd = 2,
+    /// Compatibility Decomposition followed by Canonical Composition.
+    Nfkc = 3,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Byteset {
@@ -450,6 +466,13 @@ extern "C" {
         matched_length: *mut usize,
     ) -> *const c_void;
     pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
+    pub(crate) fn sz_utf8_norm(
+        source: *const c_void,
+        source_length: usize,
+        form: i32,
+        destination: *mut c_void,
+    ) -> usize;
+    pub(crate) fn sz_utf8_norm_violation(source: *const c_void, source_length: usize, form: i32) -> *const c_void;
     pub(crate) fn sz_utf8_case_insensitive_find(
         haystack: *const c_void,
         haystack_length: usize,
@@ -1073,6 +1096,98 @@ where
             source_ref.len(),
             dest_slice.as_mut_ptr() as *mut c_void,
         )
+    }
+}
+
+/// Normalizes a UTF-8 string to the requested Unicode Normal Form, writing the result to a
+/// destination buffer.
+///
+/// Covers all four standard forms: NFD, NFC, NFKD, and NFKC. NFC is the most common form on
+/// the web; NFD is useful for collation. Compatibility forms (NFKD/NFKC) additionally decompose
+/// ligatures and compatibility characters (e.g., U+FB03 ﬃ → "ffi").
+///
+/// # Arguments
+///
+/// * `source`: The UTF-8 string to normalize.
+/// * `form`: The target Unicode normalization form.
+/// * `destination`: The destination buffer to write the normalized string.
+///
+/// # Returns
+///
+/// Returns the number of bytes written to the destination buffer.
+///
+/// # Safety
+///
+/// The caller must ensure the destination buffer is large enough.
+/// Use `source.len() * 18` bytes for worst-case expansion (canonical decomposition).
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// use sz::Utf8NormalForm;
+/// let source = "caf\u{00E9}"; // "café" NFC (precomposed é)
+/// let mut dest = vec![0u8; source.len() * 18];
+/// let len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut dest);
+/// assert_eq!(&dest[..len], "caf\u{00E9}".as_bytes()); // unchanged — already NFC
+/// ```
+///
+pub fn utf8_norm<T, D>(source: T, form: Utf8NormalForm, destination: &mut D) -> usize
+where
+    T: AsRef<[u8]>,
+    D: AsMut<[u8]> + ?Sized,
+{
+    let source_ref = source.as_ref();
+    let dest_slice = destination.as_mut();
+
+    unsafe {
+        sz_utf8_norm(
+            source_ref.as_ptr() as *const c_void,
+            source_ref.len(),
+            form as i32,
+            dest_slice.as_mut_ptr() as *mut c_void,
+        )
+    }
+}
+
+/// Returns the byte offset of the first byte in `source` that violates the given Unicode Normal
+/// Form, or `None` if `source` is already in the requested form.
+///
+/// This is a fast check — it does not produce the normalized output. Use it to avoid an
+/// unnecessary [`utf8_norm`] call when the input is likely already normalized.
+///
+/// # Arguments
+///
+/// * `source`: The UTF-8 string to inspect.
+/// * `form`: The normalization form to check against.
+///
+/// # Returns
+///
+/// * `None` if `source` already conforms to `form`.
+/// * `Some(offset)` with the byte offset of the first offending byte otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+/// use sz::Utf8NormalForm;
+/// // NFD string (decomposed): base 'e' + combining acute U+0301
+/// let nfd = "cafe\u{0301}";
+/// assert!(sz::utf8_norm_violation(nfd, Utf8NormalForm::Nfc).is_some());
+/// assert!(sz::utf8_norm_violation("café", Utf8NormalForm::Nfc).is_none());
+/// ```
+///
+pub fn utf8_norm_violation<T>(source: T, form: Utf8NormalForm) -> Option<usize>
+where
+    T: AsRef<[u8]>,
+{
+    let source_ref = source.as_ref();
+    let ptr = unsafe { sz_utf8_norm_violation(source_ref.as_ptr() as *const c_void, source_ref.len(), form as i32) };
+    if ptr.is_null() {
+        None
+    } else {
+        let offset = unsafe { (ptr as *const u8).offset_from(source_ref.as_ptr()) } as usize;
+        Some(offset)
     }
 }
 
@@ -4742,11 +4857,14 @@ mod tests {
         // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
         // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
         let golden: &[(&str, &[u8])] = &[
-            ("HeLLo", b"hello"),                   // ASCII fast path
+            ("HeLLo", b"hello"),                                           // ASCII fast path
             ("ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"abcdefghijklmnopqrstuvwxyz"), // >16B ASCII: SIMD fold loop
             ("Hello, WASM World! 12345.", b"hello, wasm world! 12345."),   // >16B mixed: only A-Z fold
             // Long ASCII run, then a multi-byte codepoint, then more ASCII: SIMD → serial → scalar tail.
-            ("LONG ASCII PREFIX \u{00C4} SUFFIX", "long ascii prefix \u{00E4} suffix".as_bytes()),
+            (
+                "LONG ASCII PREFIX \u{00C4} SUFFIX",
+                "long ascii prefix \u{00E4} suffix".as_bytes(),
+            ),
             ("\u{00DF}", b"ss"),                   // ß → ss expansion
             ("\u{1E9E}", b"ss"),                   // ẞ → ss (E1 BA lead bytes)
             ("\u{03A3}", "\u{03C3}".as_bytes()),   // Σ → σ
@@ -4775,5 +4893,106 @@ mod tests {
         let folded_length = sz::utf8_case_fold("\u{0390}", &mut destination);
         assert_eq!(folded_length, 6);
         assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
+    }
+
+    #[test]
+    fn utf8_norm_golden_vectors() {
+        use sz::Utf8NormalForm;
+
+        // ASCII is invariant under all normalization forms.
+        for form in [
+            Utf8NormalForm::Nfd,
+            Utf8NormalForm::Nfc,
+            Utf8NormalForm::Nfkd,
+            Utf8NormalForm::Nfkc,
+        ] {
+            let source = "Hello, world! 123";
+            let mut dest = vec![0u8; source.len() * 18];
+            let len = sz::utf8_norm(source, form, &mut dest);
+            assert_eq!(&dest[..len], source.as_bytes(), "ASCII unchanged under {:?}", form);
+        }
+
+        // "café" with precomposed é (U+00E9) is already NFC.
+        // NFC → NFC is a no-op (same bytes out).
+        let cafe_nfc = "caf\u{00E9}"; // 5 bytes: c a f 0xC3 0xA9
+        {
+            let mut dest = vec![0u8; cafe_nfc.len() * 18];
+            let len = sz::utf8_norm(cafe_nfc, Utf8NormalForm::Nfc, &mut dest);
+            assert_eq!(&dest[..len], cafe_nfc.as_bytes(), "café NFC→NFC unchanged");
+        }
+
+        // "café" with decomposed é = base 'e' + combining acute U+0301 is NFD.
+        // NFD → NFC must produce the precomposed form.
+        let cafe_nfd = "cafe\u{0301}"; // 6 bytes: c a f e 0xCC 0x81
+        {
+            let mut dest = vec![0u8; cafe_nfd.len() * 18];
+            let len = sz::utf8_norm(cafe_nfd, Utf8NormalForm::Nfc, &mut dest);
+            assert_eq!(&dest[..len], cafe_nfc.as_bytes(), "café NFD→NFC gives precomposed form");
+        }
+
+        // NFD of the precomposed form must give the decomposed form.
+        {
+            let mut dest = vec![0u8; cafe_nfc.len() * 18];
+            let len = sz::utf8_norm(cafe_nfc, Utf8NormalForm::Nfd, &mut dest);
+            assert_eq!(&dest[..len], cafe_nfd.as_bytes(), "café NFC→NFD gives decomposed form");
+        }
+
+        // Ligature U+FB03 ﬃ: NFKD and NFKC both decompose to "ffi".
+        let ligature = "\u{FB03}"; // 3 bytes: 0xEF 0xAC 0x83
+        {
+            let mut dest = vec![0u8; ligature.len() * 18];
+            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkd, &mut dest);
+            assert_eq!(&dest[..len], b"ffi", "ligature NFKD → ffi");
+        }
+        {
+            let mut dest = vec![0u8; ligature.len() * 18];
+            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkc, &mut dest);
+            assert_eq!(&dest[..len], b"ffi", "ligature NFKC → ffi");
+        }
+
+        // Idempotence: norm(norm(x, NFC), NFC) == norm(x, NFC).
+        {
+            let source = cafe_nfd;
+            let mut first = vec![0u8; source.len() * 18];
+            let first_len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut first);
+            let first_result = first[..first_len].to_vec();
+
+            let mut second = vec![0u8; first_len * 18];
+            let second_len = sz::utf8_norm(&first_result[..], Utf8NormalForm::Nfc, &mut second);
+            assert_eq!(&second[..second_len], &first_result[..], "NFC is idempotent");
+        }
+    }
+
+    #[test]
+    fn utf8_norm_violation() {
+        use sz::Utf8NormalForm;
+
+        // NFC string: precomposed é — no violation.
+        let nfc_str = "caf\u{00E9}";
+        assert_eq!(
+            sz::utf8_norm_violation(nfc_str, Utf8NormalForm::Nfc),
+            None,
+            "NFC string has no NFC violation"
+        );
+
+        // NFD string: decomposed e + combining acute U+0301.
+        // The combining mark violates NFC (it should be composed with the preceding base).
+        let nfd_str = "cafe\u{0301}";
+        let violation = sz::utf8_norm_violation(nfd_str, Utf8NormalForm::Nfc);
+        assert!(violation.is_some(), "NFD string must report an NFC violation");
+        // The violation may point to the base 'e' (byte 3) or to the combining mark (byte 4);
+        // either is within the suffix that must change during composition.
+        assert!(
+            violation.unwrap() >= 3,
+            "violation offset must be ≥ 3 (at 'e' or the combining mark)"
+        );
+
+        // NFC string has no NFD violation only if it contains no precomposed characters.
+        // ASCII is valid NFD.
+        assert_eq!(
+            sz::utf8_norm_violation("hello", Utf8NormalForm::Nfd),
+            None,
+            "pure ASCII has no NFD violation"
+        );
     }
 }

@@ -33,6 +33,35 @@ public enum StringZillaOrdering: Sendable {
     case descending  // The receiver sorts after the argument.
 }
 
+/// Unicode normalization form selector, mirroring `sz_normal_form_t`.
+public enum StringZillaNormalizationForm: RawRepresentable, Sendable {
+    case nfd   // Canonical decomposition.
+    case nfc   // Canonical decomposition + canonical composition.
+    case nfkd  // Compatibility decomposition.
+    case nfkc  // Compatibility decomposition + canonical composition.
+
+    public typealias RawValue = sz_normal_form_t
+
+    public var rawValue: sz_normal_form_t {
+        switch self {
+        case .nfd: return sz_normal_form_nfd_k
+        case .nfc: return sz_normal_form_nfc_k
+        case .nfkd: return sz_normal_form_nfkd_k
+        case .nfkc: return sz_normal_form_nfkc_k
+        }
+    }
+
+    public init?(rawValue: sz_normal_form_t) {
+        switch rawValue {
+        case sz_normal_form_nfd_k: self = .nfd
+        case sz_normal_form_nfc_k: self = .nfc
+        case sz_normal_form_nfkd_k: self = .nfkd
+        case sz_normal_form_nfkc_k: self = .nfkc
+        default: return nil
+        }
+    }
+}
+
 /// Protocol defining a single-byte data type.
 private protocol SingleByte {}
 
@@ -294,6 +323,49 @@ extension StringZillaViewable {
             folded = destination
         }
         return folded
+    }
+
+    /// Produces the UTF-8 bytes of the receiver after applying a Unicode normalization form.
+    /// The output may be longer than the input; the worst-case expansion is 18× per source byte (NFKD).
+    /// - Parameter form: The normalization form to apply (default: `.nfc`).
+    /// - Returns: The normalized UTF-8 bytes.
+    public func utf8Normalized(_ form: StringZillaNormalizationForm = .nfc) -> [UInt8] {
+        var normalized: [UInt8] = []
+        withStringZillaScope { pointer, length in
+            if length == 0 {
+                normalized = []
+                return
+            }
+            let capacity = Int(length) * 18
+            var destination = [UInt8](repeating: 0, count: capacity)
+            let outLen: sz_size_t = destination.withUnsafeMutableBufferPointer { bufferPointer in
+                sz_utf8_norm(pointer, length, form.rawValue, bufferPointer.baseAddress)
+            }
+            let actual = Int(outLen)
+            if actual < destination.count { destination.removeLast(destination.count - actual) }
+            normalized = destination
+        }
+        return normalized
+    }
+
+    /// Returns the index of the first byte violating the given normalization form, or `nil` if already normalized.
+    /// - Parameter form: The normalization form to test.
+    /// - Returns: The `Index` of the first non-conforming byte, or `nil` if the content is already in @p form.
+    public func utf8NormalizationViolation(_ form: StringZillaNormalizationForm) -> Index? {
+        var result: Index?
+        withStringZillaScope { pointer, length in
+            if let violationPointer = sz_utf8_norm_violation(pointer, length, form.rawValue) {
+                result = self.stringZillaByteOffset(forByte: violationPointer, after: pointer)
+            }
+        }
+        return result
+    }
+
+    /// Returns `true` if the content is already in the given Unicode normalization form.
+    /// - Parameter form: The normalization form to test.
+    /// - Returns: `true` when no normalization violation is found.
+    public func isUtf8Normalized(_ form: StringZillaNormalizationForm) -> Bool {
+        utf8NormalizationViolation(form) == nil
     }
 
     /// Finds the first case-insensitive occurrence of `needle` using full Unicode case folding.

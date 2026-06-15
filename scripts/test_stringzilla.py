@@ -31,6 +31,7 @@ import tempfile
 import platform
 import hashlib
 import hmac
+import unicodedata
 from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
@@ -1747,9 +1748,104 @@ def test_utf8_case_fold_expansions(input_str, expected):
     assert sz.utf8_case_fold(input_str) == expected
 
 
-# Backward compatibility aliases
-_parse_case_folding_file = parse_case_folding_file
-_get_case_folding_rules = get_case_folding_rules
+def test_unit_utf8_norm():
+    """Test basic Unicode normalization functionality."""
+
+    # ASCII is unchanged by all forms
+    for form in ("NFC", "NFD", "NFKC", "NFKD"):
+        assert sz.utf8_norm("hello", form) == b"hello"
+        assert sz.utf8_norm("", form) == b""
+
+    # NFC vs NFD differ for precomposed characters
+    # "café" with precomposed é (U+00E9)
+    cafe_nfc = "café"
+    cafe_nfd = "café"  # e + combining acute accent
+    # NFC of precomposed → precomposed bytes
+    assert sz.utf8_norm(cafe_nfc, "NFC") == cafe_nfc.encode("utf-8")
+    # NFD of precomposed → decomposed bytes
+    assert sz.utf8_norm(cafe_nfc, "NFD") == cafe_nfd.encode("utf-8")
+    # NFC of decomposed → precomposed bytes (composition)
+    assert sz.utf8_norm(cafe_nfd, "NFC") == cafe_nfc.encode("utf-8")
+
+    # NFKD of fi ligature (U+FB01) decomposes to "fi"
+    assert sz.utf8_norm("ﬁ", "NFKD") == b"fi"
+    assert sz.utf8_norm("ﬁ", "NFKC") == b"fi"
+
+    # Idempotence: normalizing an already-normalized string gives the same result
+    for form in ("NFC", "NFD", "NFKC", "NFKD"):
+        once = sz.utf8_norm("café", form)
+        twice = sz.utf8_norm(once, form)
+        assert once == twice, f"Idempotence failed for form {form}"
+
+    # Method form on Str
+    assert sz.Str("café").utf8_norm("NFD") == "café".encode("utf-8")
+
+    # Bytes input
+    assert sz.utf8_norm("café".encode("utf-8"), "NFC") == "café".encode("utf-8")
+
+    # Cross-check with Python unicodedata.normalize
+    for sample in ("café", "Ångström", "ﬁle", "ẛ̣"):
+        for form in ("NFC", "NFD", "NFKC", "NFKD"):
+            expected = unicodedata.normalize(form, sample).encode("utf-8")
+            got = sz.utf8_norm(sample, form)
+            assert got == expected, f"Mismatch for {repr(sample)} form={form}: {got!r} != {expected!r}"
+
+
+@pytest.mark.parametrize(
+    "input_str, form, expected",
+    [
+        ("ﬁ", "NFKD", b"fi"),  # fi ligature compatibility decomposition
+        ("ﬁ", "NFKC", b"fi"),  # fi ligature compatibility composition
+        ("ﬀ", "NFKD", b"ff"),  # ff ligature
+        ("ﬂ", "NFKD", b"fl"),  # fl ligature
+        ("café", "NFD", "café".encode("utf-8")),  # precomposed → decomposed
+        ("café", "NFC", "café".encode("utf-8")),  # decomposed → precomposed
+        ("Å", "NFD", "Å".encode("utf-8")),  # Å → A + ring above
+    ],
+)
+def test_utf8_norm_expansions(input_str, form, expected):
+    """Test normalization with specific known transformations."""
+    assert sz.utf8_norm(input_str, form) == expected
+
+
+def test_unit_utf8_norm_violation():
+    """Test normalization violation detection."""
+    # Pure ASCII is always normalized in every form
+    for form in ("NFC", "NFD", "NFKC", "NFKD"):
+        assert sz.utf8_norm_violation("hello", form) is None
+        assert sz.utf8_norm_violation("", form) is None
+
+    # A precomposed character (U+00E9 é) is valid NFC but is a violation for NFD
+    precomposed = "café"  # NFC: already composed
+    assert sz.utf8_norm_violation(precomposed, "NFC") is None
+    nfd_violation = sz.utf8_norm_violation(precomposed, "NFD")
+    assert nfd_violation is not None
+    assert isinstance(nfd_violation, int)
+    assert nfd_violation >= 0
+
+    # A decomposed sequence (e + combining accent) is valid NFD but violates NFC
+    decomposed = "café"  # NFD: e + combining acute
+    assert sz.utf8_norm_violation(decomposed, "NFD") is None
+    nfc_violation = sz.utf8_norm_violation(decomposed, "NFC")
+    assert nfc_violation is not None
+    assert isinstance(nfc_violation, int)
+
+    # Method form on Str
+    assert sz.Str("hello").utf8_norm_violation("NFC") is None
+
+    # Bytes input
+    assert sz.utf8_norm_violation(b"hello", "NFD") is None
+
+    # fi ligature (U+FB01) is not NFKD-normalized
+    assert sz.utf8_norm_violation("ﬁ", "NFKD") is not None
+    # But "fi" as two plain ASCII chars IS NFKD-normalized
+    assert sz.utf8_norm_violation("fi", "NFKD") is None
+
+    # ValueError on unknown form
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="unknown form"):
+        sz.utf8_norm_violation("hello", "XYZ")
 
 
 def test_utf8_case_fold_all_codepoints():
@@ -1761,7 +1857,7 @@ def test_utf8_case_fold_all_codepoints():
     """
     # Load Unicode 17.0 case folding rules (downloads and caches automatically)
     try:
-        unicode_folds = _get_case_folding_rules("17.0.0")
+        unicode_folds = get_case_folding_rules("17.0.0")
     except UnicodeDataDownloadError as e:
         pytest.skip(f"Skipping due to network issue: {e}")
 
@@ -1834,7 +1930,7 @@ def test_utf8_case_insensitive_find_preimages():
     """
     # Load Unicode 17.0 case folding rules (downloads and caches automatically)
     try:
-        unicode_folds = _get_case_folding_rules("17.0.0")
+        unicode_folds = get_case_folding_rules("17.0.0")
     except UnicodeDataDownloadError as e:
         pytest.skip(f"Skipping due to network issue: {e}")
 

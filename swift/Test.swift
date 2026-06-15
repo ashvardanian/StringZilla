@@ -313,4 +313,60 @@ class StringZillaTests: XCTestCase {
         XCTAssertEqual("Straße".utf8CaseInsensitiveOrder("STRASSE"), .equal)
         XCTAssertEqual("apple".utf8CaseInsensitiveOrder("BANANA"), .ascending)
     }
+
+    // MARK: - UTF-8 Normalization Tests
+
+    func testUtf8NormalizedNFC() {
+        // "e" + combining acute accent (U+0301) should compose to precomposed "é" (U+00E9) under NFC.
+        let decomposed = "e\u{0301}"
+        let nfcBytes = decomposed.utf8Normalized(.nfc)
+        let nfcString = String(decoding: nfcBytes, as: UTF8.self)
+        XCTAssertEqual(nfcString, "é")
+        // Precomposed "é" is shorter (2 UTF-8 bytes) than the decomposed sequence (3 bytes).
+        XCTAssertEqual(nfcBytes.count, 2)
+    }
+
+    func testUtf8NormalizedNFD() {
+        // Precomposed "é" (U+00E9) should decompose to "e" + U+0301 under NFD.
+        let precomposed = "é"
+        let nfdBytes = precomposed.utf8Normalized(.nfd)
+        let nfdString = String(decoding: nfdBytes, as: UTF8.self)
+        XCTAssertEqual(nfdString, "e\u{0301}")
+        // NFD form: "e" (1 byte) + U+0301 (2 bytes) = 3 bytes.
+        XCTAssertEqual(nfdBytes.count, 3)
+    }
+
+    func testIsUtf8NormalizedNFC() {
+        // Precomposed "é" is already in NFC.
+        XCTAssertTrue("é".isUtf8Normalized(.nfc))
+        // "e" + combining accent is NOT in NFC (requires composition).
+        XCTAssertFalse("e\u{0301}".isUtf8Normalized(.nfc))
+    }
+
+    func testIsUtf8NormalizedNFD() {
+        // "e" + combining acute is already in NFD.
+        XCTAssertTrue("e\u{0301}".isUtf8Normalized(.nfd))
+        // Precomposed "é" is NOT in NFD (requires decomposition).
+        XCTAssertFalse("é".isUtf8Normalized(.nfd))
+    }
+
+    func testUtf8NormalizationViolationNilWhenNormalized() {
+        // A plain ASCII string is always in every normalization form.
+        XCTAssertNil("hello".utf8NormalizationViolation(.nfc))
+        XCTAssertNil("hello".utf8NormalizationViolation(.nfd))
+    }
+
+    func testUtf8NormalizationViolationNotNilWhenNotNormalized() {
+        // Precomposed "é" violates NFD; violation index must be non-nil.
+        XCTAssertNotNil("é".utf8NormalizationViolation(.nfd))
+        // "e" + combining accent violates NFC; violation index must be non-nil.
+        XCTAssertNotNil("e\u{0301}".utf8NormalizationViolation(.nfc))
+    }
+
+    func testUtf8NormalizedEmptyString() {
+        XCTAssertEqual("".utf8Normalized(.nfc), [])
+        XCTAssertEqual("".utf8Normalized(.nfd), [])
+        XCTAssertNil("".utf8NormalizationViolation(.nfc))
+        XCTAssertTrue("".isUtf8Normalized(.nfc))
+    }
 }
