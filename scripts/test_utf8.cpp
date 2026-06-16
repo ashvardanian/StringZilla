@@ -2,7 +2,7 @@
  *  @brief  UTF-8 counting/newline/whitespace equivalence, normalization, and C++ API semantics.
  *  @file   scripts/test_utf8.cpp
  *  @author Ash Vardanian
- *  @date   2026-06-16
+ *  @date June 16, 2026
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -46,23 +46,23 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert>       // C-style assertions
+#include <cassert> // C-style assertions
+#include <cstdio>  // `std::printf`
+#include <cstring> // `std::memcpy`
+
 #include <algorithm>     // `std::transform`
-#include <cstdio>        // `std::printf`
-#include <cstring>       // `std::memcpy`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
+#include <set>           // `std::set`
 #include <sstream>       // `std::ostringstream`
+#include <string>        // Baseline
+#include <string_view>   // Baseline
 #include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
-#include <set>           // `std::set`
 #include <vector>        // `std::vector`
-
-#include <string>      // Baseline
-#include <string_view> // Baseline
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -79,6 +79,62 @@ using sz::literals::operator""_bs; // for `sz::byteset`
 using namespace std::literals; // for ""sv
 #endif
 
+#pragma region Helpers
+
+/** @brief Prints one labeled hex dump line to `stderr`; used by the malformed-input safety test below. */
+static void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
+    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
+    for (std::size_t index = 0; index < length; ++index) std::fprintf(stderr, "%02X ", (unsigned char)bytes[index]);
+    std::fprintf(stderr, "\n");
+}
+
+/**
+ *  @brief Runs one UTF-8 backend's counting and boundary-finding kernels over the known-answer anchors
+ *         and asserts the produced codepoint count and the emitted newline/whitespace (offset, length)
+ *         spans match the expected lists exactly.
+ *
+ *  Mirrors `check_sha256_unit_` in `test_hash.cpp`: the caller drives it once per backend (dispatched,
+ *  serial, and each natively-compiled kernel), so a wrong constant shared by the serial-vs-SIMD agreement
+ *  tests is still caught against these external ground-truth vectors.
+ *
+ *  @param count                 Codepoint counter under test.
+ *  @param newlines              Newline boundary finder under test.
+ *  @param whitespaces           Whitespace boundary finder under test.
+ *  @param count_text            Anchor text whose codepoints are counted.
+ *  @param count_length          Byte length of @p count_text.
+ *  @param expected_count        Expected codepoint count of @p count_text.
+ *  @param newline_text          Anchor text scanned for newline boundaries.
+ *  @param newline_length        Byte length of @p newline_text.
+ *  @param expected_newlines     Expected (offset, length) pairs of the newline matches.
+ *  @param whitespace_text       Anchor text scanned for whitespace boundaries.
+ *  @param whitespace_length     Byte length of @p whitespace_text.
+ *  @param expected_whitespaces  Expected (offset, length) pairs of the whitespace matches.
+ */
+static void check_utf8_unit_(                                                                         //
+    sz_utf8_count_t count, sz_utf8_find_boundaries_t newlines, sz_utf8_find_boundaries_t whitespaces, //
+    sz_cptr_t count_text, sz_size_t count_length, sz_size_t expected_count,                           //
+    sz_cptr_t newline_text, sz_size_t newline_length,                                                 //
+    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_newlines,                            //
+    sz_cptr_t whitespace_text, sz_size_t whitespace_length,                                           //
+    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_whitespaces) {
+
+    assert(count(count_text, count_length) == expected_count);
+
+    auto check_boundaries = [](sz_utf8_find_boundaries_t finder, sz_cptr_t text, sz_size_t length,
+                               std::vector<std::pair<sz_size_t, sz_size_t>> const &expected) {
+        sz_size_t found_offsets[16], found_lengths[16], consumed = 0;
+        sz_size_t const found = finder(text, length, found_offsets, found_lengths, 16u, &consumed);
+        assert(found == expected.size());
+        for (sz_size_t index = 0; index != found; ++index) {
+            assert(found_offsets[index] == expected[index].first);
+            assert(found_lengths[index] == expected[index].second);
+        }
+    };
+    check_boundaries(newlines, newline_text, newline_length, expected_newlines);
+    check_boundaries(whitespaces, whitespace_text, whitespace_length, expected_whitespaces);
+}
+
+#pragma endregion // Helpers
 
 #pragma region Unit
 
@@ -102,25 +158,46 @@ void test_utf8_unit() {
     sz_size_t const mixed_length = (sz_size_t)(sizeof(mixed) - 1);
     assert(mixed_length == 6u);
 
-    // `sz_utf8_count`: 6 bytes, 3 codepoints.
-    assert(sz_utf8_count(mixed, mixed_length) == 3u);        // Dispatched (automatic kernel)
-    assert(sz_utf8_count_serial(mixed, mixed_length) == 3u); // Manual propagation to the serial kernel
+    // `sz_utf8_find_newlines`: in "a\nb\r\nc" the `\n` is a length-1 newline at byte 1, and the `\r\n` is a
+    // single length-2 newline at byte 3 (CRLF merges into one match).
+    char const newline_text[] = "a\nb\r\nc";
+    sz_size_t const newline_length = (sz_size_t)(sizeof(newline_text) - 1);
+    std::vector<std::pair<sz_size_t, sz_size_t>> const newline_spans = {{1u, 1u}, {3u, 2u}};
+
+    // `sz_utf8_find_whitespaces`: in "a b\tc" the space is a length-1 match at byte 1, the tab at byte 3
+    // (there is no CRLF merging in the whitespace set - each codepoint is its own match).
+    char const whitespace_text[] = "a b\tc";
+    sz_size_t const whitespace_length = (sz_size_t)(sizeof(whitespace_text) - 1);
+    std::vector<std::pair<sz_size_t, sz_size_t>> const whitespace_spans = {{1u, 1u}, {3u, 1u}};
+
+    // `sz_utf8_count` (6 bytes, 3 codepoints) plus the newline/whitespace boundary anchors, driven through
+    // the dispatched (automatic kernel), serial, and each natively-compiled backend.
+    check_utf8_unit_(sz_utf8_count, sz_utf8_find_newlines, sz_utf8_find_whitespaces, // Dispatched
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+    check_utf8_unit_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial, // serial
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
 #if SZ_USE_HASWELL
-    assert(sz_utf8_count_haswell(mixed, mixed_length) == 3u); // Manual: haswell kernel
+    check_utf8_unit_(sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell, // haswell
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
 #endif
 #if SZ_USE_ICELAKE
-    assert(sz_utf8_count_icelake(mixed, mixed_length) == 3u); // Manual: icelake kernel
+    check_utf8_unit_(sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake, // icelake
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
 #endif
     assert(sz::string_view(mixed, mixed_length).utf8_count() == 3u); // C++ wrapper
 
     // `sz_utf8_find_nth`: codepoint starts land at byte offsets 0, 1, 3; the 4th (n=3) is one-past-the-end.
-    assert(sz_utf8_find_nth(mixed, mixed_length, 0u) == mixed + 0);            // Dispatched: 'a' at byte 0
-    assert(sz_utf8_find_nth(mixed, mixed_length, 1u) == mixed + 1);            // Dispatched: 'ß' at byte 1
-    assert(sz_utf8_find_nth(mixed, mixed_length, 2u) == mixed + 3);            // Dispatched: '中' at byte 3
-    assert(sz_utf8_find_nth(mixed, mixed_length, 3u) == SZ_NULL_CHAR);         // Dispatched: beyond end
-    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 0u) == mixed + 0);     // Manual: serial kernel
-    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 2u) == mixed + 3);     // Manual: serial kernel
-    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 3u) == SZ_NULL_CHAR);  // Manual: serial kernel
+    assert(sz_utf8_find_nth(mixed, mixed_length, 0u) == mixed + 0);           // Dispatched: 'a' at byte 0
+    assert(sz_utf8_find_nth(mixed, mixed_length, 1u) == mixed + 1);           // Dispatched: 'ß' at byte 1
+    assert(sz_utf8_find_nth(mixed, mixed_length, 2u) == mixed + 3);           // Dispatched: '中' at byte 3
+    assert(sz_utf8_find_nth(mixed, mixed_length, 3u) == SZ_NULL_CHAR);        // Dispatched: beyond end
+    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 0u) == mixed + 0);    // Manual: serial kernel
+    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 2u) == mixed + 3);    // Manual: serial kernel
+    assert(sz_utf8_find_nth_serial(mixed, mixed_length, 3u) == SZ_NULL_CHAR); // Manual: serial kernel
 #if SZ_USE_HASWELL
     assert(sz_utf8_find_nth_haswell(mixed, mixed_length, 2u) == mixed + 3);    // Manual: haswell kernel
     assert(sz_utf8_find_nth_haswell(mixed, mixed_length, 3u) == SZ_NULL_CHAR); // Manual: haswell kernel
@@ -130,51 +207,6 @@ void test_utf8_unit() {
     assert(sz_utf8_find_nth_icelake(mixed, mixed_length, 3u) == SZ_NULL_CHAR); // Manual: icelake kernel
 #endif
     assert(sz::string_view(mixed, mixed_length).utf8_find_nth(2u) == 3u); // C++ wrapper (byte offset)
-
-    // Runs one boundary kernel and asserts the emitted offsets/lengths match the expected lists.
-    auto check_boundaries = [](sz_utf8_find_boundaries_t matcher, sz_cptr_t text, sz_size_t length,
-                               std::vector<sz_size_t> const &expected_offsets,
-                               std::vector<sz_size_t> const &expected_lengths) {
-        sz_size_t found_offsets[16], found_lengths[16], consumed = 0;
-        sz_size_t const got = matcher(text, length, found_offsets, found_lengths, 16u, &consumed);
-        assert(got == expected_offsets.size());
-        for (sz_size_t i = 0; i != got; ++i) {
-            assert(found_offsets[i] == expected_offsets[i]);
-            assert(found_lengths[i] == expected_lengths[i]);
-        }
-    };
-
-    // `sz_utf8_find_newlines`: in "a\nb\r\nc" the `\n` is a length-1 newline at byte 1, and the `\r\n` is a
-    // single length-2 newline at byte 3 (CRLF merges into one match).
-    char const newline_text[] = "a\nb\r\nc";
-    sz_size_t const newline_length = (sz_size_t)(sizeof(newline_text) - 1);
-    std::vector<sz_size_t> const newline_offsets = {1u, 3u}, newline_lengths = {1u, 2u};
-    check_boundaries(sz_utf8_find_newlines, newline_text, newline_length, newline_offsets, newline_lengths); // Dispatched
-    check_boundaries(sz_utf8_find_newlines_serial, newline_text, newline_length, newline_offsets, newline_lengths); // serial
-#if SZ_USE_HASWELL
-    check_boundaries(sz_utf8_find_newlines_haswell, newline_text, newline_length, newline_offsets, newline_lengths); // haswell
-#endif
-#if SZ_USE_ICELAKE
-    check_boundaries(sz_utf8_find_newlines_icelake, newline_text, newline_length, newline_offsets, newline_lengths); // icelake
-#endif
-
-    // `sz_utf8_find_whitespaces`: in "a b\tc" the space is a length-1 match at byte 1, the tab at byte 3
-    // (there is no CRLF merging in the whitespace set - each codepoint is its own match).
-    char const whitespace_text[] = "a b\tc";
-    sz_size_t const whitespace_length = (sz_size_t)(sizeof(whitespace_text) - 1);
-    std::vector<sz_size_t> const whitespace_offsets = {1u, 3u}, whitespace_lengths = {1u, 1u};
-    check_boundaries(sz_utf8_find_whitespaces, whitespace_text, whitespace_length, whitespace_offsets,
-                     whitespace_lengths); // Dispatched
-    check_boundaries(sz_utf8_find_whitespaces_serial, whitespace_text, whitespace_length, whitespace_offsets,
-                     whitespace_lengths); // serial
-#if SZ_USE_HASWELL
-    check_boundaries(sz_utf8_find_whitespaces_haswell, whitespace_text, whitespace_length, whitespace_offsets,
-                     whitespace_lengths); // haswell
-#endif
-#if SZ_USE_ICELAKE
-    check_boundaries(sz_utf8_find_whitespaces_icelake, whitespace_text, whitespace_length, whitespace_offsets,
-                     whitespace_lengths); // icelake
-#endif
 
     // `sz_utf8_unpack_chunk` is a streaming chunk decoder: per its documented contract each call unpacks
     // a prefix of the remaining bytes - not necessarily all of it when the chunk mixes codepoint widths -
@@ -208,18 +240,21 @@ void test_utf8_unit() {
     // breaks NFD (é decomposes into e + U+0301). NFC normalization is a no-op; NFD expands it to 5 bytes.
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
     sz_size_t const cafe_length = (sz_size_t)(sizeof(cafe_nfc) - 1);
-    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfc_k) == SZ_NULL_CHAR);     // Dispatched: already NFC
-    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR);     // Dispatched: not NFD
-    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) == SZ_NULL_CHAR); // Manual: serial
-    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR); // Manual: serial
+    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+           SZ_NULL_CHAR); // Dispatched: already NFC
+    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR); // Dispatched: not NFD
+    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+           SZ_NULL_CHAR); // Manual: serial
+    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+           SZ_NULL_CHAR); // Manual: serial
     {
         char norm_buffer[64];
         sz_size_t const nfc_length = sz_utf8_norm(cafe_nfc, cafe_length, sz_normal_form_nfc_k, norm_buffer);
         assert(nfc_length == cafe_length && std::memcmp(norm_buffer, cafe_nfc, cafe_length) == 0); // NFC no-op
         sz_size_t const nfd_length = sz_utf8_norm(cafe_nfc, cafe_length, sz_normal_form_nfd_k, norm_buffer);
         assert(nfd_length == 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
-        sz_size_t const nfd_length_serial =
-            sz_utf8_norm_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k, norm_buffer); // Manual: serial
+        sz_size_t const nfd_length_serial = sz_utf8_norm_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k,
+                                                                norm_buffer); // Manual: serial
         assert(nfd_length_serial == 6u);
     }
 
@@ -429,6 +464,22 @@ void test_utf8_unit() {
         // Transition exactly at 64-byte boundary
         scope_assert(std::string exact_boundary(64, 'x'), exact_boundary += "П世😀",
                      sz::string_view(exact_boundary).utf8_count() == 67);
+
+        // A buffer well past the L2 cache (>2 MB) of mixed-width codepoints: every repeat contributes one ASCII
+        // 'x', one 2-byte 'П', one 3-byte '世', and one 4-byte '😀' - 4 codepoints in 10 bytes. The dispatched
+        // and C++ counts must equal the serial reference and the exact known codepoint total over the long run.
+        {
+            std::string l2_mixed;
+            std::size_t const l2_repeats = 220000; // 220000 * 10 bytes = 2.2 MB > a typical 256 KB-1 MB L2
+            char const l2_unit[] = "x\xD0\x9F\xE4\xB8\xAD\xF0\x9F\x98\x80"; // 'x' + 'П' + '世' + '😀', 10 bytes
+            l2_mixed.reserve(l2_repeats * (sizeof(l2_unit) - 1));
+            for (std::size_t repeat = 0; repeat != l2_repeats; ++repeat) l2_mixed += l2_unit;
+            sz_size_t const expected_codepoints = (sz_size_t)(l2_repeats * 4);
+            sz_size_t const count_serial = sz_utf8_count_serial(l2_mixed.data(), l2_mixed.size());
+            assert(count_serial == expected_codepoints);
+            assert(sz_utf8_count(l2_mixed.data(), l2_mixed.size()) == count_serial); // Dispatched matches serial
+            assert(sz::string_view(l2_mixed).utf8_count() == count_serial);          // C++ wrapper matches serial
+        }
     }
 
     // Split by Unicode newlines
@@ -505,13 +556,13 @@ void test_utf8_unit() {
         let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2002 EN SPACE
         let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2003 EM SPACE
         let_assert(auto w = words("a b"),
-                   w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2004 THREE-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2005 FOUR-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2006 SIX-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2007 FIGURE SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2008 PUNCTUATION SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2009 THIN SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+200A HAIR SPACE
+                   w.size() == 2 && w[0] == "a" && w[1] == "b");                          // U+2004 THREE-PER-EM SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+2005 FOUR-PER-EM SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+2006 SIX-PER-EM SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+2007 FIGURE SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+2008 PUNCTUATION SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+2009 THIN SPACE
+        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");   // U+200A HAIR SPACE
         let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2028 LINE SEPARATOR
         let_assert(auto w = words("a b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2029 PARAGRAPH SEPARATOR
@@ -523,15 +574,15 @@ void test_utf8_unit() {
 
         // Mixed byte-length whitespace patterns
         let_assert(auto w = words("a   b"), w.size() == 4);             // 1+2+3 byte mix: "a" "" "" "b"
-        let_assert(auto w = words("a\t　b"), w.size() == 4);            // 1+2+3 byte mix: "a" "" "" "b"
+        let_assert(auto w = words("a\t　b"), w.size() == 4);         // 1+2+3 byte mix: "a" "" "" "b"
         let_assert(auto w = words("Hello 世界 Привет"), w.size() == 3); // Unicode content + spaces
 
         // Edge cases
         let_assert(auto w = words(""), w.size() == 1 && w[0] == "");
-        let_assert(auto w = words("   "), w.size() == 4);                // "" "" "" ""
-        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 6);         // All single-byte whitespace
+        let_assert(auto w = words("   "), w.size() == 4);        // "" "" "" ""
+        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 6); // All single-byte whitespace
         let_assert(auto w = words(" "), w.size() == 3);       // All double-byte whitespace
-        let_assert(auto w = words("  　"), w.size() == 4); // All triple-byte whitespace
+        let_assert(auto w = words("  　"), w.size() == 4);       // All triple-byte whitespace
         let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
 
         // Non-ASCII content with regular spaces
@@ -561,8 +612,8 @@ void test_utf8_unit() {
         let_assert(auto w = words("a‍b"), w.size() == 2); // ZERO WIDTH JOINER
 
         // Consecutive different whitespace types - N delimiters yield N+1 segments
-        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 6);                // 5 whitespace chars between a and b
-        let_assert(auto w = words("a   　b"), w.size() == 5); // 1+2+3+3 byte: 4 delims -> 5 segs
+        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 6); // 5 whitespace chars between a and b
+        let_assert(auto w = words("a   　b"), w.size() == 5);     // 1+2+3+3 byte: 4 delims -> 5 segs
 
         // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
         scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
@@ -853,34 +904,28 @@ void test_norm_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps a UTF-8 codepoint-counting backend by its kernel pointer. */
-template <sz_utf8_count_t count_>
-struct utf8_count_from_sz_ {
-    sz_size_t operator()(sz_cptr_t text, sz_size_t length) const noexcept { return count_(text, length); }
-};
-
-/** @brief Wraps a UTF-8 boundary-finding backend (newlines or whitespaces) by its kernel pointer. */
-template <sz_utf8_find_boundaries_t find_>
-struct utf8_find_boundaries_from_sz_ {
-    sz_size_t operator()(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, sz_size_t capacity,
-                         sz_size_t *consumed) const noexcept {
-        return find_(text, length, offsets, lengths, capacity, consumed);
+/** @brief Wraps the UTF-8 counting and boundary-finding kernels of one backend by their pointers. */
+template <sz_utf8_count_t count_, sz_utf8_find_boundaries_t newlines_, sz_utf8_find_boundaries_t whitespaces_>
+struct utf8_from_sz_ {
+    sz_size_t count(sz_cptr_t text, sz_size_t length) const noexcept { return count_(text, length); }
+    sz_size_t newlines(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, //
+                       sz_size_t capacity, sz_size_t *bytes_consumed) const noexcept {
+        return newlines_(text, length, offsets, lengths, capacity, bytes_consumed);
+    }
+    sz_size_t whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, //
+                          sz_size_t capacity, sz_size_t *bytes_consumed) const noexcept {
+        return whitespaces_(text, length, offsets, lengths, capacity, bytes_consumed);
     }
 };
 
-/** @brief Wraps a UTF-8 normalization backend by its kernel pointer. */
-template <sz_utf8_norm_t norm_>
-struct utf8_norm_from_sz_ {
-    sz_size_t operator()(sz_cptr_t text, sz_size_t length, sz_normal_form_t form, sz_ptr_t output) const noexcept {
-        return norm_(text, length, form, output);
+/** @brief Wraps the UTF-8 normalization and normalization-violation kernels of one backend by their pointers. */
+template <sz_utf8_norm_t norm_, sz_utf8_norm_violation_t violation_>
+struct norm_from_sz_ {
+    sz_size_t form(sz_cptr_t text, sz_size_t length, sz_normal_form_t normal_form, sz_ptr_t output) const noexcept {
+        return norm_(text, length, normal_form, output);
     }
-};
-
-/** @brief Wraps a UTF-8 normalization-violation backend by its kernel pointer. */
-template <sz_utf8_norm_violation_t violation_>
-struct utf8_norm_violation_from_sz_ {
-    sz_cptr_t operator()(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) const noexcept {
-        return violation_(text, length, form);
+    sz_cptr_t violation(sz_cptr_t text, sz_size_t length, sz_normal_form_t normal_form) const noexcept {
+        return violation_(text, length, normal_form);
     }
 };
 
@@ -897,22 +942,14 @@ struct utf8_norm_violation_from_sz_ {
  *  - sz_utf8_find_newline: newline detection (position and matched length)
  *  - sz_utf8_find_whitespace: whitespace detection (position and matched length)
  *
- *  @param count_reference         Serial reference codepoint counter (wrapper instance).
- *  @param count_candidate         ISA-specific codepoint counter under test (wrapper instance).
- *  @param newlines_reference      Serial reference newline finder (wrapper instance).
- *  @param newlines_candidate      ISA-specific newline finder under test (wrapper instance).
- *  @param whitespaces_reference   Serial reference whitespace finder (wrapper instance).
- *  @param whitespaces_candidate   ISA-specific whitespace finder under test (wrapper instance).
- *  @param min_text_length         Minimum byte length of each generated string.
- *  @param min_iterations          Number of random strings to generate and check.
+ *  @param reference       Serial reference backend bundle (counting + newline/whitespace boundaries).
+ *  @param candidate       ISA-specific backend bundle under test (counting + newline/whitespace boundaries).
+ *  @param min_text_length Minimum byte length of each generated string.
+ *  @param min_iterations  Number of random strings to generate and check.
  */
-template <typename count_reference_, typename count_candidate_, typename newlines_reference_,
-          typename newlines_candidate_, typename whitespaces_reference_, typename whitespaces_candidate_>
-void test_utf8_equivalence(                                              //
-    count_reference_ count_reference, count_candidate_ count_candidate,  //
-    newlines_reference_ newlines_reference, newlines_candidate_ newlines_candidate,
-    whitespaces_reference_ whitespaces_reference, whitespaces_candidate_ whitespaces_candidate,
-    std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
+template <typename reference_, typename candidate_>
+void test_utf8_equivalence(reference_ reference, candidate_ candidate, //
+                           std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
 
     // Enumerate every delimiter via repeated streaming calls (resuming from `bytes_consumed`), so a small
     // `capacity` exercises the SIMD vector loop, its resume logic, and the serial tail handoff.
@@ -943,8 +980,8 @@ void test_utf8_equivalence(                                              //
         sz_size_t suffix = 0;
         for (;;) {
             sz_size_t region = length - suffix, consumed = 0;
-            sz_size_t delimiters =
-                matcher(data + suffix, region, batch_offsets.data(), batch_lengths.data(), capacity, &consumed);
+            sz_size_t delimiters = matcher(data + suffix, region, batch_offsets.data(), batch_lengths.data(), capacity,
+                                           &consumed);
             sz_size_t previous_end = 0;
             for (sz_size_t i = 0; i < delimiters; ++i) {
                 seg_offsets.push_back(suffix + previous_end), seg_lengths.push_back(batch_offsets[i] - previous_end);
@@ -959,13 +996,28 @@ void test_utf8_equivalence(                                              //
         }
     };
 
-    auto check = [&](std::string const &text) {
-        sz_cptr_t data = text.data();
-        sz_size_t length = text.size();
+    // Adapt the bundle methods to the plain boundary-finder signature the enumerators expect.
+    auto reference_newlines = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
+                                  sz_size_t capacity, sz_size_t *bytes_consumed) {
+        return reference.newlines(data, length, offsets, lengths, capacity, bytes_consumed);
+    };
+    auto candidate_newlines = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
+                                  sz_size_t capacity, sz_size_t *bytes_consumed) {
+        return candidate.newlines(data, length, offsets, lengths, capacity, bytes_consumed);
+    };
+    auto reference_whitespaces = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
+                                     sz_size_t capacity, sz_size_t *bytes_consumed) {
+        return reference.whitespaces(data, length, offsets, lengths, capacity, bytes_consumed);
+    };
+    auto candidate_whitespaces = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
+                                     sz_size_t capacity, sz_size_t *bytes_consumed) {
+        return candidate.whitespaces(data, length, offsets, lengths, capacity, bytes_consumed);
+    };
 
+    auto check = [&](sz_cptr_t data, sz_size_t length) {
         // Test `sz_utf8_count` equivalence
-        sz_size_t count_result_reference = count_reference(data, length);
-        sz_size_t count_result_candidate = count_candidate(data, length);
+        sz_size_t count_result_reference = reference.count(data, length);
+        sz_size_t count_result_candidate = candidate.count(data, length);
         assert(count_result_reference == count_result_candidate);
 
         // Sweep capacities: one huge (one-shot), the awkward 65/63 straddling the 64-byte AVX-512 window, the
@@ -974,23 +1026,23 @@ void test_utf8_equivalence(                                              //
         std::vector<sz_size_t> reference_offsets, reference_lengths, candidate_offsets, candidate_lengths;
         for (sz_size_t capacity : capacities) {
             if (capacity == 0) continue;
-            enumerate(newlines_reference, data, length, capacity, reference_offsets, reference_lengths);
-            enumerate(newlines_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
+            enumerate(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
+            enumerate(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && "Mismatch in newline offsets");
             assert(reference_lengths == candidate_lengths && "Mismatch in newline lengths");
 
-            enumerate(whitespaces_reference, data, length, capacity, reference_offsets, reference_lengths);
-            enumerate(whitespaces_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
+            enumerate(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
+            enumerate(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && "Mismatch in whitespace offsets");
             assert(reference_lengths == candidate_lengths && "Mismatch in whitespace lengths");
 
             // Segment-level (iterator) equivalence: catches a `bytes_consumed` overshoot at a window-aligned fill.
-            reconstruct_segments(newlines_reference, data, length, capacity, reference_offsets, reference_lengths);
-            reconstruct_segments(newlines_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
+            reconstruct_segments(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
+            reconstruct_segments(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in newline segments");
-            reconstruct_segments(whitespaces_reference, data, length, capacity, reference_offsets, reference_lengths);
-            reconstruct_segments(whitespaces_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
+            reconstruct_segments(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
+            reconstruct_segments(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in whitespace segments");
         }
@@ -1057,7 +1109,7 @@ void test_utf8_equivalence(                                              //
             if (random_content_index < utf8_content_count) { text.append(utf8_content[random_content_index]); }
             else { text.append(special_chars[random_content_index - utf8_content_count]); }
         }
-        check(text);
+        check(text.data(), text.size());
 
         // Now, let's replace 10% of bytes in the sequence with a NUL character, thus breaking many valid codepoints
         std::size_t num_bytes_to_corrupt = text.size() / 10;
@@ -1066,7 +1118,7 @@ void test_utf8_equivalence(                                              //
             std::size_t byte_index = byte_index_dist(rng);
             text[byte_index] = '\0';
         }
-        check(text);
+        check(text.data(), text.size());
 
         // Swap 10% of bytes at random positions, creating malformed UTF-8 sequences
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
@@ -1074,8 +1126,21 @@ void test_utf8_equivalence(                                              //
             std::size_t byte_index_2 = byte_index_dist(rng);
             std::swap(text[byte_index_1], text[byte_index_2]);
         }
-        check(text);
+        check(text.data(), text.size());
     }
+
+    // Re-run count/newline/whitespace equivalence with the input placed at every sub-cache-line byte offset,
+    // so the SIMD load alignment - not just the content - is swept against the serial reference.
+    std::string alignment_probe;
+    while (alignment_probe.size() < 256) {
+        std::size_t random_content_index = content_dist(rng);
+        if (random_content_index < utf8_content_count) { alignment_probe.append(utf8_content[random_content_index]); }
+        else { alignment_probe.append(special_chars[random_content_index - utf8_content_count]); }
+    }
+    for_each_cacheline_offset_(alignment_probe.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
+        std::memcpy(buffer, alignment_probe.data(), alignment_probe.size());
+        check(buffer, alignment_probe.size());
+    });
 }
 
 /**
@@ -1083,17 +1148,12 @@ void test_utf8_equivalence(                                              //
  *         reference for all four forms (norm output + violation offset). The all-codepoint shuffle
  *         stresses canonical ordering, every decomposition/composition path, and SIMD-block straddles.
  *
- *  @param norm_reference        Serial reference normalizer (wrapper instance).
- *  @param norm_candidate        ISA-specific normalizer under test (wrapper instance).
- *  @param violation_reference   Serial reference normalization-violation finder (wrapper instance).
- *  @param violation_candidate   ISA-specific normalization-violation finder under test (wrapper instance).
- *  @param iterations            Number of all-codepoint shuffles to fuzz x 4 normal forms.
+ *  @param reference   Serial reference backend bundle (normalizer + normalization-violation finder).
+ *  @param candidate   ISA-specific backend bundle under test (normalizer + normalization-violation finder).
+ *  @param iterations  Number of all-codepoint shuffles to fuzz x 4 normal forms.
  */
-template <typename norm_reference_, typename norm_candidate_, typename violation_reference_,
-          typename violation_candidate_>
-void test_norm_equivalence(norm_reference_ norm_reference, norm_candidate_ norm_candidate,
-                           violation_reference_ violation_reference, violation_candidate_ violation_candidate,
-                           std::size_t iterations = scale_iterations(25)) {
+template <typename reference_, typename candidate_>
+void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations = scale_iterations(25)) {
     std::printf("  - testing normalization fuzz (%zu iterations x 4 forms)...\n", iterations);
 
     std::vector<sz_rune_t> all_runes;
@@ -1115,19 +1175,21 @@ void test_norm_equivalence(norm_reference_ norm_reference, norm_candidate_ norm_
         for (sz_rune_t cp : all_runes) write_cursor += sz_rune_export(cp, (sz_u8_t *)write_cursor);
         sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
 
-        for (sz_normal_form_t form : norm_forms) {
-            sz_size_t len_reference = norm_reference(input_buffer.data(), input_length, form, output_reference.data());
-            sz_size_t len_candidate = norm_candidate(input_buffer.data(), input_length, form, output_candidate.data());
+        for (sz_normal_form_t normal_form : norm_forms) {
+            sz_size_t len_reference = reference.form(input_buffer.data(), input_length, normal_form,
+                                                     output_reference.data());
+            sz_size_t len_candidate = candidate.form(input_buffer.data(), input_length, normal_form,
+                                                     output_candidate.data());
             if (len_reference != len_candidate ||
                 std::memcmp(output_reference.data(), output_candidate.data(), len_reference) != 0) {
                 std::fprintf(stderr, "norm mismatch (form=%d, iter=%zu): reference_len=%zu candidate_len=%zu\n",
-                             (int)form, it, (size_t)len_reference, (size_t)len_candidate);
+                             (int)normal_form, it, (size_t)len_reference, (size_t)len_candidate);
                 assert(false);
             }
-            sz_cptr_t viol_reference = violation_reference(input_buffer.data(), input_length, form);
-            sz_cptr_t viol_candidate = violation_candidate(input_buffer.data(), input_length, form);
+            sz_cptr_t viol_reference = reference.violation(input_buffer.data(), input_length, normal_form);
+            sz_cptr_t viol_candidate = candidate.violation(input_buffer.data(), input_length, normal_form);
             if (viol_reference != viol_candidate) {
-                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)form, it);
+                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)normal_form, it);
                 assert(false);
             }
         }
@@ -1137,171 +1199,284 @@ void test_norm_equivalence(norm_reference_ norm_reference, norm_candidate_ norm_
 
 #pragma endregion // Equivalence
 
+#pragma region Safety
+
+/**
+ *  @brief Feeds malformed / invalid UTF-8 through one backend's counting, boundary-finding, normalization,
+ *         and streaming-unpack kernels, asserting no crash, in-bounds output, and intact canary bytes.
+ *
+ *  Counting and the boundary finders are bounds-safe on arbitrary bytes, so they face the full malformed
+ *  battery: the only requirements are that they survive and that no `(offset, length)` pair lands outside
+ *  the input. `sz_utf8_norm` and `sz_utf8_unpack_chunk` instead document a valid-UTF-8 precondition (the
+ *  decoder "performs no validity checks") and assert internally on garbage, so they are exercised on the
+ *  `sz_utf8_valid` subset of the same adversarial shapes - the normalizer's output must stay within its
+ *  documented 18x bound, the unpacker must report no more runes than the destination holds and never let
+ *  its cursor escape the input. Every byte outside each documented output window keeps its `0xA5` canary;
+ *  guards bracket the destination buffers, like `test_uncased_safety`.
+ *
+ *  @param count            Codepoint counter under test.
+ *  @param newlines         Newline boundary finder under test.
+ *  @param whitespaces      Whitespace boundary finder under test.
+ *  @param norm             Single-pass normalizer under test (or NULL when this backend has no normalizer).
+ *  @param unpack           Streaming chunk decoder under test (or NULL when this backend has no decoder).
+ *  @param random_inputs    Number of random garbage buffers to fuzz on top of the exhaustive byte sweeps.
+ */
+static void check_utf8_safety_(sz_utf8_count_t count, sz_utf8_find_boundaries_t newlines,
+                               sz_utf8_find_boundaries_t whitespaces, sz_utf8_norm_t norm,
+                               sz_utf8_unpack_chunk_t unpack, std::size_t random_inputs = scale_iterations(10000)) {
+
+    std::size_t const max_input_length = 70;
+    // The normalizer's documented worst case is 18x the input for a single-codepoint compatibility
+    // decomposition (see `utf8_norm.h`); a truncated trailing sequence may mis-decode one extra rune.
+    std::size_t const norm_bound = max_input_length * 18 + 18;
+    std::vector<sz_rune_t> rune_destination;
+
+    auto check = [&](char const *input, std::size_t input_length) {
+        // Counting and the case-invariant boundary finders just have to survive and stay in bounds.
+        [[maybe_unused]] sz_size_t const counted = count(input, (sz_size_t)input_length);
+
+        sz_size_t boundary_offsets[max_input_length + 1], boundary_lengths[max_input_length + 1];
+        auto check_boundaries = [&](sz_utf8_find_boundaries_t finder, char const *finder_name) {
+            sz_size_t bytes_consumed = 0;
+            sz_size_t const found = finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
+                                           (sz_size_t)(max_input_length + 1), &bytes_consumed);
+            assert(bytes_consumed <= input_length && "Boundary finder consumed past the input");
+            for (sz_size_t index = 0; index != found; ++index) {
+                if (boundary_offsets[index] + boundary_lengths[index] <= input_length) continue;
+                std::fprintf(stderr, "%s emitted out-of-bounds boundary (offset=%zu len=%zu, input=%zu)\n", finder_name,
+                             (std::size_t)boundary_offsets[index], (std::size_t)boundary_lengths[index], input_length);
+                print_utf8_test_bytes_("input", input, input_length);
+                assert(false && "Boundary finder emitted a span outside the input");
+            }
+        };
+        check_boundaries(newlines, "newline finder");
+        check_boundaries(whitespaces, "whitespace finder");
+
+        // Streaming unpack: like `sz_utf8_norm`, the chunk decoder "performs no validity checks" (see its
+        // docs) and assumes valid UTF-8, so it is only exercised on inputs that pass `sz_utf8_valid`. Each
+        // call must report no more runes than the destination holds and a cursor that never runs past the
+        // input. A truncated trailing sequence legitimately stalls (returns the same cursor) - the "need more
+        // bytes" signal - so we stop rather than spin.
+        if (unpack && sz_utf8_valid(input, (sz_size_t)input_length) == sz_true_k) {
+            std::size_t const rune_capacity = max_input_length + 4;
+            rune_destination.assign(rune_capacity, (sz_rune_t)0);
+            sz_cptr_t cursor = input;
+            sz_cptr_t const end = input + input_length;
+            while (cursor < end) {
+                sz_size_t produced = 0;
+                sz_cptr_t const next = unpack(cursor, (sz_size_t)(end - cursor), rune_destination.data(),
+                                              (sz_size_t)rune_capacity, &produced);
+                assert(produced <= rune_capacity && "Unpack reported more runes than the destination holds");
+                assert(next >= cursor && next <= end && "Unpack cursor escaped the input");
+                if (next == cursor) break; // Stalled on a truncated trailing sequence - the caller would refill
+                cursor = next;
+            }
+        }
+
+        // Normalization (when present): unlike counting and the boundary finders, `sz_utf8_norm` documents a
+        // valid-UTF-8 precondition and asserts internally on malformed bytes, so it is only driven on inputs
+        // that pass `sz_utf8_valid`. The output must still stay within the bound; `with_guarded_buffer_`
+        // brackets the destination with canaries and asserts they survive, like `test_uncased_safety`.
+        if (norm && sz_utf8_valid(input, (sz_size_t)input_length) == sz_true_k) {
+            with_guarded_buffer_(norm_bound, [&](sz_ptr_t output, std::size_t) {
+                sz_size_t const normalized = norm(input, (sz_size_t)input_length, sz_normal_form_nfkd_k, output);
+                if (normalized > norm_bound) {
+                    std::fprintf(stderr, "Norm of invalid input returned %zu bytes for %zu input bytes (bound %zu)\n",
+                                 (std::size_t)normalized, input_length, norm_bound);
+                    print_utf8_test_bytes_("input", input, input_length);
+                    assert(false && "Normalizer output must stay within the documented bound");
+                }
+            });
+        }
+    };
+
+    char input[max_input_length];
+
+    // The named adversarial shapes the task calls out, exercised directly.
+    check("\x80", 1);              // Lone continuation byte
+    check("\xC0\x80", 2);          // Overlong encoding of NUL
+    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
+    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
+
+    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF.
+    for (std::size_t byte = 0; byte != 256; ++byte) {
+        input[0] = (char)byte;
+        check(input, 1);
+    }
+
+    // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
+    for (std::size_t first_byte = 0; first_byte != 256; ++first_byte)
+        for (std::size_t second_byte = 0; second_byte != 256; ++second_byte) {
+            input[0] = (char)first_byte;
+            input[1] = (char)second_byte;
+            check(input, 2);
+        }
+
+    // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
+    auto &rng = global_random_generator();
+    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
+    std::uniform_int_distribution<int> byte_distribution(0, 255);
+    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
+        std::size_t const input_length = length_distribution(rng);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
+            std::memcpy(buffer, input, input_length);
+            check(buffer, input_length);
+        });
+    }
+}
+
+/** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
+void test_utf8_safety() {
+    std::printf("  - testing malformed-input safety of UTF-8 kernels...\n");
+
+    // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
+                       sz_utf8_norm_serial, sz_utf8_unpack_chunk_serial);
+    check_utf8_safety_(sz_utf8_count, sz_utf8_find_newlines, sz_utf8_find_whitespaces, sz_utf8_norm,
+                       sz_utf8_unpack_chunk);
+
+#if SZ_USE_HASWELL
+    check_utf8_safety_(sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell,
+                       sz_utf8_norm_haswell, SZ_NULL);
+#endif
+#if SZ_USE_SKYLAKE
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
+                       sz_utf8_norm_skylake, SZ_NULL);
+#endif
+#if SZ_USE_ICELAKE
+    check_utf8_safety_(sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake,
+                       sz_utf8_norm_icelake, sz_utf8_unpack_chunk_icelake);
+#endif
+#if SZ_USE_NEON
+    check_utf8_safety_(sz_utf8_count_neon, sz_utf8_find_newlines_neon, sz_utf8_find_whitespaces_neon, sz_utf8_norm_neon,
+                       SZ_NULL);
+#endif
+#if SZ_USE_SVE
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
+                       sz_utf8_norm_sve, SZ_NULL);
+#endif
+#if SZ_USE_SVE2
+    check_utf8_safety_(sz_utf8_count_sve2, sz_utf8_find_newlines_sve2, sz_utf8_find_whitespaces_sve2, sz_utf8_norm_sve2,
+                       SZ_NULL);
+#endif
+#if SZ_USE_V128
+    check_utf8_safety_(sz_utf8_count_v128, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128, sz_utf8_norm_v128,
+                       SZ_NULL);
+#endif
+#if SZ_USE_V128RELAXED
+    // Relaxed-V128 only specializes counting; boundaries and normalization fall back to the V128 kernels.
+    check_utf8_safety_(sz_utf8_count_v128relaxed, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128,
+                       sz_utf8_norm_v128relaxed, SZ_NULL);
+#endif
+#if SZ_USE_RVV
+    check_utf8_safety_(sz_utf8_count_rvv, sz_utf8_find_newlines_rvv, sz_utf8_find_whitespaces_rvv, sz_utf8_norm_rvv,
+                       SZ_NULL);
+#endif
+#if SZ_USE_LASX
+    check_utf8_safety_(sz_utf8_count_lasx, sz_utf8_find_newlines_lasx, sz_utf8_find_whitespaces_lasx, sz_utf8_norm_lasx,
+                       SZ_NULL);
+#endif
+#if SZ_USE_POWERVSX
+    check_utf8_safety_(sz_utf8_count_powervsx, sz_utf8_find_newlines_powervsx, sz_utf8_find_whitespaces_powervsx,
+                       sz_utf8_norm_powervsx, SZ_NULL);
+#endif
+
+    std::printf("    malformed-input safety passed!\n");
+}
+
+#pragma endregion // Safety
+
 #pragma region Drivers
 
 /** @brief Run the UTF-8 count/newline/whitespace differential against every compiled SIMD backend. */
 void test_utf8_all() {
+    using reference_t =
+        utf8_from_sz_<sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial>;
 #if SZ_USE_HASWELL
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_haswell> {},                               //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_haswell> {},             //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_haswell> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell> {});
 #endif
 #if SZ_USE_ICELAKE
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_icelake> {},                               //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_icelake> {},             //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_icelake> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake> {});
 #endif
 #if SZ_USE_NEON
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_neon> {},                                  //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_neon> {},                //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_neon> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_neon, sz_utf8_find_newlines_neon, sz_utf8_find_whitespaces_neon> {});
 #endif
 #if SZ_USE_SVE2
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_sve2> {},                                  //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_sve2> {},                //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_sve2> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_sve2, sz_utf8_find_newlines_sve2, sz_utf8_find_whitespaces_sve2> {});
 #endif
 #if SZ_USE_V128
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_v128> {},                                  //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_v128> {},                //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_v128> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_v128, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128> {});
 #endif
 #if SZ_USE_V128RELAXED
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_v128relaxed> {},                           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_v128relaxed> {},         //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_v128relaxed> {});
+    // The relaxed-V128 backend only specializes counting; boundary finding falls back to the V128 kernels,
+    // which `SZ_USE_V128RELAXED` always pulls in (it forces `SZ_USE_V128`).
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_v128relaxed, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128> {});
 #endif
 #if SZ_USE_RVV
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_rvv> {},                                   //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_rvv> {},                 //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_rvv> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_rvv, sz_utf8_find_newlines_rvv, sz_utf8_find_whitespaces_rvv> {});
 #endif
 #if SZ_USE_LASX
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_lasx> {},                                  //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_lasx> {},                //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_lasx> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_lasx, sz_utf8_find_newlines_lasx, sz_utf8_find_whitespaces_lasx> {});
 #endif
 #if SZ_USE_POWERVSX
-    test_utf8_equivalence(                                                           //
-        utf8_count_from_sz_<sz_utf8_count_serial> {},                                //
-        utf8_count_from_sz_<sz_utf8_count_powervsx> {},                              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_serial> {},              //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_newlines_powervsx> {},            //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_serial> {},           //
-        utf8_find_boundaries_from_sz_<sz_utf8_find_whitespaces_powervsx> {});
+    test_utf8_equivalence(
+        reference_t {},
+        utf8_from_sz_<sz_utf8_count_powervsx, sz_utf8_find_newlines_powervsx, sz_utf8_find_whitespaces_powervsx> {});
 #endif
 }
 
 /** @brief Run the normalization differential fuzz against every compiled SIMD backend. */
 void test_norm_all() {
+    using reference_t = norm_from_sz_<sz_utf8_norm_serial, sz_utf8_norm_violation_serial>;
 #if SZ_USE_HASWELL
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_haswell> {},                        //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_haswell> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_haswell, sz_utf8_norm_violation_haswell> {});
 #endif
 #if SZ_USE_SKYLAKE
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_skylake> {},                        //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_skylake> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_skylake, sz_utf8_norm_violation_skylake> {});
 #endif
 #if SZ_USE_ICELAKE
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_icelake> {},                        //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_icelake> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_icelake, sz_utf8_norm_violation_icelake> {});
 #endif
 #if SZ_USE_NEON
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_neon> {},                           //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_neon> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_neon, sz_utf8_norm_violation_neon> {});
 #endif
 #if SZ_USE_SVE
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_sve> {},                            //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_sve> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve, sz_utf8_norm_violation_sve> {});
 #endif
 #if SZ_USE_SVE2
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_sve2> {},                           //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_sve2> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve2, sz_utf8_norm_violation_sve2> {});
 #endif
 #if SZ_USE_RVV
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_rvv> {},                            //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_rvv> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_rvv, sz_utf8_norm_violation_rvv> {});
 #endif
 #if SZ_USE_V128
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_v128> {},                           //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_v128> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_v128, sz_utf8_norm_violation_v128> {});
 #endif
 #if SZ_USE_V128RELAXED
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_v128relaxed> {},                    //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_v128relaxed> {});
+    test_norm_equivalence(reference_t {},
+                          norm_from_sz_<sz_utf8_norm_v128relaxed, sz_utf8_norm_violation_v128relaxed> {});
 #endif
 #if SZ_USE_LASX
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_lasx> {},                           //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_lasx> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_lasx, sz_utf8_norm_violation_lasx> {});
 #endif
 #if SZ_USE_POWERVSX
-    test_norm_equivalence(                                                  //
-        utf8_norm_from_sz_<sz_utf8_norm_serial> {},                         //
-        utf8_norm_from_sz_<sz_utf8_norm_powervsx> {},                       //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_serial> {},     //
-        utf8_norm_violation_from_sz_<sz_utf8_norm_violation_powervsx> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_powervsx, sz_utf8_norm_violation_powervsx> {});
 #endif
 }
 

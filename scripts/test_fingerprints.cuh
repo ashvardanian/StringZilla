@@ -4,6 +4,7 @@
  *
  *  @file scripts/test_fingerprints.cuh
  *  @author Ash Vardanian
+ *  @date June 16, 2026
  */
 #include <cstring> // `std::memcmp`
 #include <thread>  // `std::thread::hardware_concurrency`
@@ -45,8 +46,11 @@ namespace fu = fork_union;
 using namespace stringzilla;
 using namespace stringzilla::scripts;
 
+#pragma region Helpers
+
+/** @brief Verifies that rolling and from-scratch slice digests agree for one hasher across `strs`. */
 template <typename hasher_type_>
-void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &strs) {
+static void check_rolling_hasher_unit_(hasher_type_ &&hasher, std::vector<std::string> const &strs) {
 
     using hasher_t = typename std::decay<hasher_type_>::type;
     using state_t = typename hasher_t::state_t;
@@ -84,9 +88,10 @@ void check_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const 
     }
 }
 
+/** @brief Verifies a hasher's rolling and slice digests agree with each other and with a baseline hasher. */
 template <typename hasher_type_, typename baseline_hasher_type_>
-void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline_hasher,
-                          std::vector<std::string> const &strs) {
+static void check_rolling_hasher_unit_(hasher_type_ &&hasher, baseline_hasher_type_ &&baseline_hasher,
+                                       std::vector<std::string> const &strs) {
 
     using hasher_t = typename std::decay<hasher_type_>::type;
     using state_t = typename hasher_t::state_t;
@@ -146,6 +151,7 @@ void check_rolling_hasher(hasher_type_ &&hasher, baseline_hasher_type_ &&baselin
     }
 }
 
+/** @brief Hand-picked short, repetitive, Unicode, and long inputs for the rolling-hasher unit checks. */
 std::vector<std::string> rolling_hasher_basic_inputs() {
     std::vector<std::string> strings;
 
@@ -189,6 +195,7 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     return strings;
 }
 
+/** @brief Random `ACGT` strings to exercise the rolling hashers on DNA-like alphabets. */
 std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
@@ -202,6 +209,7 @@ std::vector<std::string> rolling_hasher_dna_like_inputs(std::size_t max_len = 4 
     return strings;
 }
 
+/** @brief Random strings built from adversarial edge bytes (`0x00`, `0x01`, `0x7F`, `0xFF`). */
 std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len = 4 * 1024) {
     std::vector<std::string> strings;
 
@@ -217,7 +225,18 @@ std::vector<std::string> rolling_hasher_inconvenient_inputs(std::size_t max_len 
     return strings;
 }
 
-void test_rolling_hasher() {
+#pragma endregion // Helpers
+
+#pragma region Unit
+
+/**
+ *  @brief Unit-checks every fingerprinting rolling-hasher family: that its rolling digest equals a
+ *         from-scratch slice digest at every window position, and (for Rabin-Karp) matches an integer baseline.
+ *
+ *  Exercises Rabin-Karp, multiplying, BuzHash, and floating hashers across a ladder of window
+ *  widths - including super-wide windows - over hand-picked, DNA-like, and edge-byte inputs.
+ */
+void test_fingerprints_unit() {
 
     // Some very basic variants:
     auto unit_strings = rolling_hasher_basic_inputs();
@@ -234,17 +253,17 @@ void test_rolling_hasher() {
     using f32u32_hasher_t = floating_rolling_hasher<float>;
     using f64u64_hasher_t = floating_rolling_hasher<f64_t>;
 
-    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), unit_strings);
-    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), dna_like_strings);
-    check_rolling_hasher(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), inconvenient_strings);
+    check_rolling_hasher_unit_(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), unit_strings);
+    check_rolling_hasher_unit_(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), dna_like_strings);
+    check_rolling_hasher_unit_(f64u64_hasher_t(4, 257, 65521), u32u64_hasher_t(4, 257, 65521), inconvenient_strings);
 
     std::vector<u16u32_hasher_t> u16u32_hashers;
     u16u32_hashers.emplace_back(3, 31, 65521);
     u16u32_hashers.emplace_back(5, 31, 65521);
     u16u32_hashers.emplace_back(7, 31, 65521);
     for (auto hasher : u16u32_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<u32u64_hasher_t> u32u64_hashers;
     u32u64_hashers.emplace_back(3, 31, 65521);
@@ -252,8 +271,8 @@ void test_rolling_hasher() {
     u32u64_hashers.emplace_back(4, 257, SZ_U32_MAX_PRIME);
     u32u64_hashers.emplace_back(7, 257, SZ_U32_MAX_PRIME);
     for (auto hasher : u32u64_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<u32mul_hasher_t> u32mul_hashers;
     u32mul_hashers.emplace_back(3);
@@ -265,8 +284,8 @@ void test_rolling_hasher() {
     u32mul_hashers.emplace_back(4, 257);
     u32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : u32mul_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<i32mul_hasher_t> i32mul_hashers;
     i32mul_hashers.emplace_back(3);
@@ -278,8 +297,8 @@ void test_rolling_hasher() {
     i32mul_hashers.emplace_back(4, 257);
     i32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : i32mul_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<u64mul_hasher_t> u64mul_hashers;
     u64mul_hashers.emplace_back(3, 31);
@@ -292,8 +311,8 @@ void test_rolling_hasher() {
     u64mul_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64mul_hashers.emplace_back(32, 257);
     for (auto hasher : u64mul_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<u32buz_hasher_t> u32buz_hashers;
     u32buz_hashers.emplace_back(3);
@@ -305,8 +324,8 @@ void test_rolling_hasher() {
     u32buz_hashers.emplace_back(4, 257);
     u32buz_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
     for (auto hasher : u32buz_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<u64buz_hasher_t> u64buz_hashers;
     u64buz_hashers.emplace_back(3, 31);
@@ -319,8 +338,8 @@ void test_rolling_hasher() {
     u64buz_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64buz_hashers.emplace_back(32, 257);
     for (auto hasher : u64buz_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<f32u32_hasher_t> f32u32_hashers;
     f32u32_hashers.emplace_back(3, 31);
@@ -337,8 +356,8 @@ void test_rolling_hasher() {
     f32u32_hashers.emplace_back(1000);  // Super-wide window
     f32u32_hashers.emplace_back(30000); // Super-wide window
     for (auto hasher : f32u32_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 
     std::vector<f64u64_hasher_t> f64u64_hashers;
     f64u64_hashers.emplace_back(3, 31);
@@ -355,10 +374,15 @@ void test_rolling_hasher() {
     f64u64_hashers.emplace_back(1000);  // Super-wide window
     f64u64_hashers.emplace_back(30000); // Super-wide window
     for (auto hasher : f64u64_hashers)
-        check_rolling_hasher(hasher, unit_strings), check_rolling_hasher(hasher, dna_like_strings),
-            check_rolling_hasher(hasher, inconvenient_strings);
+        check_rolling_hasher_unit_(hasher, unit_strings), check_rolling_hasher_unit_(hasher, dna_like_strings),
+            check_rolling_hasher_unit_(hasher, inconvenient_strings);
 }
 
+#pragma endregion // Unit
+
+#pragma region Equivalence
+
+/** @brief Asserts a baseline and an accelerated min-hash fingerprinter produce identical hashes and counts. */
 template <std::size_t dims_, typename texts_type_, typename baseline_hasher_type_, typename accelerated_hasher_type_>
 void test_rolling_hashers_equivalence_against_baseline( //
     texts_type_ const &texts, baseline_hasher_type_ &baseline_hasher, accelerated_hasher_type_ &accelerated_hasher) {
@@ -435,10 +459,7 @@ void test_rolling_hashers_equivalence_against_baseline( //
     }
 }
 
-/**
- *  Compares the equivalence of SIMD backends to @b `floating_rolling_hashers<sz_cap_serial_k>`
- *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<f64_t>, ..., u32_t>`.
- */
+/** @brief Compares every compiled SIMD/CUDA `floating_rolling_hashers` backend to the serial and scalar baselines. */
 template <std::size_t window_width_, std::size_t dims_>
 void test_rolling_hashers_equivalence_for_width(      //
     std::vector<std::string> const &unit_strings,     //
@@ -488,11 +509,15 @@ void test_rolling_hashers_equivalence_for_width(      //
 #endif
 }
 
-void test_rolling_hashers_equivalence() {
+/**
+ *  @brief Verifies the AoS scalar, SoA serial, and every SoA SIMD/CUDA min-hash fingerprinter agree, across
+ *         a ladder of window widths and dimensionalities, over hand-picked, DNA-like, and edge-byte inputs.
+ */
+void test_fingerprints_equivalence() {
     // AoS-vs-SoA agreement is deterministic per character, so a few KB per string already exercises every
     // window width tested here (<= 64) across the unrolled paths. Generate the fuzz inputs once with a small
-    // cap and reuse them across all widths - the 100 KB strings are reserved for `test_rolling_hasher`, which
-    // needs them for its super-wide windows.
+    // cap and reuse them across all widths - the 100 KB strings are reserved for `test_fingerprints_unit`,
+    // which needs them for its super-wide windows.
     auto const unit = rolling_hasher_basic_inputs();
     auto const dna = rolling_hasher_dna_like_inputs(4 * 1024);
     auto const bad = rolling_hasher_inconvenient_inputs(4 * 1024);
@@ -513,6 +538,96 @@ void test_rolling_hashers_equivalence() {
     test_rolling_hashers_equivalence_for_width<12, 32>(unit, dna, bad);
     test_rolling_hashers_equivalence_for_width<16, 32>(unit, dna, bad);
 }
+
+#pragma endregion // Equivalence
+
+#pragma region Safety
+
+/** @brief Builds degenerate and adversarial strings: empty, single byte, all-identical runs, and edge bytes. */
+static std::vector<std::string> rolling_hasher_degenerate_inputs() {
+    std::vector<std::string> strings;
+    std::size_t const run_length = scale_iterations(64);
+
+    strings.emplace_back("");                                // Empty string
+    strings.emplace_back(1, 'a');                            // Single byte
+    strings.emplace_back(1, '\x00');                         // Single NUL byte
+    strings.emplace_back(1, '\xff');                         // Single high byte
+    strings.emplace_back(run_length, 'a');                   // All-identical printable bytes
+    strings.emplace_back(run_length, '\x00');                // All-identical NUL bytes
+    strings.emplace_back(run_length, '\xff');                // All-identical high bytes
+    strings.emplace_back("\x00\xff\x00\xff\x00\xff", 6);     // Alternating edge bytes
+    strings.emplace_back("a");                               // Shorter than any tested window
+    strings.emplace_back("ab");                              // Shorter than any tested window
+    return strings;
+}
+
+/**
+ *  @brief Adversarial invalid-input safety driver for fingerprinting across every compiled backend.
+ *
+ *  Mirrors `test_memory_safety()` / `test_uncased_safety()`: a no-arg registered driver that owns the
+ *  per-backend ladder internally. Feeds degenerate inputs - empty, single byte, all-identical runs, edge
+ *  bytes, and windows wider than the string - to the scalar rolling hashers (which must not crash and whose
+ *  rolling digest must match the from-scratch slice digest, enforced by `check_rolling_hasher_unit_`) and to
+ *  each SoA SIMD/CUDA min-hash fingerprinter, whose seed and fingerprint calls must succeed and produce a
+ *  zero count whenever the input is shorter than the window.
+ */
+void test_fingerprints_safety() {
+
+    std::vector<std::string> const degenerate = rolling_hasher_degenerate_inputs();
+
+    // Scalar rolling hashers: windows both narrower and far wider than the longest degenerate input.
+    using u32u64_hasher_t = rabin_karp_rolling_hasher<u32_t, u64_t>;
+    using u32mul_hasher_t = multiplying_rolling_hasher<u32_t>;
+    using u32buz_hasher_t = buz_rolling_hasher<u32_t>;
+    using f64u64_hasher_t = floating_rolling_hasher<f64_t>;
+    for (std::size_t window_width : {std::size_t {2}, std::size_t {4}, std::size_t {1000}}) {
+        check_rolling_hasher_unit_(u32u64_hasher_t(window_width, 257, SZ_U32_MAX_PRIME), degenerate);
+        check_rolling_hasher_unit_(u32mul_hasher_t(window_width, 257), degenerate);
+        check_rolling_hasher_unit_(u32buz_hasher_t(window_width, 257), degenerate);
+        check_rolling_hasher_unit_(f64u64_hasher_t(window_width, 257), degenerate);
+    }
+
+    // SoA min-hash fingerprinters: a window wider than every degenerate input forces the zero-count path.
+    constexpr std::size_t dims_k = 32;
+    constexpr std::size_t window_width_k = 7;
+    using min_hashes_t = safe_array<u32_t, dims_k>;
+    using min_counts_t = safe_array<u32_t, dims_k>;
+
+    auto check_fingerprinter = [&](auto &fingerprinter) {
+        for (std::string const &text : degenerate) {
+            min_hashes_t hashes;
+            min_counts_t counts;
+            byte_t const *bytes = reinterpret_cast<byte_t const *>(text.data());
+            span<byte_t const> const text_span(bytes, text.size());
+            sz_assert_(fingerprinter.try_fingerprint(text_span, hashes, counts) == status_t::success_k);
+            // A degenerate input shorter than the window must yield zero counts on every dimension.
+            for (std::size_t dimension = 0; dimension < dims_k; ++dimension)
+                if (text.size() < fingerprinter.window_width(dimension)) sz_assert_(counts[dimension] == 0);
+        }
+    };
+
+    floating_rolling_hashers<sz_cap_serial_k, dims_k> rolling_serial;
+    sz_assert_(rolling_serial.try_seed(window_width_k) == status_t::success_k);
+    check_fingerprinter(rolling_serial);
+
+#if SZ_USE_HASWELL
+    floating_rolling_hashers<sz_cap_haswell_k, dims_k> rolling_haswell;
+    sz_assert_(rolling_haswell.try_seed(window_width_k) == status_t::success_k);
+    check_fingerprinter(rolling_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    floating_rolling_hashers<sz_cap_skylake_k, dims_k> rolling_skylake;
+    sz_assert_(rolling_skylake.try_seed(window_width_k) == status_t::success_k);
+    check_fingerprinter(rolling_skylake);
+#endif
+#if SZ_USE_CUDA
+    floating_rolling_hashers<sz_cap_cuda_k, dims_k> rolling_cuda;
+    sz_assert_(rolling_cuda.try_seed(window_width_k) == status_t::success_k);
+    check_fingerprinter(rolling_cuda);
+#endif
+}
+
+#pragma endregion // Safety
 
 } // namespace scripts
 } // namespace stringzilla

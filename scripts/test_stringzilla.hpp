@@ -2,7 +2,7 @@
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
  *  @file   scripts/test_stringzilla.hpp
  *  @author Ash Vardanian
- *  @date   2026-06-16
+ *  @date June 16, 2026
  *
  *  @section Environment Variables
  *
@@ -40,7 +40,9 @@
  *  @endcode
  */
 #pragma once
+#include <cassert> // `assert` used directly by `with_guarded_buffer_`
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
+#include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::printf`, `std::fflush`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::strcmp`
@@ -222,6 +224,42 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
         std::size_t slice_length = slice_length_distribution(global_random_generator());
         slice_callback({text.data() + text.size() - remaining, slice_length});
         remaining -= slice_length;
+    }
+}
+
+/**
+ *  @brief Invokes @p body with a writable buffer placed at each of a representative spread of
+ *         sub-cache-line byte offsets, so SIMD kernels are exercised at every alignment.
+ *  @param usable_length Minimum number of writable bytes guaranteed past the passed pointer.
+ *  @param body Callable as `body(sz_ptr_t pointer, std::size_t offset)`; the buffer is zero-filled per offset.
+ */
+template <typename body_type_>
+inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) noexcept {
+    static constexpr std::size_t offsets[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 48, 63};
+    for (std::size_t offset : offsets) {
+        std::vector<char> storage(usable_length + 2 * SZ_CACHE_LINE_WIDTH + 1, '\0');
+        char *pointer = storage.data();
+        while (reinterpret_cast<std::uintptr_t>(pointer) % SZ_CACHE_LINE_WIDTH != offset) ++pointer;
+        body(reinterpret_cast<sz_ptr_t>(pointer), offset);
+    }
+}
+
+/**
+ *  @brief Runs @p body on a @p length -byte writable buffer flanked by canary bytes on both sides, then
+ *         asserts the guards are intact - catching out-of-bounds writes from a kernel under adversarial input.
+ *  @param length Number of usable bytes handed to @p body.
+ *  @param body Callable as `body(sz_ptr_t pointer, std::size_t length)`; the buffer is canary-filled per call.
+ */
+template <typename body_type_>
+inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept {
+    static constexpr std::size_t guard_width = 64;
+    static constexpr unsigned char canary_value = 0xA5;
+    std::vector<unsigned char> storage(length + 2 * guard_width, canary_value);
+    unsigned char *usable = storage.data() + guard_width;
+    body(reinterpret_cast<sz_ptr_t>(usable), length);
+    for (std::size_t index = 0; index != guard_width; ++index) {
+        assert(storage[index] == canary_value && "front canary overwritten");
+        assert(storage[guard_width + length + index] == canary_value && "back canary overwritten");
     }
 }
 
@@ -501,6 +539,7 @@ void test_hash_multiseed_all();
 
 void test_utf8_unit();
 void test_utf8_all();
+void test_utf8_safety();
 void test_utf8_words_unit();
 void test_utf8_ligature_unit();
 void test_norm_unit();
@@ -512,6 +551,7 @@ void test_norm_all();
 
 void test_uncased_unit();
 void test_uncased_all();
+void test_uncased_safety();
 
 #pragma endregion // Uncased UTF-8
 
@@ -522,6 +562,8 @@ void test_ascii_unit();
 
 void test_memory_unit(std::size_t max_l2_size = 1024ull * 1024ull);
 void test_memory_large_unit();
+void test_memory_all();
+void test_memory_safety();
 
 template <typename string_type>
 void test_stl_reads_unit();
@@ -546,6 +588,7 @@ void test_string_updates_unit(std::size_t repetitions = 1024);
 
 void test_compare_unit();
 void test_find_unit();
+void test_find_all();
 void test_find_misaligned_fuzz();
 void test_lookup_fuzz(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
 

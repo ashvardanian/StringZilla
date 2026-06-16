@@ -2,7 +2,7 @@
  *  @brief  Uncased UTF-8 case-folding equivalence/fuzzing and uncased substring search tests.
  *  @file   scripts/test_uncased.cpp
  *  @author Ash Vardanian
- *  @date   2026-06-16
+ *  @date June 16, 2026
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -46,23 +46,23 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert>       // C-style assertions
+#include <cassert> // C-style assertions
+#include <cstdio>  // `std::printf`
+#include <cstring> // `std::memcpy`
+
 #include <algorithm>     // `std::transform`
-#include <cstdio>        // `std::printf`
-#include <cstring>       // `std::memcpy`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
+#include <set>           // `std::set`
 #include <sstream>       // `std::ostringstream`
+#include <string>        // Baseline
+#include <string_view>   // Baseline
 #include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
-#include <set>           // `std::set`
 #include <vector>        // `std::vector`
-
-#include <string>      // Baseline
-#include <string_view> // Baseline
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -130,8 +130,13 @@ static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
     std::size_t needle_folded_count = 0;
     for (char const *cursor = needle, *end = needle + needle_length; cursor < end;) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(cursor, end, &rune, &rune_length);
+        sz_rune_length_t rune_length = sz_rune_parse(cursor, end, &rune);
+        if (rune_length == sz_utf8_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
+            assert(needle_folded_count < 128 && "reference needle buffer overflow");
+            needle_folded[needle_folded_count++] = (sz_u8_t)*cursor;
+            ++cursor;
+            continue;
+        }
         sz_rune_t folded[3];
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
         for (sz_size_t index = 0; index < folded_count; ++index) {
@@ -150,8 +155,16 @@ static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
     std::size_t haystack_folded_count = 0;
     for (char const *cursor = haystack, *end = haystack + haystack_length; cursor < end;) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(cursor, end, &rune, &rune_length);
+        sz_rune_length_t rune_length = sz_rune_parse(cursor, end, &rune);
+        if (rune_length == sz_utf8_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
+            assert(haystack_folded_count < 512 && "reference haystack buffer overflow");
+            haystack_folded[haystack_folded_count] = (sz_u8_t)*cursor;
+            source_begin[haystack_folded_count] = cursor;
+            source_end[haystack_folded_count] = cursor + 1;
+            ++haystack_folded_count;
+            ++cursor;
+            continue;
+        }
         sz_rune_t folded[3];
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
         for (sz_size_t index = 0; index < folded_count; ++index) {
@@ -866,6 +879,34 @@ static void run_uncased_find_battery_(sz_utf8_uncased_find_t find_simd) {
     test_uncased_find_tails_fuzz(find_serial, find_simd);
     test_uncased_find_crossing_fuzz(find_serial, find_simd);
     test_uncased_find_long_crossing_fuzz(find_serial, find_simd);
+
+    // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives the
+    // pure Rabin-Karp path inside a large random haystack, both where the needle was spliced in (so a
+    // match exists) and where it was not (so the not-found path is exercised at scale).
+    std::printf("  - testing uncased find with a long Rabin-Karp ASCII needle in a large haystack...\n");
+    auto &random_generator = global_random_generator();
+    std::uniform_int_distribution<int> letter_distribution(0, 25);
+    // The independent reference oracle caps its folded haystack at 512 runes, so keep the haystack under
+    // that while the 48-rune needle (well past the 32-rune ring buffer) still drives the Rabin-Karp path.
+    std::string needle, haystack;
+    needle.reserve(48);
+    haystack.reserve(400);
+    for (std::size_t length = 0; length != 48; ++length)
+        needle.push_back((char)('A' + letter_distribution(random_generator)));
+    haystack.clear();
+    for (std::size_t length = 0; length != 400; ++length)
+        haystack.push_back((char)('a' + letter_distribution(random_generator)));
+
+    // The lowercase haystack cannot contain the uppercase needle by chance, so this is the not-found case.
+    check_uncased_find_three_way_(find_serial, find_simd, haystack.data(), haystack.size(), needle.data(),
+                                  needle.size(), "long ascii needle, not found");
+
+    // Splice the needle near the middle of the haystack so the match exists.
+    std::string spliced_haystack = haystack;
+    std::size_t const splice_offset = spliced_haystack.size() / 2;
+    spliced_haystack.replace(splice_offset, needle.size(), needle);
+    check_uncased_find_three_way_(find_serial, find_simd, spliced_haystack.data(), spliced_haystack.size(),
+                                  needle.data(), needle.size(), "long ascii needle, with match");
 }
 
 #pragma endregion // Helpers
@@ -2095,6 +2136,19 @@ void test_uncased_invariant_reference() {
 
 #pragma region Safety
 
+/** @brief Wraps the uncased fold/find/violation kernels of one backend by their pointers. */
+template <sz_utf8_uncased_fold_t fold_, sz_utf8_uncased_find_t find_, sz_utf8_uncased_violation_t violation_>
+struct uncased_from_sz_ {
+    sz_size_t fold(sz_cptr_t text, sz_size_t length, sz_ptr_t output) const noexcept {
+        return fold_(text, length, output);
+    }
+    sz_cptr_t find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
+                   sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) const noexcept {
+        return find_(haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+    }
+    sz_cptr_t violation(sz_cptr_t text, sz_size_t length) const noexcept { return violation_(text, length); }
+};
+
 /**
  *  @brief Smoke test feeding invalid UTF-8 into the case kernels of one backend.
  *
@@ -2107,49 +2161,35 @@ void test_uncased_invariant_reference() {
  *  all 65,536 byte pairs, and random garbage buffers of 1..70 bytes through fold, find (with a
  *  short valid needle), and the case-invariant check.
  */
-void test_uncased_safety(sz_utf8_uncased_fold_t fold, sz_utf8_uncased_find_t find,
-                         sz_utf8_uncased_violation_t invariant, std::size_t random_inputs = scale_iterations(10000)) {
+template <typename candidate_>
+static void check_uncased_safety_(candidate_ candidate, std::size_t random_inputs = scale_iterations(10000)) {
 
     std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
 
     std::size_t const max_input_length = 70;
-    std::size_t const guard_length = 64;
-    char const canary = (char)0xA5;
-    std::vector<char> destination(guard_length + max_input_length * 3 + guard_length);
     char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
 
     auto check = [&](char const *input, std::size_t input_length) {
-        std::fill(destination.begin(), destination.end(), canary);
-        sz_size_t folded_length = fold(input, input_length, destination.data() + guard_length);
         // The documented bound is 3x for valid UTF-8; invalid input may add one mis-decoded
         // trailing rune of up to 4 bytes on top of it
         std::size_t const output_bound = input_length * 3 + 4;
-        if (folded_length > output_bound) {
-            std::fprintf(stderr, "Fold of invalid input returned %zu bytes for %zu input bytes (bound is 3x + 4)\n",
-                         (std::size_t)folded_length, input_length);
-            print_uncased_test_bytes_("input", input, input_length);
-            assert(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
-        }
-        // Every destination byte outside that window, in front of the buffer or behind it,
-        // must keep its canary value
-        for (std::size_t i = 0; i < guard_length; ++i) {
-            if (destination[i] == canary) continue;
-            std::fprintf(stderr, "Fold of invalid input smashed the front canary at byte %zu\n", i);
-            print_uncased_test_bytes_("input", input, input_length);
-            assert(false && "Fold must not write in front of the destination buffer");
-        }
-        for (std::size_t i = guard_length + output_bound; i < destination.size(); ++i) {
-            if (destination[i] == canary) continue;
-            std::fprintf(stderr, "Fold of invalid input smashed the back canary at byte %zu for %zu input bytes\n", //
-                         i - guard_length, input_length);
-            print_uncased_test_bytes_("input", input, input_length);
-            assert(false && "Fold must not write beyond 3x the input length plus one mis-decoded rune");
-        }
+        // A canary-guarded fold output buffer catches any write past the documented bound; the helper
+        // asserts the flanking guards survive the call.
+        with_guarded_buffer_(output_bound, [&](sz_ptr_t output, std::size_t length) {
+            sz_size_t folded_length = candidate.fold(input, input_length, output);
+            if (folded_length > length) {
+                std::fprintf(stderr, "Fold of invalid input returned %zu bytes for %zu input bytes (bound is 3x + 4)\n",
+                             (std::size_t)folded_length, input_length);
+                print_uncased_test_bytes_("input", input, input_length);
+                assert(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
+            }
+        });
         // The classifier and the finder return arbitrary verdicts on garbage - they just must survive
-        [[maybe_unused]] sz_cptr_t const violation = invariant(input, input_length);
-        sz_utf8_uncased_needle_metadata_t metadata = {};
+        [[maybe_unused]] sz_cptr_t const violation = candidate.violation(input, input_length);
+        sz_utf8_uncased_needle_metadata_t needle_metadata = {};
         sz_size_t matched_length = 0;
-        [[maybe_unused]] sz_cptr_t const match = find(input, input_length, needle, 2, &metadata, &matched_length);
+        [[maybe_unused]] sz_cptr_t const match = candidate.find(input, input_length, needle, 2, &needle_metadata,
+                                                                &matched_length);
     };
 
     char input[max_input_length];
@@ -2174,7 +2214,7 @@ void test_uncased_safety(sz_utf8_uncased_fold_t fold, sz_utf8_uncased_find_t fin
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration < random_inputs; ++iteration) {
         std::size_t input_length = length_distribution(rng);
-        for (std::size_t i = 0; i < input_length; ++i) input[i] = (char)byte_distribution(rng);
+        for (std::size_t index = 0; index < input_length; ++index) input[index] = (char)byte_distribution(rng);
         check(input, input_length);
     }
 
@@ -2182,18 +2222,43 @@ void test_uncased_safety(sz_utf8_uncased_fold_t fold, sz_utf8_uncased_find_t fin
                 256 + 65536 + random_inputs, random_inputs);
 }
 
+/**
+ *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
+ *
+ *  Mirrors `test_memory_safety()` / `test_utf8_safety()`: the registered no-arg driver owns the per-ISA
+ *  ladder while the file-local `check_uncased_safety_` checker runs the actual probes. The serial backend
+ *  faces the same invalid-input contract as the SIMD ones, then one `#if SZ_USE_*` block per ISA.
+ */
+void test_uncased_safety() {
+
+    check_uncased_safety_(uncased_from_sz_<sz_utf8_uncased_fold_serial, sz_utf8_uncased_find_serial,
+                                           sz_utf8_uncased_violation_serial> {});
+#if SZ_USE_HASWELL
+    check_uncased_safety_(uncased_from_sz_<sz_utf8_uncased_fold_haswell, sz_utf8_uncased_find_haswell,
+                                           sz_utf8_uncased_violation_haswell> {});
+#endif
+#if SZ_USE_ICELAKE
+    check_uncased_safety_(uncased_from_sz_<sz_utf8_uncased_fold_icelake, sz_utf8_uncased_find_icelake,
+                                           sz_utf8_uncased_violation_icelake> {});
+#endif
+#if SZ_USE_NEON
+    check_uncased_safety_(
+        uncased_from_sz_<sz_utf8_uncased_fold_neon, sz_utf8_uncased_find_neon, sz_utf8_uncased_violation_neon> {});
+#endif
+}
+
 #pragma endregion // Safety
 
 #pragma region Drivers
 
 /**
- *  @brief Drives the serial-vs-SIMD uncased fold/find differentials, the structured adversarial find
- *         enumerators, and the invalid-input safety probes across every backend compiled on this target.
+ *  @brief Drives the serial-vs-SIMD uncased fold/find differentials and the structured adversarial find
+ *         enumerators across every backend compiled on this target.
  *
  *  Mirrors the per-ISA ladder of the legacy `test_equivalence`: the backend-independent fold-table
- *  closure and the serial safety probe always run, then each `#if SZ_USE_*` block exercises that ISA's
- *  fold equivalence (serial = reference, ISA = candidate), its full find battery, and - where the
- *  legacy ladder ran one - its safety probe.
+ *  closure always runs, then each `#if SZ_USE_*` block exercises that ISA's fold equivalence
+ *  (serial = reference, ISA = candidate) and its full find battery. The invalid-input safety probes
+ *  live in their own registered driver, `test_uncased_safety`.
  */
 void test_uncased_all() {
 
@@ -2202,26 +2267,21 @@ void test_uncased_all() {
 
     // Backend-independent: the fold table and the case-invariant classifier must stay closed
     test_uncased_invariant_reference();
-    // The serial backend faces the same invalid-input contract as the SIMD ones
-    test_uncased_safety(sz_utf8_uncased_fold_serial, sz_utf8_uncased_find_serial, sz_utf8_uncased_violation_serial);
 
 #if SZ_USE_HASWELL
     test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_haswell> {}, 4000,
                           scale_iterations(10000));
     run_uncased_find_battery_(sz_utf8_uncased_find_haswell);
-    test_uncased_safety(sz_utf8_uncased_fold_haswell, sz_utf8_uncased_find_haswell, sz_utf8_uncased_violation_haswell);
 #endif
 #if SZ_USE_ICELAKE
     test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_icelake> {}, 4000,
                           scale_iterations(10000));
     run_uncased_find_battery_(sz_utf8_uncased_find_icelake);
-    test_uncased_safety(sz_utf8_uncased_fold_icelake, sz_utf8_uncased_find_icelake, sz_utf8_uncased_violation_icelake);
 #endif
 #if SZ_USE_NEON
     test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_neon> {}, 4000,
                           scale_iterations(10000));
     run_uncased_find_battery_(sz_utf8_uncased_find_neon);
-    test_uncased_safety(sz_utf8_uncased_fold_neon, sz_utf8_uncased_find_neon, sz_utf8_uncased_violation_neon);
 #endif
 #if SZ_USE_V128
     test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_v128> {}, 4000,

@@ -4,6 +4,7 @@
  *
  *  @file scripts/test_stringzillas.cpp
  *  @author Ash Vardanian
+ *  @date June 16, 2026
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -44,10 +45,17 @@ int main(int argc, char const **argv) {
     print_test_environment();
 
     int failures = 0;
-    failures += run_test("test_rolling_hashers_equivalence", test_rolling_hashers_equivalence);
-    failures += run_test("test_rolling_hasher", test_rolling_hasher);
-    failures += run_test("test_similarity_scores_equivalence", test_similarity_scores_equivalence);
-    failures += run_test("test_similarity_scores_memory_usage", test_similarity_scores_memory_usage);
+
+    std::printf("\n=== Fingerprints ===\n");
+    failures += run_test("test_fingerprints_unit", test_fingerprints_unit);
+    failures += run_test("test_fingerprints_equivalence", test_fingerprints_equivalence);
+    failures += run_test("test_fingerprints_safety", test_fingerprints_safety);
+
+    std::printf("\n=== Similarities ===\n");
+    failures += run_test("test_similarities_unit", test_similarities_unit);
+    failures += run_test("test_similarities_equivalence", test_similarities_equivalence);
+    failures += run_test("test_similarities_safety", test_similarities_safety);
+    failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%d test(s) failed.\n", failures);

@@ -2,7 +2,7 @@
  *  @brief  Test entry point and template instantiations; registers every per-domain unit and driver.
  *  @file   scripts/test_stringzilla.cpp
  *  @author Ash Vardanian
- *  @date   2026-06-16
+ *  @date June 16, 2026
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -46,23 +46,23 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert>       // C-style assertions
+#include <cassert> // C-style assertions
+#include <cstdio>  // `std::printf`
+#include <cstring> // `std::memcpy`
+
 #include <algorithm>     // `std::transform`
-#include <cstdio>        // `std::printf`
-#include <cstring>       // `std::memcpy`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
+#include <set>           // `std::set`
 #include <sstream>       // `std::ostringstream`
+#include <string>        // `std::string` baseline
+#include <string_view>   // `std::string_view` baseline
 #include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
-#include <set>           // `std::set`
 #include <vector>        // `std::vector`
-
-#include <string>      // Baseline
-#include <string_view> // Baseline
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -148,6 +148,8 @@ int main(int argc, char const **argv) {
     failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);
     failures += run_test("test_memory_unit", [] { test_memory_unit(); }); // ! Defaulted arg
     failures += run_test("test_memory_large_unit", test_memory_large_unit);
+    failures += run_test("test_memory_all", test_memory_all);
+    failures += run_test("test_memory_safety", test_memory_safety);
 
     std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
@@ -175,6 +177,7 @@ int main(int argc, char const **argv) {
     std::printf("\n=== Search and Comparison ===\n");
     failures += run_test("test_compare_unit", test_compare_unit);
     failures += run_test("test_find_unit", test_find_unit);
+    failures += run_test("test_find_all", test_find_all);
     failures += run_test("test_lookup_fuzz", [] { test_lookup_fuzz(); }); // ! Defaulted args
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.
@@ -185,6 +188,7 @@ int main(int argc, char const **argv) {
     std::printf("\n=== UTF-8 ===\n");
     failures += run_test("test_utf8_unit", test_utf8_unit);
     failures += run_test("test_utf8_all", test_utf8_all);
+    failures += run_test("test_utf8_safety", test_utf8_safety);
     failures += run_test("test_utf8_words_unit", test_utf8_words_unit);
     failures += run_test("test_utf8_ligature_unit", test_utf8_ligature_unit);
     failures += run_test("test_norm_unit", test_norm_unit);
@@ -193,6 +197,7 @@ int main(int argc, char const **argv) {
     std::printf("\n=== Uncased UTF-8 ===\n");
     failures += run_test("test_uncased_unit", test_uncased_unit);
     failures += run_test("test_uncased_all", test_uncased_all);
+    failures += run_test("test_uncased_safety", test_uncased_safety);
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%d test(s) failed.\n", failures);

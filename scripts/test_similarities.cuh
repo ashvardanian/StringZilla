@@ -4,6 +4,7 @@
  *
  *  @file scripts/test_similarities.cuh
  *  @author Ash Vardanian
+ *  @date June 16, 2026
  */
 #include "stringzillas/similarities.hpp"
 
@@ -41,10 +42,9 @@ using ashvardanian::stringzillas::gpu_specs_fetch;
 using ashvardanian::stringzillas::ualloc_t;
 #endif
 
-/**
- *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
- */
+#pragma region Helpers
+
+/** @brief Dual-row O(n)-memory reference Levenshtein distance, keeping only the previous and current rows. */
 inline std::size_t levenshtein_baseline(                                //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
     error_cost_t match_cost = 0, error_cost_t mismatch_cost = 1, error_cost_t gap_cost = 1) noexcept(false) {
@@ -70,10 +70,7 @@ inline std::size_t levenshtein_baseline(                                //
     return previous_row.back();
 }
 
-/**
- *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
- */
+/** @brief Dual-row O(n)-memory reference Needleman-Wunsch alignment score, keeping only two rows. */
 template <typename substituter_type_>
 inline std::ptrdiff_t needleman_wunsch_baseline(                        //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
@@ -102,10 +99,7 @@ inline std::ptrdiff_t needleman_wunsch_baseline(                        //
     return previous_row.back();
 }
 
-/**
- *  @brief Inefficient baseline Smith-Waterman local alignment score computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only the previous and current rows, not the full matrix.
- */
+/** @brief Dual-row O(n)-memory reference Smith-Waterman local alignment score, keeping only two rows. */
 template <typename substituter_type_>
 inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
                                               substituter_type_ substitution_cost_for,
@@ -138,11 +132,8 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
     return best_score;
 }
 
-/**
- *  @brief Inefficient baseline Levenshtein-Gotoh distance computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
- */
-inline std::size_t levenshtein_gotoh_baseline(                          //
+/** @brief Dual-row O(n)-memory reference Levenshtein-Gotoh (affine-gap) distance, keeping two rows per matrix. */
+inline std::size_t levenshtein_gotoh_baseline(                          //                      //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
     error_cost_t match_cost, error_cost_t mismatch_cost,                //
     error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
@@ -189,12 +180,11 @@ inline std::size_t levenshtein_gotoh_baseline(                          //
 }
 
 /**
- *  @brief Inefficient baseline Needleman-Wunsch-Gotoh alignment score computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
+ *  @brief Dual-row O(n)-memory reference Needleman-Wunsch-Gotoh (affine-gap) score, keeping two rows per matrix.
  *  @see https://github.com/gata-bio/affine-gaps
  */
 template <typename substituter_type_>
-inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
+inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //              //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
     substituter_type_ substitution_cost_for,                            //
     error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
@@ -238,12 +228,11 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
 }
 
 /**
- *  @brief Inefficient baseline Smith-Waterman-Gotoh alignment score computation, as implemented in most codebases.
- *  @warning Dual-row O(n)-memory reference: keeps only two rows of each of the three matrices, not the full matrices.
+ *  @brief Dual-row O(n)-memory reference Smith-Waterman-Gotoh (affine-gap) local score, keeping two rows per matrix.
  *  @see https://github.com/gata-bio/affine-gaps
  */
 template <typename substituter_type_>
-inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
+inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //                //
     char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
     substituter_type_ substitution_cost_for,                            //
     error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
@@ -378,6 +367,7 @@ struct smith_waterman_baselines_t {
     }
 };
 
+/** @brief Logs a single base-vs-SIMD edit-distance mismatch with truncated string previews. */
 template <typename score_type_>
 void edit_distance_log_mismatch(std::string const &first, std::string const &second, //
                                 score_type_ result_base, score_type_ result_simd) {
@@ -391,14 +381,14 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
     std::printf(format_string, result_simd, result_base, first.c_str(), ellipsis, second.c_str(), ellipsis);
 }
 
-/**
- *  @brief Tests the correctness of the string class Levenshtein distance computation,
- *         as well as the similarity scoring functions for bioinformatics-like workloads
- *         on a @b fixed set of different representative ASCII and UTF-8 strings.
- */
+#pragma endregion // Helpers
+
+#pragma region Unit
+
+/** @brief Checks base-vs-SIMD agreement on a @b fixed set of representative ASCII and UTF-8 strings. */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
-void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
+static void check_similarities_fixed_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                           std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
 
     std::vector<std::pair<std::string, std::string>> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
@@ -546,17 +536,90 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     }
 }
 
+/** @brief Runs one string pair through a similarity operator and asserts the @b known expected score. */
+template <typename score_type_, typename operator_type_, typename... extra_args_>
+static void check_similarities_known_(operator_type_ &&similarity_operator, std::string const &first,
+                                          std::string const &second, score_type_ expected,
+                                          extra_args_ &&...extra_args) {
+
+    arrow_strings_tape_t first_tape, second_tape;
+    sz_assert_(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
+    sz_assert_(second_tape.try_append({second.data(), second.size()}) == status_t::success_k);
+
+    unified_vector<score_type_> result(1);
+    result[0] = std::numeric_limits<score_type_>::max();
+    status_t status =
+        similarity_operator(first_tape.view(), second_tape.view(), result.data(), extra_args...);
+    sz_assert_(status == status_t::success_k);
+    if (result[0] != expected) edit_distance_log_mismatch(first, second, expected, result[0]);
+    sz_assert_(result[0] == expected);
+}
+
 /**
- *  @brief Tests the correctness of the string class Levenshtein distance computation,
- *         as well as the similarity scoring functions for bioinformatics-like workloads
- *         on a synthetic @b randomly-generated set of strings from a given @p alphabet.
+ *  @brief Known-answer unit tests for the similarity family on simple, hand-verifiable string pairs.
  *
+ *  Unlike `test_similarities_equivalence`, this needs no second (SIMD/GPU) backend: it pins the
+ *  hand-computed unit-cost Levenshtein distance for each pair and drives it through both the dispatched
+ *  serial engine and the dual-row baseline. A regression that the serial-vs-SIMD agreement tests would
+ *  miss - because both share a wrong constant - is still caught here against the external ground truth.
+ */
+void test_similarities_unit() {
+    std::printf("  - testing similarity known-answer vectors...\n");
+
+    // Hand-verifiable unit-cost (match 0, mismatch 1, gap 1) Levenshtein distances on ASCII pairs.
+    struct known_levenshtein_t {
+        char const *first;
+        char const *second;
+        sz_size_t distance;
+    };
+    known_levenshtein_t const levenshtein_vectors[] = {
+        {"", "", 0},                            // both empty
+        {"ABC", "ABC", 0},                      // identical
+        {"A", "=", 1},                          // single substitution
+        {"", "ABC", 3},                         // pure insertion
+        {"ABC", "", 3},                         // pure deletion
+        {"ABC", "AABC", 1},                     // one prepended insertion
+        {"ABC", "ABCC", 1},                     // one appended insertion
+        {"ABC", "AC", 1},                       // one deletion
+        {"ABC", "AXBC", 1},                     // one insertion
+        {"ABC", "AXC", 1},                      // one substitution
+        {"ABCDEFG", "ABCXEFG", 1},              // one substitution
+        {"ggbuzgjux{}l", "gbuzgjux{}l", 1},     // one prepended insertion
+        {"APPLE", "APLE", 1},                   // one deletion
+        {"LISTEN", "SILENT", 4},                // classic anagram-ish pair
+        {"ATCA", "CTACTCACCC", 6},              // DNA-like pair
+    };
+
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+    constexpr linear_gap_costs_t unit_linear {1};
+
+    for (known_levenshtein_t const &vector : levenshtein_vectors) {
+        std::string const first {vector.first};
+        std::string const second {vector.second};
+
+        // Dispatched serial engine (automatic kernel resolution within the serial capability).
+        check_similarities_known_<sz_size_t>(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}, //
+            first, second, vector.distance);
+
+        // The dual-row reference baseline, sharing none of the engine's machinery.
+        check_similarities_known_<sz_size_t>(levenshtein_baselines_t {unit_uniform, unit_linear}, //
+                                                 first, second, vector.distance);
+    }
+}
+
+#pragma endregion // Unit
+
+#pragma region Equivalence
+
+/**
+ *  @brief Checks base-vs-SIMD agreement on synthetic @b randomly-generated strings from a given @p alphabet.
  *  @note The default iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
-void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  fuzzy_config_t config = {}, std::size_t iterations = scale_iterations(100),
-                                  simd_extra_args_ &&...simd_extra_args) {
+static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                           fuzzy_config_t config = {}, std::size_t iterations = scale_iterations(100),
+                                           simd_extra_args_ &&...simd_extra_args) {
 
     unified_vector<score_type_> results_base(config.batch_size), results_simd(config.batch_size);
     std::vector<std::string> first_array, second_array;
@@ -582,19 +645,20 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
     }
 }
 
+/** @brief Runs both the fixed and a single fuzzy base-vs-SIMD agreement pass for one backend pairing. */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
-void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                            std::string_view allowed_chars = {}, fuzzy_config_t config = {},
-                                            simd_extra_args_ &&...simd_extra_args) {
-    test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars, simd_extra_args...);
-    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, 1, simd_extra_args...);
+static void check_similarities_fixed_and_fuzzy_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                                     std::string_view allowed_chars = {}, fuzzy_config_t config = {},
+                                                     simd_extra_args_ &&...simd_extra_args) {
+    check_similarities_fixed_<score_type_>(base_operator, simd_operator, allowed_chars, simd_extra_args...);
+    check_similarities_fuzzy_<score_type_>(base_operator, simd_operator, config, 1, simd_extra_args...);
 }
 
 /**
- *  @brief Tests the correctness of the string class Levenshtein distance, NW & SW score computation,
- *         comparing the results to some baseline implementation for predefined and random inputs.
+ *  @brief Validates Levenshtein, Needleman-Wunsch & Smith-Waterman scores across every backend against
+ *         the dual-row baselines, over fixed representative strings and random fuzzed inputs.
  */
-void test_similarity_scores_equivalence() {
+void test_similarities_equivalence() {
 
     using error_t = error_cost_t;
     using error_matrix32_t = error_costs_32x32_t;
@@ -624,32 +688,32 @@ void test_similarity_scores_equivalence() {
     constexpr uniform_substitution_costs_t weird_uniform {1, 3};
 
     // Single-threaded serial Levenshtein distance implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
-        levenshtein_baselines_t {},                    //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        levenshtein_baselines_t {},                      //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
 
     // Multi-threaded parallel Levenshtein distance implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
-        levenshtein_baselines_t {},                    //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        levenshtein_baselines_t {},                      //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
 
     // Single-threaded serial Levenshtein distance implementation with weird linear costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
         levenshtein_baselines_t {weird_uniform, weird_linear}, //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
 
     // Multi-threaded parallel Levenshtein distance implementation with weird linear costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
         levenshtein_baselines_t {weird_uniform, weird_linear}, //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
 
     // Single-threaded serial Levenshtein distance implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
         levenshtein_baselines_t {weird_uniform, weird_affine}, //
         levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
 
     // Multi-threaded parallel Levenshtein distance implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
         levenshtein_baselines_t {weird_uniform, weird_affine}, //
         levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
 
@@ -659,87 +723,87 @@ void test_similarity_scores_equivalence() {
     error_matrix32_t blosum62_matrix = error_costs_32x32_t::blosum62();
 
     // Single-threaded serial NW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Multi-threaded parallel NW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost});
 
     // Single-threaded serial SW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
                                                                                                 blosum62_linear_cost});
 
     // Multi-threaded parallel SW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
                                                                                                 blosum62_linear_cost});
 
     // Single-threaded serial NW implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
     // Multi-threaded parallel NW implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost});
 
     // Single-threaded serial SW implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
                                                                                                 blosum62_affine_cost});
 
     // Multi-threaded parallel SW implementation with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
                                                                                                 blosum62_affine_cost});
 
 #if SZ_USE_ICELAKE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                           //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                         //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                      //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                      //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
         levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
         levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine});
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                              //
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU with weird linear costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
 
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {blosum62_matrix,
                                                                                                 blosum62_linear_cost});
 
     // Ice Lake Smith-Waterman distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {blosum62_matrix,
                                                                                               blosum62_linear_cost});
@@ -748,14 +812,14 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_HASWELL
     // Haswell Needleman-Wunsch distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
                                 (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
                                                                                         blosum62_linear_cost});
 
     // Haswell Smith-Waterman distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
                               (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
@@ -770,13 +834,13 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU with weird linear costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                      //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}, {}, {},
         cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Levenshtein distance against Multi-threaded on CPU with weird affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                      //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
         levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
         levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_affine}, {}, {},
         cuda_executor_t {}, first_gpu_specs);
@@ -784,7 +848,7 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_KEPLER
     // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                      //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
         levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {weird_uniform, weird_linear}, {}, {},
         cuda_executor_t {}, first_gpu_specs);
@@ -792,7 +856,7 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
@@ -800,7 +864,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU with affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
@@ -808,7 +872,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
@@ -816,7 +880,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU with affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
@@ -826,7 +890,7 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_HOPPER
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
@@ -834,7 +898,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU with affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
@@ -842,7 +906,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
@@ -850,7 +914,7 @@ void test_similarity_scores_equivalence() {
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU with affine costs
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
@@ -860,14 +924,144 @@ void test_similarity_scores_equivalence() {
 #endif
 }
 
+#pragma endregion // Equivalence
+
+#pragma region Safety
+
 /**
- *  @brief Stress-tests the StringZillas similarity engines for @b memory-usage regressions and scale.
+ *  @brief Runs one base-vs-SIMD agreement pass over @b degenerate strings, then asserts the closed-form
+ *         Levenshtein identities `distance(x, "") == |x| * gap` and `distance(x, x) == 0` directly.
+ */
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
+static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                                error_cost_t gap_cost, simd_extra_args_ &&...simd_extra_args) {
+
+    // The degenerate corpus: empty/empty, empty/non-empty, single-char, identical, and a near-identical
+    // one-edit pair. They live in one batch so the engines also face a mixed-length, mostly-tiny input.
+    std::vector<std::pair<std::string, std::string>> degenerate_cases {
+        {"", ""},             // both empty; distance 0
+        {"", "ABC"},          // empty vs non-empty; pure insertion
+        {"ABC", ""},          // non-empty vs empty; pure deletion
+        {"A", "A"},           // single-char identical; distance 0
+        {"A", "B"},           // single-char substitution
+        {"ABCABC", "ABCABC"}, // identical longer string; distance 0
+        {"ABCABC", "ABCXBC"}, // one planted substitution; unit-cost distance 1
+    };
+
+    unified_vector<score_type_> results_base(degenerate_cases.size());
+    unified_vector<score_type_> results_simd(degenerate_cases.size());
+    arrow_strings_tape_t first_tape, second_tape;
+    for (auto const &pair : degenerate_cases) {
+        sz_assert_(first_tape.try_append({pair.first.data(), pair.first.size()}) == status_t::success_k);
+        sz_assert_(second_tape.try_append({pair.second.data(), pair.second.size()}) == status_t::success_k);
+    }
+
+    status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
+    status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(),
+                                         simd_extra_args...);
+    sz_assert_(status_base == status_t::success_k);
+    sz_assert_(status_simd == status_t::success_k);
+    for (std::size_t pair_idx = 0; pair_idx != degenerate_cases.size(); ++pair_idx) {
+        if (results_base[pair_idx] == results_simd[pair_idx]) continue;
+        edit_distance_log_mismatch(degenerate_cases[pair_idx].first, degenerate_cases[pair_idx].second,
+                                   results_base[pair_idx], results_simd[pair_idx]);
+        sz_assert_(results_base[pair_idx] == results_simd[pair_idx]);
+    }
+
+    // Closed-form identities, independent of any O(n²) reference. With a single uniform-cost string the only
+    // alignment against an empty string is all-gaps, so the linear-gap Levenshtein distance is exactly `|x| * gap`.
+    std::string const sample = "ADVERSARIAL";
+    std::string const empty;
+    arrow_strings_tape_t sample_tape, empty_tape, copy_tape;
+    sz_assert_(sample_tape.try_append({sample.data(), sample.size()}) == status_t::success_k);
+    sz_assert_(empty_tape.try_append({empty.data(), empty.size()}) == status_t::success_k);
+    sz_assert_(copy_tape.try_append({sample.data(), sample.size()}) == status_t::success_k);
+
+    unified_vector<score_type_> closed_form(1);
+    score_type_ const expected_all_gaps = static_cast<score_type_>(sample.size() * static_cast<std::size_t>(gap_cost));
+    sz_assert_(simd_operator(sample_tape.view(), empty_tape.view(), closed_form.data(), simd_extra_args...) ==
+               status_t::success_k);
+    sz_assert_(closed_form[0] == expected_all_gaps);
+    sz_assert_(simd_operator(sample_tape.view(), copy_tape.view(), closed_form.data(), simd_extra_args...) ==
+               status_t::success_k);
+    sz_assert_(closed_form[0] == static_cast<score_type_>(0));
+}
+
+/**
+ *  @brief Feeds @b degenerate and adversarial inputs through the distance/alignment engines on every
+ *         available backend (serial, each `#if SZ_USE_*`, and CUDA where guarded), asserting no crash and
+ *         agreement with the dual-row baselines and the closed-form Levenshtein identities.
+ */
+void test_similarities_safety() {
+    std::printf("  - testing degenerate-input safety of similarity engines...\n");
+
+    // A tiny, empty-inclusive fuzz pass shares the agreement machinery with the equivalence suite, but
+    // pins the minimum length to zero so empty strings reach every kernel's prologue and tail handling.
+    fuzzy_config_t degenerate_config {"ABC", /* batch_size */ 8, /* min_string_length */ 0, /* max_string_length */ 6};
+    std::size_t const iterations = scale_iterations(8);
+
+    constexpr linear_gap_costs_t unit_linear {1};
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+
+#if SZ_USE_CUDA
+    gpu_specs_t first_gpu_specs;
+    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+#endif
+
+    // Serial Levenshtein distance against the dual-row baseline on degenerate inputs.
+    check_similarities_fuzzy_<sz_size_t>(               //
+        levenshtein_baselines_t {unit_uniform, unit_linear}, //
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
+        degenerate_config, iterations);
+    check_similarities_degenerate_<sz_size_t>(          //
+        levenshtein_baselines_t {unit_uniform, unit_linear}, //
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}, 1);
+
+#if SZ_USE_ICELAKE
+    // Ice Lake Levenshtein distance against the serial CPU engine on degenerate inputs.
+    check_similarities_fuzzy_<sz_size_t>( //
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear},
+        degenerate_config, iterations);
+    check_similarities_degenerate_<sz_size_t>( //
+        levenshtein_baselines_t {unit_uniform, unit_linear},
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}, 1);
+#endif
+
+#if SZ_USE_CUDA
+    // CUDA Levenshtein distance against the serial CPU engine on degenerate inputs.
+    check_similarities_fuzzy_<sz_size_t>( //
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
+        degenerate_config, iterations, cuda_executor_t {}, first_gpu_specs);
+    check_similarities_degenerate_<sz_size_t>( //
+        levenshtein_baselines_t {unit_uniform, unit_linear},
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}, 1,
+        cuda_executor_t {}, first_gpu_specs);
+#endif
+
+#if SZ_USE_KEPLER
+    // CUDA Levenshtein distance on Kepler against the serial CPU engine on degenerate inputs.
+    check_similarities_degenerate_<sz_size_t>( //
+        levenshtein_baselines_t {unit_uniform, unit_linear},
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {unit_uniform, unit_linear}, 1,
+        cuda_executor_t {}, first_gpu_specs);
+#endif
+}
+
+#pragma endregion // Safety
+
+#pragma region Drivers
+
+/**
+ *  @brief @b GPU-oriented memory-scale stress test for the StringZillas similarity engines: closed-form
+ *         answers plus an RSS/scratch bound, checking @b memory-usage regressions and scale.
  *
  *  The test is split into two phases following two principles - correctness is verified only where it is
  *  cheap, and scale is verified only against closed-form answers that never touch an O(n²) reference:
  *
  *  1. @b Correctness @b sweep (small/medium, max length <= 8192). Exercises every backend against the
- *     dual-row baselines through the existing `test_similarity_scores_fuzzy` machinery, exactly as before.
+ *     dual-row baselines through the existing `check_similarities_fuzzy_` machinery, exactly as before.
  *     The O(n²)-time reference is affordable at these lengths.
  *
  *  2. @b Scale/memory @b probe (32768 and 131072). Never calls the O(n²) baseline. It verifies the engine
@@ -884,7 +1078,7 @@ void test_similarity_scores_equivalence() {
  *  Each formula is validated at n=512 against the dual-row baseline (`levenshtein_baseline` /
  *  `levenshtein_gotoh_baseline`) before being trusted at 32768/131072 without paying O(n²) at scale.
  */
-void test_similarity_scores_memory_usage() {
+void test_similarities_memory_usage() {
 
     std::vector<fuzzy_config_t> correctness_experiments {
         // Single string pair of same length:
@@ -921,36 +1115,36 @@ void test_similarity_scores_memory_usage() {
                     experiment.min_string_length, experiment.max_string_length);
 
         // Multi-threaded serial Levenshtein distance implementation
-        test_similarity_scores_fuzzy<sz_size_t>( //
-            levenshtein_baselines_t {},          //
+        check_similarities_fuzzy_<sz_size_t>( //
+            levenshtein_baselines_t {},            //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, experiment, 1);
 
         // Multi-threaded serial Levenshtein distance implementation with weird linear costs
-        test_similarity_scores_fuzzy<sz_size_t>(                   //
+        check_similarities_fuzzy_<sz_size_t>(                 //
             levenshtein_baselines_t {weird_uniform, weird_linear}, //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
             experiment, 1);
 
         // Multi-threaded serial Levenshtein distance implementation with weird affine costs
-        test_similarity_scores_fuzzy<sz_size_t>(                   //
+        check_similarities_fuzzy_<sz_size_t>(                 //
             levenshtein_baselines_t {weird_uniform, weird_affine}, //
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
             experiment, 1);
 
 #if SZ_USE_ICELAKE
         // Ice Lake Levenshtein distance against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>( //
+        check_similarities_fuzzy_<sz_size_t>( //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {},
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}, experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
-        test_similarity_scores_fuzzy<sz_size_t>( //
+        check_similarities_fuzzy_<sz_size_t>( //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear},
             experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
-        test_similarity_scores_fuzzy<sz_size_t>( //
+        check_similarities_fuzzy_<sz_size_t>( //
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine},
             experiment, 1);
@@ -958,7 +1152,7 @@ void test_similarity_scores_memory_usage() {
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                                     //
+        check_similarities_fuzzy_<sz_size_t>(                                   //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, experiment, 10, cuda_executor_t {},
             first_gpu_specs);
@@ -966,13 +1160,15 @@ void test_similarity_scores_memory_usage() {
 
 #if SZ_USE_KEPLER
         // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                                     //
+        check_similarities_fuzzy_<sz_size_t>(                                   //
             levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, experiment, 10, cuda_executor_t {},
             first_gpu_specs);
 #endif
     }
 }
+
+#pragma endregion // Drivers
 
 } // namespace scripts
 } // namespace stringzilla
