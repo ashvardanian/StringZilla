@@ -1698,6 +1698,71 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #endif
 }
 
+/** @brief Store a 16-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
+SZ_INTERNAL void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
+#if !SZ_USE_MISALIGNED_LOADS
+    sz_u16_vec_t vec;
+    vec.u16 = value;
+    ptr[0] = vec.u8s[0];
+    ptr[1] = vec.u8s[1];
+#elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
+    ((sz_u16_vec_t *)ptr)->u16 = value;
+#else
+    ((__unaligned sz_u16_vec_t *)ptr)->u16 = value;
+#endif
+#else
+    __attribute__((aligned(1))) sz_u16_vec_t *result = (sz_u16_vec_t *)ptr;
+    result->u16 = value;
+#endif
+}
+
+/** @brief Store a 32-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
+SZ_INTERNAL void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
+#if !SZ_USE_MISALIGNED_LOADS
+    sz_u32_vec_t vec;
+    vec.u32 = value;
+    ptr[0] = vec.u8s[0];
+    ptr[1] = vec.u8s[1];
+    ptr[2] = vec.u8s[2];
+    ptr[3] = vec.u8s[3];
+#elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
+    ((sz_u32_vec_t *)ptr)->u32 = value;
+#else
+    ((__unaligned sz_u32_vec_t *)ptr)->u32 = value;
+#endif
+#else
+    __attribute__((aligned(1))) sz_u32_vec_t *result = (sz_u32_vec_t *)ptr;
+    result->u32 = value;
+#endif
+}
+
+/** @brief Store a 64-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
+SZ_INTERNAL void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
+#if !SZ_USE_MISALIGNED_LOADS
+    sz_u64_vec_t vec;
+    vec.u64 = value;
+    ptr[0] = vec.u8s[0];
+    ptr[1] = vec.u8s[1];
+    ptr[2] = vec.u8s[2];
+    ptr[3] = vec.u8s[3];
+    ptr[4] = vec.u8s[4];
+    ptr[5] = vec.u8s[5];
+    ptr[6] = vec.u8s[6];
+    ptr[7] = vec.u8s[7];
+#elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
+    ((sz_u64_vec_t *)ptr)->u64 = value;
+#else
+    ((__unaligned sz_u64_vec_t *)ptr)->u64 = value;
+#endif
+#else
+    __attribute__((aligned(1))) sz_u64_vec_t *result = (sz_u64_vec_t *)ptr;
+    result->u64 = value;
+#endif
+}
+
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 

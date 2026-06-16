@@ -49,10 +49,10 @@ SZ_PUBLIC void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         while (length--) *(target++) = *(source++);
     }
     else if (length <= 16) {
-        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
-        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
-        *(sz_u64_t *)(target) = source_first_word;
-        *(sz_u64_t *)(target + length - 8) = source_second_word;
+        sz_u64_t source_first_word = sz_u64_load(source).u64;
+        sz_u64_t source_second_word = sz_u64_load(source + length - 8).u64;
+        sz_u64_store(target, source_first_word);
+        sz_u64_store(target + length - 8, source_second_word);
     }
     else if (length <= 32) {
         // Two overlapping 128-bit LSX halves cover everything in [17, 32].
@@ -96,10 +96,10 @@ SZ_PUBLIC void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         }
     }
     else if (length <= 16) {
-        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
-        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
-        *(sz_u64_t *)(target) = source_first_word;
-        *(sz_u64_t *)(target + length - 8) = source_second_word;
+        sz_u64_t source_first_word = sz_u64_load(source).u64;
+        sz_u64_t source_second_word = sz_u64_load(source + length - 8).u64;
+        sz_u64_store(target, source_first_word);
+        sz_u64_store(target + length - 8, source_second_word);
     }
     else if (length <= 32) {
         // Both overlapping 128-bit halves are loaded before either store, so source/target overlap is safe.

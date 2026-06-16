@@ -86,34 +86,26 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S.html#518
     // It shouldn't improve performance on microbenchmarks, but should be better in practice.
     else if (length <= 16) {
-        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
-        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
-        sz_u64_t *target_first_word_ptr = (sz_u64_t *)(target);
-        sz_u64_t *target_second_word_ptr = (sz_u64_t *)(target + length - 8);
-        *target_first_word_ptr = source_first_word;
-        *target_second_word_ptr = source_second_word;
+        sz_u64_t source_first_word = sz_u64_load(source).u64;
+        sz_u64_t source_second_word = sz_u64_load(source + length - 8).u64;
+        sz_u64_store(target, source_first_word);
+        sz_u64_store(target + length - 8, source_second_word);
     }
     // We can use 2x 128-bit interleaving loads for each string, and then compare them for equality.
     else if (length <= 32) {
         sz_u128_vec_t source_first_vec, source_second_vec;
-        sz_u128_vec_t *target_first_word_ptr, *target_second_word_ptr;
         source_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(source));
         source_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(source + length - 16));
-        target_first_word_ptr = (sz_u128_vec_t *)(target);
-        target_second_word_ptr = (sz_u128_vec_t *)(target + length - 16);
-        _mm_storeu_si128(&target_first_word_ptr->xmm, source_first_vec.xmm);
-        _mm_storeu_si128(&target_second_word_ptr->xmm, source_second_vec.xmm);
+        _mm_storeu_si128((__m128i *)(target), source_first_vec.xmm);
+        _mm_storeu_si128((__m128i *)(target + length - 16), source_second_vec.xmm);
     }
     // We can use 2x 256-bit interleaving loads for each string, and then compare them for equality.
     else if (length <= 64) {
         sz_u256_vec_t source_first_vec, source_second_vec;
-        sz_u256_vec_t *target_first_word_ptr, *target_second_word_ptr;
         source_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source));
         source_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source + length - 32));
-        target_first_word_ptr = (sz_u256_vec_t *)(target);
-        target_second_word_ptr = (sz_u256_vec_t *)(target + length - 32);
-        _mm256_storeu_si256(&target_first_word_ptr->ymm, source_first_vec.ymm);
-        _mm256_storeu_si256(&target_second_word_ptr->ymm, source_second_vec.ymm);
+        _mm256_storeu_si256((__m256i *)(target), source_first_vec.ymm);
+        _mm256_storeu_si256((__m256i *)(target + length - 32), source_second_vec.ymm);
     }
     // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_haswell` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
@@ -133,9 +125,9 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 
         // Fill the head of the buffer. This part is much cleaner with AVX-512.
         if (head_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, head_length--;
-        if (head_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, head_length -= 2;
-        if (head_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, head_length -= 4;
-        if (head_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, head_length -= 8;
+        if (head_length & 2) sz_u16_store(target, sz_u16_load(source).u16), target += 2, source += 2, head_length -= 2;
+        if (head_length & 4) sz_u32_store(target, sz_u32_load(source).u32), target += 4, source += 4, head_length -= 4;
+        if (head_length & 8) sz_u64_store(target, sz_u64_load(source).u64), target += 8, source += 8, head_length -= 8;
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
@@ -169,9 +161,9 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (tail_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 tail_length -= 16;
-        if (tail_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, tail_length -= 8;
-        if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
-        if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
+        if (tail_length & 8) sz_u64_store(target, sz_u64_load(source).u64), target += 8, source += 8, tail_length -= 8;
+        if (tail_length & 4) sz_u32_store(target, sz_u32_load(source).u32), target += 4, source += 4, tail_length -= 4;
+        if (tail_length & 2) sz_u16_store(target, sz_u16_load(source).u16), target += 2, source += 2, tail_length -= 2;
         if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
         sz_assert_(tail_length == 0 && "The tail length should be zero after the tail copy.");
     }
@@ -194,34 +186,26 @@ SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S.html#518
     // It shouldn't improve performance on microbenchmarks, but should be better in practice.
     else if (length <= 16) {
-        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
-        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
-        sz_u64_t *target_first_word_ptr = (sz_u64_t *)(target);
-        sz_u64_t *target_second_word_ptr = (sz_u64_t *)(target + length - 8);
-        *target_first_word_ptr = source_first_word;
-        *target_second_word_ptr = source_second_word;
+        sz_u64_t source_first_word = sz_u64_load(source).u64;
+        sz_u64_t source_second_word = sz_u64_load(source + length - 8).u64;
+        sz_u64_store(target, source_first_word);
+        sz_u64_store(target + length - 8, source_second_word);
     }
     // We can use 2x 128-bit interleaving loads for each string, and then compare them for equality.
     else if (length <= 32) {
         sz_u128_vec_t source_first_vec, source_second_vec;
-        sz_u128_vec_t *target_first_word_ptr, *target_second_word_ptr;
         source_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(source));
         source_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(source + length - 16));
-        target_first_word_ptr = (sz_u128_vec_t *)(target);
-        target_second_word_ptr = (sz_u128_vec_t *)(target + length - 16);
-        _mm_storeu_si128(&target_first_word_ptr->xmm, source_first_vec.xmm);
-        _mm_storeu_si128(&target_second_word_ptr->xmm, source_second_vec.xmm);
+        _mm_storeu_si128((__m128i *)(target), source_first_vec.xmm);
+        _mm_storeu_si128((__m128i *)(target + length - 16), source_second_vec.xmm);
     }
     // We can use 2x 256-bit interleaving loads for each string, and then compare them for equality.
     else if (length <= 64) {
         sz_u256_vec_t source_first_vec, source_second_vec;
-        sz_u256_vec_t *target_first_word_ptr, *target_second_word_ptr;
         source_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source));
         source_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source + length - 32));
-        target_first_word_ptr = (sz_u256_vec_t *)(target);
-        target_second_word_ptr = (sz_u256_vec_t *)(target + length - 32);
-        _mm256_storeu_si256(&target_first_word_ptr->ymm, source_first_vec.ymm);
-        _mm256_storeu_si256(&target_second_word_ptr->ymm, source_second_vec.ymm);
+        _mm256_storeu_si256((__m256i *)(target), source_first_vec.ymm);
+        _mm256_storeu_si256((__m256i *)(target + length - 32), source_second_vec.ymm);
     }
     // When dealing with larger arrays, we keep things simple:
     else if (target < source || target >= source + length) {
