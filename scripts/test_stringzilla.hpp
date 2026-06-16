@@ -1,7 +1,8 @@
 /**
- *  @brief Helper structures and functions for C++ unit- and stress-tests.
- *  @file scripts/test_stringzilla.hpp
+ *  @brief  Helper structures and functions for C++ unit- and stress-tests.
+ *  @file   scripts/test_stringzilla.hpp
  *  @author Ash Vardanian
+ *  @date   2026-06-16
  *
  *  @section Environment Variables
  *
@@ -442,3 +443,120 @@ inline int run_test(char const *name, function_type_ &&test_function) noexcept {
 } // namespace scripts
 } // namespace stringzilla
 } // namespace ashvardanian
+
+#pragma region Cross-Translation-Unit Test Declarations
+
+/*  Fused from the former `test_stringzilla_decls.hpp`. These declarations live at global scope to
+ *  match the TU definitions; the using-declaration makes `scale_iterations` visible for the default
+ *  arguments below. */
+using ashvardanian::stringzilla::scripts::scale_iterations;
+
+#pragma region Assertion Helpers
+
+#define scope_assert(init, operation, condition) \
+    do {                                         \
+        init;                                    \
+        operation;                               \
+        assert(condition);                       \
+    } while (0)
+
+#define let_assert(init, condition) \
+    do {                            \
+        init;                       \
+        assert(condition);          \
+    } while (0)
+
+#define assert_throws(expression, exception_type) \
+    do {                                          \
+        bool threw = false;                       \
+        try {                                     \
+            sz_unused_(expression);               \
+        }                                         \
+        catch (exception_type const &) {          \
+            threw = true;                         \
+        }                                         \
+        assert(threw);                            \
+    } while (0)
+
+#pragma endregion // Assertion Helpers
+
+#pragma region Basic Utilities
+
+void test_arithmetic_unit();
+void test_sequence_unit();
+void test_allocator_unit();
+void test_byteset_unit();
+
+#pragma endregion // Basic Utilities
+
+#pragma region Hashing
+
+void test_hash_unit();
+void test_hash_all();
+void test_hash_multiseed_all();
+
+#pragma endregion // Hashing
+
+#pragma region UTF-8
+
+void test_utf8_unit();
+void test_utf8_all();
+void test_utf8_words_unit();
+void test_utf8_ligature_unit();
+void test_norm_unit();
+void test_norm_all();
+
+#pragma endregion // UTF-8
+
+#pragma region Uncased UTF-8
+
+void test_uncased_unit();
+void test_uncased_all();
+
+#pragma endregion // Uncased UTF-8
+
+#pragma region String Class and STL Compatibility
+
+template <typename string_type>
+void test_ascii_unit();
+
+void test_memory_unit(std::size_t max_l2_size = 1024ull * 1024ull);
+void test_memory_large_unit();
+
+template <typename string_type>
+void test_stl_reads_unit();
+
+template <typename string_type>
+void test_stl_updates_unit();
+
+void test_stl_conversions_unit();
+void test_stl_containers_unit();
+
+template <typename string_type>
+void test_extensions_reads_unit();
+
+void test_extensions_updates_unit();
+void test_string_constructors_unit();
+void test_memory_stability_unit(std::size_t length = 1ull << 10, std::size_t iterations = scale_iterations(100));
+void test_string_updates_unit(std::size_t repetitions = 1024);
+
+#pragma endregion // String Class and STL Compatibility
+
+#pragma region Search and Comparison
+
+void test_compare_unit();
+void test_find_unit();
+void test_find_misaligned_fuzz();
+void test_lookup_fuzz(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
+
+#pragma endregion // Search and Comparison
+
+#pragma region Sequence Algorithms
+
+void test_sort_all();
+void test_sort_unit();
+void test_intersect_unit();
+
+#pragma endregion // Sequence Algorithms
+
+#pragma endregion // Cross-Translation-Unit Test Declarations

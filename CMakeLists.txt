@@ -148,6 +148,16 @@ option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAI
 option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
 option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
+
+# Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only):
+#   cmake -B build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++
+#   cmake --build build_cov --target stringzilla_test_cpp17 -j
+#   LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp17
+#   llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata
+#   llvm-cov report ./build_cov/stringzilla_test_cpp17 -instr-profile=/tmp/sz.profdata include/stringzilla/
+# `-march=native` compiles out the non-native backends, so a faithful picture needs `llvm-profdata merge`
+# across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV qemu toolchain).
+option(STRINGZILLA_BUILD_COVERAGE "Instrument with Clang source-based coverage" OFF)
 set(STRINGZILLA_TARGET_ARCH
     ""
     CACHE STRING "Architecture to tell the compiler to optimize for (-march)"
@@ -425,6 +435,11 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     else ()
         target_compile_definitions(${target} PRIVATE "SZ_DEBUG=0")
+    endif ()
+
+    if (STRINGZILLA_BUILD_COVERAGE AND (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang"))
+        target_compile_options(${target} PRIVATE "-fprofile-instr-generate" "-fcoverage-mapping")
+        target_link_options(${target} PRIVATE "-fprofile-instr-generate" "-fcoverage-mapping")
     endif ()
 endfunction ()
 
@@ -883,11 +898,24 @@ if (STRINGZILLA_BUILD_BENCHMARK)
 endif ()
 
 if (STRINGZILLA_BUILD_TEST)
+    # The serial test suite is split across per-domain translation units that compile into the same binary,
+    # so the standards-matrix builds below parallelize and rebuild incrementally instead of recompiling one
+    # 5K-line file. `define_launcher`'s `target_sources` accepts this list verbatim.
+    set(STRINGZILLA_TEST_SOURCES
+        scripts/test_stringzilla.cpp
+        scripts/test_hash.cpp
+        scripts/test_utf8.cpp
+        scripts/test_uncased.cpp
+        scripts/test_string.cpp
+        scripts/test_find.cpp
+        scripts/test_sort.cpp
+    )
+
     # Make sure compilation passes for different C++ standards; MSVC only supports C++11 and newer.
-    define_launcher(stringzilla_test_cpp11 scripts/test_stringzilla.cpp 11 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp14 scripts/test_stringzilla.cpp 14 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp17 scripts/test_stringzilla.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp20 scripts/test_stringzilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp11 "${STRINGZILLA_TEST_SOURCES}" 11 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp14 "${STRINGZILLA_TEST_SOURCES}" 14 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp17 "${STRINGZILLA_TEST_SOURCES}" 17 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Test parallel algorithms separately; link the static archive when the libraries are built.
     define_launcher(stringzillas_test_cpp17 scripts/test_stringzillas.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
