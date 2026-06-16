@@ -154,11 +154,33 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_internal_t_ cons
     // Mix the length into the key
     uint64x2_t key_with_length_u64x2 = vaddq_u64(state->key.u64x2,
                                                  vsetq_lane_u64(state->ins_length, vdupq_n_u64(0), 0));
+
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
+    uint8x16_t aes_0_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[0], state->ins.u8x16s[0]);
+    uint8x16_t aes_1_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[1], state->ins.u8x16s[1]);
+    uint8x16_t aes_2_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[2], state->ins.u8x16s[2]);
+    uint8x16_t aes_3_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[3], state->ins.u8x16s[3]);
+    uint64x2_t sum_0_u64x2 = vaddq_u64(
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[0]), order_u8x16)),
+        state->ins.u64x2s[0]);
+    uint64x2_t sum_1_u64x2 = vaddq_u64(
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[1]), order_u8x16)),
+        state->ins.u64x2s[1]);
+    uint64x2_t sum_2_u64x2 = vaddq_u64(
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[2]), order_u8x16)),
+        state->ins.u64x2s[2]);
+    uint64x2_t sum_3_u64x2 = vaddq_u64(
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[3]), order_u8x16)),
+        state->ins.u64x2s[3]);
+
     // Combine the "sum" and the "AES" blocks
-    uint8x16_t mixed_0_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->sum.u8x16s[0], state->aes.u8x16s[0]);
-    uint8x16_t mixed_1_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->sum.u8x16s[1], state->aes.u8x16s[1]);
-    uint8x16_t mixed_2_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->sum.u8x16s[2], state->aes.u8x16s[2]);
-    uint8x16_t mixed_3_u8x16 = sz_emulate_aesenc_u8x16_neon_(state->sum.u8x16s[3], state->aes.u8x16s[3]);
+    uint8x16_t mixed_0_u8x16 = sz_emulate_aesenc_u8x16_neon_(vreinterpretq_u8_u64(sum_0_u64x2), aes_0_u8x16);
+    uint8x16_t mixed_1_u8x16 = sz_emulate_aesenc_u8x16_neon_(vreinterpretq_u8_u64(sum_1_u64x2), aes_1_u8x16);
+    uint8x16_t mixed_2_u8x16 = sz_emulate_aesenc_u8x16_neon_(vreinterpretq_u8_u64(sum_2_u64x2), aes_2_u8x16);
+    uint8x16_t mixed_3_u8x16 = sz_emulate_aesenc_u8x16_neon_(vreinterpretq_u8_u64(sum_3_u64x2), aes_3_u8x16);
     // Combine the mixed registers
     uint8x16_t mixed_01_u8x16 = sz_emulate_aesenc_u8x16_neon_(mixed_0_u8x16, mixed_1_u8x16);
     uint8x16_t mixed_23_u8x16 = sz_emulate_aesenc_u8x16_neon_(mixed_2_u8x16, mixed_3_u8x16);
@@ -173,124 +195,65 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_neon_(sz_hash_state_internal_t_ cons
 
 SZ_PUBLIC void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
 
-    // The worst usage pattern... that we should ironically handle first - is updating the state
-    // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
-    // even bother using NEON masked loads to avoid complexity.
-    sz_size_t const current_block_index = state->ins_length / 64;
-    sz_size_t const final_block_index = (state->ins_length + length) / 64;
-    int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state->ins_length + length) % 64 == 0;
-    if (stays_in_the_block && !fills_the_block) {
-        for (; length; --length, ++state->ins_length, ++text) state->ins[state->ins_length % 64] = *text;
-        return;
-    }
-
-    // Now we know that our "text" parts will end up in different blocks.
-    // It's a good idea to pull the state into registers, as well definitely mix them at block boundaries.
-    sz_size_t const progress_in_block = state->ins_length % 64;
-    sz_size_t const head_length = (64 - progress_in_block) % 64;
-    sz_size_t const tail_length = (state->ins_length + length) % 64;
-    sz_size_t const body_length = length - head_length - tail_length;
-    sz_assert_(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
-
-    // Lets keep a local copy of the state for one or more updates.
-    sz_align_(64) sz_hash_state_internal_t_ local_state;
-    local_state.aes.u8x16s[0] = vld1q_u8((sz_u8_t const *)state->aes + 0);
-    local_state.aes.u8x16s[1] = vld1q_u8((sz_u8_t const *)state->aes + 16);
-    local_state.aes.u8x16s[2] = vld1q_u8((sz_u8_t const *)state->aes + 32);
-    local_state.aes.u8x16s[3] = vld1q_u8((sz_u8_t const *)state->aes + 48);
-    local_state.sum.u8x16s[0] = vld1q_u8((sz_u8_t const *)state->sum + 0);
-    local_state.sum.u8x16s[1] = vld1q_u8((sz_u8_t const *)state->sum + 16);
-    local_state.sum.u8x16s[2] = vld1q_u8((sz_u8_t const *)state->sum + 32);
-    local_state.sum.u8x16s[3] = vld1q_u8((sz_u8_t const *)state->sum + 48);
-    local_state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)state->ins + 0);
-    local_state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)state->ins + 16);
-    local_state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)state->ins + 32);
-    local_state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)state->ins + 48);
-    local_state.ins_length = state->ins_length;
-
-    // Handle the head first, filling up the current block
+    // `ins` is exactly one 64-byte block (four NEON lanes), so buffering is just: track how many bytes it holds,
+    // absorb it only once it becomes interior (more bytes arrive - the deferral `digest` needs to choose
+    // minimal/full by total length), and append incoming bytes with a single contiguous copy. The deferred
+    // trailing block reads back as `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The
+    // append touches only `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes
+    // stay zero-padded for `finalize` to fold. NEON has no masked load/store, so the copy is a plain byte loop.
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
-    if (head_length) {
-        sz_ptr_t local_cursor = (sz_ptr_t)&local_state.ins.u8s[progress_in_block];
-        sz_ptr_t const local_end = (sz_ptr_t)&local_state.ins.u8s[64];
-        for (; local_cursor < local_end; ++local_cursor, ++text) *local_cursor = *text;
-        local_state.aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[0], local_state.ins.u8x16s[0]);
-        local_state.aes.u8x16s[1] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[1], local_state.ins.u8x16s[1]);
-        local_state.aes.u8x16s[2] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[2], local_state.ins.u8x16s[2]);
-        local_state.aes.u8x16s[3] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[3], local_state.ins.u8x16s[3]);
-        local_state.sum.u64x2s[0] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[0]), order_u8x16)),
-            local_state.ins.u64x2s[0]);
-        local_state.sum.u64x2s[1] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[1]), order_u8x16)),
-            local_state.ins.u64x2s[1]);
-        local_state.sum.u64x2s[2] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[2]), order_u8x16)),
-            local_state.ins.u64x2s[2]);
-        local_state.sum.u64x2s[3] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[3]), order_u8x16)),
-            local_state.ins.u64x2s[3]);
-        local_state.ins_length += head_length;
-        length -= head_length;
+    sz_size_t buffered = state->ins_length % 64;
+    if (buffered == 0 && state->ins_length) buffered = 64;
+    while (length) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
+            uint8x16_t aes_0 = vld1q_u8(state->aes + 0);
+            uint8x16_t aes_1 = vld1q_u8(state->aes + 16);
+            uint8x16_t aes_2 = vld1q_u8(state->aes + 32);
+            uint8x16_t aes_3 = vld1q_u8(state->aes + 48);
+            uint8x16_t ins_0 = vld1q_u8(state->ins + 0);
+            uint8x16_t ins_1 = vld1q_u8(state->ins + 16);
+            uint8x16_t ins_2 = vld1q_u8(state->ins + 32);
+            uint8x16_t ins_3 = vld1q_u8(state->ins + 48);
+            vst1q_u8(state->aes + 0, sz_emulate_aesenc_u8x16_neon_(aes_0, ins_0));
+            vst1q_u8(state->aes + 16, sz_emulate_aesenc_u8x16_neon_(aes_1, ins_1));
+            vst1q_u8(state->aes + 32, sz_emulate_aesenc_u8x16_neon_(aes_2, ins_2));
+            vst1q_u8(state->aes + 48, sz_emulate_aesenc_u8x16_neon_(aes_3, ins_3));
+            uint64x2_t sum_0 = vld1q_u64((sz_u64_t const *)state->sum + 0);
+            uint64x2_t sum_1 = vld1q_u64((sz_u64_t const *)state->sum + 2);
+            uint64x2_t sum_2 = vld1q_u64((sz_u64_t const *)state->sum + 4);
+            uint64x2_t sum_3 = vld1q_u64((sz_u64_t const *)state->sum + 6);
+            vst1q_u64((sz_u64_t *)state->sum + 0,
+                      vaddq_u64(vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(sum_0), order_u8x16)),
+                                vreinterpretq_u64_u8(ins_0)));
+            vst1q_u64((sz_u64_t *)state->sum + 2,
+                      vaddq_u64(vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(sum_1), order_u8x16)),
+                                vreinterpretq_u64_u8(ins_1)));
+            vst1q_u64((sz_u64_t *)state->sum + 4,
+                      vaddq_u64(vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(sum_2), order_u8x16)),
+                                vreinterpretq_u64_u8(ins_2)));
+            vst1q_u64((sz_u64_t *)state->sum + 6,
+                      vaddq_u64(vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(sum_3), order_u8x16)),
+                                vreinterpretq_u64_u8(ins_3)));
+            uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
+            vst1q_u8(state->ins + 0, zeros_u8x16);
+            vst1q_u8(state->ins + 16, zeros_u8x16);
+            vst1q_u8(state->ins + 32, zeros_u8x16);
+            vst1q_u8(state->ins + 48, zeros_u8x16);
+            buffered = 0;
+        }
+        sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        for (sz_size_t byte_index = 0; byte_index < take; ++byte_index) state->ins[buffered + byte_index] = text[byte_index];
+        buffered += take, text += take, length -= take, state->ins_length += take;
     }
-
-    // Now handle the body
-    for (; length >= 64; local_state.ins_length += 64, text += 64, length -= 64) {
-        local_state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + 0));
-        local_state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + 16));
-        local_state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)(text + 32));
-        local_state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)(text + 48));
-        local_state.aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[0], local_state.ins.u8x16s[0]);
-        local_state.aes.u8x16s[1] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[1], local_state.ins.u8x16s[1]);
-        local_state.aes.u8x16s[2] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[2], local_state.ins.u8x16s[2]);
-        local_state.aes.u8x16s[3] = sz_emulate_aesenc_u8x16_neon_(local_state.aes.u8x16s[3], local_state.ins.u8x16s[3]);
-        local_state.sum.u64x2s[0] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[0]), order_u8x16)),
-            local_state.ins.u64x2s[0]);
-        local_state.sum.u64x2s[1] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[1]), order_u8x16)),
-            local_state.ins.u64x2s[1]);
-        local_state.sum.u64x2s[2] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[2]), order_u8x16)),
-            local_state.ins.u64x2s[2]);
-        local_state.sum.u64x2s[3] = vaddq_u64(
-            vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(local_state.sum.u64x2s[3]), order_u8x16)),
-            local_state.ins.u64x2s[3]);
-    }
-    local_state.ins.u8x16s[0] = vdupq_n_u8(0);
-    local_state.ins.u8x16s[1] = vdupq_n_u8(0);
-    local_state.ins.u8x16s[2] = vdupq_n_u8(0);
-    local_state.ins.u8x16s[3] = vdupq_n_u8(0);
-
-    // The tail is the last part we need to handle
-    if (tail_length) {
-        sz_ptr_t local_cursor = (sz_ptr_t)&local_state.ins.u8s[0];
-        sz_ptr_t const local_end = (sz_ptr_t)&local_state.ins.u8s[tail_length];
-        for (; local_cursor < local_end; ++local_cursor, ++text) *local_cursor = *text;
-        local_state.ins_length += tail_length;
-    }
-
-    // Save the state back to the memory
-    vst1q_u8((sz_u8_t *)state->aes + 0, local_state.aes.u8x16s[0]);
-    vst1q_u8((sz_u8_t *)state->aes + 16, local_state.aes.u8x16s[1]);
-    vst1q_u8((sz_u8_t *)state->aes + 32, local_state.aes.u8x16s[2]);
-    vst1q_u8((sz_u8_t *)state->aes + 48, local_state.aes.u8x16s[3]);
-    vst1q_u8((sz_u8_t *)state->sum + 0, local_state.sum.u8x16s[0]);
-    vst1q_u8((sz_u8_t *)state->sum + 16, local_state.sum.u8x16s[1]);
-    vst1q_u8((sz_u8_t *)state->sum + 32, local_state.sum.u8x16s[2]);
-    vst1q_u8((sz_u8_t *)state->sum + 48, local_state.sum.u8x16s[3]);
-    vst1q_u8((sz_u8_t *)state->ins + 0, local_state.ins.u8x16s[0]);
-    vst1q_u8((sz_u8_t *)state->ins + 16, local_state.ins.u8x16s[1]);
-    vst1q_u8((sz_u8_t *)state->ins + 32, local_state.ins.u8x16s[2]);
-    vst1q_u8((sz_u8_t *)state->ins + 48, local_state.ins.u8x16s[3]);
-    state->ins_length = local_state.ins_length;
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state) {
     // This whole function is identical to Haswell.
     sz_size_t length = state->ins_length;
-    if (length >= 64) {
+    // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
+    // in `ins` is folded by `sz_hash_state_finalize_neon_`. A length of exactly 64 uses the minimal (<=64) path
+    // below - matching one-shot `sz_hash`, whose `length <= 64` ladder also stays minimal.
+    if (length > 64) {
         // Load the public state into the internal representation for finalization
         sz_hash_state_internal_t_ internal_state;
         internal_state.aes.u8x16s[0] = vld1q_u8(state->aes + 0);
@@ -301,6 +264,10 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state) {
         internal_state.sum.u8x16s[1] = vld1q_u8(state->sum + 16);
         internal_state.sum.u8x16s[2] = vld1q_u8(state->sum + 32);
         internal_state.sum.u8x16s[3] = vld1q_u8(state->sum + 48);
+        internal_state.ins.u8x16s[0] = vld1q_u8(state->ins + 0);
+        internal_state.ins.u8x16s[1] = vld1q_u8(state->ins + 16);
+        internal_state.ins.u8x16s[2] = vld1q_u8(state->ins + 32);
+        internal_state.ins.u8x16s[3] = vld1q_u8(state->ins + 48);
         internal_state.key.u8x16 = vld1q_u8(state->key);
         internal_state.ins_length = state->ins_length;
         return sz_hash_state_finalize_neon_(&internal_state);
@@ -405,24 +372,25 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size
     else {
         sz_align_(64) sz_hash_state_internal_t_ state;
         sz_hash_state_init_neonaes((sz_hash_state_t *)&state, seed);
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_neon_` to fold - the same deferral the streaming path uses.
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 0));
             state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 16));
             state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 32));
             state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 48));
             sz_hash_state_update_neon_(&state);
         }
-        // Handle the tail, resetting the registers to zero first
-        if (state.ins_length < length) {
-            state.ins.u8x16s[0] = vdupq_n_u8(0);
-            state.ins.u8x16s[1] = vdupq_n_u8(0);
-            state.ins.u8x16s[2] = vdupq_n_u8(0);
-            state.ins.u8x16s[3] = vdupq_n_u8(0);
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins.u8s[byte_index] = text[state.ins_length];
-            sz_hash_state_update_neon_(&state);
-            state.ins_length = length;
-        }
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        sz_size_t const tail_length = length - state.ins_length;
+        state.ins.u8x16s[0] = vdupq_n_u8(0);
+        state.ins.u8x16s[1] = vdupq_n_u8(0);
+        state.ins.u8x16s[2] = vdupq_n_u8(0);
+        state.ins.u8x16s[3] = vdupq_n_u8(0);
+        for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+            state.ins.u8s[byte_index] = text[state.ins_length + byte_index];
+        state.ins_length = length;
         return sz_hash_state_finalize_neon_(&state);
     }
 }

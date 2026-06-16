@@ -368,6 +368,7 @@ SZ_INTERNAL void sz_hash_state_update_serial_(sz_hash_state_t *state) {
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_t const *state) {
+    sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
     // Mix the length into the key
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
@@ -378,12 +379,29 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_t const *state
     // To reuse the snippets above, let's cast to our familiar 128-bit vectors
     sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
     sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
+
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    sz_u128_vec_t aes0 = sz_emulate_aesenc_si128_serial_(aes_vecs[0], ins_vecs[0]);
+    sz_u128_vec_t aes1 = sz_emulate_aesenc_si128_serial_(aes_vecs[1], ins_vecs[1]);
+    sz_u128_vec_t aes2 = sz_emulate_aesenc_si128_serial_(aes_vecs[2], ins_vecs[2]);
+    sz_u128_vec_t aes3 = sz_emulate_aesenc_si128_serial_(aes_vecs[3], ins_vecs[3]);
+    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_serial_(sum_vecs[0], shuffle);
+    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_serial_(sum_vecs[1], shuffle);
+    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_serial_(sum_vecs[2], shuffle);
+    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_serial_(sum_vecs[3], shuffle);
+    sum0.u64s[0] += ins_vecs[0].u64s[0], sum0.u64s[1] += ins_vecs[0].u64s[1];
+    sum1.u64s[0] += ins_vecs[1].u64s[0], sum1.u64s[1] += ins_vecs[1].u64s[1];
+    sum2.u64s[0] += ins_vecs[2].u64s[0], sum2.u64s[1] += ins_vecs[2].u64s[1];
+    sum3.u64s[0] += ins_vecs[3].u64s[0], sum3.u64s[1] += ins_vecs[3].u64s[1];
 
     // Combine the "sum" and the "AES" blocks
-    sz_u128_vec_t mixed0 = sz_emulate_aesenc_si128_serial_(sum_vecs[0], aes_vecs[0]);
-    sz_u128_vec_t mixed1 = sz_emulate_aesenc_si128_serial_(sum_vecs[1], aes_vecs[1]);
-    sz_u128_vec_t mixed2 = sz_emulate_aesenc_si128_serial_(sum_vecs[2], aes_vecs[2]);
-    sz_u128_vec_t mixed3 = sz_emulate_aesenc_si128_serial_(sum_vecs[3], aes_vecs[3]);
+    sz_u128_vec_t mixed0 = sz_emulate_aesenc_si128_serial_(sum0, aes0);
+    sz_u128_vec_t mixed1 = sz_emulate_aesenc_si128_serial_(sum1, aes1);
+    sz_u128_vec_t mixed2 = sz_emulate_aesenc_si128_serial_(sum2, aes2);
+    sz_u128_vec_t mixed3 = sz_emulate_aesenc_si128_serial_(sum3, aes3);
 
     // Combine the mixed registers
     sz_u128_vec_t mixed01 = sz_emulate_aesenc_si128_serial_(mixed0, mixed1);
@@ -493,8 +511,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
 
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_serial_` to fold - the same deferral the streaming path uses.
 #if SZ_USE_MISALIGNED_LOADS
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             sz_u64_t *ins_u64s = (sz_u64_t *)state.ins;
             ins_u64s[0] = *(sz_u64_t const *)(text + state.ins_length);
             ins_u64s[1] = *(sz_u64_t const *)(text + state.ins_length + 8);
@@ -507,20 +527,17 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_
             sz_hash_state_update_serial_(&state);
         }
 #else
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index)
                 state.ins[byte_index] = text[state.ins_length + byte_index];
             sz_hash_state_update_serial_(&state);
         }
 #endif
 
-        if (state.ins_length < length) {
-            for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index) state.ins[byte_index] = 0;
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins[byte_index] = text[state.ins_length];
-            sz_hash_state_update_serial_(&state);
-            state.ins_length = length;
-        }
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index) state.ins[byte_index] = 0;
+        for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+            state.ins[byte_index] = text[state.ins_length];
         return sz_hash_state_finalize_serial_(&state);
     }
 }
@@ -528,25 +545,27 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_
 SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     while (length) {
         sz_size_t progress_in_block = state->ins_length % 64;
-        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-        int const will_fill_block = progress_in_block + to_copy == 64;
-        // Update the metadata before we modify the `to_copy` variable
-        state->ins_length += to_copy;
-        length -= to_copy;
-        // Append to the internal buffer until it's full
-        while (to_copy--) state->ins[progress_in_block++] = *text++;
-        // If we've reached the end of the buffer, update the state
-        if (will_fill_block) {
+        // A full block from an earlier fill is still buffered: its absorption is DEFERRED so `digest` can choose
+        // the same minimal (<=64) / full (>64) path the one-shot `sz_hash` would, keyed on the total length. Now
+        // that more bytes have arrived, that block is interior - flush it and clear the buffer.
+        if (progress_in_block == 0 && state->ins_length != 0) {
             sz_hash_state_update_serial_(state);
-            // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
             for (int byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
         }
+        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
+        state->ins_length += to_copy;
+        length -= to_copy;
+        // Append to the internal buffer; the block that exactly fills it stays deferred (see above).
+        while (to_copy--) state->ins[progress_in_block++] = *text++;
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_serial_(state);
+    // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
+    // buffered in `ins`, and `sz_hash_state_finalize_serial_` folds it - so this is a plain, copy-free finalize
+    // that reproduces one-shot `sz_hash` exactly.
+    if (length > 64) return sz_hash_state_finalize_serial_(state);
 
     // Switch back to a smaller "minimal" state for small inputs
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;

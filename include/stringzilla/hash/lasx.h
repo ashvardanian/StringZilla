@@ -254,23 +254,13 @@ SZ_INTERNAL __m128i sz_lsx_gf16_mul_(__m128i factor_a, __m128i factor_b, __m128i
 }
 
 /**
- *  @brief Emulates a single `_mm_aesenc_si128` round on LoongArch LSX (128-bit lanes).
- *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, bit-identical to
- *          `sz_emulate_aesenc_si128_serial_`.
+ *  @brief AES SubBytes on the ShiftRows-permuted state via tower-field GF((2^4)^2) inversion + affine.
+ *  @return The S-box output (with the `^ 0x63` AES affine constant already applied).
  */
-SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
-    sz_u8_t const *tables = sz_aes_lasx_tables_();
-    __m128i zero_vec = __lsx_vreplgr2vr_b(0);
-    __m128i low_nibble_mask = __lsx_vreplgr2vr_b(0x0F);
-    __m128i input_transform_low = __lsx_vld(tables + 0, 0), input_transform_high = __lsx_vld(tables + 16, 0);
-    __m128i sbox_output_low = __lsx_vld(tables + 32, 0), sbox_output_high = __lsx_vld(tables + 48, 0);
-    __m128i gf16_log = __lsx_vld(tables + 64, 0), gf16_exp = __lsx_vld(tables + 80, 0);
-    __m128i gf16_inverse = __lsx_vld(tables + 96, 0), shift_rows_indices = __lsx_vld(tables + 112, 0);
-
-    // (1) ShiftRows up-front so SubBytes is purely lane-parallel.
-    __m128i shifted_state = sz_lsx_pshufb_(state, shift_rows_indices);
-
-    // (2) SubBytes via tower-field inversion + affine.
+SZ_INTERNAL __m128i sz_emulate_aes_subbytes_lasx_( //
+    __m128i shifted_state, __m128i zero_vec, __m128i low_nibble_mask, __m128i input_transform_low,
+    __m128i input_transform_high, __m128i sbox_output_low, __m128i sbox_output_high, __m128i gf16_log,
+    __m128i gf16_exp, __m128i gf16_inverse) {
     __m128i state_low_nibbles = __lsx_vand_v(shifted_state, low_nibble_mask);
     __m128i state_high_nibbles = __lsx_vand_v(__lsx_vsrli_b(shifted_state, 4), low_nibble_mask);
     __m128i tower_basis = __lsx_vxor_v(sz_lsx_pshufb_(input_transform_low, state_low_nibbles),
@@ -291,10 +281,15 @@ SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
     __m128i inverted_low_nibbles = __lsx_vand_v(inverted_nibbles, low_nibble_mask);
     __m128i sbox_output = __lsx_vxor_v(sz_lsx_pshufb_(sbox_output_low, inverted_low_nibbles),
                                        sz_lsx_pshufb_(sbox_output_high, inverted_high_nibbles));
-    sbox_output = __lsx_vxor_v(sbox_output, __lsx_vreplgr2vr_b(0x63)); // AES affine constant
+    return __lsx_vxor_v(sbox_output, __lsx_vreplgr2vr_b(0x63)); // AES affine constant
+}
 
-    // (3) MixColumns: per 4-byte column, out[j] = c[j] ^ (col_base^col_rot1^col_rot2^col_rot3) ^ xtime(c[j] ^ c[j+1]).
-    //     Build rotate masks on the fly: add j and (j+1 within group) shuffle indices.
+/**
+ *  @brief AES MixColumns over the four 4-byte columns of the S-box output.
+ *  @return `c[j] ^ (col_base^col_rot1^col_rot2^col_rot3) ^ xtime(c[j] ^ c[j+1])` per column.
+ */
+SZ_INTERNAL __m128i sz_emulate_aes_mixcolumns_lasx_(__m128i sbox_output) {
+    // Build rotate masks on the fly: add j and (j+1 within group) shuffle indices.
     static sz_align_(16) sz_u8_t const rot1_bytes[16] = {1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12};
     static sz_align_(16) sz_u8_t const rot2_bytes[16] = {2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13};
     static sz_align_(16) sz_u8_t const rot3_bytes[16] = {3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14};
@@ -307,7 +302,34 @@ SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
     __m128i adjacent_column_xor = __lsx_vxor_v(col_base, col_rot1);
     __m128i column_xtime = __lsx_vxor_v(__lsx_vslli_b(adjacent_column_xor, 1),
                                         __lsx_vand_v(__lsx_vslti_b(adjacent_column_xor, 0), __lsx_vreplgr2vr_b(0x1b)));
-    __m128i mixed = __lsx_vxor_v(__lsx_vxor_v(col_base, column_rotation_sum), column_xtime);
+    return __lsx_vxor_v(__lsx_vxor_v(col_base, column_rotation_sum), column_xtime);
+}
+
+/**
+ *  @brief Emulates a single `_mm_aesenc_si128` round on LoongArch LSX (128-bit lanes).
+ *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, bit-identical to
+ *          `sz_emulate_aesenc_si128_serial_`.
+ */
+SZ_INTERNAL __m128i sz_emulate_aesenc_lasx_(__m128i state, __m128i round_key) {
+    sz_u8_t const *tables = sz_aes_lasx_tables_();
+    __m128i zero_vec = __lsx_vreplgr2vr_b(0);
+    __m128i low_nibble_mask = __lsx_vreplgr2vr_b(0x0F);
+    __m128i input_transform_low = __lsx_vld(tables + 0, 0), input_transform_high = __lsx_vld(tables + 16, 0);
+    __m128i sbox_output_low = __lsx_vld(tables + 32, 0), sbox_output_high = __lsx_vld(tables + 48, 0);
+    __m128i gf16_log = __lsx_vld(tables + 64, 0), gf16_exp = __lsx_vld(tables + 80, 0);
+    __m128i gf16_inverse = __lsx_vld(tables + 96, 0), shift_rows_indices = __lsx_vld(tables + 112, 0);
+
+    // (1) ShiftRows up-front so SubBytes is purely lane-parallel.
+    __m128i shifted_state = sz_lsx_pshufb_(state, shift_rows_indices);
+
+    // (2) SubBytes via tower-field inversion + affine.
+    __m128i sbox_output =
+        sz_emulate_aes_subbytes_lasx_(shifted_state, zero_vec, low_nibble_mask, input_transform_low,
+                                      input_transform_high, sbox_output_low, sbox_output_high, gf16_log, gf16_exp,
+                                      gf16_inverse);
+
+    // (3) MixColumns.
+    __m128i mixed = sz_emulate_aes_mixcolumns_lasx_(sbox_output);
 
     // (4) AddRoundKey.
     return __lsx_vxor_v(mixed, round_key);
@@ -400,20 +422,22 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t
     else {
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_lasx(&state, seed);
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_lasx_` to fold - the same deferral the streaming path uses.
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             __lasx_xvst(__lasx_xvld(start + state.ins_length, 0), state.ins, 0);
             __lasx_xvst(__lasx_xvld(start + state.ins_length + 32, 0), state.ins + 32, 0);
             sz_hash_state_update_lasx_(&state);
         }
-        if (state.ins_length < length) {
-            __m256i zero_vec = __lasx_xvreplgr2vr_b(0);
-            __lasx_xvst(zero_vec, state.ins, 0);
-            __lasx_xvst(zero_vec, state.ins + 32, 0);
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins[byte_index] = start[state.ins_length];
-            sz_hash_state_update_lasx_(&state);
-            state.ins_length = length;
-        }
+
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        __m256i const zero_vec = __lasx_xvreplgr2vr_b(0);
+        __lasx_xvst(zero_vec, state.ins, 0);
+        __lasx_xvst(zero_vec, state.ins + 32, 0);
+        sz_size_t const tail_length = length - state.ins_length;
+        for (sz_size_t i = 0; i < tail_length; ++i) state.ins[i] = start[state.ins_length + i];
+        state.ins_length = length;
         return sz_hash_state_finalize_lasx_(&state);
     }
 }
@@ -438,6 +462,7 @@ SZ_INTERNAL void sz_hash_state_update_lasx_(sz_hash_state_t *state) {
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_t const *state) {
+    sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
@@ -445,11 +470,28 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_t const *state) 
 
     sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
     sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
 
-    __m128i mixed0 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum_vecs[0]), sz_lsx_load128_(&aes_vecs[0]));
-    __m128i mixed1 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum_vecs[1]), sz_lsx_load128_(&aes_vecs[1]));
-    __m128i mixed2 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum_vecs[2]), sz_lsx_load128_(&aes_vecs[2]));
-    __m128i mixed3 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum_vecs[3]), sz_lsx_load128_(&aes_vecs[3]));
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    __m128i aes0 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[0]), sz_lsx_load128_(&ins_vecs[0]));
+    __m128i aes1 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[1]), sz_lsx_load128_(&ins_vecs[1]));
+    __m128i aes2 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[2]), sz_lsx_load128_(&ins_vecs[2]));
+    __m128i aes3 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&aes_vecs[3]), sz_lsx_load128_(&ins_vecs[3]));
+    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_serial_(sum_vecs[0], shuffle);
+    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_serial_(sum_vecs[1], shuffle);
+    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_serial_(sum_vecs[2], shuffle);
+    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_serial_(sum_vecs[3], shuffle);
+    sum0.u64s[0] += ins_vecs[0].u64s[0], sum0.u64s[1] += ins_vecs[0].u64s[1];
+    sum1.u64s[0] += ins_vecs[1].u64s[0], sum1.u64s[1] += ins_vecs[1].u64s[1];
+    sum2.u64s[0] += ins_vecs[2].u64s[0], sum2.u64s[1] += ins_vecs[2].u64s[1];
+    sum3.u64s[0] += ins_vecs[3].u64s[0], sum3.u64s[1] += ins_vecs[3].u64s[1];
+
+    __m128i mixed0 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum0), aes0);
+    __m128i mixed1 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum1), aes1);
+    __m128i mixed2 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum2), aes2);
+    __m128i mixed3 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum3), aes3);
     __m128i mixed01 = sz_emulate_aesenc_lasx_(mixed0, mixed1);
     __m128i mixed23 = sz_emulate_aesenc_lasx_(mixed2, mixed3);
     __m128i mixed = sz_emulate_aesenc_lasx_(mixed01, mixed23);
@@ -461,25 +503,35 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_t const *state) 
 }
 
 SZ_PUBLIC void sz_hash_state_update_lasx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    // `ins` is exactly one 64-byte block, so buffering is just: track how many bytes it holds, absorb it only once
+    // it becomes interior (more bytes arrive - the deferral `digest` needs to choose minimal/full by total length),
+    // and append incoming bytes with a contiguous copy. The deferred trailing block reads back as
+    // `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The copy touches only
+    // `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded for
+    // `finalize` to fold.
+    __m256i const zero_vec = __lasx_xvreplgr2vr_b(0);
+    sz_size_t buffered = state->ins_length % 64;
+    if (buffered == 0 && state->ins_length) buffered = 64;
     while (length) {
-        sz_size_t progress_in_block = state->ins_length % 64;
-        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-        int const will_fill_block = progress_in_block + to_copy == 64;
-        state->ins_length += to_copy;
-        length -= to_copy;
-        while (to_copy--) state->ins[progress_in_block++] = *text++;
-        if (will_fill_block) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_lasx_(state);
-            __m256i zero_vec = __lasx_xvreplgr2vr_b(0);
             __lasx_xvst(zero_vec, state->ins, 0);
             __lasx_xvst(zero_vec, state->ins + 32, 0);
+            buffered = 0;
         }
+        sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        for (sz_size_t i = 0; i < take; ++i) state->ins[buffered + i] = text[i];
+        buffered += take, text += take, length -= take, state->ins_length += take;
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_lasx(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_lasx_(state);
+    // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
+    // buffered in `ins`, and `sz_hash_state_finalize_lasx_` folds it - so this is a plain, copy-free finalize
+    // that reproduces one-shot `sz_hash` exactly. A length of exactly 64 uses the minimal (<=64) path below,
+    // matching one-shot `sz_hash`, whose `length <= 64` ladder also stays minimal.
+    if (length > 64) return sz_hash_state_finalize_lasx_(state);
 
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_hash_minimal_t_ minimal_state;

@@ -111,15 +111,29 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_t const *sta
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(_mm_lddqu_si128((__m128i const *)state->key),
                                             _mm_set_epi64x(0, state->ins_length));
+
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i ins0 = _mm_lddqu_si128((__m128i *)&state->ins[0]);
+    __m128i ins1 = _mm_lddqu_si128((__m128i *)&state->ins[16]);
+    __m128i ins2 = _mm_lddqu_si128((__m128i *)&state->ins[32]);
+    __m128i ins3 = _mm_lddqu_si128((__m128i *)&state->ins[48]);
+    __m128i aes0 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes[0]), ins0);
+    __m128i aes1 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes[16]), ins1);
+    __m128i aes2 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes[32]), ins2);
+    __m128i aes3 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes[48]), ins3);
+    __m128i sum0 = _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum[0]), order), ins0);
+    __m128i sum1 = _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum[16]), order), ins1);
+    __m128i sum2 = _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum[32]), order), ins2);
+    __m128i sum3 = _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum[48]), order), ins3);
+
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[0]),
-                                      _mm_lddqu_si128((__m128i *)&state->aes[0]));
-    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[16]),
-                                      _mm_lddqu_si128((__m128i *)&state->aes[16]));
-    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[32]),
-                                      _mm_lddqu_si128((__m128i *)&state->aes[32]));
-    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum[48]),
-                                      _mm_lddqu_si128((__m128i *)&state->aes[48]));
+    __m128i mixed0 = _mm_aesenc_si128(sum0, aes0);
+    __m128i mixed1 = _mm_aesenc_si128(sum1, aes1);
+    __m128i mixed2 = _mm_aesenc_si128(sum2, aes2);
+    __m128i mixed3 = _mm_aesenc_si128(sum3, aes3);
     // Combine the mixed registers
     __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
     __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
@@ -209,9 +223,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
         sz_align_(64) sz_hash_state_internal_t_ state;
         sz_hash_state_init_westmere((sz_hash_state_t *)&state, seed);
 
-        // Shuffle with the same mask
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same deferral the streaming path uses.
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 0));
             state.ins.xmms[1] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 16));
             state.ins.xmms[2] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 32));
@@ -225,24 +240,13 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
             state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
             state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         }
-        // Handle the tail, resetting the registers to zero first
-        if (state.ins_length < length) {
-            state.ins.xmms[0] = _mm_setzero_si128();
-            state.ins.xmms[1] = _mm_setzero_si128();
-            state.ins.xmms[2] = _mm_setzero_si128();
-            state.ins.xmms[3] = _mm_setzero_si128();
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins.u8s[byte_index] = start[state.ins_length];
-            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-            state.ins_length = length;
-        }
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        state.ins.xmms[0] = _mm_setzero_si128();
+        state.ins.xmms[1] = _mm_setzero_si128();
+        state.ins.xmms[2] = _mm_setzero_si128();
+        state.ins.xmms[3] = _mm_setzero_si128();
+        for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
+            state.ins.u8s[byte_index] = start[state.ins_length];
         return sz_hash_state_finalize_westmere_((sz_hash_state_t const *)&state);
     }
 }
@@ -319,111 +323,47 @@ SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,     
 
 SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
-    // The worst usage pattern... that we should ironically handle first - is updating the state
-    // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
-    // even bother using AVX-512 masked loads to avoid tripping the CPU state.
-    sz_size_t const current_block_index = state_ptr->ins_length / 64;
-    sz_size_t const final_block_index = (state_ptr->ins_length + length) / 64;
-    int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->ins_length + length) % 64 == 0;
-    if (stays_in_the_block && !fills_the_block) {
-        for (; length; --length, ++state_ptr->ins_length, ++text) state_ptr->ins[state_ptr->ins_length % 64] = *text;
-        return;
-    }
-
-    // Now we know that our "text" parts will end up in different blocks.
-    // It's a good idea to pull the state into registers, as well definitely mix them at block boundaries.
-    sz_size_t const progress_in_block = state_ptr->ins_length % 64;
-    sz_size_t const head_length = (64 - progress_in_block) % 64;
-    sz_size_t const tail_length = (state_ptr->ins_length + length) % 64;
-    sz_size_t const body_length = length - head_length - tail_length;
-    sz_assert_(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
-
-    // Lets keep a local copy of the state for one or more updates.
-    // Keep arithmetic in u8 space to avoid alignment assumptions on __m128i pointers.
-    sz_align_(64) sz_hash_state_internal_t_ state;
-    state.aes.xmms[0] = _mm_lddqu_si128((__m128i const *)&state_ptr->aes[0]);
-    state.aes.xmms[1] = _mm_lddqu_si128((__m128i const *)&state_ptr->aes[16]);
-    state.aes.xmms[2] = _mm_lddqu_si128((__m128i const *)&state_ptr->aes[32]);
-    state.aes.xmms[3] = _mm_lddqu_si128((__m128i const *)&state_ptr->aes[48]);
-    state.sum.xmms[0] = _mm_lddqu_si128((__m128i const *)&state_ptr->sum[0]);
-    state.sum.xmms[1] = _mm_lddqu_si128((__m128i const *)&state_ptr->sum[16]);
-    state.sum.xmms[2] = _mm_lddqu_si128((__m128i const *)&state_ptr->sum[32]);
-    state.sum.xmms[3] = _mm_lddqu_si128((__m128i const *)&state_ptr->sum[48]);
-    state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)&state_ptr->ins[0]);
-    state.ins.xmms[1] = _mm_lddqu_si128((__m128i const *)&state_ptr->ins[16]);
-    state.ins.xmms[2] = _mm_lddqu_si128((__m128i const *)&state_ptr->ins[32]);
-    state.ins.xmms[3] = _mm_lddqu_si128((__m128i const *)&state_ptr->ins[48]);
-    state.ins_length = state_ptr->ins_length;
-
-    // Handle the head first, filling up the current block
+    // `ins` is one 64-byte block; track how many bytes it holds (0..64; 64 == a full block deferred by an earlier
+    // call so `digest` can still choose minimal/full by total length), absorb it only once it becomes interior
+    // (more bytes arrive), and append with a single contiguous copy (SSE has no masked store). Re-zeroing `ins`
+    // after each absorb keeps the high lanes zero-padded for `finalize` to fold.
     __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-    if (head_length) {
-        sz_ptr_t local_ptr = (sz_ptr_t)&state.ins.u8s[progress_in_block];
-        sz_ptr_t const local_end = (sz_ptr_t)&state.ins.u8s[64];
-        for (; local_ptr < local_end; ++local_ptr, ++text) *local_ptr = *text;
-        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-        state.ins_length += head_length;
-        length -= head_length;
+    sz_size_t buffered = state_ptr->ins_length % 64;
+    if (buffered == 0 && state_ptr->ins_length) buffered = 64;
+    while (length) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
+            __m128i *const aes = (__m128i *)state_ptr->aes;
+            __m128i *const sum = (__m128i *)state_ptr->sum;
+            __m128i *const ins = (__m128i *)state_ptr->ins;
+            __m128i const block0 = _mm_lddqu_si128(&ins[0]), block1 = _mm_lddqu_si128(&ins[1]);
+            __m128i const block2 = _mm_lddqu_si128(&ins[2]), block3 = _mm_lddqu_si128(&ins[3]);
+            _mm_storeu_si128(&aes[0], _mm_aesenc_si128(_mm_lddqu_si128(&aes[0]), block0));
+            _mm_storeu_si128(&aes[1], _mm_aesenc_si128(_mm_lddqu_si128(&aes[1]), block1));
+            _mm_storeu_si128(&aes[2], _mm_aesenc_si128(_mm_lddqu_si128(&aes[2]), block2));
+            _mm_storeu_si128(&aes[3], _mm_aesenc_si128(_mm_lddqu_si128(&aes[3]), block3));
+            _mm_storeu_si128(&sum[0], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&sum[0]), order), block0));
+            _mm_storeu_si128(&sum[1], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&sum[1]), order), block1));
+            _mm_storeu_si128(&sum[2], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&sum[2]), order), block2));
+            _mm_storeu_si128(&sum[3], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&sum[3]), order), block3));
+            _mm_storeu_si128(&ins[0], _mm_setzero_si128());
+            _mm_storeu_si128(&ins[1], _mm_setzero_si128());
+            _mm_storeu_si128(&ins[2], _mm_setzero_si128());
+            _mm_storeu_si128(&ins[3], _mm_setzero_si128());
+            buffered = 0;
+        }
+        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        for (sz_size_t byte_index = 0; byte_index < to_copy; ++byte_index)
+            state_ptr->ins[buffered + byte_index] = (sz_u8_t)text[byte_index];
+        buffered += to_copy, text += to_copy, length -= to_copy, state_ptr->ins_length += to_copy;
     }
-
-    // Now handle the body
-    for (; length >= 64; state.ins_length += 64, text += 64, length -= 64) {
-        state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(text + 0));
-        state.ins.xmms[1] = _mm_lddqu_si128((__m128i const *)(text + 16));
-        state.ins.xmms[2] = _mm_lddqu_si128((__m128i const *)(text + 32));
-        state.ins.xmms[3] = _mm_lddqu_si128((__m128i const *)(text + 48));
-        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-    }
-    state.ins.xmms[0] = _mm_setzero_si128();
-    state.ins.xmms[1] = _mm_setzero_si128();
-    state.ins.xmms[2] = _mm_setzero_si128();
-    state.ins.xmms[3] = _mm_setzero_si128();
-
-    // The tail is the last part we need to handle
-    if (tail_length) {
-        sz_ptr_t local_ptr = (sz_ptr_t)&state.ins.u8s[0];
-        sz_ptr_t const local_end = (sz_ptr_t)&state.ins.u8s[tail_length];
-        for (; local_ptr < local_end; ++local_ptr, ++text) *local_ptr = *text;
-        state.ins_length += tail_length;
-    }
-
-    // Save the state back to the memory
-    __m128i *aes_dst = (__m128i *)state_ptr->aes;
-    __m128i *sum_dst = (__m128i *)state_ptr->sum;
-    __m128i *ins_dst = (__m128i *)state_ptr->ins;
-    _mm_storeu_si128(&aes_dst[0], state.aes.xmms[0]);
-    _mm_storeu_si128(&aes_dst[1], state.aes.xmms[1]);
-    _mm_storeu_si128(&aes_dst[2], state.aes.xmms[2]);
-    _mm_storeu_si128(&aes_dst[3], state.aes.xmms[3]);
-    _mm_storeu_si128(&sum_dst[0], state.sum.xmms[0]);
-    _mm_storeu_si128(&sum_dst[1], state.sum.xmms[1]);
-    _mm_storeu_si128(&sum_dst[2], state.sum.xmms[2]);
-    _mm_storeu_si128(&sum_dst[3], state.sum.xmms[3]);
-    _mm_storeu_si128(&ins_dst[0], state.ins.xmms[0]);
-    _mm_storeu_si128(&ins_dst[1], state.ins.xmms[1]);
-    _mm_storeu_si128(&ins_dst[2], state.ins.xmms[2]);
-    _mm_storeu_si128(&ins_dst[3], state.ins.xmms[3]);
-    state_ptr->ins_length = state.ins_length;
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_ptr) {
     sz_size_t length = state_ptr->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_westmere_(state_ptr);
+    // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
+    // in `ins` is folded by `sz_hash_state_finalize_westmere_`. A length of exactly 64 uses the minimal (<=64)
+    // path below - matching one-shot `sz_hash`, whose `length <= 64` ladder also stays minimal.
+    if (length > 64) return sz_hash_state_finalize_westmere_(state_ptr);
 
     // Switch back to a smaller "minimal" state for small inputs
     sz_align_(16) sz_hash_minimal_t_ state;

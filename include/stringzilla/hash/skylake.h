@@ -216,9 +216,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
         sz_align_(64) sz_hash_state_internal_t_ state;
         sz_hash_state_init_skylake((sz_hash_state_t *)&state, seed);
 
-        // Shuffle with the same mask
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same deferral the streaming path uses.
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             state.ins.zmm = _mm512_loadu_epi8(start + state.ins_length);
             state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
             state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
@@ -229,95 +230,47 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
             state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
             state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
         }
-        if (state.ins_length < length) {
-            state.ins.zmm = _mm512_maskz_loadu_epi8( //
-                sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
-            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-            state.ins_length = length;
-        }
+        // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
+        state.ins.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
+        state.ins_length = length;
         return sz_hash_state_finalize_westmere_((sz_hash_state_t const *)&state);
     }
 }
 
 SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
-    // The worst usage pattern... that we should ironically handle first - is updating the state
-    // with a very small chunk of data, potentially, one byte at a time. In such cases, we won't
-    // even bother using AVX-512 masked loads to avoid tripping the CPU state.
-    sz_size_t const current_block_index = state_ptr->ins_length / 64;
-    sz_size_t const final_block_index = (state_ptr->ins_length + length) / 64;
-    int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->ins_length + length) % 64 == 0;
-    if (stays_in_the_block && !fills_the_block) {
-        for (; length; --length, ++state_ptr->ins_length, ++text) state_ptr->ins[state_ptr->ins_length % 64] = *text;
-        return;
-    }
-
-    // Now we know that our "text" parts will end up in different blocks.
-    // It's a good idea to pull the state into registers, as well definitely mix them at block boundaries.
-    sz_size_t const progress_in_block = state_ptr->ins_length % 64;
-    sz_size_t const head_length = (64 - progress_in_block) % 64;
-    sz_size_t const tail_length = (state_ptr->ins_length + length) % 64;
-    sz_size_t const body_length = length - head_length - tail_length;
-    sz_assert_(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
-
-    // Lets keep a local copy of the state for one or more updates.
-    sz_align_(64) sz_hash_state_internal_t_ state;
-    state.aes.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->aes);
-    state.sum.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->sum);
-    state.ins.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->ins);
-    state.ins_length = state_ptr->ins_length;
-
-    // Handle the head first, to align to the next block boundary
+    // `ins` is one 64-byte block; track how many bytes it holds (0..64; 64 == a full block deferred by an earlier
+    // call so `digest` can still choose minimal/full by total length), absorb it only once it becomes interior
+    // (more bytes arrive), and append with an AVX-512 masked load+store. Skylake lacks VAES, so the absorb is four
+    // AES-NI lanes. The masked store touches only [buffered, buffered+take); re-zeroing `ins` after each absorb
+    // keeps the high lanes zero-padded for `finalize` to fold.
     __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-    if (head_length) {
-        __mmask64 progress_mask = _knot_mask64(sz_u64_mask_until_(progress_in_block));
-        state.ins.zmm = _mm512_mask_loadu_epi8(state.ins.zmm, progress_mask, text - progress_in_block);
-        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-        state.ins_length += head_length;
-        text += head_length;
-        length -= head_length;
+    sz_size_t buffered = state_ptr->ins_length % 64;
+    if (buffered == 0 && state_ptr->ins_length) buffered = 64;
+    while (length) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
+            sz_u512_vec_t block, aes, sum;
+            block.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->ins);
+            aes.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->aes);
+            sum.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->sum);
+            aes.xmms[0] = _mm_aesenc_si128(aes.xmms[0], block.xmms[0]);
+            aes.xmms[1] = _mm_aesenc_si128(aes.xmms[1], block.xmms[1]);
+            aes.xmms[2] = _mm_aesenc_si128(aes.xmms[2], block.xmms[2]);
+            aes.xmms[3] = _mm_aesenc_si128(aes.xmms[3], block.xmms[3]);
+            sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[0], order), block.xmms[0]);
+            sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[1], order), block.xmms[1]);
+            sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[2], order), block.xmms[2]);
+            sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[3], order), block.xmms[3]);
+            _mm512_storeu_si512((__m512i *)state_ptr->aes, aes.zmm);
+            _mm512_storeu_si512((__m512i *)state_ptr->sum, sum.zmm);
+            _mm512_storeu_si512((__m512i *)state_ptr->ins, _mm512_setzero_si512());
+            buffered = 0;
+        }
+        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        __mmask64 const mask = sz_u64_mask_until_(to_copy);
+        _mm512_mask_storeu_epi8(state_ptr->ins + buffered, mask, _mm512_maskz_loadu_epi8(mask, text));
+        buffered += to_copy, text += to_copy, length -= to_copy, state_ptr->ins_length += to_copy;
     }
-
-    // Now handle the body
-    for (; length >= 64; state.ins_length += 64, text += 64, length -= 64) {
-        state.ins.zmm = _mm512_loadu_epi8(text);
-        state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-        state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-        state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-        state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-        state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-        state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-        state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-        state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-    }
-
-    // The tail is the last part we need to handle
-    if (tail_length) {
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
-        state.ins.zmm = _mm512_maskz_loadu_epi8(tail_mask, text);
-        state.ins_length += tail_length;
-    }
-
-    // Save the state back to the memory
-    _mm512_storeu_si512((__m512i *)state_ptr->aes, state.aes.zmm);
-    _mm512_storeu_si512((__m512i *)state_ptr->sum, state.sum.zmm);
-    _mm512_storeu_si512((__m512i *)state_ptr->ins, state.ins.zmm);
-    state_ptr->ins_length = state.ins_length;
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {

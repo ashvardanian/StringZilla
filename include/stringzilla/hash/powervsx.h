@@ -163,6 +163,7 @@ SZ_INTERNAL void sz_hash_state_update_powervsx_(sz_hash_state_t *state) {
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_t const *state) {
+    sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
@@ -170,11 +171,28 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_t const *sta
 
     sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
     sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
 
-    sz_u128_vec_t mixed0 = sz_aesenc_powervsx_(sum_vecs[0], aes_vecs[0]);
-    sz_u128_vec_t mixed1 = sz_aesenc_powervsx_(sum_vecs[1], aes_vecs[1]);
-    sz_u128_vec_t mixed2 = sz_aesenc_powervsx_(sum_vecs[2], aes_vecs[2]);
-    sz_u128_vec_t mixed3 = sz_aesenc_powervsx_(sum_vecs[3], aes_vecs[3]);
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    sz_u128_vec_t aes0 = sz_aesenc_powervsx_(aes_vecs[0], ins_vecs[0]);
+    sz_u128_vec_t aes1 = sz_aesenc_powervsx_(aes_vecs[1], ins_vecs[1]);
+    sz_u128_vec_t aes2 = sz_aesenc_powervsx_(aes_vecs[2], ins_vecs[2]);
+    sz_u128_vec_t aes3 = sz_aesenc_powervsx_(aes_vecs[3], ins_vecs[3]);
+    sz_u128_vec_t sum0 = sz_shuffle_epi8_powervsx_(sum_vecs[0], shuffle);
+    sz_u128_vec_t sum1 = sz_shuffle_epi8_powervsx_(sum_vecs[1], shuffle);
+    sz_u128_vec_t sum2 = sz_shuffle_epi8_powervsx_(sum_vecs[2], shuffle);
+    sz_u128_vec_t sum3 = sz_shuffle_epi8_powervsx_(sum_vecs[3], shuffle);
+    sum0.u64s[0] += ins_vecs[0].u64s[0], sum0.u64s[1] += ins_vecs[0].u64s[1];
+    sum1.u64s[0] += ins_vecs[1].u64s[0], sum1.u64s[1] += ins_vecs[1].u64s[1];
+    sum2.u64s[0] += ins_vecs[2].u64s[0], sum2.u64s[1] += ins_vecs[2].u64s[1];
+    sum3.u64s[0] += ins_vecs[3].u64s[0], sum3.u64s[1] += ins_vecs[3].u64s[1];
+
+    sz_u128_vec_t mixed0 = sz_aesenc_powervsx_(sum0, aes0);
+    sz_u128_vec_t mixed1 = sz_aesenc_powervsx_(sum1, aes1);
+    sz_u128_vec_t mixed2 = sz_aesenc_powervsx_(sum2, aes2);
+    sz_u128_vec_t mixed3 = sz_aesenc_powervsx_(sum3, aes3);
 
     sz_u128_vec_t mixed01 = sz_aesenc_powervsx_(mixed0, mixed1);
     sz_u128_vec_t mixed23 = sz_aesenc_powervsx_(mixed2, mixed3);
@@ -254,42 +272,61 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_si
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_powervsx(&state, seed);
 
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_powervsx_` to fold - the same deferral the streaming path uses.
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index)
                 state.ins[byte_index] = start[state.ins_length + byte_index];
             sz_hash_state_update_powervsx_(&state);
         }
 
-        if (state.ins_length < length) {
-            for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index) state.ins[byte_index] = 0;
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins[byte_index] = start[state.ins_length];
-            sz_hash_state_update_powervsx_(&state);
-            state.ins_length = length;
-        }
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        __vector unsigned char const zero_vec = vec_splats((unsigned char)0);
+        vec_xst(zero_vec, 0, state.ins);
+        vec_xst(zero_vec, 16, state.ins);
+        vec_xst(zero_vec, 32, state.ins);
+        vec_xst(zero_vec, 48, state.ins);
+        sz_size_t const tail_length = length - state.ins_length;
+        for (sz_size_t i = 0; i < tail_length; ++i) state.ins[i] = start[state.ins_length + i];
+        state.ins_length = length;
         return sz_hash_state_finalize_powervsx_(&state);
     }
 }
 
 SZ_PUBLIC void sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    // `ins` is exactly one 64-byte block, so buffering is just: track how many bytes it holds, absorb it only once
+    // it becomes interior (more bytes arrive - the deferral `digest` needs to choose minimal/full by total length),
+    // and append incoming bytes with a contiguous copy. The deferred trailing block reads back as
+    // `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The copy touches only
+    // `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded for
+    // `finalize` to fold.
+    __vector unsigned char const zero_vec = vec_splats((unsigned char)0);
+    sz_size_t buffered = state->ins_length % 64;
+    if (buffered == 0 && state->ins_length) buffered = 64;
     while (length) {
-        sz_size_t progress_in_block = state->ins_length % 64;
-        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-        int const will_fill_block = progress_in_block + to_copy == 64;
-        state->ins_length += to_copy;
-        length -= to_copy;
-        while (to_copy--) state->ins[progress_in_block++] = *text++;
-        if (will_fill_block) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_powervsx_(state);
-            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
+            vec_xst(zero_vec, 0, state->ins);
+            vec_xst(zero_vec, 16, state->ins);
+            vec_xst(zero_vec, 32, state->ins);
+            vec_xst(zero_vec, 48, state->ins);
+            buffered = 0;
         }
+        sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        for (sz_size_t i = 0; i < take; ++i) state->ins[buffered + i] = text[i];
+        buffered += take, text += take, length -= take, state->ins_length += take;
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_powervsx_(state);
+    // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
+    // buffered in `ins`, and `sz_hash_state_finalize_powervsx_` folds it - so this is a plain, copy-free finalize
+    // that reproduces one-shot `sz_hash_powervsx` exactly.
+    if (length > 64) return sz_hash_state_finalize_powervsx_(state);
 
+    // Switch back to a smaller "minimal" state for small inputs. The four-lane state still holds the init values
+    // (every block was deferred), so the buffered `ins` bytes replayed here match the one-shot minimal ladder.
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_hash_minimal_t_ minimal_state;
     minimal_state.key.u64s[0] = key_u64s[0];

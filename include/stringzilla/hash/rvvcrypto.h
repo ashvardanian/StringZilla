@@ -101,6 +101,7 @@ SZ_INTERNAL void sz_hash_state_update_rvvcrypto_(sz_hash_state_t *state) {
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_t const *state) {
+    sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
@@ -108,11 +109,28 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_t const *st
 
     sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
     sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
 
-    sz_u128_vec_t mixed0 = sz_emulate_aesenc_rvvcrypto_(sum_vecs[0], aes_vecs[0]);
-    sz_u128_vec_t mixed1 = sz_emulate_aesenc_rvvcrypto_(sum_vecs[1], aes_vecs[1]);
-    sz_u128_vec_t mixed2 = sz_emulate_aesenc_rvvcrypto_(sum_vecs[2], aes_vecs[2]);
-    sz_u128_vec_t mixed3 = sz_emulate_aesenc_rvvcrypto_(sum_vecs[3], aes_vecs[3]);
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    sz_u128_vec_t aes0 = sz_emulate_aesenc_rvvcrypto_(aes_vecs[0], ins_vecs[0]);
+    sz_u128_vec_t aes1 = sz_emulate_aesenc_rvvcrypto_(aes_vecs[1], ins_vecs[1]);
+    sz_u128_vec_t aes2 = sz_emulate_aesenc_rvvcrypto_(aes_vecs[2], ins_vecs[2]);
+    sz_u128_vec_t aes3 = sz_emulate_aesenc_rvvcrypto_(aes_vecs[3], ins_vecs[3]);
+    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_serial_(sum_vecs[0], shuffle);
+    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_serial_(sum_vecs[1], shuffle);
+    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_serial_(sum_vecs[2], shuffle);
+    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_serial_(sum_vecs[3], shuffle);
+    sum0.u64s[0] += ins_vecs[0].u64s[0], sum0.u64s[1] += ins_vecs[0].u64s[1];
+    sum1.u64s[0] += ins_vecs[1].u64s[0], sum1.u64s[1] += ins_vecs[1].u64s[1];
+    sum2.u64s[0] += ins_vecs[2].u64s[0], sum2.u64s[1] += ins_vecs[2].u64s[1];
+    sum3.u64s[0] += ins_vecs[3].u64s[0], sum3.u64s[1] += ins_vecs[3].u64s[1];
+
+    sz_u128_vec_t mixed0 = sz_emulate_aesenc_rvvcrypto_(sum0, aes0);
+    sz_u128_vec_t mixed1 = sz_emulate_aesenc_rvvcrypto_(sum1, aes1);
+    sz_u128_vec_t mixed2 = sz_emulate_aesenc_rvvcrypto_(sum2, aes2);
+    sz_u128_vec_t mixed3 = sz_emulate_aesenc_rvvcrypto_(sum3, aes3);
 
     sz_u128_vec_t mixed01 = sz_emulate_aesenc_rvvcrypto_(mixed0, mixed1);
     sz_u128_vec_t mixed23 = sz_emulate_aesenc_rvvcrypto_(mixed2, mixed3);
@@ -186,22 +204,24 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start, sz_s
         sz_align_(64) sz_hash_state_t state;
         sz_size_t const window = sizeof(state.ins); // the 64-byte hashing window
         sz_hash_state_init_serial(&state, seed);
-        for (; state.ins_length + window <= length; state.ins_length += window) {
+
+        // Absorb every full 64-byte window EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_rvvcrypto_` to fold - the same deferral the streaming path uses.
+        for (; state.ins_length + window < length; state.ins_length += window) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(window); // VLEN >= 128 -> one whole-window transfer
             __riscv_vse8_v_u8m8(state.ins,
                                 __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vector_length),
                                 vector_length);
             sz_hash_state_update_rvvcrypto_(&state);
         }
-        if (state.ins_length < length) {
-            sz_size_t zero_vl = __riscv_vsetvl_e8m8(window);
-            __riscv_vse8_v_u8m8(state.ins, __riscv_vmv_v_x_u8m8(0, zero_vl), zero_vl);
-            sz_size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the partial tail natively
-            __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, tail_vl),
-                                tail_vl);
-            sz_hash_state_update_rvvcrypto_(&state);
-            state.ins_length = length;
-        }
+
+        // Stage the final [ins_length, length) bytes (1..64) into a zeroed window; finalize folds them.
+        sz_size_t zero_vl = __riscv_vsetvl_e8m8(window);
+        __riscv_vse8_v_u8m8(state.ins, __riscv_vmv_v_x_u8m8(0, zero_vl), zero_vl);
+        sz_size_t tail_vl = __riscv_vsetvl_e8m8(length - state.ins_length); // VL covers the final block natively
+        __riscv_vse8_v_u8m8(state.ins, __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, tail_vl),
+                            tail_vl);
+        state.ins_length = length;
         return sz_hash_state_finalize_rvvcrypto_(&state);
     }
 }
@@ -211,24 +231,33 @@ SZ_PUBLIC void sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t see
 }
 
 SZ_PUBLIC void sz_hash_state_update_rvvcrypto(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    // `ins` is exactly one 64-byte window. Track how many bytes it holds and absorb it only once it becomes
+    // interior (more bytes arrive - the deferral `digest` needs to choose minimal/full by total length). The
+    // deferred trailing block reads back as `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered ==
+    // 64`. The append uses `vl` as the mask, touching only `[buffered, buffered+take)`, and we re-zero `ins` after
+    // each absorb so the high lanes stay zero-padded for `finalize` to fold a clean trailing block.
+    sz_size_t buffered = state->ins_length % 64;
+    if (buffered == 0 && state->ins_length) buffered = 64;
     while (length) {
-        sz_size_t progress_in_block = state->ins_length % 64;
-        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-        int const will_fill_block = progress_in_block + to_copy == 64;
-        state->ins_length += to_copy;
-        length -= to_copy;
-        while (to_copy--) state->ins[progress_in_block++] = *text++;
-        if (will_fill_block) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_rvvcrypto_(state);
-            sz_size_t clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
+            sz_size_t const clear_vl = __riscv_vsetvl_e8m8(sizeof(state->ins));
             __riscv_vse8_v_u8m8(state->ins, __riscv_vmv_v_x_u8m8(0, clear_vl), clear_vl);
+            buffered = 0;
         }
+        sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        sz_size_t const vl = __riscv_vsetvl_e8m8(take); // VL is the mask: `e8m8` spans the whole 64-byte window
+        __riscv_vse8_v_u8m8(state->ins + buffered, __riscv_vle8_v_u8m8((sz_u8_t const *)text, vl), vl);
+        buffered += take, text += take, length -= take, state->ins_length += take;
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_rvvcrypto_(state);
+    // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
+    // in `ins` is folded by `sz_hash_state_finalize_rvvcrypto_`. A length of exactly 64 uses the minimal (<=64)
+    // path below - matching one-shot `sz_hash`, whose `length <= 64` ladder also stays minimal.
+    if (length > 64) return sz_hash_state_finalize_rvvcrypto_(state);
 
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_hash_minimal_t_ minimal_state;

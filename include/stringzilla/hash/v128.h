@@ -202,6 +202,7 @@ SZ_INTERNAL void sz_hash_state_update_v128_(sz_hash_state_t *state) {
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_t const *state) {
+    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
@@ -209,11 +210,28 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_t const *state) 
 
     sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
     sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
+    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
 
-    sz_u128_vec_t mixed0 = sz_emulate_aesenc_v128_(sum_vecs[0], aes_vecs[0]);
-    sz_u128_vec_t mixed1 = sz_emulate_aesenc_v128_(sum_vecs[1], aes_vecs[1]);
-    sz_u128_vec_t mixed2 = sz_emulate_aesenc_v128_(sum_vecs[2], aes_vecs[2]);
-    sz_u128_vec_t mixed3 = sz_emulate_aesenc_v128_(sum_vecs[3], aes_vecs[3]);
+    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
+    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
+    // digest defer it and share this single finalization with no state copy.
+    sz_u128_vec_t aes0 = sz_emulate_aesenc_v128_(aes_vecs[0], ins_vecs[0]);
+    sz_u128_vec_t aes1 = sz_emulate_aesenc_v128_(aes_vecs[1], ins_vecs[1]);
+    sz_u128_vec_t aes2 = sz_emulate_aesenc_v128_(aes_vecs[2], ins_vecs[2]);
+    sz_u128_vec_t aes3 = sz_emulate_aesenc_v128_(aes_vecs[3], ins_vecs[3]);
+    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_v128_(sum_vecs[0], shuffle);
+    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_v128_(sum_vecs[1], shuffle);
+    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_v128_(sum_vecs[2], shuffle);
+    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_v128_(sum_vecs[3], shuffle);
+    sum0.v128 = wasm_i64x2_add(sum0.v128, ins_vecs[0].v128);
+    sum1.v128 = wasm_i64x2_add(sum1.v128, ins_vecs[1].v128);
+    sum2.v128 = wasm_i64x2_add(sum2.v128, ins_vecs[2].v128);
+    sum3.v128 = wasm_i64x2_add(sum3.v128, ins_vecs[3].v128);
+
+    sz_u128_vec_t mixed0 = sz_emulate_aesenc_v128_(sum0, aes0);
+    sz_u128_vec_t mixed1 = sz_emulate_aesenc_v128_(sum1, aes1);
+    sz_u128_vec_t mixed2 = sz_emulate_aesenc_v128_(sum2, aes2);
+    sz_u128_vec_t mixed3 = sz_emulate_aesenc_v128_(sum3, aes3);
 
     sz_u128_vec_t mixed01 = sz_emulate_aesenc_v128_(mixed0, mixed1);
     sz_u128_vec_t mixed23 = sz_emulate_aesenc_v128_(mixed2, mixed3);
@@ -274,21 +292,23 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_size_t
     else {
         sz_align_(64) sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
-        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+
+        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
+        // buffered in `ins` for `sz_hash_state_finalize_v128_` to fold - the same deferral the streaming path uses.
+        for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
                 wasm_v128_store(state.ins + lane_index * 16,
                                 wasm_v128_load(start + state.ins_length + lane_index * 16));
             sz_hash_state_update_v128_(&state);
         }
-        if (state.ins_length < length) {
-            v128_t zero_vec = wasm_u64x2_splat(0);
-            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
-                wasm_v128_store(state.ins + lane_index * 16, zero_vec);
-            for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
-                state.ins[byte_index] = start[state.ins_length];
-            sz_hash_state_update_v128_(&state);
-            state.ins_length = length;
-        }
+
+        // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
+        v128_t const zero_vec = wasm_u64x2_splat(0);
+        for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) wasm_v128_store(state.ins + lane_index * 16, zero_vec);
+        sz_size_t const tail_length = length - state.ins_length;
+        for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+            state.ins[byte_index] = start[state.ins_length + byte_index];
+        state.ins_length = length;
         return sz_hash_state_finalize_v128_(&state);
     }
 }
@@ -298,23 +318,35 @@ SZ_PUBLIC void sz_hash_state_init_v128(sz_hash_state_t *state, sz_u64_t seed) {
 }
 
 SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+
+    // `ins` is exactly one 64-byte block (four v128 lanes), so buffering is just: track how many bytes it holds,
+    // absorb it only once it becomes interior (more bytes arrive - the deferral `digest` needs to choose
+    // minimal/full by total length), and append incoming bytes with a contiguous copy. The deferred trailing block
+    // reads back as `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The copy touches
+    // only `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded
+    // for `finalize` to fold.
+    v128_t const zero_vec = wasm_u64x2_splat(0);
+    sz_size_t buffered = state->ins_length % 64;
+    if (buffered == 0 && state->ins_length) buffered = 64;
     while (length) {
-        sz_size_t progress_in_block = state->ins_length % 64;
-        sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
-        int const will_fill_block = progress_in_block + to_copy == 64;
-        state->ins_length += to_copy;
-        length -= to_copy;
-        while (to_copy--) state->ins[progress_in_block++] = *text++;
-        if (will_fill_block) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_v128_(state);
-            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
+                wasm_v128_store(state->ins + lane_index * 16, zero_vec);
+            buffered = 0;
         }
+        sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        for (sz_size_t byte_index = 0; byte_index < take; ++byte_index) state->ins[buffered + byte_index] = text[byte_index];
+        buffered += take, text += take, length -= take, state->ins_length += take;
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128(sz_hash_state_t const *state) {
     sz_size_t length = state->ins_length;
-    if (length >= 64) return sz_hash_state_finalize_v128_(state);
+    // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
+    // buffered in `ins`, and `sz_hash_state_finalize_v128_` folds it - so this is a plain, copy-free finalize
+    // that reproduces one-shot `sz_hash` exactly. A length of exactly 64 uses the minimal (<=64) path below.
+    if (length > 64) return sz_hash_state_finalize_v128_(state);
 
     sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_hash_minimal_t_ minimal_state;
