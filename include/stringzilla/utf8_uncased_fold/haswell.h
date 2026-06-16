@@ -1,13 +1,13 @@
 /**
  *  @brief Haswell (AVX2) backend for UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold/haswell.h
+ *  @file include/stringzilla/utf8_uncased_fold/haswell.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_HASWELL_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_HASWELL_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_
 
-#include "stringzilla/utf8_case_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,7 +95,7 @@ SZ_INTERNAL sz_u32_t sz_haswell_mask_until_(sz_size_t n) { return (sz_u32_t)_bzh
  *      word still copies its longest caseless prefix vectorized.
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_caseless_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
     __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -139,7 +139,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_caseless_chunk_( //
  *      vectorized instead of degrading to one-rune serial steps per chunk.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_latin_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
     __m256i source_ymm, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -313,7 +313,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_latin_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_cyrillic_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
     __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
@@ -382,7 +382,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_cyrillic_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_greek_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
     __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
@@ -468,7 +468,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_greek_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_georgian_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
     __m256i source_ymm, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
@@ -543,7 +543,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_georgian_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_guarded_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
     __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -602,7 +602,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_guarded_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_armenian_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
     __m256i source_ymm, sz_u32_t is_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
@@ -671,7 +671,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_armenian_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_supplementary_chunk_( //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
     __m256i source_ymm, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -696,7 +696,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_haswell_supplementary_chunk_( //
     return fold_length;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // The 32-byte port of the Ice Lake classify-once design: every full chunk is classified into
     // lead-byte families with a compare tree, and uniform chunks route straight to their handler.
     // Chunks that mix families beyond the handlers below fold one rune serially and re-enter the
@@ -767,7 +767,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
         sz_size_t handled = 0;
         sz_u32_t is_two_byte_lead_mask = is_lead_mask & ~is_three_byte_lead_mask & ~is_four_byte_lead_mask;
         if (lead_families & sz_utf8_fold_haswell_lead_caseless_flag_)
-            handled = sz_utf8_case_fold_haswell_caseless_chunk_(source_ymm, is_two_byte_lead_mask,
+            handled = sz_utf8_uncased_fold_haswell_caseless_chunk_(source_ymm, is_two_byte_lead_mask,
                                                                 is_three_byte_lead_mask,
                                                                 is_lead_mask & ~is_caseless_lead_mask, target);
         // Unlike Ice Lake, pure Latin-1 chunks (German, French) take this handler too: it covers
@@ -775,35 +775,35 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
         if (!handled &&
             (lead_families & (sz_utf8_fold_haswell_lead_latin_flag_ | sz_utf8_fold_haswell_lead_latin_extended_flag_ |
                               sz_utf8_fold_haswell_lead_e1_flag_)))
-            handled = sz_utf8_case_fold_haswell_latin_chunk_(
+            handled = sz_utf8_uncased_fold_haswell_latin_chunk_(
                 source_ymm, is_continuation_mask, is_three_byte_lead_mask,
                 is_lead_mask & ~(is_latin_lead_mask | is_latin_extended_lead_mask | is_e1_lead_mask), target);
         // Georgian (E1 82/83) - runs after Latin, which already took E1 B8-BB; this handler folds
         // Georgian uppercase and truncates at E1 BC-BF Greek Extended and other E1 sub-families
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_e1_flag_))
-            handled = sz_utf8_case_fold_haswell_georgian_chunk_(source_ymm, is_three_byte_lead_mask,
+            handled = sz_utf8_uncased_fold_haswell_georgian_chunk_(source_ymm, is_three_byte_lead_mask,
                                                                 is_lead_mask & ~is_e1_lead_mask, target);
         // Basic Cyrillic + ASCII - the common case for Russian, Ukrainian, and Bulgarian
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_cyrillic_flag_))
-            handled = sz_utf8_case_fold_haswell_cyrillic_chunk_(source_ymm, is_lead_mask & ~is_cyrillic_lead_mask,
+            handled = sz_utf8_uncased_fold_haswell_cyrillic_chunk_(source_ymm, is_lead_mask & ~is_cyrillic_lead_mask,
                                                                 target);
         // Basic Greek + ASCII
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_greek_flag_))
-            handled = sz_utf8_case_fold_haswell_greek_chunk_(source_ymm, is_lead_mask & ~is_greek_lead_mask, target);
+            handled = sz_utf8_uncased_fold_haswell_greek_chunk_(source_ymm, is_lead_mask & ~is_greek_lead_mask, target);
         // Guarded 3-byte leads mixed with caseless scripts - CJK or Hangul with E2 punctuation;
         // the handler verifies the guarded seconds and truncates at the first folding sequence
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_guarded_flag_))
-            handled = sz_utf8_case_fold_haswell_guarded_chunk_(
+            handled = sz_utf8_uncased_fold_haswell_guarded_chunk_(
                 source_ymm, is_two_byte_lead_mask, is_three_byte_lead_mask,
                 is_lead_mask & ~(is_caseless_lead_mask | is_guarded_lead_mask), target);
         // Armenian (D4-D6) + the Cyrillic Supplement that shares the D4 lead - both fall in the
         // complex family; this handler folds them and truncates at any non-Armenian complex lead
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
-            handled = sz_utf8_case_fold_haswell_armenian_chunk_(source_ymm, is_lead_mask, target);
+            handled = sz_utf8_uncased_fold_haswell_armenian_chunk_(source_ymm, is_lead_mask, target);
         // Complex chunks are usually emoji runs: 4-byte sequences with caseless second bytes
         // copy through; anything else in the family truncates to the serial path
         if (!handled && (lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
-            handled = sz_utf8_case_fold_haswell_supplementary_chunk_(
+            handled = sz_utf8_uncased_fold_haswell_supplementary_chunk_(
                 source_ymm, is_complex_lead_mask, is_four_byte_lead_mask, is_lead_mask & ~is_complex_lead_mask, target);
         if (handled) {
             target += handled, source += handled, source_length -= handled;
@@ -825,7 +825,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
 
     // The sub-32-byte tail goes through the serial kernel, inheriting its handling of
     // incomplete or invalid trailing sequences byte-for-byte
-    target += sz_utf8_case_fold_serial(source, source_length, target);
+    target += sz_utf8_uncased_fold_serial(source, source_length, target);
     return (sz_size_t)(target - target_start);
 }
 
@@ -840,4 +840,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell(sz_cptr_t source, sz_size_t source
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_HASWELL_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_

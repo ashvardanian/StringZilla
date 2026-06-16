@@ -71,7 +71,7 @@ def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
     return sorted(codepoints)
 
 
-def parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
+def parse_uncased_folding_file(filepath: str) -> Dict[int, bytes]:
     """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
 
     Uses status C (common) and F (full) mappings for full case folding.
@@ -102,7 +102,7 @@ def parse_case_folding_file(filepath: str) -> Dict[int, bytes]:
     return folds
 
 
-def _download_case_folding_file(version: str) -> str:
+def _download_uncased_folding_file(version: str) -> str:
     """Download CaseFolding.txt and return the cache path.
 
     Args:
@@ -129,7 +129,7 @@ def _download_case_folding_file(version: str) -> str:
     return cache_path
 
 
-def get_case_folding_rules(version: str = UNICODE_VERSION) -> Dict[int, bytes]:
+def get_uncased_folding_rules(version: str = UNICODE_VERSION) -> Dict[int, bytes]:
     """Download and parse Unicode CaseFolding.txt, caching in temp directory.
 
     Args:
@@ -138,11 +138,11 @@ def get_case_folding_rules(version: str = UNICODE_VERSION) -> Dict[int, bytes]:
     Returns:
         Dict mapping codepoints to their folded UTF-8 bytes
     """
-    cache_path = _download_case_folding_file(version)
-    return parse_case_folding_file(cache_path)
+    cache_path = _download_uncased_folding_file(version)
+    return parse_uncased_folding_file(cache_path)
 
 
-def get_case_folding_rules_as_codepoints(
+def get_uncased_folding_rules_as_codepoints(
     version: str = UNICODE_VERSION,
 ) -> Dict[int, List[int]]:
     """Download and parse Unicode CaseFolding.txt, returning target codepoints.
@@ -153,7 +153,7 @@ def get_case_folding_rules_as_codepoints(
     Returns:
         Dict mapping source codepoints to list of target codepoints
     """
-    cache_path = _download_case_folding_file(version)
+    cache_path = _download_uncased_folding_file(version)
 
     folds = {}
     with open(cache_path, "r", encoding="utf-8") as f:

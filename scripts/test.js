@@ -263,21 +263,21 @@ test("UTF-8 Multi-byte Character Handling", () => {
 });
 
 test("UTF-8 Case Fold - Sharp S and Ligature", () => {
-    const folded1 = stringzilla.utf8CaseFold(Buffer.from("Straße"));
+    const folded1 = stringzilla.utf8UncasedFold(Buffer.from("Straße"));
     assert.strictEqual(folded1.toString("utf8"), "strasse");
 
-    const folded2 = stringzilla.utf8CaseFold(Buffer.from("ofﬁce")); // contains U+FB01
+    const folded2 = stringzilla.utf8UncasedFold(Buffer.from("ofﬁce")); // contains U+FB01
     assert.strictEqual(folded2.toString("utf8"), "office");
 });
 
-test("UTF-8 Case-Insensitive Find - Full Case Folding", () => {
+test("UTF-8 Uncased Find - Full Case Folding", () => {
     const haystack = Buffer.from(
         "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
         "Typografisch sieht man auch: ein Maß von etwa 20 μK."
     );
     const needle = Buffer.from("EIN MASS VON ETWA 20 μK");
 
-    const firstResult = stringzilla.utf8CaseInsensitiveFind(haystack, needle);
+    const firstResult = stringzilla.utf8UncasedFind(haystack, needle);
     assert.notStrictEqual(firstResult.index, -1n);
     assert(firstResult.length > 0n);
     const firstStart = Number(firstResult.index);
@@ -289,7 +289,7 @@ test("UTF-8 Case-Insensitive Find - Full Case Folding", () => {
 
     // Find the second match after the first one
     const remainingHaystack = haystack.subarray(firstEnd);
-    const secondResult = stringzilla.utf8CaseInsensitiveFind(
+    const secondResult = stringzilla.utf8UncasedFind(
         remainingHaystack,
         needle
     );
@@ -302,13 +302,13 @@ test("UTF-8 Case-Insensitive Find - Full Case Folding", () => {
     );
 });
 
-test("UTF-8 Case-Insensitive Needle - Reuse Metadata", () => {
+test("UTF-8 Uncased Needle - Reuse Metadata", () => {
     const haystack = Buffer.from(
         "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
         "Typografisch sieht man auch: ein Maß von etwa 20 μK."
     );
     const needleBytes = Buffer.from("EIN MASS VON ETWA 20 μK");
-    const compiledNeedle = new stringzilla.Utf8CaseInsensitiveNeedle(
+    const compiledNeedle = new stringzilla.Utf8UncasedNeedle(
         needleBytes
     );
 

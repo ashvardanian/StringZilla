@@ -136,22 +136,22 @@ export default {
      *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
      *  @returns {Buffer} Case-folded UTF-8 bytes (may be longer than input due to expansions)
      */
-    utf8CaseFold: compiled.utf8CaseFold,
+    utf8UncasedFold: compiled.utf8UncasedFold,
 
     /**
-     *  Finds the first case-insensitive occurrence of `needle` in `haystack` using full Unicode case folding.
+     *  Finds the first uncased occurrence of `needle` in `haystack` using full Unicode case folding.
      *
      *  @param {Buffer} haystack - UTF-8 encoded haystack
      *  @param {Buffer} needle - UTF-8 encoded needle
      *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
      *  @returns {{index: bigint, length: bigint}} Object with byte index and matched byte length; `index` is -1n if not found
      */
-    utf8CaseInsensitiveFind: compiled.utf8CaseInsensitiveFind,
+    utf8UncasedFind: compiled.utf8UncasedFind,
 
     /**
-     *  Precompiled case-insensitive UTF-8 needle for repeated searches.
+     *  Precompiled uncased UTF-8 needle for repeated searches.
      *
      *  Construct with `new`, then call `findIn(haystack, validate?)`.
      */
-    Utf8CaseInsensitiveNeedle: compiled.Utf8CaseInsensitiveNeedle,
+    Utf8UncasedNeedle: compiled.Utf8UncasedNeedle,
 };

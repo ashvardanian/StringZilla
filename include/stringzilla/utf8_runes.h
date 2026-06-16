@@ -2,7 +2,7 @@
  *  @brief ISA-agnostic Unicode core for case folding (no SIMD intrinsics).
  *  @file include/stringzilla/utf8_runes.h
  *  @author Ash Vardanian
- *  @sa utf8_case.h
+ *  @sa utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_RUNES_H_
 #define STRINGZILLA_UTF8_RUNES_H_
@@ -20,7 +20,7 @@ extern "C" {
  *
  *  This struct only contains location and length information needed for kernel selection.
  *  The actual case-folding and probe computation is deferred until after the best kernel
- *  is chosen, using `sz_utf8_case_insensitive_needle_metadata_t`.
+ *  is chosen, using `sz_utf8_uncased_needle_metadata_t`.
  */
 typedef struct sz_utf8_string_slice_t {
     sz_size_t offset;       // Start offset in original needle (bytes)
@@ -42,7 +42,7 @@ typedef struct sz_utf8_string_slice_t {
  *    - third: `probe_third`
  *    - last: implicit at `folded_slice[folded_slice_length - 1]`
  */
-typedef struct sz_utf8_case_insensitive_needle_metadata_t {
+typedef struct sz_utf8_uncased_needle_metadata_t {
     sz_size_t offset_in_unfolded; // Number of bytes in the "unsafe LONG NeedLe" before the safe & folded part
     sz_size_t length_in_unfolded; // Number of bytes in the safe part of the actual "NeedLe" before folding
     sz_u8_t folded_slice[16];
@@ -50,7 +50,7 @@ typedef struct sz_utf8_case_insensitive_needle_metadata_t {
     sz_u8_t probe_second; // Position of the second relevant character in the folded slice
     sz_u8_t probe_third;  // Position of the third relevant character in the folded slice
     sz_u8_t kernel_id;    // The unique identifier of the kernel best suited for searching this needle
-} sz_utf8_case_insensitive_needle_metadata_t;
+} sz_utf8_uncased_needle_metadata_t;
 
 #pragma endregion // Core Types
 
@@ -873,8 +873,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_r
         it->ptr += rune_length;
         // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
         // The fold function will overwrite positions it uses; unused positions keep the sentinel.
-        // This follows the same pattern as sz_utf8_case_insensitive_find_2folded_serial_ and
-        // sz_utf8_case_insensitive_find_3folded_serial_.
+        // This follows the same pattern as sz_utf8_uncased_find_2folded_serial_ and
+        // sz_utf8_uncased_find_3folded_serial_.
         it->pending[0] = 0xFFFFFFFFu;
         it->pending[1] = 0xFFFFFFFEu;
         it->pending[2] = 0xFFFFFFFDu;
@@ -960,7 +960,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
  *  @brief Safety profile for a single character across all script paths.
  *
  *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly folding
- *  than the proper `sz_utf8_case_fold`, but without losing any possible matches. That's typically achieved
+ *  than the proper `sz_utf8_uncased_fold`, but without losing any possible matches. That's typically achieved
  *  finding parts of the needle, that never appear in any multi-byte expansions of complex characters, so
  *  we don't need to shuffle data within a CPU register - just swap some byte sequences with others.
  *
@@ -969,13 +969,13 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
  *  by language groups and Unicode subranges, the 5 GB/s target becomes approachable.
  */
 typedef enum {
-    sz_utf8_case_rune_unknown_k = 0,
+    sz_utf8_uncased_rune_unknown_k = 0,
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII characters, mostly for English text,
      *         exclusive to single-byte characters without case-folding "collisions" and ambiguities.
      *
-     *  If all of the following @b needle-constraints are satisfied, our case-insensitive UTF-8 substring search
-     *  becomes no more than a trivial case-insensitive ASCII substring search, where the only @b haystack-folding
+     *  If all of the following @b needle-constraints are satisfied, our uncased UTF-8 substring search
+     *  becomes no more than a trivial uncased ASCII substring search, where the only @b haystack-folding
      *  operation to be applied is mapping A-Z to a-z:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
@@ -1019,14 +1019,14 @@ typedef enum {
      *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_ascii_invariant_k = 1,
+    sz_utf8_uncased_rune_ascii_invariant_k = 1,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Latin-1 Supplements designed mostly
      *         for Western European languages (like French, German, Spanish, & Portuguese) with a mixture of
      *         single-byte and double-byte UTF-8 character sequences.
      *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for a simpler variant.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -1038,7 +1038,7 @@ typedef enum {
      *    - 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)
      *
      *  This doesn't cover Latin-A and Latin-B extensions (like Polish, Czech, Hungarian, & Turkish letters).
-     *  This also inherits some of the contextual limitations from `sz_utf8_case_rune_ascii_invariant_k`, but not all!
+     *  This also inherits some of the contextual limitations from `sz_utf8_uncased_rune_ascii_invariant_k`, but not all!
      *
      *  The lowercase 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73) is folded in-place (2 bytes → 2 bytes).
      *  This creates a mid-expansion matching issue: if a needle starts or ends with 's', the SIMD kernel might find
@@ -1072,7 +1072,7 @@ typedef enum {
      *  It's archaic in modern languages but theoretically possible in historical texts.
      *
      *  So we allow 'k' unconditionally and inherit/extend the following limitations from
-     *  `sz_utf8_case_rune_ascii_invariant_k`:
+     *  `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'i' (U+0069, 69) - can't be first or last; can't follow 'f' (U+0066, 66); can't precede '̇' (U+0307, CC 87)
      *    to avoid 'İ' (U+0130, C4 B0) → "i̇" (U+0069 U+0307, 69 CC 87).
@@ -1111,14 +1111,14 @@ typedef enum {
      *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_western_europe_k = 2,
+    sz_utf8_uncased_rune_safe_western_europe_k = 2,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin-A Supplements designed
      *         mostly for Central European languages (like Polish, Czech, & Hungarian) and Turkish with a mixture of
      *         single-byte, double-byte, and rare triple-byte UTF-8 character sequences.
      *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for a simpler variant.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for a simpler variant.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -1163,7 +1163,7 @@ typedef enum {
      *  frequently encounter in Turkish text.
      *
      *  We inherit most contextual limitations for some of the ASCII characters from
-     *  `sz_utf8_case_rune_ascii_invariant_k`:
+     *  `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
@@ -1204,7 +1204,7 @@ typedef enum {
      *  - 'y' (U+0079, 79) - can't be last; can't precede '̊' (U+030A, CC 8A) to avoid:
      *    - 'ẙ' (U+1E99, E1 BA 99) → "ẙ" (U+0079 U+030A, 79 CC 8A)
      *
-     *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_case_rune_safe_western_europe_k`:
+     *  We also inherit one more limitation from the Latin-1 profile, same as `sz_utf8_uncased_rune_safe_western_europe_k`:
      *
      *  - 'å' (U+00E5, C3 A5) - is the folding target of both 'Å' (U+00C5, C3 85) in Latin-1 and
      *    the Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5), so needle cannot contain 'å' (U+00E5, C3 A5)
@@ -1214,14 +1214,14 @@ typedef enum {
      *  for this profile. This includes English alphabet letters like: b, c, d, e, g, k, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_central_europe_k = 3,
+    sz_utf8_uncased_rune_safe_central_europe_k = 3,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Cyrillic designed mostly
      *         for East Slavic languages (like Russian, Ukrainian, & Belarusian) and South Slavic languages
      *         (like Serbian, Bulgarian, & Macedonian), but excluding Cyrillic Extensions.
      *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -1260,7 +1260,7 @@ typedef enum {
      *  But there are also exceptions, like the Palochka 'Ӏ' (U+04C0, D3 80) → 'ӏ' (U+04CF, D3 8F).
      *  By omitting those extensions we can make our folding kernel much lighter.
      *
-     *  We inherit ALL contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *  We inherit ALL contextual ASCII limitations from `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *     - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
@@ -1311,14 +1311,14 @@ typedef enum {
      *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_cyrillic_k = 4,
+    sz_utf8_uncased_rune_safe_cyrillic_k = 4,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Greek designed mostly
      *         for Modern Greek (Demotic) text with a mixture of single-byte and double-byte UTF-8
      *         character sequences.
      *
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  Unlike the ASCII fast path, these kernels fold a wider range of characters:
      *  - 26x original ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -1371,10 +1371,10 @@ typedef enum {
      *
      *  Note on the Micro Sign 'µ' (U+00B5, C2 B5):
      *  The Latin-1 micro sign folds TO Greek mu 'μ' (U+03BC, CE BC). This is handled by the Latin-1
-     *  kernel path (sz_utf8_case_rune_safe_western_europe_k), not the Greek path. The Greek kernel
+     *  kernel path (sz_utf8_uncased_rune_safe_western_europe_k), not the Greek path. The Greek kernel
      *  only handles characters that originate in the Greek block.
      *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
@@ -1425,11 +1425,11 @@ typedef enum {
      *  This includes English alphabet letters like: b, c, d, e, g, m, o, p, q, r, u, v, x, z,
      *  as well as digits, punctuation, symbols, and control characters.
      */
-    sz_utf8_case_rune_safe_greek_k = 5,
+    sz_utf8_uncased_rune_safe_greek_k = 5,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Basic Armenian.
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for the inherited ASCII rules.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for the inherited ASCII rules.
      *
      *  These kernels fold:
      *  - 26x ASCII uppercase letters: 'A' (U+0041, 41) → 'a' (U+0061, 61), 'Z' (U+005A, 5A) → 'z' (U+007A, 7A)
@@ -1443,7 +1443,7 @@ typedef enum {
      *  - D5 A1-BF: lowercase 'ա' (U+0561) through 'ի' (U+057F)
      *  - D6 80-86: lowercase 'լ' (U+0580) through 'ֆ' (U+0586)
      *
-     *  We inherit @b all contextual ASCII limitations from `sz_utf8_case_rune_ascii_invariant_k`:
+     *  We inherit @b all contextual ASCII limitations from `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
@@ -1524,14 +1524,14 @@ typedef enum {
      *  cannot use the fast path because finding them separately might miss the precomposed ligatures
      *  present in the haystack.
      */
-    sz_utf8_case_rune_safe_armenian_k = 6,
+    sz_utf8_uncased_rune_safe_armenian_k = 6,
 
     /**
      *  @brief Describes a safety-class profile for contextually-safe ASCII + Latin-1 + Latin Extended Additional.
-     *  @sa sz_utf8_case_rune_safe_central_europe_k for the inherited Latin rules.
+     *  @sa sz_utf8_uncased_rune_safe_central_europe_k for the inherited Latin rules.
      *
      *  These kernels extend Latin-1/A/B with Vietnamese characters:
-     *  - Everything from `sz_utf8_case_rune_safe_central_europe_k` (ASCII + Latin-1/A)
+     *  - Everything from `sz_utf8_uncased_rune_safe_central_europe_k` (ASCII + Latin-1/A)
      *  - 166x Latin Extended Additional letters (U+1E00-U+1E95, U+1EA0-U+1EFF) for Vietnamese.
      *    Include precomposed Latin letters with additional diacritics (e.g. Ạ/ạ, Ả/ả, Ấ/ấ).
      *
@@ -1548,7 +1548,7 @@ typedef enum {
      *  So we add one more check for 'K' (U+212A, E2 84 AA) in the haystack, and if detected, again - revert to serial.
      *
      *  We inherit most contextual limitations for some of the ASCII characters from
-     * `sz_utf8_case_rune_ascii_invariant_k`:
+     * `sz_utf8_uncased_rune_ascii_invariant_k`:
      *
      *  - 'a' (U+0061, 61) - can't be last; can't precede 'ʾ' (U+02BE, CA BE) to avoid:
      *    - 'ẚ' (U+1E9A, E1 BA 9A) → "aʾ" (U+0061 U+02BE, 61 CA BE)
@@ -1598,11 +1598,11 @@ typedef enum {
      *
      *  This means, that all other ASCII and Latin-1/A/Ext-Add characters are "safe" to use with this kernel.
      */
-    sz_utf8_case_rune_safe_vietnamese_k = 7,
+    sz_utf8_uncased_rune_safe_vietnamese_k = 7,
 
     /**
      *  @brief Describes a safety-class profile for Georgian Mkhedruli script.
-     *  @sa sz_utf8_case_rune_ascii_invariant_k for inherited ASCII rules.
+     *  @sa sz_utf8_uncased_rune_ascii_invariant_k for inherited ASCII rules.
      *
      *  Georgian Mkhedruli (U+10D0-U+10FF) is caseless - no folding needed for Georgian characters.
      *  Only ASCII A-Z folding for mixed text. Mtavruli (U+1C90-U+1CBF), Asomtavruli (U+10A0-U+10C5),
@@ -1611,11 +1611,11 @@ typedef enum {
      *  All Georgian scripts use 3-byte UTF-8 sequences and fold to 3-byte sequences, so there
      *  are no length changes during case folding - making this the simplest non-ASCII kernel.
      */
-    sz_utf8_case_rune_safe_georgian_k = 8,
+    sz_utf8_uncased_rune_safe_georgian_k = 8,
 
-    sz_utf8_case_rune_case_invariant_k = 9,
-    sz_utf8_case_rune_fallback_serial_k = 255,
-} sz_utf8_case_rune_safety_profile_t_;
+    sz_utf8_uncased_rune_invariant_k = 9,
+    sz_utf8_uncased_rune_fallback_serial_k = 255,
+} sz_utf8_uncased_rune_safety_profile_t_;
 
 #pragma endregion // Unicode Core
 

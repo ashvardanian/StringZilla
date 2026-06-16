@@ -1,13 +1,13 @@
 /**
  *  @brief WebAssembly SIMD128 backend for UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold/v128.h
+ *  @file include/stringzilla/utf8_uncased_fold/v128.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_V128_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_V128_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_
 
-#include "stringzilla/utf8_case_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
 #include "stringzilla/memory/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
 
 #ifdef __cplusplus
@@ -19,7 +19,7 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-/*  Byte-for-byte equivalent to `sz_utf8_case_fold_serial`, mirroring the RISC-V Vector kernel's
+/*  Byte-for-byte equivalent to `sz_utf8_uncased_fold_serial`, mirroring the RISC-V Vector kernel's
  *  "stop-and-serial" structure on fixed 16-byte windows. Maximal ASCII runs fold in-vector; Latin,
  *  Cyrillic, Greek, Armenian and Georgian text fold in place by their `_strip_v128_` handlers
  *  (dispatched on the lead byte); any other script or length-changing fold (ß→"ss", ΐ→3 runes, final
@@ -377,7 +377,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_pt
 
 #pragma endregion // Per-script strip handlers
 
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
@@ -439,4 +439,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128(sz_cptr_t source, sz_size_t source_le
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_V128_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_

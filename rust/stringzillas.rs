@@ -695,8 +695,8 @@ extern "C" {
 
     // Needleman-Wunsch scoring functions
     fn szs_needleman_wunsch_scores_init(
-        byte_to_class: *const u8,             // 256 byte-to-class map
-        class_substitution_costs: *const i8,  // 32x32 class substitution matrix
+        byte_to_class: *const u8,            // 256 byte-to-class map
+        class_substitution_costs: *const i8, // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,
@@ -739,8 +739,8 @@ extern "C" {
 
     // Smith-Waterman scoring functions
     fn szs_smith_waterman_scores_init(
-        byte_to_class: *const u8,             // 256 byte-to-class map
-        class_substitution_costs: *const i8,  // 32x32 class substitution matrix
+        byte_to_class: *const u8,            // 256 byte-to-class map
+        class_substitution_costs: *const i8, // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,

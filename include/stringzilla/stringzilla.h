@@ -89,8 +89,8 @@
 #include "stringzilla/intersect.h" // `sz_sequence_intersect`
 
 #include "stringzilla/utf8_iterate.h" // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
-#include "stringzilla/utf8_case_fold.h"        // `sz_utf8_case_fold`
-#include "stringzilla/utf8_case_insensitive.h" // `sz_utf8_case_insensitive_find`, `sz_utf8_case_insensitive_order`
+#include "stringzilla/utf8_uncased_fold.h"        // `sz_utf8_uncased_fold`
+#include "stringzilla/utf8_uncased.h" // `sz_utf8_uncased_find`, `sz_utf8_uncased_order`
 #include "stringzilla/utf8_norm.h"             // `sz_utf8_norm`, `sz_utf8_norm_violation`
 
 #include "stringzilla/small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`

@@ -26,7 +26,7 @@ import StringZillaC
 /// Result of a three-way string comparison.
 ///
 /// Mirrors `Foundation.ComparisonResult` but is defined here so the package stays Foundation-free and usable
-/// on Linux and embedded targets. The cases match the `sz_order` / `sz_utf8_case_insensitive_order` verdicts.
+/// on Linux and embedded targets. The cases match the `sz_order` / `sz_utf8_uncased_order` verdicts.
 public enum StringZillaOrdering: Sendable {
     case ascending  // The receiver sorts before the argument.
     case equal  // The two compare as equal.
@@ -306,7 +306,7 @@ extension StringZillaViewable {
 
     /// Applies full Unicode case folding to the content's UTF-8 bytes.
     /// The returned bytes are UTF-8 and may be longer than the input (e.g., "ß" -> "ss").
-    public func utf8CaseFoldedBytes() -> [UInt8] {
+    public func utf8UncasedFoldedBytes() -> [UInt8] {
         var folded: [UInt8] = []
         withStringZillaScope { pointer, length in
             if length == 0 {
@@ -316,7 +316,7 @@ extension StringZillaViewable {
             let capacity = Int(length) * 3
             var destination = [UInt8](repeating: 0, count: capacity)
             let outLen: sz_size_t = destination.withUnsafeMutableBufferPointer { bufferPointer in
-                sz_utf8_case_fold(pointer, length, bufferPointer.baseAddress)
+                sz_utf8_uncased_fold(pointer, length, bufferPointer.baseAddress)
             }
             let actual = Int(outLen)
             if actual < destination.count { destination.removeLast(destination.count - actual) }
@@ -368,17 +368,17 @@ extension StringZillaViewable {
         utf8NormalizationViolation(form) == nil
     }
 
-    /// Finds the first case-insensitive occurrence of `needle` using full Unicode case folding.
+    /// Finds the first uncased occurrence of `needle` using full Unicode case folding.
     /// Returns a byte-accurate range into the receiver.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    public func utf8CaseInsensitiveFind<S: StringZillaViewable>(substring needle: S) -> Range<Index>? {
+    public func utf8UncasedFind<S: StringZillaViewable>(substring needle: S) -> Range<Index>? {
         var result: Range<Index>?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
-                var metadata = sz_utf8_case_insensitive_needle_metadata_t()
+                var metadata = sz_utf8_uncased_needle_metadata_t()
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_case_insensitive_find(
+                if let matchPointer = sz_utf8_uncased_find(
                     hPointer,
                     hLength,
                     nPointer,
@@ -551,16 +551,16 @@ extension StringZillaViewable {
         return .equal
     }
 
-    /// Case-insensitive comparison using full Unicode case folding, via `sz_utf8_case_insensitive_order`.
+    /// Uncased comparison using full Unicode case folding, via `sz_utf8_uncased_order`.
     /// - Parameter other: The string to compare against.
     /// - Returns: `.ascending`, `.equal`, or `.descending`.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    public func utf8CaseInsensitiveOrder<S: StringZillaViewable>(_ other: S) -> StringZillaOrdering {
+    public func utf8UncasedOrder<S: StringZillaViewable>(_ other: S) -> StringZillaOrdering {
         var ordering = sz_equal_k
         withStringZillaScope { aPointer, aLength in
             other.withStringZillaScope { bPointer, bLength in
-                ordering = sz_utf8_case_insensitive_order(aPointer, aLength, bPointer, bLength)
+                ordering = sz_utf8_uncased_order(aPointer, aLength, bPointer, bLength)
             }
         }
         if ordering == sz_less_k { return .ascending }
@@ -584,11 +584,11 @@ extension StringZillaViewable {
     }
 }
 
-/// Pre-compiled case-insensitive search pattern for UTF-8 strings.
+/// Pre-compiled uncased search pattern for UTF-8 strings.
 /// Caches metadata for efficient repeated searches with the same needle.
-public final class Utf8CaseInsensitiveNeedle {
+public final class Utf8UncasedNeedle {
     private let needleBytes: [UInt8]
-    private var metadata: sz_utf8_case_insensitive_needle_metadata_t
+    private var metadata: sz_utf8_uncased_needle_metadata_t
 
     public init<S: StringZillaViewable>(_ needle: S) {
         var bytes: [UInt8] = []
@@ -601,7 +601,7 @@ public final class Utf8CaseInsensitiveNeedle {
             bytes = Array(UnsafeBufferPointer(start: start, count: Int(length)))
         }
         needleBytes = bytes
-        metadata = sz_utf8_case_insensitive_needle_metadata_t()
+        metadata = sz_utf8_uncased_needle_metadata_t()
     }
 
     /// Note: not safe for concurrent use. The internal metadata is computed lazily and mutated during searches.
@@ -615,7 +615,7 @@ public final class Utf8CaseInsensitiveNeedle {
                 let nLength = sz_size_t(needleBuffer.count)
 
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_case_insensitive_find(
+                if let matchPointer = sz_utf8_uncased_find(
                     hPointer,
                     hLength,
                     nPointer,

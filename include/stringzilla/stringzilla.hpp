@@ -62,7 +62,7 @@ class basic_string_slice;
 template <typename, typename>
 class basic_string;
 template <typename>
-class utf8_case_insensitive_needle;
+class utf8_uncased_needle;
 
 using string_span = basic_string_slice<char>;
 using string_view = basic_string_slice<char const>;
@@ -1858,18 +1858,18 @@ struct concatenation {
 
 #pragma endregion
 
-#pragma region Case-Insensitive Search Pattern
+#pragma region Uncased Search Pattern
 
 /**
- *  @brief Pre-compiled case-insensitive search pattern for UTF-8 strings.
+ *  @brief Pre-compiled uncased search pattern for UTF-8 strings.
  *
  *  Caches metadata for efficient repeated searches with the same needle.
  *  Useful when searching multiple haystacks for the same pattern.
  *
  *  @code{.cpp}
- *  sz::utf8_case_insensitive_needle pattern("hello");
+ *  sz::utf8_uncased_needle pattern("hello");
  *  for (auto const& haystack : haystacks) {
- *      auto match = haystack.utf8_case_insensitive_find(pattern);
+ *      auto match = haystack.utf8_uncased_find(pattern);
  *      if (match) { ... }
  *  }
  *  @endcode
@@ -1877,29 +1877,29 @@ struct concatenation {
  *  @tparam char_type_ The character type, usually `char const` or `char`.
  */
 template <typename char_type_ = char const>
-class utf8_case_insensitive_needle {
+class utf8_uncased_needle {
     static_assert(sizeof(char_type_) == 1, "Characters must be a single byte long");
 
     using char_type = char_type_;
 
     char_type *needle_;
     std::size_t length_;
-    mutable sz_utf8_case_insensitive_needle_metadata_t metadata_;
+    mutable sz_utf8_uncased_needle_metadata_t metadata_;
 
   public:
-    utf8_case_insensitive_needle(char_type *needle, std::size_t length) noexcept
+    utf8_uncased_needle(char_type *needle, std::size_t length) noexcept
         : needle_(needle), length_(length), metadata_ {} {}
 
-    utf8_case_insensitive_needle(basic_string_slice<char_type> needle) noexcept
+    utf8_uncased_needle(basic_string_slice<char_type> needle) noexcept
         : needle_(needle.data()), length_(needle.size()), metadata_ {} {}
 
     template <std::size_t array_length_>
-    utf8_case_insensitive_needle(char_type (&needle)[array_length_]) noexcept
+    utf8_uncased_needle(char_type (&needle)[array_length_]) noexcept
         : needle_(needle), length_(array_length_ - 1), metadata_ {} {}
 
     char_type *data() const noexcept { return needle_; }
     std::size_t size() const noexcept { return length_; }
-    sz_utf8_case_insensitive_needle_metadata_t const &metadata_ref() const noexcept { return metadata_; }
+    sz_utf8_uncased_needle_metadata_t const &metadata_ref() const noexcept { return metadata_; }
 };
 
 #pragma endregion
@@ -2524,8 +2524,8 @@ class basic_string_slice {
      *  @brief Compares two strings lexicographically, ignoring case. If prefix matches, lengths are compared.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
      */
-    int utf8_case_insensitive_order(string_view other) const noexcept {
-        return (int)sz_utf8_case_insensitive_order(start_, length_, other.data(), other.size());
+    int utf8_uncased_order(string_view other) const noexcept {
+        return (int)sz_utf8_uncased_order(start_, length_, other.data(), other.size());
     }
 
     struct sized_match_t {
@@ -2548,24 +2548,24 @@ class basic_string_slice {
      *  @brief Find the byte offset of the first occurrence of a substring.
      *  @return Offset of the first occurrence or @c npos if not found.
      */
-    sized_match_t utf8_case_insensitive_find(string_view other) const noexcept {
-        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+    sized_match_t utf8_uncased_find(string_view other) const noexcept {
+        sz_utf8_uncased_needle_metadata_t metadata = {};
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_case_insensitive_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        auto ptr = sz_utf8_uncased_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
 
     /**
-     *  @brief Find the byte offset of the first occurrence of a pre-compiled case-insensitive pattern.
+     *  @brief Find the byte offset of the first occurrence of a pre-compiled uncased pattern.
      *  @param needle A pre-compiled pattern with cached metadata for efficient repeated searches.
      *  @return Match info with offset and length, or @c npos offset if not found.
      */
     template <typename needle_char_type_>
-    sized_match_t utf8_case_insensitive_find(
-        utf8_case_insensitive_needle<needle_char_type_> const &needle) const noexcept {
+    sized_match_t utf8_uncased_find(
+        utf8_uncased_needle<needle_char_type_> const &needle) const noexcept {
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_case_insensitive_find(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
+        auto ptr = sz_utf8_uncased_find(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
                                                  &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
@@ -4429,13 +4429,13 @@ class basic_string {
     /**
      *  @brief Apply Unicode case folding to the string in-place.
      *
-     *  Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+     *  Case folding normalizes text for uncased comparisons by mapping uppercase letters
      *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
      *
      *  @return `true` if the operation was successful, `false` if memory allocation failed.
      *  @note The string may grow due to expansions (e.g., U+00DF -> "ss"). Worst-case is 3x expansion.
      */
-    bool try_utf8_case_fold() noexcept {
+    bool try_utf8_uncased_fold() noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
@@ -4446,7 +4446,7 @@ class basic_string {
         basic_string result;
         if (!result.try_resize_and_overwrite(string_length * 3,
                                              [string_start, string_length](char_type *buf, size_type) {
-                                                 return sz_utf8_case_fold(string_start, string_length, buf);
+                                                 return sz_utf8_uncased_fold(string_start, string_length, buf);
                                              }))
             return false;
 
@@ -4952,11 +4952,11 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
 }
 
 /**
- *  @brief Case-insensitive (Unicode case-folded) counterpart of `try_argsort`.
- *  @sa sz_sequence_argsort_utf8_case_insensitive
+ *  @brief Uncased (Unicode case-folded) counterpart of `try_argsort`.
+ *  @sa sz_sequence_argsort_utf8_uncased
  */
 template <typename container_type_, typename string_extractor_>
-status_t try_argsort_utf8_case_insensitive(container_type_ const &container, string_extractor_ const &extractor,
+status_t try_argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
                                            sorted_idx_t *order, std::size_t top_count = 0,
                                            bool reverse = false) noexcept {
 
@@ -4970,7 +4970,7 @@ status_t try_argsort_utf8_case_insensitive(container_type_ const &container, str
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort_utf8_case_insensitive(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
+        return sz_sequence_argsort_utf8_uncased(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
                                                          static_cast<sz_bool_t>(reverse));
     });
 }
@@ -5085,28 +5085,28 @@ std::vector<sorted_idx_t> argsort(container_type_ const &container, std::size_t 
 }
 
 /**
- *  @brief Case-insensitive (Unicode case-folded) permutation that would lead to sorted order.
+ *  @brief Uncased (Unicode case-folded) permutation that would lead to sorted order.
  *  @throw `std::bad_alloc` if the allocation fails.
  */
 template <typename container_type_, typename string_extractor_,
           typename std::enable_if<!std::is_arithmetic<string_extractor_>::value, int>::type = 0>
-std::vector<sorted_idx_t> argsort_utf8_case_insensitive( //
+std::vector<sorted_idx_t> argsort_utf8_uncased( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
     bool reverse = false) noexcept(false) {
     std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort_utf8_case_insensitive(container, extractor, order.data(), top_count, reverse);
+    status_t status = try_argsort_utf8_uncased(container, extractor, order.data(), top_count, reverse);
     raise(status);
     return order;
 }
 
 /** @overload */
 template <typename container_type_>
-std::vector<sorted_idx_t> argsort_utf8_case_insensitive(container_type_ const &container, std::size_t top_count = 0,
+std::vector<sorted_idx_t> argsort_utf8_uncased(container_type_ const &container, std::size_t top_count = 0,
                                                         bool reverse = false) noexcept(false) {
     using string_like_type = typename container_type_::value_type;
     static_assert( //
         std::is_convertible<string_like_type, string_view>::value, "The type must be convertible to string_view.");
-    return argsort_utf8_case_insensitive(
+    return argsort_utf8_uncased(
         container, [](string_like_type const &s) -> string_view { return s; }, top_count, reverse);
 }
 

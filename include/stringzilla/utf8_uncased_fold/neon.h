@@ -1,13 +1,13 @@
 /**
  *  @brief Arm NEON backend for UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold/neon.h
+ *  @file include/stringzilla/utf8_uncased_fold/neon.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_NEON_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_NEON_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_NEON_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_NEON_H_
 
-#include "stringzilla/utf8_case_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -148,7 +148,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16, uint
  *  @brief Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII.
  *      Folds ASCII A-Z in place and copies everything else, trimming an incomplete trailing sequence.
  *
- *  Mirrors `sz_utf8_case_fold_icelake_caseless_chunk_` at a fixed 64-byte chunk size: an
+ *  Mirrors `sz_utf8_uncased_fold_icelake_caseless_chunk_` at a fixed 64-byte chunk size: an
  *  incomplete sequence can only be a 2-byte lead in the last byte or a 3-byte lead in the last
  *  two bytes (4-byte leads carry the complex flag and never reach this handler), so only the
  *  last register's lead masks matter and one nibble-mask extraction covers both checks.
@@ -156,7 +156,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16, uint
  *  @return Bytes consumed; always 62..64, never zero - 62 bytes of any valid UTF-8 cover at
  *      least one complete sequence, so the superchunk cannot start with an incomplete one.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
 
     uint8x16_t last_u8x16 = source_u8x16x4.val[3];
     uint8x16_t is_two_byte_lead_u8x16 = vcltq_u8(vsubq_u8(last_u8x16, vdupq_n_u8(0xC0)), vdupq_n_u8(0x20));
@@ -187,7 +187,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_caseless_chunk_(uint8x16x4_t source
  *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
  *      of German, Czech, Vietnamese, and most other Latin-script languages.
  *
- *  Mirrors `sz_utf8_case_fold_icelake_latin_chunk_` at a fixed 64-byte chunk size. Latin
+ *  Mirrors `sz_utf8_uncased_fold_icelake_latin_chunk_` at a fixed 64-byte chunk size. Latin
  *  Extended folding is parity-based: uppercase codepoints are even and fold to the next odd
  *  codepoint, and the codepoint's low bit lives in the last byte of its UTF-8 sequence, so the
  *  fold is an in-place masked +1. Per-codepoint deltas come from `vqtbl4q_u8` tables indexed by
@@ -202,7 +202,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_caseless_chunk_(uint8x16x4_t source
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                           sz_ptr_t target) {
 
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_neon_c4_deltas_lut_);
@@ -369,7 +369,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_latin_chunk_(uint8x16x4_t source_u8
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                              sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
@@ -444,7 +444,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_cyrillic_chunk_(uint8x16x4_t source
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                           sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_ce_u8x16 = zero_u8x16, previous_is_cf_u8x16 = zero_u8x16;
@@ -519,7 +519,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8
  *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII.
  *
  *  Armenian uppercase spans two lead bytes and folds into three target blocks, reusing the exact
- *  math verified in the NEON finder's `sz_utf8_case_insensitive_find_neon_armenian_fold_u8x16x2_`:
+ *  math verified in the NEON finder's `sz_utf8_uncased_find_neon_armenian_fold_u8x16x2_`:
  *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
  *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
  *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
@@ -537,7 +537,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_greek_chunk_(uint8x16x4_t source_u8
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                              sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_d4_u8x16 = zero_u8x16, previous_is_d5_u8x16 = zero_u8x16;
@@ -633,7 +633,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_armenian_chunk_(uint8x16x4_t source
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                              sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_82_upper_lead_u8x16 = zero_u8x16, previous_is_83_upper_lead_u8x16 = zero_u8x16;
@@ -727,7 +727,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_georgian_chunk_(uint8x16x4_t source
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                             sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t stop_masks_u8x16[4];
@@ -782,7 +782,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_neon_guarded_chunk_(uint8x16x4_t source_
     return 64;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // The main loop processes a 64-byte logical superchunk - four 16-byte NEON registers - so
     // chunk decisions stay comparable to the Ice Lake kernel on the same input, which makes
     // three-way differential debugging (serial / icelake / neon) tractable.
@@ -823,7 +823,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
         sz_u8_t lead_families = sz_utf8_fold_neon_reduce_or_u8_(lead_families_u8x16);
 
         if (!(lead_families & ~sz_utf8_fold_neon_lead_caseless_flag_)) {
-            sz_size_t handled = sz_utf8_case_fold_neon_caseless_chunk_(source_u8x16x4, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_caseless_chunk_(source_u8x16x4, target);
             target += handled, source += handled, source_length -= handled;
             continue;
         }
@@ -834,7 +834,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
         // and the chunk falls through to the next family - or to the serial rune below.
         if (lead_families & (sz_utf8_fold_neon_lead_latin_flag_ | sz_utf8_fold_neon_lead_latin_extended_flag_ |
                              sz_utf8_fold_neon_lead_e1_flag_)) {
-            sz_size_t handled = sz_utf8_case_fold_neon_latin_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_latin_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -843,28 +843,28 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
         // Georgian shares the E1 lead with Latin Extended Additional, so it runs second: the Latin
         // handler folds E1 B8-BB and returns zero on a leading E1 82/83, and this picks those up.
         if (lead_families & sz_utf8_fold_neon_lead_e1_flag_) {
-            sz_size_t handled = sz_utf8_case_fold_neon_georgian_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_georgian_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_neon_lead_cyrillic_flag_) {
-            sz_size_t handled = sz_utf8_case_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_neon_lead_greek_flag_) {
-            sz_size_t handled = sz_utf8_case_fold_neon_greek_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_greek_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_neon_lead_guarded_flag_) {
-            sz_size_t handled = sz_utf8_case_fold_neon_guarded_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_guarded_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -873,7 +873,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
         // Armenian (D4-D6) plus the Cyrillic Supplement that shares the D4 lead both fall in the
         // complex family; this handler folds them and truncates at any non-Armenian complex lead.
         if (lead_families & sz_utf8_fold_neon_lead_complex_flag_) {
-            sz_size_t handled = sz_utf8_case_fold_neon_armenian_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_neon_armenian_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -907,7 +907,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
 
     // Serial epilogue: handles the sub-register tail and any trailing incomplete sequence
     // exactly like the scalar reference, keeping the two backends byte-for-byte identical.
-    if (source_length) target += sz_utf8_case_fold_serial(source, source_length, target);
+    if (source_length) target += sz_utf8_uncased_fold_serial(source, source_length, target);
     return (sz_size_t)(target - target_start);
 }
 
@@ -923,4 +923,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon(sz_cptr_t source, sz_size_t source_le
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_NEON_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_NEON_H_

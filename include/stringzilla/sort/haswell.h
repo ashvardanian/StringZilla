@@ -10,7 +10,7 @@
  *  8 dword indices that gather the selected u64 lanes (of 4) to the front. The 4-wide table is 16x32 = 512
  *  bytes - small enough to keep `const` and warm in cache - versus the 16 KB an 8-wide table would need.
  *  Compaction preserves lane order, so the partition is @b stable - matching the stable-by-default contract -
- *  and the recursion/stability/reverse/top-K/case-insensitive machinery is reused verbatim from `sort/serial.h`.
+ *  and the recursion/stability/reverse/top-K/uncased machinery is reused verbatim from `sort/serial.h`.
  *
  *  AVX2 has only a @b signed 64-bit compare (`_mm256_cmpgt_epi64`), so unsigned pgram keys are biased by the
  *  sign bit (XOR `0x8000...`) before comparing, which maps unsigned order onto signed order.
@@ -350,9 +350,9 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence,
 }
 
 /**
- *  @brief Case-insensitive twin of `sz_sequence_argsort_haswell_sort_byte_windows_`: the folded code-point export
+ *  @brief Uncased twin of `sz_sequence_argsort_haswell_sort_byte_windows_`: the folded code-point export
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      AVX2 partition - which is where Haswell beats the fully-serial case-insensitive path.
+ *      AVX2 partition - which is where Haswell beats the fully-serial uncased path.
  */
 SZ_PUBLIC void sz_sequence_argsort_haswell_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -390,7 +390,7 @@ SZ_PUBLIC void sz_sequence_argsort_haswell_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_haswell( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_haswell( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

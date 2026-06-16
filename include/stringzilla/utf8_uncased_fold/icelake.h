@@ -1,13 +1,13 @@
 /**
  *  @brief Ice Lake (AVX-512) backend for UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold/icelake.h
+ *  @file include/stringzilla/utf8_uncased_fold/icelake.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_ICELAKE_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_ICELAKE_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_
 
-#include "stringzilla/utf8_case_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -101,7 +101,7 @@ SZ_INTERNAL sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
  *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_caseless_chunk_(   //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_(   //
     __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
     __mmask64 is_two_byte_lead_mask, __mmask64 is_three_byte_lead_mask, sz_ptr_t target) {
 
@@ -135,7 +135,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_caseless_chunk_(   //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_latin_chunk_(      //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(      //
     __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
     __mmask64 is_continuation_mask, __mmask64 is_three_byte_lead_mask, sz_ptr_t target) {
 
@@ -260,7 +260,7 @@ SZ_INTERNAL sz_size_t sz_utf8_case_fold_icelake_latin_chunk_(      //
     return fold_length;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
     // 1. All ASCII single-byte codepoints
@@ -413,7 +413,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
 
         if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_)) {
             __mmask64 is_two_byte_lead_mask = is_lead_mask & ~is_three_byte_lead_mask & ~is_four_byte_lead_mask;
-            sz_size_t handled = sz_utf8_case_fold_icelake_caseless_chunk_(
+            sz_size_t handled = sz_utf8_uncased_fold_icelake_caseless_chunk_(
                 source_vec.zmm, load_mask, chunk_size, is_two_byte_lead_mask, is_three_byte_lead_mask, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
@@ -423,7 +423,7 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
         else if ((lead_families & (sz_utf8_fold_lead_latin_extended_flag_ | sz_utf8_fold_lead_e1_flag_)) &&
                  !(lead_families & ~(sz_utf8_fold_lead_latin_flag_ | sz_utf8_fold_lead_latin_extended_flag_ |
                                      sz_utf8_fold_lead_e1_flag_))) {
-            sz_size_t handled = sz_utf8_case_fold_icelake_latin_chunk_(source_vec.zmm, load_mask, chunk_size,
+            sz_size_t handled = sz_utf8_uncased_fold_icelake_latin_chunk_(source_vec.zmm, load_mask, chunk_size,
                                                                        is_cont_mask, is_three_byte_lead_mask, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
@@ -1548,4 +1548,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake(sz_cptr_t source, sz_size_t source
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_ICELAKE_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_

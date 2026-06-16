@@ -7,8 +7,8 @@
  *  This translation unit owns only the cross-cutting glue: the shared `sz_dispatch_table`
  *  definition, its one-time initialization, and the version & capabilities exports. The
  *  per-domain backends and `SZ_DYNAMIC` wrappers live in the sibling `compare.c`, `memory.c`,
- *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_iterate.c`, `utf8_case_fold.c`, and
- *  `utf8_case_insensitive.c`.
+ *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_iterate.c`, `utf8_uncased_fold.c`, and
+ *  `utf8_uncased.c`.
  */
 #include "dispatch.h"                // `sz_dispatch_table`, per-domain updaters, sets `SZ_DYNAMIC_DISPATCH 1`
 #include <stringzilla/stringzilla.h> // `sz_capabilities_*_implementation_`, version macros
@@ -40,8 +40,8 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_intersect_update_(caps);
     sz_dispatch_utf8_norm_update_(caps);
     sz_dispatch_utf8_iterate_update_(caps);
-    sz_dispatch_utf8_case_fold_update_(caps);
-    sz_dispatch_utf8_case_insensitive_update_(caps);
+    sz_dispatch_utf8_uncased_fold_update_(caps);
+    sz_dispatch_utf8_uncased_update_(caps);
 }
 
 /**

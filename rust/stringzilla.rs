@@ -142,16 +142,16 @@ impl IndexSpan {
     }
 }
 
-/// Internal metadata for case-insensitive UTF-8 search operations.
+/// Internal metadata for uncased UTF-8 search operations.
 ///
 /// This structure caches pre-computed information about the needle for reuse
 /// across multiple searches. Zero-initialization (default) triggers automatic
 /// analysis on first use.
 ///
-/// Matches C's `sz_utf8_case_insensitive_needle_metadata_t`.
+/// Matches C's `sz_utf8_uncased_needle_metadata_t`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Utf8CaseInsensitiveNeedleMetadata {
+pub(crate) struct Utf8UncasedNeedleMetadata {
     // sz_size_t offset_in_unfolded
     offset_in_unfolded: usize,
     // sz_size_t length_in_unfolded
@@ -168,7 +168,7 @@ pub(crate) struct Utf8CaseInsensitiveNeedleMetadata {
     kernel_id: u8,
 }
 
-impl Default for Utf8CaseInsensitiveNeedleMetadata {
+impl Default for Utf8UncasedNeedleMetadata {
     fn default() -> Self {
         Self {
             offset_in_unfolded: 0,
@@ -177,12 +177,12 @@ impl Default for Utf8CaseInsensitiveNeedleMetadata {
             folded_slice_length: 0,
             probe_second: 0,
             probe_third: 0,
-            kernel_id: 0, // sz_utf8_case_rune_unknown_k = 0, triggers analysis
+            kernel_id: 0, // sz_utf8_uncased_rune_unknown_k = 0, triggers analysis
         }
     }
 }
 
-/// Pre-compiled case-insensitive search pattern for UTF-8 strings.
+/// Pre-compiled uncased search pattern for UTF-8 strings.
 ///
 /// Caches metadata for efficient repeated searches with the same needle.
 /// Useful when searching multiple haystacks for the same pattern.
@@ -190,33 +190,33 @@ impl Default for Utf8CaseInsensitiveNeedleMetadata {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+/// use stringzilla::stringzilla::{utf8_uncased_find, Utf8UncasedNeedle};
 ///
-/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+/// let needle = Utf8UncasedNeedle::new(b"hello");
 /// let haystack1 = b"Hello World";
 /// let haystack2 = b"HELLO there";
 ///
 /// // Metadata is computed once on first search, reused for subsequent searches
-/// let result1 = utf8_case_insensitive_find(haystack1, &needle);
-/// let result2 = utf8_case_insensitive_find(haystack2, &needle);
+/// let result1 = utf8_uncased_find(haystack1, &needle);
+/// let result2 = utf8_uncased_find(haystack2, &needle);
 ///
 /// assert!(result1.is_some());
 /// assert!(result2.is_some());
 /// ```
-pub struct Utf8CaseInsensitiveNeedle<'a> {
+pub struct Utf8UncasedNeedle<'a> {
     needle: &'a [u8],
-    metadata: UnsafeCell<Utf8CaseInsensitiveNeedleMetadata>,
+    metadata: UnsafeCell<Utf8UncasedNeedleMetadata>,
 }
 
-impl<'a> Utf8CaseInsensitiveNeedle<'a> {
-    /// Creates a new pre-compiled case-insensitive needle.
+impl<'a> Utf8UncasedNeedle<'a> {
+    /// Creates a new pre-compiled uncased needle.
     ///
     /// The metadata will be computed lazily on first use.
     #[inline]
     pub fn new(needle: &'a [u8]) -> Self {
         Self {
             needle,
-            metadata: UnsafeCell::new(Utf8CaseInsensitiveNeedleMetadata::default()),
+            metadata: UnsafeCell::new(Utf8UncasedNeedleMetadata::default()),
         }
     }
 
@@ -240,15 +240,15 @@ impl<'a> Utf8CaseInsensitiveNeedle<'a> {
 
     /// Internal: returns a mutable pointer to the metadata for FFI calls.
     #[inline]
-    pub(crate) fn metadata_ptr(&self) -> *mut Utf8CaseInsensitiveNeedleMetadata {
+    pub(crate) fn metadata_ptr(&self) -> *mut Utf8UncasedNeedleMetadata {
         self.metadata.get()
     }
 }
 
 // Safety: The metadata is only mutated through FFI during search operations,
 // which internally synchronize access. The needle reference is immutable.
-unsafe impl<'a> Send for Utf8CaseInsensitiveNeedle<'a> {}
-unsafe impl<'a> Sync for Utf8CaseInsensitiveNeedle<'a> {}
+unsafe impl<'a> Send for Utf8UncasedNeedle<'a> {}
+unsafe impl<'a> Sync for Utf8UncasedNeedle<'a> {}
 
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
@@ -473,7 +473,7 @@ extern "C" {
         matches_capacity: usize,
         bytes_consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_case_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
+    pub(crate) fn sz_utf8_uncased_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
     pub(crate) fn sz_utf8_norm(
         source: *const c_void,
         source_length: usize,
@@ -481,20 +481,15 @@ extern "C" {
         destination: *mut c_void,
     ) -> usize;
     pub(crate) fn sz_utf8_norm_violation(source: *const c_void, source_length: usize, form: i32) -> *const c_void;
-    pub(crate) fn sz_utf8_case_insensitive_find(
+    pub(crate) fn sz_utf8_uncased_find(
         haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-        needle_metadata: *mut Utf8CaseInsensitiveNeedleMetadata,
+        needle_metadata: *mut Utf8UncasedNeedleMetadata,
         matched_length: *mut usize,
     ) -> *const c_void;
-    pub(crate) fn sz_utf8_case_insensitive_order(
-        a: *const c_void,
-        a_length: usize,
-        b: *const c_void,
-        b_length: usize,
-    ) -> i32;
+    pub(crate) fn sz_utf8_uncased_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
 
     pub(crate) fn sz_utf8_word_find_boundaries(
         text: *const c_void,
@@ -541,7 +536,7 @@ extern "C" {
         reverse: i32,
     ) -> Status;
 
-    pub(crate) fn sz_sequence_argsort_utf8_case_insensitive(
+    pub(crate) fn sz_sequence_argsort_utf8_uncased(
         //
         sequence: *const _SzSequence,
         alloc: *const c_void,
@@ -1063,7 +1058,7 @@ where
 
 /// Applies Unicode case folding to a UTF-8 string, writing the result to a destination buffer.
 ///
-/// Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+/// Case folding normalizes text for uncased comparisons by mapping uppercase letters
 /// to their lowercase equivalents and handling special cases like German U+00DF -> ss expansion.
 ///
 /// # Arguments
@@ -1086,11 +1081,11 @@ where
 /// use stringzilla::stringzilla as sz;
 /// let source = "HELLO WORLD";
 /// let mut dest = [0u8; 32];
-/// let len = sz::utf8_case_fold(source, &mut dest);
+/// let len = sz::utf8_uncased_fold(source, &mut dest);
 /// assert_eq!(&dest[..len], b"hello world");
 /// ```
 ///
-pub fn utf8_case_fold<T, D>(source: T, destination: &mut D) -> usize
+pub fn utf8_uncased_fold<T, D>(source: T, destination: &mut D) -> usize
 where
     T: AsRef<[u8]>,
     D: AsMut<[u8]> + ?Sized,
@@ -1099,7 +1094,7 @@ where
     let dest_slice = destination.as_mut();
 
     unsafe {
-        sz_utf8_case_fold(
+        sz_utf8_uncased_fold(
             source_ref.as_ptr() as *const c_void,
             source_ref.len(),
             dest_slice.as_mut_ptr() as *mut c_void,
@@ -1199,9 +1194,9 @@ where
     }
 }
 
-/// Performs case-insensitive search for `needle` in UTF-8 `haystack`.
+/// Performs uncased search for `needle` in UTF-8 `haystack`.
 ///
-/// Unlike ASCII case-insensitive search, this handles Unicode case folding
+/// Unlike ASCII uncased search, this handles Unicode case folding
 /// (e.g., German ß matches "ss", Turkish İ matches "i").
 ///
 /// # Arguments
@@ -1224,7 +1219,7 @@ where
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let haystack = "Hello WORLD";
-/// if let Some((offset, len)) = sz::utf8_case_insensitive_find(haystack, "world") {
+/// if let Some((offset, len)) = sz::utf8_uncased_find(haystack, "world") {
 ///     assert_eq!(offset, 6);
 ///     assert_eq!(len, 5);
 /// }
@@ -1233,44 +1228,44 @@ where
 /// With a pre-compiled needle for repeated searches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+/// use stringzilla::stringzilla::{utf8_uncased_find, Utf8UncasedNeedle};
 ///
-/// let needle = Utf8CaseInsensitiveNeedle::new(b"hello");
+/// let needle = Utf8UncasedNeedle::new(b"hello");
 ///
 /// // Metadata is computed once, reused for subsequent searches
-/// let result1 = utf8_case_insensitive_find(b"Hello World", &needle);
-/// let result2 = utf8_case_insensitive_find(b"HELLO there", &needle);
+/// let result1 = utf8_uncased_find(b"Hello World", &needle);
+/// let result2 = utf8_uncased_find(b"HELLO there", &needle);
 ///
 /// assert_eq!(result1, Some((0, 5)));
 /// assert_eq!(result2, Some((0, 5)));
 /// ```
 ///
-pub fn utf8_case_insensitive_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
+pub fn utf8_uncased_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
 where
     H: AsRef<[u8]>,
-    N: Utf8CaseInsensitiveNeedleArg,
+    N: Utf8UncasedNeedleArg,
 {
-    needle.find_case_insensitive_in(haystack.as_ref())
+    needle.find_uncased_in(haystack.as_ref())
 }
 
-/// Trait for types that can be used as a case-insensitive search needle.
+/// Trait for types that can be used as a uncased search needle.
 ///
 /// This trait is implemented for:
 /// - Any type implementing `AsRef<[u8]>` (strings, byte slices, etc.)
-/// - [`Utf8CaseInsensitiveNeedle`] references for efficient repeated searches
-pub trait Utf8CaseInsensitiveNeedleArg {
-    /// Performs the case-insensitive search in the given haystack.
-    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)>;
+/// - [`Utf8UncasedNeedle`] references for efficient repeated searches
+pub trait Utf8UncasedNeedleArg {
+    /// Performs the uncased search in the given haystack.
+    fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)>;
 }
 
-impl<T: AsRef<[u8]>> Utf8CaseInsensitiveNeedleArg for T {
-    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+impl<T: AsRef<[u8]>> Utf8UncasedNeedleArg for T {
+    fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
         let needle_ref = self.as_ref();
         let mut matched_length: usize = 0;
-        let mut needle_metadata = Utf8CaseInsensitiveNeedleMetadata::default();
+        let mut needle_metadata = Utf8UncasedNeedleMetadata::default();
 
         let result = unsafe {
-            sz_utf8_case_insensitive_find(
+            sz_utf8_uncased_find(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_ref.as_ptr() as *const c_void,
@@ -1289,13 +1284,13 @@ impl<T: AsRef<[u8]>> Utf8CaseInsensitiveNeedleArg for T {
     }
 }
 
-impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> {
-    fn find_case_insensitive_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
+impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
+    fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
         let needle_bytes = self.as_bytes();
         let mut matched_length: usize = 0;
 
         let result = unsafe {
-            sz_utf8_case_insensitive_find(
+            sz_utf8_uncased_find(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_bytes.as_ptr() as *const c_void,
@@ -1314,7 +1309,7 @@ impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> 
     }
 }
 
-/// Compares two UTF-8 strings in case-insensitive manner.
+/// Compares two UTF-8 strings in uncased manner.
 ///
 /// Uses Unicode case folding for comparison, handling characters like
 /// German ß, Turkish İ/ı, and other case variants.
@@ -1327,7 +1322,7 @@ impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> 
 /// # Returns
 ///
 /// * `Ordering::Less` if `a < b`
-/// * `Ordering::Equal` if `a == b` (case-insensitively)
+/// * `Ordering::Equal` if `a == b` (uncasedly)
 /// * `Ordering::Greater` if `a > b`
 ///
 /// # Examples
@@ -1335,11 +1330,11 @@ impl<'a, 'b> Utf8CaseInsensitiveNeedleArg for &'b Utf8CaseInsensitiveNeedle<'a> 
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// use std::cmp::Ordering;
-/// assert_eq!(sz::utf8_case_insensitive_order("Hello", "HELLO"), Ordering::Equal);
-/// assert_eq!(sz::utf8_case_insensitive_order("abc", "ABD"), Ordering::Less);
+/// assert_eq!(sz::utf8_uncased_order("Hello", "HELLO"), Ordering::Equal);
+/// assert_eq!(sz::utf8_uncased_order("abc", "ABD"), Ordering::Less);
 /// ```
 ///
-pub fn utf8_case_insensitive_order<A, B>(a: A, b: B) -> Ordering
+pub fn utf8_uncased_order<A, B>(a: A, b: B) -> Ordering
 where
     A: AsRef<[u8]>,
     B: AsRef<[u8]>,
@@ -1348,7 +1343,7 @@ where
     let b_ref = b.as_ref();
 
     let result = unsafe {
-        sz_utf8_case_insensitive_order(
+        sz_utf8_uncased_order(
             a_ref.as_ptr() as *const c_void,
             a_ref.len(),
             b_ref.as_ptr() as *const c_void,
@@ -2291,7 +2286,7 @@ where
 /// use stringzilla::stringzilla as sz;
 ///
 /// let descending = sz::ArgsortOptions::default().reversed();
-/// let top_10_folded = sz::ArgsortOptions { case_insensitive: true, top: Some(10), ..Default::default() };
+/// let top_10_folded = sz::ArgsortOptions { uncased: true, top: Some(10), ..Default::default() };
 /// # let _ = (descending, top_10_folded);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2299,7 +2294,7 @@ pub struct ArgsortOptions {
     /// Sort in descending order; equal elements still keep their input order (stable).
     pub reverse: bool,
     /// Order under Unicode case-folding instead of raw bytes.
-    pub case_insensitive: bool,
+    pub uncased: bool,
     /// Only fully order the leading `Some(k)` elements (top-K / partial sort); `None` sorts everything.
     /// The remaining entries of `order` stay a valid - but arbitrary - permutation of the leftover indices.
     pub top: Option<usize>,
@@ -2312,8 +2307,8 @@ impl ArgsortOptions {
         self
     }
     /// Order under Unicode case-folding instead of raw bytes.
-    pub fn case_insensitive(mut self) -> Self {
-        self.case_insensitive = true;
+    pub fn uncased(mut self) -> Self {
+        self.uncased = true;
         self
     }
     /// Only fully order the leading `count` elements (top-K / partial sort).
@@ -2327,7 +2322,7 @@ impl ArgsortOptions {
 ///
 /// The caller supplies an output buffer `order` of length at least `data.len()`; on success the sorted
 /// permutation indices are written into its first `data.len()` slots. See [`ArgsortOptions`] for
-/// descending, case-insensitive, and top-K variants.
+/// descending, uncased, and top-K variants.
 ///
 /// # Example
 ///
@@ -2339,10 +2334,10 @@ impl ArgsortOptions {
 /// sz::argsort(&fruits, &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 0, 2]); // "apple", "banana", "cherry"
 ///
-/// // Descending, case-insensitive:
+/// // Descending, uncased:
 /// let labels = ["beta", "Alpha", "BETA"];
 /// let mut order = [0; 3];
-/// sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed().case_insensitive()).unwrap();
+/// sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed().uncased()).unwrap();
 /// assert_eq!(labels[order[0]], "beta"); // "beta"/"BETA" (fold-equal) before "Alpha", stable on ties
 /// ```
 pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status> {
@@ -2405,8 +2400,8 @@ where
     let top_count = options.top.unwrap_or(0);
     let reverse = options.reverse as i32;
     let status = unsafe {
-        if options.case_insensitive {
-            sz_sequence_argsort_utf8_case_insensitive(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+        if options.uncased {
+            sz_sequence_argsort_utf8_uncased(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
         } else {
             sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
         }
@@ -3384,7 +3379,7 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
     }
 }
 
-/// An iterator over case-insensitive matches of a UTF-8 pattern in a string.
+/// An iterator over uncased matches of a UTF-8 pattern in a string.
 ///
 /// This iterator yields `IndexSpan` values representing the byte offset and length
 /// of each match. The match length may differ from the needle length due to Unicode
@@ -3395,10 +3390,10 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8CaseInsensitiveMatches, IndexSpan};
+/// use stringzilla::stringzilla::{RangeUtf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"Hello WORLD, hello world";
-/// let matches: Vec<IndexSpan> = RangeUtf8CaseInsensitiveMatches::new(haystack, b"hello").collect();
+/// let matches: Vec<IndexSpan> = RangeUtf8UncasedMatches::new(haystack, b"hello").collect();
 /// assert_eq!(matches.len(), 2);
 /// assert_eq!(matches[0], IndexSpan::new(0, 5));
 /// assert_eq!(matches[1], IndexSpan::new(13, 5));
@@ -3407,27 +3402,27 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
 /// With overlapping matches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8CaseInsensitiveMatches, IndexSpan};
+/// use stringzilla::stringzilla::{RangeUtf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"aAaAa";
-/// let matches: Vec<IndexSpan> = RangeUtf8CaseInsensitiveMatches::with_overlaps(haystack, b"aA", true).collect();
+/// let matches: Vec<IndexSpan> = RangeUtf8UncasedMatches::with_overlaps(haystack, b"aA", true).collect();
 /// assert_eq!(matches.len(), 4); // Overlapping matches
 /// ```
-pub struct RangeUtf8CaseInsensitiveMatches<'a> {
+pub struct RangeUtf8UncasedMatches<'a> {
     haystack: &'a [u8],
     needle: &'a [u8],
-    metadata: Utf8CaseInsensitiveNeedleMetadata,
+    metadata: Utf8UncasedNeedleMetadata,
     position: usize,
     include_overlaps: bool,
 }
 
-impl<'a> RangeUtf8CaseInsensitiveMatches<'a> {
-    /// Creates a new iterator for non-overlapping case-insensitive matches.
+impl<'a> RangeUtf8UncasedMatches<'a> {
+    /// Creates a new iterator for non-overlapping uncased matches.
     pub fn new(haystack: &'a [u8], needle: &'a [u8]) -> Self {
         Self {
             haystack,
             needle,
-            metadata: Utf8CaseInsensitiveNeedleMetadata::default(),
+            metadata: Utf8UncasedNeedleMetadata::default(),
             position: 0,
             include_overlaps: false,
         }
@@ -3438,14 +3433,14 @@ impl<'a> RangeUtf8CaseInsensitiveMatches<'a> {
         Self {
             haystack,
             needle,
-            metadata: Utf8CaseInsensitiveNeedleMetadata::default(),
+            metadata: Utf8UncasedNeedleMetadata::default(),
             position: 0,
             include_overlaps,
         }
     }
 }
 
-impl<'a> Iterator for RangeUtf8CaseInsensitiveMatches<'a> {
+impl<'a> Iterator for RangeUtf8UncasedMatches<'a> {
     type Item = IndexSpan;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3457,7 +3452,7 @@ impl<'a> Iterator for RangeUtf8CaseInsensitiveMatches<'a> {
         let mut matched_length: usize = 0;
 
         let result = unsafe {
-            sz_utf8_case_insensitive_find(
+            sz_utf8_uncased_find(
                 remaining.as_ptr() as *const c_void,
                 remaining.len(),
                 self.needle.as_ptr() as *const c_void,
@@ -4364,10 +4359,10 @@ mod tests {
     }
 
     #[test]
-    fn argsort_case_insensitive() {
+    fn argsort_uncased() {
         let labels = ["Banana", "apple", "BANANA", "Apple"];
         let mut order = [0; 4];
-        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().case_insensitive()).expect("argsort failed");
+        sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().uncased()).expect("argsort failed");
         let sorted: Vec<_> = order.iter().map(|&i| labels[i]).collect();
         // Fold-equal strings group together and stay in input order: "apple","Apple" then "Banana","BANANA".
         assert_eq!(sorted, vec!["apple", "Apple", "Banana", "BANANA"]);
@@ -4846,7 +4841,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_case_fold_golden_vectors() {
+    fn utf8_uncased_fold_golden_vectors() {
         // One probe per kernel family: ASCII, Latin-1 (C3), Latin Extended (C4/C6),
         // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
         // ligature expansions, and the post-Unicode-15 Garay block (4-byte sequences).
@@ -4877,16 +4872,133 @@ mod tests {
         ];
         for (source, expected) in golden {
             let mut destination = vec![0u8; source.len() * 3];
-            let folded_length = sz::utf8_case_fold(source, &mut destination[..]);
+            let folded_length = sz::utf8_uncased_fold(source, &mut destination[..]);
             assert_eq!(&destination[..folded_length], *expected, "folding {:?}", source);
         }
 
         // Returned length tracks expansion: ẞ shrinks 3 → 2 bytes, ΐ grows 2 → 6 bytes
         let mut destination = [0u8; 16];
-        assert_eq!(sz::utf8_case_fold("\u{1E9E}", &mut destination), 2);
-        let folded_length = sz::utf8_case_fold("\u{0390}", &mut destination);
+        assert_eq!(sz::utf8_uncased_fold("\u{1E9E}", &mut destination), 2);
+        let folded_length = sz::utf8_uncased_fold("\u{0390}", &mut destination);
         assert_eq!(folded_length, 6);
         assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
+    }
+
+    /// Folds a single codepoint into a fixed-size buffer, returning the buffer and its
+    /// used length. A single codepoint case-folds to at most a handful of bytes (the
+    /// longest known expansion is the Greek "ΐ" growing to 6 bytes), so a 16-byte buffer
+    /// is comfortably oversized.
+    fn fold_codepoint(codepoint: char) -> ([u8; 16], usize) {
+        let mut source_buffer = [0u8; 4];
+        let source = codepoint.encode_utf8(&mut source_buffer);
+        let mut folded = [0u8; 16];
+        let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
+        debug_assert!(folded_length <= folded.len(), "fold expansion exceeded buffer");
+        (folded, folded_length)
+    }
+
+    /// Independent oracle for uncased UTF-8 search. A match exists iff the fold of
+    /// `needle` is a contiguous run of the fold of `haystack`; the earliest such run wins.
+    /// The reported `(offset, length)` is in ORIGINAL haystack bytes, snapped to codepoint
+    /// boundaries. Implemented by folding each haystack codepoint and remembering, for every
+    /// folded byte, the original byte span of the codepoint that produced it.
+    fn reference_uncased_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+        // Fixed-size accumulators sized for the short test inputs.
+        const CAPACITY: usize = 512;
+        let mut haystack_folded = [0u8; CAPACITY];
+        // For each folded byte, the [start, end) byte range in the ORIGINAL haystack of the
+        // codepoint that produced it.
+        let mut source_starts = [0usize; CAPACITY];
+        let mut source_ends = [0usize; CAPACITY];
+        let mut haystack_folded_length = 0usize;
+
+        let mut original_offset = 0usize;
+        for codepoint in haystack.chars() {
+            let codepoint_length = codepoint.len_utf8();
+            let codepoint_start = original_offset;
+            let codepoint_end = original_offset + codepoint_length;
+            let (folded, folded_length) = fold_codepoint(codepoint);
+            for byte_index in 0..folded_length {
+                debug_assert!(haystack_folded_length < CAPACITY, "haystack fold overflow");
+                haystack_folded[haystack_folded_length] = folded[byte_index];
+                source_starts[haystack_folded_length] = codepoint_start;
+                source_ends[haystack_folded_length] = codepoint_end;
+                haystack_folded_length += 1;
+            }
+            original_offset = codepoint_end;
+        }
+
+        // Fold the needle independently.
+        let mut needle_folded = [0u8; CAPACITY];
+        let mut needle_folded_length = 0usize;
+        let mut needle_buffer = [0u8; 4];
+        for codepoint in needle.chars() {
+            let source = codepoint.encode_utf8(&mut needle_buffer);
+            let mut folded = [0u8; 16];
+            let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
+            for byte_index in 0..folded_length {
+                debug_assert!(needle_folded_length < CAPACITY, "needle fold overflow");
+                needle_folded[needle_folded_length] = folded[byte_index];
+                needle_folded_length += 1;
+            }
+        }
+
+        let haystack_fold = &haystack_folded[..haystack_folded_length];
+        let needle_fold = &needle_folded[..needle_folded_length];
+
+        // An empty needle-fold matches at the very start with zero length.
+        if needle_fold.is_empty() {
+            return Some((0, 0));
+        }
+        if needle_fold.len() > haystack_fold.len() {
+            return None;
+        }
+
+        // Slide the needle-fold over the haystack-fold; earliest run wins.
+        for run_start in 0..=(haystack_fold.len() - needle_fold.len()) {
+            let run_end = run_start + needle_fold.len();
+            if &haystack_fold[run_start..run_end] == needle_fold {
+                let offset = source_starts[run_start];
+                let length = source_ends[run_end - 1] - offset;
+                return Some((offset, length));
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn utf8_uncased_find_crossing_expansions() {
+        // Curated cross-expansion cases where folding changes byte counts and matches can
+        // straddle multiple expanding codepoints. Swept across prefix paddings so the match
+        // lands at varied alignments relative to the SIMD window boundaries.
+        let cases: &[(&str, &str)] = &[
+            ("\u{00DF}\u{00DF}", "sss"),            // ßß → "ssss", needle "sss"
+            ("\u{00DF}\u{00DF}", "\u{017F}\u{00DF}"), // ßß vs ſß → "sss" inside "ssss"
+            ("\u{1E9E}\u{00DF}", "ssss"),          // ẞß → "ssss"
+            ("\u{1E9E}\u{00DF}", "sss"),           // ẞß → "ssss", needle "sss"
+            ("\u{FB03}", "fi"),                    // ﬃ → "ffi", needle "fi"
+            ("\u{FB03}", "ffi"),                   // ﬃ → "ffi"
+            ("\u{FB00}\u{FB01}", "ffi"),           // ﬀﬁ → "ff" + "fi" = "fffi"
+        ];
+        let paddings: &[usize] = &[0, 30, 62, 63, 64, 65];
+
+        for (haystack_core, needle) in cases {
+            for &padding in paddings {
+                let mut haystack = String::with_capacity(padding + haystack_core.len());
+                for _ in 0..padding {
+                    haystack.push('z'); // non-folding filler
+                }
+                haystack.push_str(haystack_core);
+
+                let actual = sz::utf8_uncased_find(haystack.as_bytes(), needle.as_bytes());
+                let expected = reference_uncased_find(&haystack, needle);
+                assert_eq!(
+                    actual, expected,
+                    "mismatch for haystack_core={:?} needle={:?} padding={}",
+                    haystack_core, needle, padding
+                );
+            }
+        }
     }
 
     #[test]

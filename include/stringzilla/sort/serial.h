@@ -616,7 +616,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
 #define sz_argsort_casefold_fields_(pgram_type) ((sz_size_t)(sizeof(pgram_type) * 8) / sz_argsort_casefold_field_bits_)
 
 /**
- *  @brief Case-insensitive counterpart of `sz_sequence_argsort_serial_export_byte_window_`.
+ *  @brief Uncased counterpart of `sz_sequence_argsort_serial_export_byte_window_`.
  *      Packs the folded @b code-points of each string at recursion depth @p folded_skip_count into a pgram -
  *      three 21-bit fields on 64-bit targets, MSB-first, each holding `code-point + 1` so a zero field means
  *      "no code-point here". Because `0` sorts below every real `code-point + 1`, a string that ends sorts
@@ -685,7 +685,7 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_casefold_window_(            
 }
 
 /**
- *  @brief Case-insensitive counterpart of `sz_sequence_argsort_serial_sort_byte_windows_`: sorts a range by its
+ *  @brief Uncased counterpart of `sz_sequence_argsort_serial_sort_byte_windows_`: sorts a range by its
  *      folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups one window
  *      deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly like `start_character`.
  */
@@ -728,7 +728,7 @@ SZ_PUBLIC void sz_sequence_argsort_serial_sort_casefold_windows_(         //
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_serial( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,        //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

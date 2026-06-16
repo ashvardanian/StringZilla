@@ -10,7 +10,7 @@
  *  moves the order indices). The 4-wide table is 16x32 = 512 bytes - small enough to keep `const` and warm
  *  in cache - versus the 16 KB an 8-wide table would need. Compaction preserves lane order, so the partition
  *  is @b stable - matching the stable-by-default contract - and the recursion/stability/reverse/top-K/
- *  case-insensitive machinery is reused verbatim from `sort/serial.h`.
+ *  uncased machinery is reused verbatim from `sort/serial.h`.
  */
 #ifndef STRINGZILLA_SORT_NEON_H_
 #define STRINGZILLA_SORT_NEON_H_
@@ -337,9 +337,9 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz
 }
 
 /**
- *  @brief Case-insensitive twin of `sz_sequence_argsort_neon_sort_byte_windows_`: the folded code-point export
+ *  @brief Uncased twin of `sz_sequence_argsort_neon_sort_byte_windows_`: the folded code-point export
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      NEON partition - which is where NEON beats the fully-serial case-insensitive path.
+ *      NEON partition - which is where NEON beats the fully-serial uncased path.
  */
 SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -377,7 +377,7 @@ SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_neon( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_neon( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,      //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

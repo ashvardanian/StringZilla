@@ -32,7 +32,7 @@
  *      build_release/stringzilla_bench_utf8_iterate_cpp20
  *  @endcode
  *
- *  This file is the sibling of `bench_utf8_case.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_utf8_uncased.cpp`, `bench_find.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
 #include <vector>
 

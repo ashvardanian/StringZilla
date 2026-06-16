@@ -384,8 +384,8 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/intersect.c",
     "c/stringzilla/utf8_norm.c",
     "c/stringzilla/utf8_iterate.c",
-    "c/stringzilla/utf8_case_fold.c",
-    "c/stringzilla/utf8_case_insensitive.c",
+    "c/stringzilla/utf8_uncased_fold.c",
+    "c/stringzilla/utf8_uncased.c",
 ]
 STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
 # Per-capability instantiation units: each emits one ISA's (CPU) or tier's (CUDA) heavy engine code exactly once, so

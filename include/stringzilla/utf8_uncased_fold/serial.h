@@ -1,11 +1,11 @@
 /**
  *  @brief Serial backend for UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold/serial.h
+ *  @file include/stringzilla/utf8_uncased_fold/serial.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_SERIAL_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_SERIAL_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SERIAL_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_SERIAL_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes.h"
@@ -26,7 +26,7 @@ extern "C" {
  *  @param bytes_consumed Number of bytes read from source.
  *  @param bytes_exported Number of bytes written to destination.
  */
-SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
+SZ_INTERNAL void sz_utf8_uncased_fold_upto_(                           //
     sz_cptr_t source, sz_size_t source_length,                      //
     sz_ptr_t destination, sz_size_t destination_length,             //
     sz_size_t *codepoints_consumed, sz_size_t *codepoints_exported, //
@@ -85,7 +85,7 @@ SZ_INTERNAL void sz_utf8_case_fold_upto_(                           //
     if (bytes_exported) *bytes_exported = (sz_size_t)(destination_ptr - destination_start);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
@@ -117,4 +117,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(sz_cptr_t source, sz_size_t source_
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_SERIAL_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_SERIAL_H_

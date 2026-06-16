@@ -19,7 +19,7 @@
 #define STRINGZILLA_UTF8_NORM_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_case_fold/v128.h" // `sz_utf8_gather64_v128_`
+#include "stringzilla/utf8_uncased_fold/v128.h" // `sz_utf8_gather64_v128_`
 #include "stringzilla/utf8_norm/serial.h"
 
 #ifdef __cplusplus

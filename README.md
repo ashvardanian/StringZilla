@@ -76,13 +76,13 @@ __Who is this for?__
       <span style="color:#ABABAB;">x86:</span> <b>0.4</b> GB/s
     </td>
     <td align="center">
-      <code>sz.utf8_case_fold</code><br/>
+      <code>sz.utf8_uncased_fold</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1.3</b> GB/s
     </td>
   </tr>
-  <!-- Unicode case-insensitive search -->
+  <!-- Unicode uncased search -->
   <tr>
-    <td colspan="4" align="center">Unicode case-insensitive substring search</td>
+    <td colspan="4" align="center">Unicode uncased substring search</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
@@ -92,7 +92,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">x86:</span> <b>0.02</b> GB/s
     </td>
     <td align="center">
-      <code>utf8_case_insensitive_find</code><br/>
+      <code>utf8_uncased_find</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>3.0</b> GB/s
     </td>
   </tr>
@@ -364,7 +364,7 @@ Consider contributing if you need a feature that's not yet implemented.
 | Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Case-Insensitive UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Uncased UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 | TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ⚪    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
@@ -556,37 +556,37 @@ OpenSSL (powering `hashlib`) has faster Assembly kernels, but StringZilla avoids
 - OpenSSL-backed `hashlib.sha256`: 12.6s
 - StringZilla end-to-end: 4.0s — __3× faster!__
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
-StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+StringZilla implements both Unicode Case Folding and Uncased UTF-8 Search.
 Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
 The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
 
 ```python
 import stringzilla as sz
 
-sz.utf8_case_fold('HELLO')      # b'hello'
-sz.utf8_case_fold('Straße')     # b'strasse' — ß (1 char) expands to "ss" (2 chars)
-sz.utf8_case_fold('eﬃcient')    # b'efficient' — ﬃ ligature (1 char) expands to "ffi" (3 chars)
+sz.utf8_uncased_fold('HELLO')      # b'hello'
+sz.utf8_uncased_fold('Straße')     # b'strasse' — ß (1 char) expands to "ss" (2 chars)
+sz.utf8_uncased_fold('eﬃcient')    # b'efficient' — ﬃ ligature (1 char) expands to "ffi" (3 chars)
 ```
 
-The case-insensitive search returns the byte offset of the match, handling expansions correctly.
+The uncased search returns the byte offset of the match, handling expansions correctly.
 
 ```python
 import stringzilla as sz
 
-sz.utf8_case_insensitive_find('Der große Hund', 'GROSSE')   # 4 — finds "große" at codepoint 4
-sz.utf8_case_insensitive_find('Straße', 'STRASSE')          # 0 — ß matches "SS"
-sz.utf8_case_insensitive_find('eﬃcient', 'EFFICIENT')       # 0 — ﬃ ligature matches "FFI"
+sz.utf8_uncased_find('Der große Hund', 'GROSSE')   # 4 — finds "große" at codepoint 4
+sz.utf8_uncased_find('Straße', 'STRASSE')          # 0 — ß matches "SS"
+sz.utf8_uncased_find('eﬃcient', 'EFFICIENT')       # 0 — ﬃ ligature matches "FFI"
 
 # Iterator for finding ALL matches
 haystack = 'Straße STRASSE strasse'
-for match in sz.utf8_case_insensitive_find_iter(haystack, 'strasse'):
+for match in sz.utf8_uncased_find_iter(haystack, 'strasse'):
     print(match, match.offset_within(haystack))  # Yields: 'Straße', 'STRASSE', 'strasse'
 
 # With overlapping matches
-list(sz.utf8_case_insensitive_find_iter('aaaa', 'aa'))  # ['aa', 'aa'] — 2 non-overlapping
-list(sz.utf8_case_insensitive_find_iter('aaaa', 'aa', include_overlapping=True))  # 3 matches
+list(sz.utf8_uncased_find_iter('aaaa', 'aa'))  # ['aa', 'aa'] — 2 non-overlapping
+list(sz.utf8_uncased_find_iter('aaaa', 'aa', include_overlapping=True))  # 3 matches
 ```
 
 ### Collection-Level Operations
@@ -1000,26 +1000,26 @@ auto b = "some string"_sv; // sz::string_view
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
-StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+StringZilla implements both Unicode Case Folding and Uncased UTF-8 Search.
 Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
 The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
 
 ```c
 char source[] = "Straße";  // German: "Street"
 char destination[64];      // Must be at least 3x source length
-sz_size_t result_len = sz_utf8_case_fold(source, strlen(source), destination);
+sz_size_t result_len = sz_utf8_uncased_fold(source, strlen(source), destination);
 // destination now contains "strasse" (7 bytes), result_len = 7
 ```
 
-The case-insensitive search API returns a pointer to the start of the first relevant glyph in the haystack, or `NULL` if not found.
+The uncased search API returns a pointer to the start of the first relevant glyph in the haystack, or `NULL` if not found.
 It outputs the length of the matched haystack substring in bytes, and accepts a metadata structure to speed up repeated searches for the same needle.
 
 ```c
-sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+sz_utf8_uncased_needle_metadata_t metadata = {};
 sz_size_t match_length;
-sz_cptr_t match = sz_utf8_case_insensitive_find(
+sz_cptr_t match = sz_utf8_uncased_find(
     haystack, haystack_len,
     needle, needle_len,
     &metadata,      // Reuse for queries with the same needle
@@ -1033,11 +1033,11 @@ Same functionality is available in C++:
 namespace sz = ashvardanian::stringzilla;
 
 sz::string_view text = "Hello World"; // Single search
-auto [offset, length] = text.utf8_case_insensitive_find("HELLO");
+auto [offset, length] = text.utf8_uncased_find("HELLO");
 
-sz::utf8_case_insensitive_needle pattern("hello"); // Repeated searches with pre-compiled pattern
+sz::utf8_uncased_needle pattern("hello"); // Repeated searches with pre-compiled pattern
 for (auto const& haystack : haystacks)
-    auto match = haystack.utf8_case_insensitive_find(pattern);
+    auto match = haystack.utf8_uncased_find(pattern);
 ```
 
 ### Similarity Scores
@@ -1756,9 +1756,9 @@ let mac = sz::hmac_sha256(b"secret", b"Hello, world!");
 ```
 
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
-StringZilla implements both Unicode Case Folding and Case-Insensitive UTF-8 Search.
+StringZilla implements both Unicode Case Folding and Uncased UTF-8 Search.
 Unlike most libraries only capable of lower-casing ASCII-represented English alphabet, StringZilla covers over 1M+ codepoints.
 The case-folding API expects the output buffer to be at least 3× larger than the input, to accommodate for the worst-case character expansions scenarios.
 
@@ -1767,26 +1767,26 @@ use stringzilla::stringzilla as sz;
 
 let source = "Straße";           // German: "Street"
 let mut dest = [0u8; 64];        // Must be at least 3x source length
-let len = sz::utf8_case_fold(source, &mut dest);
+let len = sz::utf8_uncased_fold(source, &mut dest);
 assert_eq!(&dest[..len], b"strasse");  // ß (2 bytes) → "ss" (2 bytes)
 ```
 
-The case-insensitive search returns `Some((offset, matched_length))` or `None`.
+The uncased search returns `Some((offset, matched_length))` or `None`.
 The `matched_length` may differ from needle length due to expansions.
 
 ```rust
-use stringzilla::stringzilla::{utf8_case_insensitive_find, Utf8CaseInsensitiveNeedle};
+use stringzilla::stringzilla::{utf8_uncased_find, Utf8UncasedNeedle};
 
 // Single search — ß (C3 9F) matches "SS"
-if let Some((offset, len)) = utf8_case_insensitive_find("Straße", "STRASSE") {
+if let Some((offset, len)) = utf8_uncased_find("Straße", "STRASSE") {
     assert_eq!(offset, 0);
     assert_eq!(len, 7);  // "Straße" is 7 bytes
 }
 
 // Repeated searches with pre-compiled needle metadata
-let needle = Utf8CaseInsensitiveNeedle::new(b"STRASSE");
+let needle = Utf8UncasedNeedle::new(b"STRASSE");
 for haystack in &["Straße", "STRASSE", "strasse"] {
-    if let Some((offset, len)) = utf8_case_insensitive_find(haystack, &needle) {
+    if let Some((offset, len)) = utf8_uncased_find(haystack, &needle) {
         println!("Found at byte {} with length {}", offset, len);
     }
 }
@@ -1953,30 +1953,30 @@ const order = sz.compare(Buffer.from('a'), Buffer.from('b')); // -1, 0, or 1
 const byteSum = sz.byteSum(haystack); // sum of bytes as BigInt
 ```
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
 StringZilla provides full Unicode case folding (including expansions like `ß → ss`, ligatures like `ﬁ → fi`, and special folds like `µ → μ`, `K → k`)
-and a case-insensitive substring search that accounts for those expansions.
+and a uncased substring search that accounts for those expansions.
 
 ```js
 import sz from "stringzilla";
 
 // Case folding (returns a UTF-8 Buffer)
-console.log(sz.utf8CaseFold(Buffer.from("Straße")).toString("utf8")); // "strasse"
-console.log(sz.utf8CaseFold(Buffer.from("ofﬁce")).toString("utf8"));  // "office" (U+FB01 ligature)
+console.log(sz.utf8UncasedFold(Buffer.from("Straße")).toString("utf8")); // "strasse"
+console.log(sz.utf8UncasedFold(Buffer.from("ofﬁce")).toString("utf8"));  // "office" (U+FB01 ligature)
 
-// Case-insensitive substring search (full Unicode case folding)
+// Uncased substring search (full Unicode case folding)
 const text = Buffer.from(
     "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
     "Typografisch sieht man auch: ein Maß von etwa 20 μK."
 );
 const patternBytes = Buffer.from("EIN MASS VON ETWA 20 μK");
 
-const first = sz.utf8CaseInsensitiveFind(text, patternBytes);
+const first = sz.utf8UncasedFind(text, patternBytes);
 console.log(first); // { index: 69n, length: ... } (byte offsets)
 
 // Reuse the same needle efficiently
-const pattern = new sz.Utf8CaseInsensitiveNeedle(patternBytes);
+const pattern = new sz.Utf8UncasedNeedle(patternBytes);
 const again = pattern.findIn(text);
 console.log(again.index === first.index);
 ```
@@ -2039,12 +2039,12 @@ s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
 ```
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
 ```swift
 import StringZilla
 
-let folded = "Straße".utf8CaseFoldedBytes()
+let folded = "Straße".utf8UncasedFoldedBytes()
 print(String(decoding: folded, as: UTF8.self)) // "strasse"
 
 let haystack =
@@ -2052,12 +2052,12 @@ let haystack =
     + "Typografisch sieht man auch: ein Maß von etwa 20 μK."
 let needle = "EIN MASS VON ETWA 20 μK"
 
-if let range = haystack.utf8CaseInsensitiveFind(substring: needle) {
+if let range = haystack.utf8UncasedFind(substring: needle) {
     print(haystack[range]) // "ein Maß von etwa 20 µK"
 }
 
 // Reuse the same needle efficiently
-let compiledNeedle = Utf8CaseInsensitiveNeedle(needle)
+let compiledNeedle = Utf8UncasedNeedle(needle)
 if let range = compiledNeedle.findFirst(in: haystack) {
     print(haystack[range])
 }
@@ -2149,7 +2149,7 @@ func main() {
 }
 ```
 
-### Unicode Case-Folding and Case-Insensitive Search
+### Unicode Case-Folding and Uncased Search
 
 ```go
 package main
@@ -2160,19 +2160,19 @@ import (
 )
 
 func main() {
-    folded, _ := sz.Utf8CaseFold("Straße", true)
+    folded, _ := sz.Utf8UncasedFold("Straße", true)
     fmt.Println(folded) // "strasse"
 
     haystack := "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n" +
         "Typografisch sieht man auch: ein Maß von etwa 20 μK."
     needle := "EIN MASS VON ETWA 20 μK"
 
-    start64, len64, _ := sz.Utf8CaseInsensitiveFind(haystack, needle, true)
+    start64, len64, _ := sz.Utf8UncasedFind(haystack, needle, true)
     start, end := int(start64), int(start64+len64)
     fmt.Println(haystack[start:end]) // "ein Maß von etwa 20 µK"
 
     // Reuse the same needle efficiently
-    compiled, _ := sz.NewUtf8CaseInsensitiveNeedle(needle, true)
+    compiled, _ := sz.NewUtf8UncasedNeedle(needle, true)
     start64, len64, _ = compiled.FindIn(haystack, true)
     start, end = int(start64), int(start64+len64)
     fmt.Println(haystack[start:end])
@@ -2572,9 +2572,9 @@ Moreover, it implements the Unicode 17.0 standard, being practically the only li
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
 
-### Case-Folding and Case-Insensitive Search
+### Case-Folding and Uncased Search
 
-StringZilla provides Unicode-aware case-insensitive substring search that handles the full complexity of Unicode case folding.
+StringZilla provides Unicode-aware uncased substring search that handles the full complexity of Unicode case folding.
 This includes multi-character expansions:
 
 | Character | Codepoint | UTF-8 Bytes | Case-Folds To | Result Bytes |

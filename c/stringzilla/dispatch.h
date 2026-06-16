@@ -6,7 +6,7 @@
  *
  *  The compiled StringZilla library is split into one translation unit per domain
  *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_iterate.c`,
- *  `utf8_case_fold.c`, `utf8_case_insensitive.c`), so that touching one domain only recompiles
+ *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
  *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_DYNAMIC` public
  *  wrappers that call through the table. The thin `runtime.c` owns the table definition and the
@@ -66,15 +66,15 @@ typedef struct sz_implementations_t {
 
     sz_utf8_norm_t utf8_norm;
     sz_utf8_norm_violation_t utf8_norm_violation;
-    sz_utf8_case_fold_t utf8_case_fold;
-    sz_utf8_case_insensitive_find_t utf8_case_insensitive_find;
+    sz_utf8_uncased_fold_t utf8_uncased_fold;
+    sz_utf8_uncased_find_t utf8_uncased_find;
 
     sz_utf8_find_boundaries_t utf8_word_find_boundaries;
     sz_utf8_find_boundaries_t utf8_word_rfind_boundaries;
-    sz_utf8_case_insensitive_order_t utf8_case_insensitive_order;
+    sz_utf8_uncased_order_t utf8_uncased_order;
 
     sz_sequence_argsort_t sequence_argsort;
-    sz_sequence_argsort_t sequence_argsort_utf8_case_insensitive;
+    sz_sequence_argsort_t sequence_argsort_utf8_uncased;
     sz_sequence_intersect_t sequence_intersect;
 
 } sz_implementations_t;
@@ -95,8 +95,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_fold_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_case_insensitive_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
 
 #endif // STRINGZILLA_DISPATCH_H_

@@ -281,9 +281,9 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
 }
 
 /**
- *  @brief Case-insensitive twin of `sz_sequence_argsort_sve_sort_byte_windows_`: the folded code-point export
+ *  @brief Uncased twin of `sz_sequence_argsort_sve_sort_byte_windows_`: the folded code-point export
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      SVE partition - which is where SVE beats the fully-serial case-insensitive path.
+ *      SVE partition - which is where SVE beats the fully-serial uncased path.
  */
 SZ_PUBLIC void sz_sequence_argsort_sve_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -321,7 +321,7 @@ SZ_PUBLIC void sz_sequence_argsort_sve_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_sve( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_sve( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

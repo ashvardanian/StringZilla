@@ -307,9 +307,9 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 }
 
 /**
- *  @brief Case-insensitive twin of `sz_sequence_argsort_skylake_sort_byte_windows_`: the folded code-point export
+ *  @brief Uncased twin of `sz_sequence_argsort_skylake_sort_byte_windows_`: the folded code-point export
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      AVX-512 partition - which is where Skylake beats the fully-serial case-insensitive path.
+ *      AVX-512 partition - which is where Skylake beats the fully-serial uncased path.
  */
 SZ_PUBLIC void sz_sequence_argsort_skylake_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -347,7 +347,7 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_skylake( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_skylake( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

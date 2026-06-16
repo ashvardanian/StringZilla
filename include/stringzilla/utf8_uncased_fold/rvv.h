@@ -1,13 +1,13 @@
 /**
  *  @brief RISC-V Vector backend for UTF-8 case folding (delegates to serial).
- *  @file include/stringzilla/utf8_case_fold/rvv.h
+ *  @file include/stringzilla/utf8_uncased_fold/rvv.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_RVV_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_RVV_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_
 
-#include "stringzilla/utf8_case_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +30,7 @@ extern "C" {
  *  load (`vluxei8`) keyed by `family_base + low6` (family_base = 0 / 64 / 128 for C4 / C5 / C6) covers all
  *  three families in one gather — the fold handlers below exploit this to run a strip at `e8m8`. The three
  *  `sz_utf8_fold_latin_c{4,5,6}_deltas_rvv_` names alias the matching 64-byte windows so the
- *  `utf8_case_insensitive` strips can keep loading a single family with one `vle8`. */
+ *  `utf8_uncased` strips can keep loading a single family with one `vle8`. */
 static sz_u8_t const sz_utf8_fold_latin_c456_deltas_rvv_[192] = {
     // C4 80-BF
     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
@@ -456,12 +456,12 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr
     return consumed;
 }
 
-/*  Byte-for-byte equivalent to `sz_utf8_case_fold_serial`. Maximal ASCII runs are folded at `e8m8`, Latin /
+/*  Byte-for-byte equivalent to `sz_utf8_uncased_fold_serial`. Maximal ASCII runs are folded at `e8m8`, Latin /
  *  Cyrillic / Greek / Armenian / Georgian text are folded in place by their `_strip_rvv_` handlers
  *  (dispatched on the lead byte), and any other script / length-changing fold is handled by the value-exact
  *  serial decode/fold/encode for that one codepoint before re-entering the vector path. These folds are 1:1
  *  in length, so the destination tracks the source for those runs. */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
     sz_u8_t *destination_ptr = (sz_u8_t *)destination;
@@ -527,4 +527,4 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_rvv(sz_cptr_t source, sz_size_t source_len
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_RVV_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_

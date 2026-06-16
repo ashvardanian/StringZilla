@@ -1,12 +1,12 @@
 /**
- *  @file scripts/bench_utf8_case.cpp
- *  @brief Benchmarks the @b `sz_utf8_case_*` family — case folding and case-insensitive search.
+ *  @file scripts/bench_utf8_uncased.cpp
+ *  @brief Benchmarks the @b `sz_utf8_uncased_*` family — case folding and uncased search.
  *         The program accepts a file path to a dataset and benchmarks the case folding operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
  *
  *  Benchmarks include:
- *  - Case folding for Unicode text - @b utf8_case_fold.
- *  - Case-insensitive substring search for Unicode text - @b utf8_case_insensitive_find.
+ *  - Case folding for Unicode text - @b utf8_uncased_fold.
+ *  - Uncased substring search for Unicode text - @b utf8_uncased_find.
  *
  *  Its sibling @b `bench_utf8_iterate.cpp` covers the @b `sz_utf8_*` iteration/segmentation family
  *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word boundaries, transcoding).
@@ -28,9 +28,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_utf8_case_cpp20
+ *  cmake --build build_release --config Release --target stringzilla_bench_utf8_uncased_cpp20
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words STRINGWARS_UNIQUE=1 \
- *      build_release/stringzilla_bench_utf8_case_cpp20
+ *      build_release/stringzilla_bench_utf8_uncased_cpp20
  *  @endcode
  *
  *  This file is the sibling of `bench_utf8_iterate.cpp`, `bench_token.cpp`, `bench_find.cpp`,
@@ -44,13 +44,13 @@ using namespace ashvardanian::stringzilla::scripts;
 #pragma region Case Folding Functions
 
 /** @brief Wraps a hardware-specific UTF-8 case folding backend. */
-template <sz_utf8_case_fold_t func_>
-struct utf8_case_fold_from_sz {
+template <sz_utf8_uncased_fold_t func_>
+struct utf8_uncased_fold_from_sz {
 
     environment_t const &env;
     mutable std::vector<char> output_buffer; // Reusable buffer to avoid repeated allocation
 
-    utf8_case_fold_from_sz(environment_t const &env_) : env(env_) {
+    utf8_uncased_fold_from_sz(environment_t const &env_) : env(env_) {
         // Pre-allocate worst-case buffer: 3x input size for worst-case expansion
         std::size_t max_token_size = 0;
         for (auto const &token : env.tokens) max_token_size = std::max(max_token_size, token.size());
@@ -75,51 +75,51 @@ struct utf8_case_fold_from_sz {
     }
 };
 
-void bench_utf8_case_fold(environment_t const &env) {
+void bench_utf8_uncased_fold(environment_t const &env) {
 
-    auto validator = utf8_case_fold_from_sz<sz_utf8_case_fold_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_case_fold_serial", validator).log();
+    auto validator = utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_uncased_fold_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_case_fold_icelake", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_icelake> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_icelake", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_case_fold_haswell", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_haswell> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_haswell", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_case_fold_neon", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_neon> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_neon", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_neon> {env})
         .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_case_fold_v128", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_v128> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_v128", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_v128> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_case_fold_rvv", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_rvv> {env}).log(base);
+    bench_unary(env, "sz_utf8_uncased_fold_rvv", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_rvv> {env}).log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_case_fold_lasx", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_lasx> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_lasx", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_case_fold_powervsx", validator, utf8_case_fold_from_sz<sz_utf8_case_fold_powervsx> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_powervsx", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_powervsx> {env})
         .log(base);
 #endif
 }
 
 #pragma endregion
 
-#pragma region Case-Insensitive Find Functions
+#pragma region Uncased Find Functions
 
-/** @brief Wraps a hardware-specific UTF-8 case-insensitive find backend. */
-template <sz_utf8_case_insensitive_find_t func_>
-struct utf8_case_insensitive_find_from_sz {
+/** @brief Wraps a hardware-specific UTF-8 uncased find backend. */
+template <sz_utf8_uncased_find_t func_>
+struct utf8_uncased_find_from_sz {
 
     environment_t const &env;
 
-    utf8_case_insensitive_find_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_uncased_find_from_sz(environment_t const &env_) : env(env_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
         std::string_view haystack = env.dataset;
@@ -132,10 +132,10 @@ struct utf8_case_insensitive_find_from_sz {
         std::size_t count_matches = 0;
         sz_cptr_t h = haystack.data();
         sz_size_t h_len = haystack.size();
-        sz_utf8_case_insensitive_needle_metadata_t metadata;
+        sz_utf8_uncased_needle_metadata_t metadata;
         std::memset(&metadata, 0, sizeof(metadata));
 
-        // Count all case-insensitive matches
+        // Count all uncased matches
         while (h_len >= needle.size()) {
             sz_cptr_t match = func_(h, h_len, needle.data(), needle.size(), &metadata, &matched_length);
             if (!match) break;
@@ -153,44 +153,44 @@ struct utf8_case_insensitive_find_from_sz {
     }
 };
 
-void bench_utf8_case_insensitive_find(environment_t const &env) {
+void bench_utf8_uncased_find(environment_t const &env) {
 
-    auto validator = utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_case_insensitive_find_serial", validator).log();
+    auto validator = utf8_uncased_find_from_sz<sz_utf8_uncased_find_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_uncased_find_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_case_insensitive_find_icelake", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_icelake> {env})
+    bench_unary(env, "sz_utf8_uncased_find_icelake", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_case_insensitive_find_haswell", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_haswell> {env})
+    bench_unary(env, "sz_utf8_uncased_find_haswell", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_case_insensitive_find_neon", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_neon> {env})
+    bench_unary(env, "sz_utf8_uncased_find_neon", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_neon> {env})
         .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_case_insensitive_find_v128", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_v128> {env})
+    bench_unary(env, "sz_utf8_uncased_find_v128", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_v128> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_case_insensitive_find_rvv", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_rvv> {env})
+    bench_unary(env, "sz_utf8_uncased_find_rvv", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_rvv> {env})
         .log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_case_insensitive_find_lasx", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_lasx> {env})
+    bench_unary(env, "sz_utf8_uncased_find_lasx", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_case_insensitive_find_powervsx", validator,
-                utf8_case_insensitive_find_from_sz<sz_utf8_case_insensitive_find_powervsx> {env})
+    bench_unary(env, "sz_utf8_uncased_find_powervsx", validator,
+                utf8_uncased_find_from_sz<sz_utf8_uncased_find_powervsx> {env})
         .log(base);
 #endif
 }
@@ -211,8 +211,8 @@ int main(int argc, char const **argv) {
     std::printf("Starting Unicode benchmarks...\n");
 
     // Unicode operations
-    bench_utf8_case_fold(env);
-    bench_utf8_case_insensitive_find(env);
+    bench_utf8_uncased_fold(env);
+    bench_utf8_uncased_find(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

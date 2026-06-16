@@ -639,8 +639,8 @@ void test_utf8_equivalence(                                 //
  *
  *  For each generated string, compares byte-by-byte output of both implementations.
  */
-void test_utf8_case_fold_equivalence(                             //
-    sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd, //
+void test_utf8_uncased_fold_equivalence(                             //
+    sz_utf8_uncased_fold_t fold_base, sz_utf8_uncased_fold_t fold_simd, //
     std::size_t min_text_length = 4000, std::size_t min_iterations = scale_iterations(10000)) {
 
     // Output buffers (3x input for worst-case expansion)
@@ -774,7 +774,7 @@ void test_utf8_case_fold_equivalence(                             //
  *  - Subsequent runs: Shuffles the codepoints to create random sequences.
  *  - Checks for both length and content matches between serial and SIMD implementations.
  */
-void test_utf8_case_fold_fuzz(sz_utf8_case_fold_t fold_base, sz_utf8_case_fold_t fold_simd,
+void test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_t fold_base, sz_utf8_uncased_fold_t fold_simd,
                               std::size_t iterations = scale_iterations(100)) {
     std::printf("  - testing case folding fuzz (%zu iterations + ordered check)...\n", iterations);
 
@@ -975,7 +975,7 @@ void test_utf8_norm_all() {
 }
 
 /**
- *  @brief Fuzz tests case-insensitive UTF-8 substring search with controlled haystack sizes.
+ *  @brief Fuzz tests uncased UTF-8 substring search with controlled haystack sizes.
  *
  *  Uses two verification modes:
  *  - Exhaustive (max_needles_per_haystack == 0): Tests ALL N*(N+1)/2 substrings of each folded haystack
@@ -984,7 +984,7 @@ void test_utf8_norm_all() {
  *  Algorithm:
  *  1. Generate random haystack of ~haystack_length runes from character pool
  *  2. Case-fold the haystack
- *  3. Extract needles from folded haystack (guarantees needle exists case-insensitively)
+ *  3. Extract needles from folded haystack (guarantees needle exists uncasedly)
  *  4. Search needle in ORIGINAL (unfolded) haystack with both serial and SIMD
  *  5. Both must return identical positions
  *
@@ -992,8 +992,8 @@ void test_utf8_norm_all() {
  *  @param max_needles_per_haystack  0 = exhaustive, >0 = sample this many per haystack
  *  @param total_queries Total needle searches to perform across all haystacks
  */
-void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8_case_insensitive_find_t find_simd,
-                            sz_utf8_case_fold_t case_fold, sz_utf8_find_nth_t utf8_find_nth, sz_utf8_count_t utf8_count,
+void test_utf8_uncased_find_fuzz(sz_utf8_uncased_find_t find_serial, sz_utf8_uncased_find_t find_simd,
+                            sz_utf8_uncased_fold_t uncased_fold, sz_utf8_find_nth_t utf8_find_nth, sz_utf8_count_t utf8_count,
                             std::size_t haystack_length, std::size_t max_needles_per_haystack,
                             std::size_t total_queries) {
 
@@ -1182,7 +1182,7 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
 
         // 2. Case-fold the haystack - expands up to 3x
         haystack_folded.resize(haystack.size() * 3);
-        haystack_folded.resize(case_fold(haystack.data(), haystack.size(), haystack_folded.data()));
+        haystack_folded.resize(uncased_fold(haystack.data(), haystack.size(), haystack_folded.data()));
         if (haystack_folded.empty()) continue;
 
         // 3. Count runes in folded haystack
@@ -1207,7 +1207,7 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
 
             sz_size_t needle_bytes = needle_end - needle_start;
             sz_size_t serial_matched = 0, simd_matched = 0;
-            sz_utf8_case_insensitive_needle_metadata_t serial_meta = {}, simd_meta = {};
+            sz_utf8_uncased_needle_metadata_t serial_meta = {}, simd_meta = {};
 
             sz_cptr_t serial_result = find_serial(haystack.data(), haystack.size(), needle_start, needle_bytes,
                                                   &serial_meta, &serial_matched);
@@ -1281,45 +1281,123 @@ void test_utf8_ci_find_fuzz(sz_utf8_case_insensitive_find_t find_serial, sz_utf8
 }
 
 /** @brief Prints one labeled hex dump line to `stderr`; used by the adversarial UTF-8 case tests below. */
-static void print_utf8_case_test_bytes(char const *label, char const *bytes, std::size_t length) {
+static void print_utf8_uncased_test_bytes(char const *label, char const *bytes, std::size_t length) {
     std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
     for (std::size_t i = 0; i < length; ++i) std::fprintf(stderr, "%02X ", (unsigned char)bytes[i]);
     std::fprintf(stderr, "\n");
 }
 
 /**
- *  @brief Runs one case-insensitive find query through two backends and demands identical results.
+ *  @brief Independent ground-truth uncased search: `fold(needle)` as a contiguous run of `fold(haystack)`.
  *
- *  Both the match pointer offset and the matched length must agree, including the not-found case
- *  where both backends return `SZ_NULL_CHAR`. On mismatch prints the needle and haystack as hex.
+ *  Folds the haystack codepoint by codepoint into fixed-size arrays, recording each folded rune's source
+ *  byte span, then folds the needle and slides it over the folded stream. The earliest run wins; the
+ *  reported offset and length snap to the source codepoint boundaries, so a match that begins or ends
+ *  mid-expansion ("sss" inside "ssss" from "ßß") is reported in original haystack bytes. Depends on no
+ *  production kernel, so it catches bugs the base-vs-SIMD differential cannot: those where every backend
+ *  agrees yet all of them are wrong. Mirrors the Python `_reference_case_insensitive_find`.
  */
-static void check_utf8_ci_find_pair(                                                      //
-    sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd, //
-    char const *haystack, std::size_t haystack_length,                                    //
+static sz_cptr_t reference_uncased_find(char const *haystack, std::size_t haystack_length, //
+                                        char const *needle, std::size_t needle_length, std::size_t *match_length) {
+
+    // The adversarial harnesses below cap haystacks at 128 bytes and needles at 32; folding can triple
+    // the rune count, so these fixed windows stay comfortably ahead of the longest input.
+    sz_rune_t needle_folded[128];
+    std::size_t needle_folded_count = 0;
+    for (char const *cursor = needle, *end = needle + needle_length; cursor < end;) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(cursor, end, &rune, &rune_length);
+        sz_rune_t folded[3];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
+        for (sz_size_t index = 0; index < folded_count; ++index) {
+            assert(needle_folded_count < 128 && "reference needle buffer overflow");
+            needle_folded[needle_folded_count++] = folded[index];
+        }
+        cursor += rune_length;
+    }
+    if (needle_folded_count == 0) {
+        *match_length = 0;
+        return haystack;
+    }
+
+    sz_rune_t haystack_folded[512];
+    sz_cptr_t source_begin[512], source_end[512];
+    std::size_t haystack_folded_count = 0;
+    for (char const *cursor = haystack, *end = haystack + haystack_length; cursor < end;) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(cursor, end, &rune, &rune_length);
+        sz_rune_t folded[3];
+        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
+        for (sz_size_t index = 0; index < folded_count; ++index) {
+            assert(haystack_folded_count < 512 && "reference haystack buffer overflow");
+            haystack_folded[haystack_folded_count] = folded[index];
+            source_begin[haystack_folded_count] = cursor;
+            source_end[haystack_folded_count] = cursor + rune_length;
+            ++haystack_folded_count;
+        }
+        cursor += rune_length;
+    }
+
+    for (std::size_t start = 0; start + needle_folded_count <= haystack_folded_count; ++start) {
+        bool equal = true;
+        for (std::size_t index = 0; index < needle_folded_count; ++index)
+            if (haystack_folded[start + index] != needle_folded[index]) { equal = false; break; }
+        if (!equal) continue;
+        *match_length = (std::size_t)(source_end[start + needle_folded_count - 1] - source_begin[start]);
+        return source_begin[start];
+    }
+    *match_length = 0;
+    return SZ_NULL_CHAR;
+}
+
+/**
+ *  @brief Runs one uncased find query through two backends and the reference, demanding all three agree.
+ *
+ *  Both the match pointer offset and the matched length must agree across the base backend, the SIMD
+ *  backend, and the independent fold-subset reference, including the not-found case. Because the SIMD
+ *  kernels delegate short needles to the serial path, a base-vs-SIMD-only check is blind to a bug both
+ *  share; the reference leg closes that gap. On mismatch prints the needle and haystack as hex.
+ */
+static void check_utf8_uncased_find_pair(                              //
+    sz_utf8_uncased_find_t find_base, sz_utf8_uncased_find_t find_simd, //
+    char const *haystack, std::size_t haystack_length,                 //
     char const *needle, std::size_t needle_length, char const *test_name) {
 
-    sz_utf8_case_insensitive_needle_metadata_t base_metadata = {}, simd_metadata = {};
+    sz_utf8_uncased_needle_metadata_t base_metadata = {}, simd_metadata = {};
     sz_size_t base_matched = 0, simd_matched = 0;
     sz_cptr_t base_result = find_base(haystack, haystack_length, needle, needle_length, &base_metadata, &base_matched);
     sz_cptr_t simd_result = find_simd(haystack, haystack_length, needle, needle_length, &simd_metadata, &simd_matched);
 
-    bool const same_position = base_result == simd_result;
-    bool const same_length = base_result == SZ_NULL_CHAR || base_matched == simd_matched;
-    if (same_position && same_length) return;
+    std::size_t reference_matched = 0;
+    sz_cptr_t reference_result =
+        reference_uncased_find(haystack, haystack_length, needle, needle_length, &reference_matched);
+
+    bool const base_matches_simd =
+        base_result == simd_result && (base_result == SZ_NULL_CHAR || base_matched == simd_matched);
+    bool const base_matches_reference =
+        base_result == reference_result && (base_result == SZ_NULL_CHAR || base_matched == reference_matched);
+    bool const simd_matches_reference =
+        simd_result == reference_result && (simd_result == SZ_NULL_CHAR || simd_matched == reference_matched);
+    if (base_matches_simd && base_matches_reference && simd_matches_reference) return;
 
     long const base_offset = base_result ? (long)(base_result - haystack) : -1L;
     long const simd_offset = simd_result ? (long)(simd_result - haystack) : -1L;
-    std::fprintf(stderr, "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu, simd kernel=%u\n", //
+    long const reference_offset = reference_result ? (long)(reference_result - haystack) : -1L;
+    std::fprintf(stderr,
+                 "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu kernel=%u | reference offset=%ld len=%zu\n",
                  test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
-                 simd_metadata.kernel_id);
-    print_utf8_case_test_bytes("needle  ", needle, needle_length);
-    print_utf8_case_test_bytes("haystack", haystack, haystack_length);
-    assert(same_position && "Case-insensitive find backends disagree on the match position");
-    assert(same_length && "Case-insensitive find backends disagree on the matched length");
+                 simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
+    print_utf8_uncased_test_bytes("needle  ", needle, needle_length);
+    print_utf8_uncased_test_bytes("haystack", haystack, haystack_length);
+    assert(base_matches_reference && "Uncased find base backend disagrees with the reference");
+    assert(simd_matches_reference && "Uncased find SIMD backend disagrees with the reference");
+    assert(base_matches_simd && "Uncased find backends disagree with each other");
 }
 
 /**
- *  @brief Differential adversarial test for case-insensitive search over @b all fold preimages.
+ *  @brief Differential adversarial test for uncased search over @b all fold preimages.
  *
  *  Random fuzzing rarely places a rare preimage (like 'ϴ' U+03F4 → 'θ') right where a SIMD
  *  danger-detection "alarm" crosses a chunk boundary - structured enumeration does. For every
@@ -1329,9 +1407,9 @@ static void check_utf8_ci_find_pair(                                            
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
  *  with the same adversarial shapes.
  */
-void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base, sz_utf8_case_insensitive_find_t find_simd) {
+void test_utf8_uncased_find_preimages(sz_utf8_uncased_find_t find_base, sz_utf8_uncased_find_t find_simd) {
 
-    std::printf("  - testing case-insensitive find against all fold preimages...\n");
+    std::printf("  - testing uncased find against all fold preimages...\n");
 
     std::size_t const offsets[] = {0, 30, 61, 62, 63, 64, 65};
     std::size_t const offsets_count = sizeof(offsets) / sizeof(offsets[0]);
@@ -1376,7 +1454,7 @@ void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base, sz_u
                     if (variant == 2 && with_context) haystack[haystack_length++] = 'x';
                     for (std::size_t i = 0; i < padding_length; ++i) haystack[haystack_length++] = 'y';
 
-                    check_utf8_ci_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
+                    check_utf8_uncased_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
                                             "preimage find");
                     ++cases_tested;
                 }
@@ -1389,13 +1467,13 @@ void test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_t find_base, sz_u
 /**
  *  @brief Closure property of the case-invariant classifier over the Unicode fold table.
  *
- *  A rune may be treated as case-invariant only if no case-insensitive match can start or hide
+ *  A rune may be treated as case-invariant only if no uncased match can start or hide
  *  inside it. That demands two closures over `sz_unicode_fold_codepoint_`: every preimage with a
  *  non-identity fold participates in case, and every rune @b emitted by such a fold can appear
  *  inside a folded expansion (like 'ʾ' U+02BE inside 'ẚ' → "aʾ"), so neither may be invariant.
  *  Fully generative: a Unicode table update re-derives the expected set automatically.
  */
-void test_utf8_case_invariant_closure() {
+void test_utf8_uncased_invariant_closure() {
 
     std::printf("  - testing case-invariant closure over the fold table...\n");
     std::size_t preimages_checked = 0, outputs_checked = 0;
@@ -1406,14 +1484,14 @@ void test_utf8_case_invariant_closure() {
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         if (folded_count == 1 && folded_runes[0] == rune) continue; // Identity folds impose no constraint
 
-        if (sz_rune_is_case_invariant_(rune) != sz_false_k) {
+        if (sz_rune_is_uncased_(rune) != sz_false_k) {
             std::fprintf(stderr, "Fold preimage U+%04X is wrongly classified as case-invariant\n", rune);
             assert(false && "Fold preimages must not be case-invariant");
         }
         ++preimages_checked;
 
         for (sz_size_t i = 0; i < folded_count; ++i) {
-            if (sz_rune_is_case_invariant_(folded_runes[i]) != sz_false_k) {
+            if (sz_rune_is_uncased_(folded_runes[i]) != sz_false_k) {
                 std::fprintf(stderr,
                              "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
                              folded_runes[i], rune);
@@ -1436,10 +1514,10 @@ void test_utf8_case_invariant_closure() {
  *  from its own. Each lands within the last `needle_window` bytes (windows 4..16) of haystacks
  *  whose filler also sweeps the 64-byte SIMD chunk boundary.
  */
-void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base,
-                                       sz_utf8_case_insensitive_find_t find_simd) {
+void test_utf8_uncased_find_expanding_tails(sz_utf8_uncased_find_t find_base,
+                                       sz_utf8_uncased_find_t find_simd) {
 
-    std::printf("  - testing case-insensitive find with expanding preimages at haystack tails...\n");
+    std::printf("  - testing uncased find with expanding preimages at haystack tails...\n");
 
     struct expanding_preimage_t {
         sz_u8_t preimage_utf8[4];
@@ -1502,7 +1580,7 @@ void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base
                     if (variant == 1) haystack[haystack_length++] = 'x';
                     for (std::size_t i = 0; i < tail_padding; ++i) haystack[haystack_length++] = 'y';
 
-                    check_utf8_ci_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
+                    check_utf8_uncased_find_pair(find_base, find_simd, haystack, haystack_length, needle, needle_length,
                                             "expanding tail find");
                     ++cases_tested;
                 }
@@ -1510,6 +1588,119 @@ void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base
         }
     }
     std::printf("    passed %zu cases across %zu expanding preimages\n", cases_tested, expanding_preimages.size());
+}
+
+/**
+ *  @brief Differential + ground-truth test for matches whose folded runes cross the boundary between
+ *         two adjacent multi-rune-folding codepoints.
+ *
+ *  The byte-history serial helpers are most fragile when a needle's folded runes begin mid-way through
+ *  one expanding codepoint and end mid-way through the next - e.g. needle "sss" sits inside haystack
+ *  "ßß" -> "ssss", beginning in the first 'ß' and finishing in the second. The preimage / expanding-tail
+ *  fuzzers never reproduce this: they pad expansions with ASCII filler, so a folded run never straddles
+ *  two expansions. Here we place two multi-rune-folding codepoints back to back, enumerate every proper
+ *  sub-run of the combined folded stream that genuinely crosses the join, and use that sub-run (as
+ *  folded bytes) as the needle - swept across the 64-byte SIMD chunk boundary - validated against the
+ *  fold-subset reference.
+ */
+void test_utf8_uncased_find_crossing_expansions(sz_utf8_uncased_find_t find_base, sz_utf8_uncased_find_t find_simd) {
+
+    std::printf("  - testing uncased find across adjacent expansion boundaries...\n");
+
+    // Codepoints whose fold emits more than one rune, so a needle can slice through the middle of their
+    // expansion. The set is small (ligatures, sharp-s, decomposed accents), so a fixed cap avoids any
+    // dynamic allocation on this cold path.
+    enum { expanders_capacity = 1024 };
+    sz_rune_t expanders[expanders_capacity];
+    std::size_t expanders_count = 0;
+    for (sz_rune_t codepoint = 1; codepoint <= 0x10FFFF; ++codepoint) {
+        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) continue; // Surrogates are not valid UTF-8
+        sz_rune_t folded[3];
+        if (sz_unicode_fold_codepoint_(codepoint, folded) < 2) continue;
+        assert(expanders_count < expanders_capacity && "expander buffer overflow");
+        expanders[expanders_count++] = codepoint;
+    }
+
+    std::size_t const filler_lengths[] = {0, 1, 30, 60, 61, 62, 63, 64, 65};
+    std::size_t const filler_lengths_count = sizeof(filler_lengths) / sizeof(filler_lengths[0]);
+    std::size_t cases_tested = 0;
+
+    char haystack[128];
+    char needle[32];
+
+    for (std::size_t first_index = 0; first_index < expanders_count; ++first_index) {
+        for (std::size_t second_index = 0; second_index < expanders_count; ++second_index) {
+            // Fold the adjacent pair into a flat rune stream, tagging which source codepoint (0 or 1)
+            // produced each folded rune so we keep only the needles that cross the join.
+            sz_rune_t folded_runes[6];
+            int rune_owner[6];
+            std::size_t folded_total = 0;
+            sz_u8_t pair_utf8[8];
+            std::size_t pair_length = 0;
+            for (int which = 0; which < 2; ++which) {
+                sz_rune_t const codepoint = expanders[which == 0 ? first_index : second_index];
+                pair_length += (std::size_t)sz_rune_export(codepoint, pair_utf8 + pair_length);
+                sz_rune_t emitted[3];
+                sz_size_t emitted_count = sz_unicode_fold_codepoint_(codepoint, emitted);
+                for (sz_size_t index = 0; index < emitted_count; ++index) {
+                    folded_runes[folded_total] = emitted[index];
+                    rune_owner[folded_total] = which;
+                    ++folded_total;
+                }
+            }
+
+            // Every proper sub-run [start, start + length) that begins in the first codepoint and ends
+            // in the second is a needle whose folded runes straddle the expansion boundary.
+            for (std::size_t start = 0; start < folded_total; ++start) {
+                for (std::size_t length = 1; start + length <= folded_total; ++length) {
+                    std::size_t const last = start + length - 1;
+                    if (rune_owner[start] != 0 || rune_owner[last] != 1) continue;
+
+                    std::size_t needle_length = 0;
+                    for (std::size_t index = 0; index < length; ++index)
+                        needle_length +=
+                            (std::size_t)sz_rune_export(folded_runes[start + index], (sz_u8_t *)needle + needle_length);
+
+                    for (std::size_t filler_index = 0; filler_index < filler_lengths_count; ++filler_index) {
+                        std::size_t haystack_length = 0;
+                        while (haystack_length < filler_lengths[filler_index]) haystack[haystack_length++] = 'o';
+                        std::memcpy(haystack + haystack_length, pair_utf8, pair_length);
+                        haystack_length += pair_length;
+                        for (int tail = 0; tail < 4; ++tail) haystack[haystack_length++] = 'y';
+
+                        check_utf8_uncased_find_pair(find_base, find_simd, haystack, haystack_length, needle,
+                                                     needle_length, "crossing expansion find");
+                        ++cases_tested;
+                    }
+                }
+            }
+        }
+    }
+    std::printf("    passed %zu cases across %zu adjacent expander pairs\n", cases_tested,
+                expanders_count * expanders_count);
+}
+
+/**
+ *  @brief The full differential + ground-truth battery for one backend's uncased find.
+ *
+ *  Runs the fuzzers and the structured adversarial enumerators (fold preimages, expanding tails, and
+ *  cross-expansion needles) of `find_simd` against the serial baseline and the independent reference.
+ *  Called once per backend so coverage stays uniform and a new backend cannot silently skip a test.
+ */
+void test_utf8_uncased_find_battery(sz_utf8_uncased_find_t find_simd) {
+    sz_utf8_uncased_find_t const find_serial = sz_utf8_uncased_find_serial;
+    std::size_t const queries = scale_iterations(100000);
+    test_utf8_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_find_nth_serial,
+                                sz_utf8_count_serial, 16, 0, queries);
+    test_utf8_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_find_nth_serial,
+                                sz_utf8_count_serial, 32, 0, queries);
+    test_utf8_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_find_nth_serial,
+                                sz_utf8_count_serial, 100, 100, queries);
+    test_utf8_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_find_nth_serial,
+                                sz_utf8_count_serial, 200, 100, queries);
+    test_utf8_uncased_find_preimages(find_serial, find_simd);
+    test_utf8_uncased_find_expanding_tails(find_serial, find_simd);
+    test_utf8_uncased_find_crossing_expansions(find_serial, find_simd);
 }
 
 /**
@@ -1524,8 +1715,8 @@ void test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_t find_base
  *  all 65,536 byte pairs, and random garbage buffers of 1..70 bytes through fold, find (with a
  *  short valid needle), and the case-invariant check.
  */
-void test_utf8_case_invalid_input_safety(sz_utf8_case_fold_t fold, sz_utf8_case_insensitive_find_t find,
-                                         sz_utf8_case_agnostic_t invariant,
+void test_utf8_uncased_invalid_input_safety(sz_utf8_uncased_fold_t fold, sz_utf8_uncased_find_t find,
+                                         sz_utf8_uncased_violation_t invariant,
                                          std::size_t random_inputs = scale_iterations(10000)) {
 
     std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
@@ -1545,7 +1736,7 @@ void test_utf8_case_invalid_input_safety(sz_utf8_case_fold_t fold, sz_utf8_case_
         if (folded_length > output_bound) {
             std::fprintf(stderr, "Fold of invalid input returned %zu bytes for %zu input bytes (bound is 3x + 4)\n",
                          (std::size_t)folded_length, input_length);
-            print_utf8_case_test_bytes("input", input, input_length);
+            print_utf8_uncased_test_bytes("input", input, input_length);
             assert(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
         }
         // Every destination byte outside that window, in front of the buffer or behind it,
@@ -1553,19 +1744,19 @@ void test_utf8_case_invalid_input_safety(sz_utf8_case_fold_t fold, sz_utf8_case_
         for (std::size_t i = 0; i < guard_length; ++i) {
             if (destination[i] == canary) continue;
             std::fprintf(stderr, "Fold of invalid input smashed the front canary at byte %zu\n", i);
-            print_utf8_case_test_bytes("input", input, input_length);
+            print_utf8_uncased_test_bytes("input", input, input_length);
             assert(false && "Fold must not write in front of the destination buffer");
         }
         for (std::size_t i = guard_length + output_bound; i < destination.size(); ++i) {
             if (destination[i] == canary) continue;
             std::fprintf(stderr, "Fold of invalid input smashed the back canary at byte %zu for %zu input bytes\n", //
                          i - guard_length, input_length);
-            print_utf8_case_test_bytes("input", input, input_length);
+            print_utf8_uncased_test_bytes("input", input, input_length);
             assert(false && "Fold must not write beyond 3x the input length plus one mis-decoded rune");
         }
         // The classifier and the finder return arbitrary verdicts on garbage - they just must survive
         (void)invariant(input, input_length);
-        sz_utf8_case_insensitive_needle_metadata_t metadata = {};
+        sz_utf8_uncased_needle_metadata_t metadata = {};
         sz_size_t matched_length = 0;
         (void)find(input, input_length, needle, 2, &metadata, &matched_length);
     };
@@ -1733,10 +1924,10 @@ void test_equivalence() {
 
     // Test UTF-8 functions
     // Backend-independent: the fold table and the case-invariant classifier must stay closed
-    test_utf8_case_invariant_closure();
+    test_utf8_uncased_invariant_closure();
     // The serial backend faces the same invalid-input contract as the SIMD ones
-    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_serial, sz_utf8_case_insensitive_find_serial,
-                                        sz_utf8_case_invariant_serial);
+    test_utf8_uncased_invalid_input_safety(sz_utf8_uncased_fold_serial, sz_utf8_uncased_find_serial,
+                                        sz_utf8_uncased_violation_serial);
 
     test_utf8_norm_all();
     test_utf8_norm_bindings();
@@ -1749,21 +1940,12 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,              //
         sz_utf8_find_whitespaces_haswell);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_haswell);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_haswell);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_haswell);
 
-    std::size_t haswell_fuzz_queries = scale_iterations(100000);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, haswell_fuzz_queries);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, haswell_fuzz_queries);
-
-    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell);
-    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_haswell);
-    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_haswell, sz_utf8_case_insensitive_find_haswell,
-                                        sz_utf8_case_invariant_haswell);
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_haswell);
+    test_utf8_uncased_invalid_input_safety(sz_utf8_uncased_fold_haswell, sz_utf8_uncased_find_haswell,
+                                        sz_utf8_uncased_violation_haswell);
 #endif
 #if SZ_USE_ICELAKE
     test_utf8_equivalence(                           //
@@ -1773,32 +1955,12 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,              //
         sz_utf8_find_whitespaces_icelake);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_icelake);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_icelake);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_icelake);
 
-    // Fuzz testing with different haystack sizes and sampling strategies:
-    // - (16, 0, N): Exhaustive on tiny haystacks (~136 needles each)
-    // - (32, 0, N): Exhaustive on small haystacks (~528 needles each)
-    // - (100, 100, N): Sampled on medium haystacks (100 random needles)
-    // - (200, 100, N): Sampled on larger haystacks (100 random needles)
-    std::size_t fuzz_queries = scale_iterations(100000);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, fuzz_queries);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, fuzz_queries);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, fuzz_queries);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, fuzz_queries);
-
-    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake);
-    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_icelake);
-    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_icelake, sz_utf8_case_insensitive_find_icelake,
-                                        sz_utf8_case_invariant_icelake);
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_icelake);
+    test_utf8_uncased_invalid_input_safety(sz_utf8_uncased_fold_icelake, sz_utf8_uncased_find_icelake,
+                                        sz_utf8_uncased_violation_icelake);
 #endif
 #if SZ_USE_NEON
     test_utf8_equivalence(                        //
@@ -1808,21 +1970,12 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,           //
         sz_utf8_find_whitespaces_neon);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_neon);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_neon);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_neon);
 
-    std::size_t neon_fuzz_queries = scale_iterations(100000);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, neon_fuzz_queries);
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, neon_fuzz_queries);
-
-    test_utf8_ci_find_preimages(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon);
-    test_utf8_ci_find_expanding_tails(sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_neon);
-    test_utf8_case_invalid_input_safety(sz_utf8_case_fold_neon, sz_utf8_case_insensitive_find_neon,
-                                        sz_utf8_case_invariant_neon);
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_neon);
+    test_utf8_uncased_invalid_input_safety(sz_utf8_uncased_fold_neon, sz_utf8_uncased_find_neon,
+                                        sz_utf8_uncased_violation_neon);
 #endif
 #if SZ_USE_SVE2
     test_utf8_equivalence(                        //
@@ -1840,21 +1993,10 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,           //
         sz_utf8_find_whitespaces_v128);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_v128);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_v128);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_v128);
 
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_v128, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_v128);
 #endif
 #if SZ_USE_V128RELAXED
     test_utf8_equivalence(                               //
@@ -1872,21 +2014,10 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,          //
         sz_utf8_find_whitespaces_rvv);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_rvv);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_rvv);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_rvv);
 
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_rvv, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_rvv);
 #endif
 #if SZ_USE_LASX
     test_utf8_equivalence(                        //
@@ -1896,21 +2027,10 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,           //
         sz_utf8_find_whitespaces_lasx);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_lasx);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_lasx);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_lasx);
 
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_lasx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_lasx);
 #endif
 #if SZ_USE_POWERVSX
     test_utf8_equivalence(                            //
@@ -1920,21 +2040,10 @@ void test_equivalence() {
         sz_utf8_find_whitespaces_serial,               //
         sz_utf8_find_whitespaces_powervsx);
 
-    test_utf8_case_fold_equivalence(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
-    test_utf8_case_fold_fuzz(sz_utf8_case_fold_serial, sz_utf8_case_fold_powervsx);
+    test_utf8_uncased_fold_equivalence(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_powervsx);
+    test_utf8_uncased_fold_fuzz(sz_utf8_uncased_fold_serial, sz_utf8_uncased_fold_powervsx);
 
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 16, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 32, 0, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 100, 100, scale_iterations(100000));
-    test_utf8_ci_find_fuzz( //
-        sz_utf8_case_insensitive_find_serial, sz_utf8_case_insensitive_find_powervsx, sz_utf8_case_fold_serial,
-        sz_utf8_find_nth_serial, sz_utf8_count_serial, 200, 100, scale_iterations(100000));
+    test_utf8_uncased_find_battery(sz_utf8_uncased_find_powervsx);
 #endif
 };
 
@@ -3536,45 +3645,45 @@ void test_utf8() {
 
     // Test Unicode case folding
     {
-        auto case_fold = [](sz::string s) -> sz::string {
-            assert(s.try_utf8_case_fold());
+        auto uncased_fold = [](sz::string s) -> sz::string {
+            assert(s.try_utf8_uncased_fold());
             return s;
         };
 
         // ASCII uppercase to lowercase
-        assert(case_fold("HELLO WORLD") == "hello world");
-        assert(case_fold("ABC") == "abc");
-        assert(case_fold("abc") == "abc"); // already lowercase
-        assert(case_fold("123") == "123"); // no change for digits
-        assert(case_fold("") == "");       // empty string
+        assert(uncased_fold("HELLO WORLD") == "hello world");
+        assert(uncased_fold("ABC") == "abc");
+        assert(uncased_fold("abc") == "abc"); // already lowercase
+        assert(uncased_fold("123") == "123"); // no change for digits
+        assert(uncased_fold("") == "");       // empty string
 
         // German Eszett - one-to-many expansion
-        assert(case_fold("\xC3\x9F") == "ss");    // U+00DF -> ss
-        assert(case_fold("STRAẞE") == "strasse"); // Capital U+1E9E -> ss
+        assert(uncased_fold("\xC3\x9F") == "ss");    // U+00DF -> ss
+        assert(uncased_fold("STRAẞE") == "strasse"); // Capital U+1E9E -> ss
 
         // Cyrillic uppercase to lowercase
-        assert(case_fold("ПРИВЕТ") == "привет");
+        assert(uncased_fold("ПРИВЕТ") == "привет");
 
         // Greek uppercase to lowercase
-        assert(case_fold("ΑΒΓΔ") == "αβγδ");
+        assert(uncased_fold("ΑΒΓΔ") == "αβγδ");
 
         // Latin Extended characters
-        assert(case_fold("ÀÁÂ") == "àáâ");
+        assert(uncased_fold("ÀÁÂ") == "àáâ");
 
         // Armenian
-        assert(case_fold("Ա") == "ա"); // U+0531 -> U+0561
+        assert(uncased_fold("Ա") == "ա"); // U+0531 -> U+0561
 
         // Mixed case preservation for non-alphabetic
-        assert(case_fold("Hello 123 World!") == "hello 123 world!");
+        assert(uncased_fold("Hello 123 World!") == "hello 123 world!");
 
         // Unicode characters without case folding should pass through unchanged
-        assert(case_fold("日本語") == "日本語"); // Japanese (no case)
-        assert(case_fold("中文") == "中文");     // Chinese (no case)
+        assert(uncased_fold("日本語") == "日本語"); // Japanese (no case)
+        assert(uncased_fold("中文") == "中文");     // Chinese (no case)
     }
 }
 
 /**
- * @brief Test ligature/expansion matching semantics for UTF-8 case-insensitive search.
+ * @brief Test ligature/expansion matching semantics for UTF-8 uncased search.
  *
  * SEMANTIC: fold(needle) should be a substring of fold(haystack).
  * Offsets are reported in the ORIGINAL (pre-folded) haystack.
@@ -3585,516 +3694,516 @@ void test_utf8_ligature_semantics() {
     // Ligature in haystack, ASCII needle
 
     // "fi" in "ﬃ": fold("ﬃ")="ffi", "fi" is suffix of "ffi" → MATCH
-    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("fi"), m.offset == 0);
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_uncased_find("fi"), m.offset == 0);
 
     // "ff" in "ﬃ": fold("ﬃ")="ffi", "ff" is prefix of "ffi" → MATCH
-    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("ff"), m.offset == 0);
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_uncased_find("ff"), m.offset == 0);
 
     // "ffi" in "ﬃ": exact match → MATCH
-    let_assert(auto m = str("\xEF\xAC\x83").utf8_case_insensitive_find("ffi"), m.offset == 0);
+    let_assert(auto m = str("\xEF\xAC\x83").utf8_uncased_find("ffi"), m.offset == 0);
 
     // "if" in "ﬃf": fold("ﬃf")="ffif", "if" at folded position 2 → MATCH
-    let_assert(auto m = str("\xEF\xAC\x83" "f").utf8_case_insensitive_find("if"), m.offset != str::npos);
+    let_assert(auto m = str("\xEF\xAC\x83" "f").utf8_uncased_find("if"), m.offset != str::npos);
 
     // "lf" in "ﬂﬃ": fold("ﬂﬃ")="flffi", "lf" at folded position 1 → MATCH
-    let_assert(auto m = str("\xEF\xAC\x82\xEF\xAC\x83").utf8_case_insensitive_find("lf"), m.offset != str::npos);
+    let_assert(auto m = str("\xEF\xAC\x82\xEF\xAC\x83").utf8_uncased_find("lf"), m.offset != str::npos);
 
     // "xfi" in "xﬃ": fold("xﬃ")="xffi", "xfi" is NOT a substring → NO MATCH
-    let_assert(auto m = str("x\xEF\xAC\x83").utf8_case_insensitive_find("xfi"), m.offset == str::npos);
+    let_assert(auto m = str("x\xEF\xAC\x83").utf8_uncased_find("xfi"), m.offset == str::npos);
 
     // Ligature in needle, ASCII haystack
 
     // "ﬂ" in "ffll": fold("ﬂ")="fl", "fl" at position 1 → MATCH
-    let_assert(auto m = str("ffll").utf8_case_insensitive_find("\xEF\xAC\x82"), m.offset == 1);
+    let_assert(auto m = str("ffll").utf8_uncased_find("\xEF\xAC\x82"), m.offset == 1);
 
     // "ﬁ" in "fil": fold("ﬁ")="fi", "fi" at position 0 → MATCH
-    let_assert(auto m = str("fil").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset == 0);
+    let_assert(auto m = str("fil").utf8_uncased_find("\xEF\xAC\x81"), m.offset == 0);
 
     // "ﬁ" in "ﬀi": fold("ﬁ")="fi", fold("ﬀi")="ffi", "fi" at folded position 1 → MATCH
-    let_assert(auto m = str("\xEF\xAC\x80i").utf8_case_insensitive_find("\xEF\xAC\x81"), m.offset != str::npos);
+    let_assert(auto m = str("\xEF\xAC\x80i").utf8_uncased_find("\xEF\xAC\x81"), m.offset != str::npos);
 
     // Eszett (ß) cases
 
     // "ss" in "ß": fold("ß")="ss" → exact MATCH
-    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("ss"), m.offset == 0);
+    let_assert(auto m = str("\xC3\x9F").utf8_uncased_find("ss"), m.offset == 0);
 
     // "s" in "ß": fold("ß")="ss", "s" is substring → MATCH
-    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("s"), m.offset == 0);
+    let_assert(auto m = str("\xC3\x9F").utf8_uncased_find("s"), m.offset == 0);
 
     // "ß" in "ss": fold("ß")="ss", exact match → MATCH
-    let_assert(auto m = str("ss").utf8_case_insensitive_find("\xC3\x9F"), m.offset == 0);
+    let_assert(auto m = str("ss").utf8_uncased_find("\xC3\x9F"), m.offset == 0);
 }
 
-void test_utf8_case() {
+void test_utf8_uncased() {
 
     using str = sz::string_view;
 
     // Equal strings (ASCII)
-    assert(str("hello").utf8_case_insensitive_order("HELLO") == sz_equal_k);
-    assert(str("abc").utf8_case_insensitive_order("ABC") == sz_equal_k);
-    assert(str("HeLLo WoRLd").utf8_case_insensitive_order("hello world") == sz_equal_k);
+    assert(str("hello").utf8_uncased_order("HELLO") == sz_equal_k);
+    assert(str("abc").utf8_uncased_order("ABC") == sz_equal_k);
+    assert(str("HeLLo WoRLd").utf8_uncased_order("hello world") == sz_equal_k);
 
     // ASCII Extensions
-    let_assert(auto m = str("prefixhello").utf8_case_insensitive_find("HELLO"), m.offset == 6 && m.length == 5);
-    let_assert(auto m = str("hello_suffix").utf8_case_insensitive_find("HELLO"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("mid_hello_mid").utf8_case_insensitive_find("HELLO"), m.offset == 4 && m.length == 5);
+    let_assert(auto m = str("prefixhello").utf8_uncased_find("HELLO"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("hello_suffix").utf8_uncased_find("HELLO"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("mid_hello_mid").utf8_uncased_find("HELLO"), m.offset == 4 && m.length == 5);
 
     // Less than
-    assert(str("abc").utf8_case_insensitive_order("abd") == sz_less_k);
-    assert(str("ab").utf8_case_insensitive_order("abc") == sz_less_k);
-    assert(str("ABC").utf8_case_insensitive_order("abd") == sz_less_k);
+    assert(str("abc").utf8_uncased_order("abd") == sz_less_k);
+    assert(str("ab").utf8_uncased_order("abc") == sz_less_k);
+    assert(str("ABC").utf8_uncased_order("abd") == sz_less_k);
 
     // Greater than
-    assert(str("abd").utf8_case_insensitive_order("abc") == sz_greater_k);
-    assert(str("abcd").utf8_case_insensitive_order("abc") == sz_greater_k);
-    assert(str("ABD").utf8_case_insensitive_order("abc") == sz_greater_k);
+    assert(str("abd").utf8_uncased_order("abc") == sz_greater_k);
+    assert(str("abcd").utf8_uncased_order("abc") == sz_greater_k);
+    assert(str("ABD").utf8_uncased_order("abc") == sz_greater_k);
 
     // Latin-1 Supplement & Latin Extended-A
     // German Umlauts
-    assert(str("schöner").utf8_case_insensitive_order("SCHÖNER") == sz_equal_k);
-    let_assert(auto m = str("Das ist ein schöner Tag").utf8_case_insensitive_find("SCHÖNER"),
+    assert(str("schöner").utf8_uncased_order("SCHÖNER") == sz_equal_k);
+    let_assert(auto m = str("Das ist ein schöner Tag").utf8_uncased_find("SCHÖNER"),
                m.offset == 12 && m.length == 8); // 'ö' (U+00F6, C3 B6) is 2 bytes
 
     // French Accents
-    assert(str("café").utf8_case_insensitive_order("CAFÉ") == sz_equal_k);
-    assert(str("naïve").utf8_case_insensitive_order("NAÏVE") == sz_equal_k);
-    assert(str("À la carte").utf8_case_insensitive_order("à la CARTE") == sz_equal_k);
+    assert(str("café").utf8_uncased_order("CAFÉ") == sz_equal_k);
+    assert(str("naïve").utf8_uncased_order("NAÏVE") == sz_equal_k);
+    assert(str("À la carte").utf8_uncased_order("à la CARTE") == sz_equal_k);
 
     // Spanish/Portuguese
-    assert(str("niño").utf8_case_insensitive_order("NIÑO") == sz_equal_k);
+    assert(str("niño").utf8_uncased_order("NIÑO") == sz_equal_k);
 
     // Polish / Central European (Latin Extended-A)
     // "ĄĆĘŁŃÓŚŹŻ" -> "ąćęłńóśźż"
     // "Zaółć gęślą jaźń" (classic Polish pangram fragment)
-    assert(str("Zaółć gęślą jaźń").utf8_case_insensitive_order("ZAÓŁĆ GĘŚLĄ JAŹŃ") == sz_equal_k);
+    assert(str("Zaółć gęślą jaźń").utf8_uncased_order("ZAÓŁĆ GĘŚLĄ JAŹŃ") == sz_equal_k);
 
     // Czech characters: ř (U+0159, C5 99), ž (U+017E, C5 BE), č (U+010D, C4 8D), ě (U+011B, C4 9B)
-    assert(str("řžčě").utf8_case_insensitive_order("ŘŽČĚ") == sz_equal_k);
-    let_assert(auto m = str("Příklad").utf8_case_insensitive_find("PŘÍKLAD"), m.offset == 0 && m.length == 9);
-    let_assert(auto m = str("žena").utf8_case_insensitive_find("ŽENA"), m.offset == 0 && m.length == 5);
+    assert(str("řžčě").utf8_uncased_order("ŘŽČĚ") == sz_equal_k);
+    let_assert(auto m = str("Příklad").utf8_uncased_find("PŘÍKLAD"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("žena").utf8_uncased_find("ŽENA"), m.offset == 0 && m.length == 5);
 
     // Polish ł (U+0142, C5 82) in city name
-    assert(str("Łódź").utf8_case_insensitive_order("ŁÓDŹ") == sz_equal_k);
-    let_assert(auto m = str("miasto Łódź").utf8_case_insensitive_find("łódź"), m.offset == 7 && m.length == 7);
+    assert(str("Łódź").utf8_uncased_order("ŁÓDŹ") == sz_equal_k);
+    let_assert(auto m = str("miasto Łódź").utf8_uncased_find("łódź"), m.offset == 7 && m.length == 7);
 
     // Hungarian: ő (U+0151, C5 91), ű (U+0171, C5 B1)
-    assert(str("őű").utf8_case_insensitive_order("ŐŰ") == sz_equal_k);
-    let_assert(auto m = str("Erdő").utf8_case_insensitive_find("ERDŐ"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("Győr").utf8_case_insensitive_find("GYŐR"), m.offset == 0 && m.length == 5);
+    assert(str("őű").utf8_uncased_order("ŐŰ") == sz_equal_k);
+    let_assert(auto m = str("Erdő").utf8_uncased_find("ERDŐ"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("Győr").utf8_uncased_find("GYŐR"), m.offset == 0 && m.length == 5);
 
     // Central European at SIMD boundary (64 bytes)
     {
         std::string prefix(62, 'a');
-        let_assert(auto m = str(prefix + "ž").utf8_case_insensitive_find("Ž"), m.offset == 62 && m.length == 2);
-        let_assert(auto m = str(prefix + "řž").utf8_case_insensitive_find("ŘŽ"), m.offset == 62 && m.length == 4);
+        let_assert(auto m = str(prefix + "ž").utf8_uncased_find("Ž"), m.offset == 62 && m.length == 2);
+        let_assert(auto m = str(prefix + "řž").utf8_uncased_find("ŘŽ"), m.offset == 62 && m.length == 4);
     }
 
     // German (Eszett 'ß')
     // 'ß' (U+00DF, C3 9F) -> "ss"
     // "straße" -> "strasse"
     // "STRASSE" -> "strasse"
-    assert(str("straße").utf8_case_insensitive_order("STRASSE") == sz_equal_k);
-    assert(str("STRASSE").utf8_case_insensitive_order("straße") == sz_equal_k);
+    assert(str("straße").utf8_uncased_order("STRASSE") == sz_equal_k);
+    assert(str("STRASSE").utf8_uncased_order("straße") == sz_equal_k);
 
     // Uppercase 'ẞ' (U+1E9E, E1 BA 9E) -> "ss" or "ß" depending on fold
     // StringZilla generally folds to lowercase first. 'ẞ' -> 'ss'.
     // Haystack uses 'ß' (2 bytes), Needle "SS".
-    let_assert(auto m = str("straße").utf8_case_insensitive_find("SS"),
+    let_assert(auto m = str("straße").utf8_uncased_find("SS"),
                m.offset == 4 && m.length == 2); // Matches 'ß' (2 bytes)
 
     // Eszett Context Extensions
-    let_assert(auto m = str("Eine straße").utf8_case_insensitive_find("SS"),
+    let_assert(auto m = str("Eine straße").utf8_uncased_find("SS"),
                m.offset == 9 && m.length == 2); // "Eine " is 5 chars -> 5 bytes + "stra" (4) = 9
-    let_assert(auto m = str("straßebahn").utf8_case_insensitive_find("SS"), m.offset == 4 && m.length == 2);
-    let_assert(auto m = str("Eine straßebahn").utf8_case_insensitive_find("SS"), m.offset == 9 && m.length == 2);
+    let_assert(auto m = str("straßebahn").utf8_uncased_find("SS"), m.offset == 4 && m.length == 2);
+    let_assert(auto m = str("Eine straßebahn").utf8_uncased_find("SS"), m.offset == 9 && m.length == 2);
 
     // Same case-folding, but different relation
-    let_assert(auto m = str("HelloäeßHelloL").utf8_case_insensitive_find("helloäesshellol"),
+    let_assert(auto m = str("HelloäeßHelloL").utf8_uncased_find("helloäesshellol"),
                m.offset == 0 && m.length == 16);
-    let_assert(auto m = str("helloäesshellol").utf8_case_insensitive_find("HelloäeßHelloL"),
+    let_assert(auto m = str("helloäesshellol").utf8_uncased_find("HelloäeßHelloL"),
                m.offset == 0 && m.length == 16);
 
     // Same case-folding, but different relation and needle length due to uppercase tripple-byte 'ẞ' (U+1E9E, E1 BA 9E)
-    let_assert(auto m = str("HelloäeẞHelloL").utf8_case_insensitive_find("helloäesshellol"),
+    let_assert(auto m = str("HelloäeẞHelloL").utf8_uncased_find("helloäesshellol"),
                m.offset == 0 && m.length == 17);
-    let_assert(auto m = str("helloäesshellol").utf8_case_insensitive_find("HelloäeẞHelloL"),
+    let_assert(auto m = str("helloäesshellol").utf8_uncased_find("HelloäeẞHelloL"),
                m.offset == 0 && m.length == 16);
 
     // Haystack "STRASSE", Needle "straße"
-    let_assert(auto m = str("STRASSE").utf8_case_insensitive_find("straße"),
+    let_assert(auto m = str("STRASSE").utf8_uncased_find("straße"),
                m.offset == 0 && m.length == 7); // Matches "STRASSE" (7 bytes)
 
     // "Maße" -> "MASSE"
-    let_assert(auto m = str("Maße").utf8_case_insensitive_find("MASSE"),
+    let_assert(auto m = str("Maße").utf8_uncased_find("MASSE"),
                m.offset == 0 && m.length == 5); // Matches "Maße" (5 bytes)
 
     // Haystack: "Fuss" (4 bytes) "u", "s", "s"
     // Needle: "Fuß" (4 bytes) "u", "ß"
     // They are equal in order, and searching "Fuß" in "Fuss" works.
-    let_assert(auto m = str("Fuss").utf8_case_insensitive_find("Fuß"),
+    let_assert(auto m = str("Fuss").utf8_uncased_find("Fuß"),
                m.offset == 0 && m.length == 4); // Matches "Fuss"
 
     // Mid-expansion matching: needle starts with 's' (uses serial fallback)
     // Haystack: "ßfox" (5 bytes) → folds to "ssfox"
     // Needle "sfox" matches at position 1 in folded, but we report offset=0 (start of ß)
     // Length is 5 because we consume the entire ß character (can't point to half of it)
-    let_assert(auto m = str("\xC3\x9F" "fox").utf8_case_insensitive_find("sfox"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("\xC3\x9F" "fox").utf8_uncased_find("sfox"), m.offset == 0 && m.length == 5);
 
     // Needle ends with 's' - suffix case (uses serial fallback)
     // Haystack: "foxß" → folds to "foxss"
     // Needle "foxs" matches through first 's' of expansion
-    let_assert(auto m = str("fox\xC3\x9F").utf8_case_insensitive_find("foxs"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("fox\xC3\x9F").utf8_uncased_find("foxs"), m.offset == 0 && m.length == 5);
 
     // Cross-boundary case: "ßS" folds to "sss" (uses serial fallback)
     // Haystack: "ßStra" (6 bytes) → folds to "ssstra"
     // Needle "sstra" starts with 's', would match at position 1 (mid-ß) without the rule
     // Length is 6 because we consume the entire haystack (ß expands, consuming whole character)
-    let_assert(auto m = str("\xC3\x9F" "Stra").utf8_case_insensitive_find("sstra"), m.offset == 0 && m.length == 6);
+    let_assert(auto m = str("\xC3\x9F" "Stra").utf8_uncased_find("sstra"), m.offset == 0 && m.length == 6);
 
     // Needle with 's' NOT at boundary - should use fast SIMD path
-    let_assert(auto m = str("te\xC3\x9F" "t").utf8_case_insensitive_find("tesst"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("ma\xC3\x9F" "e").utf8_case_insensitive_find("masse"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("te\xC3\x9F" "t").utf8_uncased_find("tesst"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ma\xC3\x9F" "e").utf8_uncased_find("masse"), m.offset == 0 && m.length == 5);
 
     // Needle with 'ss' at boundary - also uses serial (can't match across ß boundary)
-    let_assert(auto m = str("fo\xC3\x9F").utf8_case_insensitive_find("foss"), m.offset == 0 && m.length == 4);
-    let_assert(auto m = str("\xC3\x9F" "fo").utf8_case_insensitive_find("ssfo"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("fo\xC3\x9F").utf8_uncased_find("foss"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("\xC3\x9F" "fo").utf8_uncased_find("ssfo"), m.offset == 0 && m.length == 4);
 
     // Math Symbols
     // Multiplication × (U+00D7, C3 97) and Division ÷ (U+00F7, C3 B7)
     // Often confusable with 'x' and '+'/'=', but strictly they are distinct.
     // They should equal themselves but not each other.
-    assert(str("×").utf8_case_insensitive_order("×") == sz_equal_k); // × == ×
-    assert(str("÷").utf8_case_insensitive_order("÷") == sz_equal_k); // ÷ == ÷
-    assert(str("×").utf8_case_insensitive_order("÷") != sz_equal_k); // × ≠ ÷
-    assert(str("a×b").utf8_case_insensitive_order("A×B") == sz_equal_k);
+    assert(str("×").utf8_uncased_order("×") == sz_equal_k); // × == ×
+    assert(str("÷").utf8_uncased_order("÷") == sz_equal_k); // ÷ == ÷
+    assert(str("×").utf8_uncased_order("÷") != sz_equal_k); // × ≠ ÷
+    assert(str("a×b").utf8_uncased_order("A×B") == sz_equal_k);
 
     // Math Context Extensions
-    let_assert(auto m = str("2×3=6").utf8_case_insensitive_find("×"), m.offset == 1 && m.length == 2);
-    let_assert(auto m = str("6÷2=3").utf8_case_insensitive_find("÷"), m.offset == 1 && m.length == 2);
+    let_assert(auto m = str("2×3=6").utf8_uncased_find("×"), m.offset == 1 && m.length == 2);
+    let_assert(auto m = str("6÷2=3").utf8_uncased_find("÷"), m.offset == 1 && m.length == 2);
 
     // Empty strings
-    assert(str("").utf8_case_insensitive_order("") == sz_equal_k);
-    assert(str("a").utf8_case_insensitive_order("") == sz_greater_k);
-    assert(str("").utf8_case_insensitive_order("a") == sz_less_k);
+    assert(str("").utf8_uncased_order("") == sz_equal_k);
+    assert(str("a").utf8_uncased_order("") == sz_greater_k);
+    assert(str("").utf8_uncased_order("a") == sz_less_k);
 
     // Greek
     // Basic casing: "αβγδ" vs "ΑΒΓΔ"
-    assert(str("αβγδ").utf8_case_insensitive_order("ΑΒΓΔ") == sz_equal_k);
-    let_assert(auto m = str("αβγδ").utf8_case_insensitive_find("ΑΒΓΔ"),
+    assert(str("αβγδ").utf8_uncased_order("ΑΒΓΔ") == sz_equal_k);
+    let_assert(auto m = str("αβγδ").utf8_uncased_find("ΑΒΓΔ"),
                m.offset == 0 && m.length == 8); // 4 * 2 bytes = 8 bytes
 
     // Greek Context Extensions
     // "prefix " is 7 bytes.
-    let_assert(auto m = str("prefix αβγδ").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
+    let_assert(auto m = str("prefix αβγδ").utf8_uncased_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
     // " suffix" is 7 bytes. "αβγδ" is 8 bytes.
-    let_assert(auto m = str("αβγδ suffix").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("prefix αβγδ suffix").utf8_case_insensitive_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
+    let_assert(auto m = str("αβγδ suffix").utf8_uncased_find("ΑΒΓΔ"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("prefix αβγδ suffix").utf8_uncased_find("ΑΒΓΔ"), m.offset == 7 && m.length == 8);
 
     // Sigma: 'Σ' (U+03A3, CE A3) matches both 'σ' (U+03C3, CF 83, medial) and 'ς' (U+03C2, CF 82, final)
     // Haystack: "ΟΔΥΣΣΕΥΣ" (Odysseus uppercase)
     // Needle: "οδυσσευς" (lowercase with final sigma)
     // Lengths match byte-for-byte in this case.
-    let_assert(auto m = str("ΟΔΥΣΣΕΥΣ").utf8_case_insensitive_find("οδυσσευς"),
+    let_assert(auto m = str("ΟΔΥΣΣΕΥΣ").utf8_uncased_find("οδυσσευς"),
                m.offset == 0 && m.length == 16); // 8 chars * 2 bytes
 
     // Micro Sign 'µ' (U+00B5) vs Greek Mu 'μ' (U+03BC) vs 'Μ' (U+039C)
     // These should all fold to the same canonical representation.
-    let_assert(auto m = str("µ").utf8_case_insensitive_find("μ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("μ").utf8_case_insensitive_find("µ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("µ").utf8_case_insensitive_find("Μ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("Μ").utf8_case_insensitive_find("µ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("µ").utf8_uncased_find("μ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("μ").utf8_uncased_find("µ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("µ").utf8_uncased_find("Μ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("Μ").utf8_uncased_find("µ"), m.offset == 0 && m.length == 2);
     // Context: Head/Tail/Middle
-    let_assert(auto m = str("123µ456").utf8_case_insensitive_find("123μ456"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("LongPrefix Μ Suffix").utf8_case_insensitive_find("Prefix µ Suf"),
+    let_assert(auto m = str("123µ456").utf8_uncased_find("123μ456"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("LongPrefix Μ Suffix").utf8_uncased_find("Prefix µ Suf"),
                m.offset == 4 && m.length == 13);
 
     // Greek Lunate Epsilon 'ϵ' (U+03F5) -> 'ε' (U+03B5)
-    let_assert(auto m = str("ϵ").utf8_case_insensitive_find("ε"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("start ϵ end").utf8_case_insensitive_find("start ε end"), m.offset == 0 && m.length == 12);
-    let_assert(auto m = str("...ϵ...").utf8_case_insensitive_find(".ε."), m.offset == 2 && m.length == 4);
+    let_assert(auto m = str("ϵ").utf8_uncased_find("ε"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("start ϵ end").utf8_uncased_find("start ε end"), m.offset == 0 && m.length == 12);
+    let_assert(auto m = str("...ϵ...").utf8_uncased_find(".ε."), m.offset == 2 && m.length == 4);
     // Greek Kappa Symbol 'ϰ' (U+03F0) -> 'κ' (U+03BA)
-    let_assert(auto m = str("ϰ").utf8_case_insensitive_find("κ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("text ϰ").utf8_case_insensitive_find("text κ"), m.offset == 0 && m.length == 7); // 5 + 2
-    let_assert(auto m = str("ϰ text").utf8_case_insensitive_find("κ text"), m.offset == 0 && m.length == 7);
+    let_assert(auto m = str("ϰ").utf8_uncased_find("κ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("text ϰ").utf8_uncased_find("text κ"), m.offset == 0 && m.length == 7); // 5 + 2
+    let_assert(auto m = str("ϰ text").utf8_uncased_find("κ text"), m.offset == 0 && m.length == 7);
 
     // Greek Symbols & Anomalies
     // 'ϐ' (CF 90) -> 'β' (CE B2)
-    let_assert(auto m = str("ϐ").utf8_case_insensitive_find("β"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("alpha ϐ").utf8_case_insensitive_find("alpha β"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("ϐ beta").utf8_case_insensitive_find("β beta"), m.offset == 0 && m.length == 7);
+    let_assert(auto m = str("ϐ").utf8_uncased_find("β"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("alpha ϐ").utf8_uncased_find("alpha β"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("ϐ beta").utf8_uncased_find("β beta"), m.offset == 0 && m.length == 7);
     // 'ϑ' (CF 91) -> 'θ' (CE B8)
-    let_assert(auto m = str("ϑ").utf8_case_insensitive_find("θ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("1ϑ2").utf8_case_insensitive_find("1θ2"), m.offset == 0 && m.length == 4);
-    let_assert(auto m = str("prefix ϑ suffix").utf8_case_insensitive_find("fix θ suf"),
+    let_assert(auto m = str("ϑ").utf8_uncased_find("θ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("1ϑ2").utf8_uncased_find("1θ2"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("prefix ϑ suffix").utf8_uncased_find("fix θ suf"),
                m.offset == 3 && m.length == 10);
     // 'ϖ' (CF 96) -> 'π' (CF 80)
-    let_assert(auto m = str("ϖ").utf8_case_insensitive_find("π"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("AϖB").utf8_case_insensitive_find("AπB"), m.offset == 0 && m.length == 4);
-    let_assert(auto m = str("Long string with ϖ in it").utf8_case_insensitive_find("th π in"),
+    let_assert(auto m = str("ϖ").utf8_uncased_find("π"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("AϖB").utf8_uncased_find("AπB"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("Long string with ϖ in it").utf8_uncased_find("th π in"),
                m.offset == 14 && m.length == 8);
 
     // Greek Context Extensions (Symbols)
-    let_assert(auto m = str("alpha ϖ omega").utf8_case_insensitive_find("π"), m.offset == 6 && m.length == 2);
+    let_assert(auto m = str("alpha ϖ omega").utf8_uncased_find("π"), m.offset == 6 && m.length == 2);
 
     // Dialytika with Tonos 'ΐ' (CE 90) -> Identity check mostly
-    assert(str("ΐ").utf8_case_insensitive_order("ΐ") == sz_equal_k);
+    assert(str("ΐ").utf8_uncased_order("ΐ") == sz_equal_k);
 
     // Greek in Mixed Scripts (boundary checks)
-    let_assert(auto m = str("ABCαβγ").utf8_case_insensitive_find("abcΑΒΓ"),
+    let_assert(auto m = str("ABCαβγ").utf8_uncased_find("abcΑΒΓ"),
                m.offset == 0 && m.length == 9); // 3 + 3*2 bytes
 
     // Cyrillic
     // Basic: "привет" vs "ПРИВЕТ"
-    assert(str("привет").utf8_case_insensitive_order("ПРИВЕТ") == sz_equal_k);
-    let_assert(auto m = str("привет мир").utf8_case_insensitive_find("ПРИВЕТ"),
+    assert(str("привет").utf8_uncased_order("ПРИВЕТ") == sz_equal_k);
+    let_assert(auto m = str("привет мир").utf8_uncased_find("ПРИВЕТ"),
                m.offset == 0 && m.length == 12); // 6 chars * 2 bytes
 
     // Cyrillic Context Extensions
     // "Check " is 6 bytes.
-    let_assert(auto m = str("Check привет").utf8_case_insensitive_find("ПРИВЕТ"), m.offset == 6 && m.length == 12);
-    let_assert(auto m = str("привет check").utf8_case_insensitive_find("ПРИВЕТ"), m.offset == 0 && m.length == 12);
+    let_assert(auto m = str("Check привет").utf8_uncased_find("ПРИВЕТ"), m.offset == 6 && m.length == 12);
+    let_assert(auto m = str("привет check").utf8_uncased_find("ПРИВЕТ"), m.offset == 0 && m.length == 12);
 
     // Palochka 'Ӏ' (U+04C0, D3 80) -> 'ӏ' (U+04CF, D3 8F)
     // Used in Caucasian languages. Case agnostic.
-    let_assert(auto m = str("Ӏ").utf8_case_insensitive_find("ӏ"), m.offset == 0 && m.length == 2);
-    let_assert(auto m = str("ӏ").utf8_case_insensitive_find("Ӏ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("Ӏ").utf8_uncased_find("ӏ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("ӏ").utf8_uncased_find("Ӏ"), m.offset == 0 && m.length == 2);
 
     // Ukrainian Ґ (U+0490) -> ґ (U+0491)
-    let_assert(auto m = str("Ґ").utf8_case_insensitive_find("ґ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("Ґ").utf8_uncased_find("ґ"), m.offset == 0 && m.length == 2);
 
     // Mixed Cyrillic
-    let_assert(auto m = str("Москва is beautiful").utf8_case_insensitive_find("МОСКВА"),
+    let_assert(auto m = str("Москва is beautiful").utf8_uncased_find("МОСКВА"),
                m.offset == 0 && m.length == 12); // 6 chars * 2
 
     // Turkish
     // Dotted 'İ' (U+0130, C4 B0) -> 'i' (ASCII) + combining dot (U+0307, CC 87)
     // "İstanbul" (starts with İ) vs "i̇stanbul" (starts with i + dot)
     // StringZilla finds canonical equivalence. 'İ' (2 bytes) matches 'i̇' (3 bytes).
-    let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("i̇stanbul"), // "i" + dot
+    let_assert(auto m = str("İstanbul").utf8_uncased_find("i̇stanbul"), // "i" + dot
                m.offset == 0 && m.length == 9); // Haystack length is 2 (İ) + 7 (stanbul) = 9
     // Needle starts with the combining dot (mid-expansion of 'İ'), so the match still anchors to 'İ'.
-    let_assert(auto m = str("İstanbul").utf8_case_insensitive_find("\xCC\x87" "stanbul"),
+    let_assert(auto m = str("İstanbul").utf8_uncased_find("\xCC\x87" "stanbul"),
                m.offset == 0 && m.length == 9);
 
     // Turkish Context Extensions
     // "Welcome to " is 11 bytes.
-    let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("i̇stanbul"),
+    let_assert(auto m = str("Welcome to İstanbul").utf8_uncased_find("i̇stanbul"),
                m.offset == 11 && m.length == 9);
-    let_assert(auto m = str("Welcome to İstanbul").utf8_case_insensitive_find("\xCC\x87" "stanbul"),
+    let_assert(auto m = str("Welcome to İstanbul").utf8_uncased_find("\xCC\x87" "stanbul"),
                m.offset == 11 && m.length == 9);
     // "İstanbul city"
-    let_assert(auto m = str("İstanbul city").utf8_case_insensitive_find("i̇stanbul"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("İstanbul city").utf8_uncased_find("i̇stanbul"), m.offset == 0 && m.length == 9);
 
     // Undotted 'ı' (U+0131)
     // Typically 'I' (ASCII) folds to 'i' (ASCII).
     // 'ı' folds to... itself? Or 'I' if we are in Turkish mode?
     // Default fold often treats 'ı' as distinct from 'i'.
     // 'I' -> 'i'. 'ı' -> 'ı'. So 'I' != 'ı'.
-    let_assert(auto m = str("I").utf8_case_insensitive_find("ı"), m.offset == str::npos);
+    let_assert(auto m = str("I").utf8_uncased_find("ı"), m.offset == str::npos);
 
     // Turkish Ğ (U+011E) -> ğ (U+011F) and Ş (U+015E) -> ş (U+015F)
-    let_assert(auto m = str("ĞŞ").utf8_case_insensitive_find("ğş"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("ĞŞ").utf8_uncased_find("ğş"), m.offset == 0 && m.length == 4);
 
     // Armenian
     // Ligature: 'և' (U+0587, D6 87) -> 'ե' (U+0565, D5 A5) + 'ւ' (U+0582, D6 82)
     // Haystack: "և" (2 bytes). Needle: "եւ" (2 + 2 = 4 bytes).
     // Match should return haystack slice (2 bytes).
-    let_assert(auto m = str("և").utf8_case_insensitive_find("եւ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("և").utf8_uncased_find("եւ"), m.offset == 0 && m.length == 2);
 
     // Armenian Context Extensions
-    let_assert(auto m = str("abcև").utf8_case_insensitive_find("եւ"), m.offset == 3 && m.length == 2);
-    let_assert(auto m = str("ևabc").utf8_case_insensitive_find("եւ"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("abcև").utf8_uncased_find("եւ"), m.offset == 3 && m.length == 2);
+    let_assert(auto m = str("ևabc").utf8_uncased_find("եւ"), m.offset == 0 && m.length == 2);
     // Reverse: Haystack "եւ" (4 bytes). Needle "և" (2 bytes).
     // Match should return haystack slice (4 bytes).
-    let_assert(auto m = str("եւ").utf8_case_insensitive_find("և"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("եւ").utf8_uncased_find("և"), m.offset == 0 && m.length == 4);
 
     // Armenian Context Extensions Reverse
-    let_assert(auto m = str("abcեւ").utf8_case_insensitive_find("և"), m.offset == 3 && m.length == 4);
+    let_assert(auto m = str("abcեւ").utf8_uncased_find("և"), m.offset == 3 && m.length == 4);
 
     // Ligature: 'ﬓ' (U+FB13 Men-Now) -> 'մ' (U+0574) + 'ն' (U+0576)
     // Haystack 3 bytes (EF AC 93). Needle 4 bytes (D5 B4 D5 B6).
-    let_assert(auto m = str("ﬓ").utf8_case_insensitive_find("մն"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("abcﬓdef").utf8_case_insensitive_find("մն"), m.offset == 3 && m.length == 3);
-    let_assert(auto m = str("ﬓ start").utf8_case_insensitive_find("մն start"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("ﬓ").utf8_uncased_find("մն"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("abcﬓdef").utf8_uncased_find("մն"), m.offset == 3 && m.length == 3);
+    let_assert(auto m = str("ﬓ start").utf8_uncased_find("մն start"), m.offset == 0 && m.length == 9);
 
     // Ligature: 'ﬔ' (U+FB14 Men-Ech) -> 'մ' (U+0574) + 'ե' (U+0565)
-    let_assert(auto m = str("ﬔ").utf8_case_insensitive_find("մե"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Some ﬔ text").utf8_case_insensitive_find("մե"), m.offset == 5 && m.length == 3);
-    let_assert(auto m = str("End ﬔ").utf8_case_insensitive_find("End մե"), m.offset == 0 && m.length == 7);
+    let_assert(auto m = str("ﬔ").utf8_uncased_find("մե"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Some ﬔ text").utf8_uncased_find("մե"), m.offset == 5 && m.length == 3);
+    let_assert(auto m = str("End ﬔ").utf8_uncased_find("End մե"), m.offset == 0 && m.length == 7);
 
     // Ligature: 'ﬕ' (U+FB15 Men-Ini) -> 'մ' (U+0574) + 'ի' (U+056B)
-    let_assert(auto m = str("ﬕ").utf8_case_insensitive_find("մի"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("123 ﬕ 456").utf8_case_insensitive_find("123 մի 456"), m.offset == 0 && m.length == 11);
-    let_assert(auto m = str("prefixﬕ").utf8_case_insensitive_find("մի"), m.offset == 6 && m.length == 3);
+    let_assert(auto m = str("ﬕ").utf8_uncased_find("մի"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("123 ﬕ 456").utf8_uncased_find("123 մի 456"), m.offset == 0 && m.length == 11);
+    let_assert(auto m = str("prefixﬕ").utf8_uncased_find("մի"), m.offset == 6 && m.length == 3);
 
     // Ligature: 'ﬖ' (U+FB16 Vew-Now) -> 'վ' (U+057E) + 'ն' (U+0576)
-    let_assert(auto m = str("ﬖ").utf8_case_insensitive_find("վն"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Test ﬖ Case").utf8_case_insensitive_find("Test վն Case"), m.offset == 0 && m.length == 13);
-    let_assert(auto m = str("ﬖ").utf8_case_insensitive_find("վն"),
+    let_assert(auto m = str("ﬖ").utf8_uncased_find("վն"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Test ﬖ Case").utf8_uncased_find("Test վն Case"), m.offset == 0 && m.length == 13);
+    let_assert(auto m = str("ﬖ").utf8_uncased_find("վն"),
                m.offset == 0 && m.length == 3); // Redundant but safe
 
     // Ligature: 'ﬗ' (U+FB17 Men-Xeh) -> 'մ' (U+0574) + 'խ' (U+056D)
-    let_assert(auto m = str("ﬗ").utf8_case_insensitive_find("մխ"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Mid ﬗ dle").utf8_case_insensitive_find("մխ"), m.offset == 4 && m.length == 3);
-    let_assert(auto m = str("Start ﬗ").utf8_case_insensitive_find("Start մխ"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("ﬗ").utf8_uncased_find("մխ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Mid ﬗ dle").utf8_uncased_find("մխ"), m.offset == 4 && m.length == 3);
+    let_assert(auto m = str("Start ﬗ").utf8_uncased_find("Start մխ"), m.offset == 0 && m.length == 9);
 
     // Vietnamese / Latin Extended Additional
     // 'Ạ' (U+1EA0, E1 BA A0) -> 'ạ' (U+1EA1, E1 BA A1)
-    let_assert(auto m = str("Ạ").utf8_case_insensitive_find("ạ"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Word Ạ End").utf8_case_insensitive_find("Word ạ End"), m.offset == 0 && m.length == 12);
-    let_assert(auto m = str("PrefixẠ").utf8_case_insensitive_find("ạ"), m.offset == 6 && m.length == 3);
+    let_assert(auto m = str("Ạ").utf8_uncased_find("ạ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Word Ạ End").utf8_uncased_find("Word ạ End"), m.offset == 0 && m.length == 12);
+    let_assert(auto m = str("PrefixẠ").utf8_uncased_find("ạ"), m.offset == 6 && m.length == 3);
 
     // 'Ấ' (U+1EA4, E1 BA A4) -> 'ấ' (U+1EA5, E1 BA A5)
-    let_assert(auto m = str("Ấ").utf8_case_insensitive_find("ấ"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Ấ Start").utf8_case_insensitive_find("ấ Start"), m.offset == 0 && m.length == 9);
-    let_assert(auto m = str("Mid Ấ dle").utf8_case_insensitive_find("Mid ấ dle"), m.offset == 0 && m.length == 11);
+    let_assert(auto m = str("Ấ").utf8_uncased_find("ấ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Ấ Start").utf8_uncased_find("ấ Start"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("Mid Ấ dle").utf8_uncased_find("Mid ấ dle"), m.offset == 0 && m.length == 11);
 
     // Horn letters: Ơ (U+01A0, C6 A0) -> ơ (U+01A1, C6 A1), Ư (U+01AF, C6 AF) -> ư (U+01B0, C6 B0)
-    let_assert(auto m = str("ƠƯ").utf8_case_insensitive_find("ơư"), m.offset == 0 && m.length == 4);
-    let_assert(auto m = str("Big ƠƯ Horns").utf8_case_insensitive_find("Big ơư Horns"),
+    let_assert(auto m = str("ƠƯ").utf8_uncased_find("ơư"), m.offset == 0 && m.length == 4);
+    let_assert(auto m = str("Big ƠƯ Horns").utf8_uncased_find("Big ơư Horns"),
                m.offset == 0 && m.length == 14);
-    let_assert(auto m = str("Prefix ƠƯ").utf8_case_insensitive_find("ơư"), m.offset == 7 && m.length == 4);
+    let_assert(auto m = str("Prefix ƠƯ").utf8_uncased_find("ơư"), m.offset == 7 && m.length == 4);
 
     // Latin Extended Additional: Ḁ (U+1E80, E1 BA 80) -> ḁ (U+1E81, E1 BA 81)
-    let_assert(auto m = str("Ḁ").utf8_case_insensitive_find("ḁ"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Code Ḁ").utf8_case_insensitive_find("Code ḁ"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("StartḀ").utf8_case_insensitive_find("Startḁ"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Ḁ").utf8_uncased_find("ḁ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Code Ḁ").utf8_uncased_find("Code ḁ"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("StartḀ").utf8_uncased_find("Startḁ"), m.offset == 0 && m.length == 8);
 
     // Vietnamese Context Extensions
-    let_assert(auto m = str("xin chào Ḁ").utf8_case_insensitive_find("ḁ"), m.offset == 10 && m.length == 3);
+    let_assert(auto m = str("xin chào Ḁ").utf8_uncased_find("ḁ"), m.offset == 10 && m.length == 3);
 
     // Special Symbols (Latin)
     // Kelvin Sign 'K' (U+212A, E2 84 AA) -> 'k' (1 byte). Match length includes 3-byte 'K'.
-    let_assert(auto m = str("273 K").utf8_case_insensitive_find("273 k"), m.offset == 0 && m.length == 7);
+    let_assert(auto m = str("273 K").utf8_uncased_find("273 k"), m.offset == 0 && m.length == 7);
 
     // Reverse: Haystack "273 k" (5 bytes). Needle "273 K".
     // Should match.
-    let_assert(auto m = str("273 k").utf8_case_insensitive_find("273 K"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("273 k").utf8_uncased_find("273 K"), m.offset == 0 && m.length == 5);
 
     // Angstrom Sign 'Å' (U+212B) -> 'å' (U+00E5)
-    let_assert(auto m = str("Å").utf8_case_insensitive_find("å"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Å").utf8_case_insensitive_find("Å"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Å").utf8_uncased_find("å"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Å").utf8_uncased_find("Å"), m.offset == 0 && m.length == 3);
 
     // Context Extensions (Special Symbols)
-    let_assert(auto m = str("Temp: 273 K").utf8_case_insensitive_find("k"), m.offset == 10 && m.length == 3);
-    let_assert(auto m = str("Unit: Å").utf8_case_insensitive_find("å"), m.offset == 6 && m.length == 3);
+    let_assert(auto m = str("Temp: 273 K").utf8_uncased_find("k"), m.offset == 10 && m.length == 3);
+    let_assert(auto m = str("Unit: Å").utf8_uncased_find("å"), m.offset == 6 && m.length == 3);
 
     // Long S 'ſ' (U+017F) -> 's'
     // "Messer" vs "Meſſer"
     // Haystack "Meſſer": M(1) e(1) ſ(2) ſ(2) e(1) r(1) = 8 bytes.
     // Needle "MESSER": 6 bytes.
-    let_assert(auto m = str("Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("Ein Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 4 && m.length == 8);
-    let_assert(auto m = str("Meſſer block").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Meſſer").utf8_uncased_find("MESSER"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Ein Meſſer").utf8_uncased_find("MESSER"), m.offset == 4 && m.length == 8);
+    let_assert(auto m = str("Meſſer block").utf8_uncased_find("MESSER"), m.offset == 0 && m.length == 8);
 
     // Ligature 'ﬅ' (U+FB05 "st") -> "st"
     // Haystack "ﬅ" (3 bytes). Needle "st" (2 bytes).
-    let_assert(auto m = str("ﬅ").utf8_case_insensitive_find("st"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("Test ﬅ").utf8_case_insensitive_find("Test st"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("ﬅart").utf8_case_insensitive_find("start"), m.offset == 0 && m.length == 6);
+    let_assert(auto m = str("ﬅ").utf8_uncased_find("st"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Test ﬅ").utf8_uncased_find("Test st"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("ﬅart").utf8_uncased_find("start"), m.offset == 0 && m.length == 6);
 
     // Ligature 'ﬆ' (U+FB06, EF AC 86) -> "st"
-    let_assert(auto m = str("ﬆ").utf8_case_insensitive_find("st"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("My ﬆyle").utf8_case_insensitive_find("My style"), m.offset == 0 && m.length == 9);
-    let_assert(auto m = str("Faﬆ").utf8_case_insensitive_find("Fast"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ﬆ").utf8_uncased_find("st"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("My ﬆyle").utf8_uncased_find("My style"), m.offset == 0 && m.length == 9);
+    let_assert(auto m = str("Faﬆ").utf8_uncased_find("Fast"), m.offset == 0 && m.length == 5);
 
     // Extended Ligature Contexts
     // "Messer" vs "Meſſer" ('ſ' is U+017F, C5 BF)
-    let_assert(auto m = str("Das Meſſer schneidet").utf8_case_insensitive_find("MESSER"),
+    let_assert(auto m = str("Das Meſſer schneidet").utf8_uncased_find("MESSER"),
                m.offset == 4 && m.length == 8); // "Das " (4) + "Meſſer" (8) = 12, start at 4
-    let_assert(auto m = str("Meſſer").utf8_case_insensitive_find("MESSER"), m.offset == 0 && m.length == 8);
-    let_assert(auto m = str("Großes Meſſer").utf8_case_insensitive_find("MESSER"),
+    let_assert(auto m = str("Meſſer").utf8_uncased_find("MESSER"), m.offset == 0 && m.length == 8);
+    let_assert(auto m = str("Großes Meſſer").utf8_uncased_find("MESSER"),
                m.offset == 8 && m.length == 8); // "Großes " (4+2+1+1+1 = 9 bytes? No. 'ß' is 2 bytes.
                                                 // G(1)r(1)o(1)ß(2)e(1)s(1) (1) = 8 bytes. So offset 8.
 
     // 'ﬅ' (U+FB05, EF AC 85)
-    let_assert(auto m = str("Ligature ﬅ check").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
-    let_assert(auto m = str("end with ﬅ").utf8_case_insensitive_find("st"), m.offset == 9 && m.length == 3);
+    let_assert(auto m = str("Ligature ﬅ check").utf8_uncased_find("st"), m.offset == 9 && m.length == 3);
+    let_assert(auto m = str("end with ﬅ").utf8_uncased_find("st"), m.offset == 9 && m.length == 3);
 
     // More complex ligatures
-    let_assert(auto m = str("ﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("ﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("fija"), m.offset == 2 && m.length == 5);
-    let_assert(auto m = str("alﬃJaCä").utf8_case_insensitive_find("ﬁja"), m.offset == 2 && m.length == 5);
+    let_assert(auto m = str("ﬃJaCä").utf8_uncased_find("fija"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("ﬃJaCä").utf8_uncased_find("ﬁja"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("alﬃJaCä").utf8_uncased_find("fija"), m.offset == 2 && m.length == 5);
+    let_assert(auto m = str("alﬃJaCä").utf8_uncased_find("ﬁja"), m.offset == 2 && m.length == 5);
 
     // Mid-expansion matches inside a single ligature: we still report the source rune span.
     // 'ﬃ' (EF AC 83) folds to "ffi", so "fi" occurs starting at index 1.
-    let_assert(auto m = str("ﬃ").utf8_case_insensitive_find("fi"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("ﬃ").utf8_uncased_find("fi"), m.offset == 0 && m.length == 3);
     // 'ﬄ' (EF AC 84) folds to "ffl", so "fl" occurs starting at index 1.
-    let_assert(auto m = str("ﬄ").utf8_case_insensitive_find("fl"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("ﬄ").utf8_uncased_find("fl"), m.offset == 0 && m.length == 3);
 
     // Combining diacritical marks: ǰ (U+01F0) folds to 'j' + combining caron (U+030C)
     // Needle starts with combining caron - can match mid-expansion of ǰ
-    let_assert(auto m = str("ǰ0").utf8_case_insensitive_find("\xCC\x8C" "0"), // caron + '0'
+    let_assert(auto m = str("ǰ0").utf8_uncased_find("\xCC\x8C" "0"), // caron + '0'
                m.offset == 0 && m.length == 3);                               // Match entire ǰ0 (2 byte ǰ + 1 byte 0)
-    let_assert(auto m = str("abcǰ0def").utf8_case_insensitive_find("\xCC\x8C" "0"),
+    let_assert(auto m = str("abcǰ0def").utf8_uncased_find("\xCC\x8C" "0"),
                m.offset == 3 && m.length == 3); // "abc" = 3 bytes
 
     // Mid-expansion matches with ß (U+00DF) → "ss"
     // Needle "sfoxeepmº" should match in "ßfoxeEPMº" (folded: "ssfoxeepmº") at position 1 of folded text
     // Return position is byte 0 where ß starts (first contributing character)
-    let_assert(auto m = str("ßfoxeEPMº").utf8_case_insensitive_find("sfoxeepmº"),
+    let_assert(auto m = str("ßfoxeEPMº").utf8_uncased_find("sfoxeepmº"),
                m.offset == 0 && m.length == 11); // Entire haystack
 
     // 'ﬆ' (U+FB06, EF AC 86)
-    let_assert(auto m = str("Big ﬆ").utf8_case_insensitive_find("st"), m.offset == 4 && m.length == 3);
+    let_assert(auto m = str("Big ﬆ").utf8_uncased_find("st"), m.offset == 4 && m.length == 3);
 
     // Georgian
     // Mtavruli (Upper) -> Mkhedruli (Lower)
     // 'Ა' (U+1C90, E1 B2 90) -> 'ა' (U+10D0, E1 83 90)
     // Both are 3 bytes in UTF-8.
     // Georgian Context
-    let_assert(auto m = str("Text Ა").utf8_case_insensitive_find("ა"), m.offset == 5 && m.length == 3);
+    let_assert(auto m = str("Text Ა").utf8_uncased_find("ა"), m.offset == 5 && m.length == 3);
 
     // Cherokee
     // Cherokee Supplement (Lower, U+AB70, EA AD B0, 'ꭰ') -> Cherokee (Upper, U+13A0, E1 8E A0, 'Ꭰ')
     // Both 3 bytes.
-    let_assert(auto m = str("ꭰ").utf8_case_insensitive_find("Ꭰ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("ꭰ").utf8_uncased_find("Ꭰ"), m.offset == 0 && m.length == 3);
 
     // Cherokee Context
-    let_assert(auto m = str("Syllable ꭰ").utf8_case_insensitive_find("Ꭰ"), m.offset == 9 && m.length == 3);
+    let_assert(auto m = str("Syllable ꭰ").utf8_uncased_find("Ꭰ"), m.offset == 9 && m.length == 3);
 
     // Coptic (Extended)
     // Coptic Ⲡ (U+2C80, E2 B2 80) -> ⲡ (U+2C81, E2 B2 81)
-    let_assert(auto m = str("Ⲡ").utf8_case_insensitive_find("ⲡ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Ⲡ").utf8_uncased_find("ⲡ"), m.offset == 0 && m.length == 3);
 
     // Glagolitic
     // Ⰰ (U+2C00, E2 B0 80) -> ⰰ (U+2C30, E2 B0 B0)
-    let_assert(auto m = str("Ⰰ").utf8_case_insensitive_find("ⰰ"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("Ⰰ").utf8_uncased_find("ⰰ"), m.offset == 0 && m.length == 3);
 
     // Glagolitic Context
-    let_assert(auto m = str("Letter Ⰰ").utf8_case_insensitive_find("ⰰ"), m.offset == 7 && m.length == 3);
+    let_assert(auto m = str("Letter Ⰰ").utf8_uncased_find("ⰰ"), m.offset == 7 && m.length == 3);
 
     // Caseless Scripts (CJK, Arabic, Hebrew, Emoji)
-    // These generally don't fold, so they must match exactly or effectively be case-insensitive by identity.
+    // These generally don't fold, so they must match exactly or effectively be uncased by identity.
 
     // Arabic "Salam"
-    assert(str("السلام").utf8_case_insensitive_order("السلام") == sz_equal_k);
+    assert(str("السلام").utf8_uncased_order("السلام") == sz_equal_k);
 
     // Hebrew "Shalom"
-    assert(str("שלום").utf8_case_insensitive_order("שלום") == sz_equal_k);
+    assert(str("שלום").utf8_uncased_order("שלום") == sz_equal_k);
 
     // Numbers & Punctuation
-    let_assert(auto m = str("12345!@#$%").utf8_case_insensitive_find("345"), m.offset == 2 && m.length == 3);
+    let_assert(auto m = str("12345!@#$%").utf8_uncased_find("345"), m.offset == 2 && m.length == 3);
 
     // Negative Tests
     // Not found in Cyrillic
-    let_assert(auto m = str("Привет").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
+    let_assert(auto m = str("Привет").utf8_uncased_find("xyz"), m.offset == str::npos);
     // Not found Cyrillic in ASCII
-    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("При"), m.offset == str::npos);
+    let_assert(auto m = str("Hello World").utf8_uncased_find("При"), m.offset == str::npos);
 
     // CJK "Chinese"
-    let_assert(auto m = str("中文测试").utf8_case_insensitive_find("中文"), m.offset == 0 && m.length == 6);
+    let_assert(auto m = str("中文测试").utf8_uncased_find("中文"), m.offset == 0 && m.length == 6);
 
     // Emoji
-    let_assert(auto m = str("😀😁😂").utf8_case_insensitive_find("😁"), m.offset == 4 && m.length == 4);
+    let_assert(auto m = str("😀😁😂").utf8_uncased_find("😁"), m.offset == 4 && m.length == 4);
 
     // Emoji Context
-    let_assert(auto m = str("smile 😀😁😂").utf8_case_insensitive_find("😁"), m.offset == 10 && m.length == 4);
+    let_assert(auto m = str("smile 😀😁😂").utf8_uncased_find("😁"), m.offset == 10 && m.length == 4);
 
     // Regressions & Complex Cases
     // "Fuzz Regression": Needle "nԱԲՐԵշ" (Mixed case Armenian + ASCII)
-    let_assert(auto m = str("nԱԲՐԵշ").utf8_case_insensitive_find("nաբրեշ"), m.offset == 0 && m.length == 11);
+    let_assert(auto m = str("nԱԲՐԵշ").utf8_uncased_find("nաբրեշ"), m.offset == 0 && m.length == 11);
 
     // Complex SIMD Regression Trigger
     // Needle includes: ǰ (Latin B), ẞ (Sharp S), Turkish ı, Emoji
@@ -4117,60 +4226,60 @@ void test_utf8_case() {
         "\x6D\x70\x73\xC7\xB0\xC3\xA9\x6D\xC3\xB6\xC4\xB1\xF0\x9F\x98\x80\x3F\xC4\xB1\xE1\xBA\x9E\x74\x68\x65\xC3" //
         "\xB1\x45\x7A\xC3\xBC\x49\x74\x68\x65";
 
-    let_assert(auto m = str(complex_haystack).utf8_case_insensitive_find(complex_needle), m.length != 0);
+    let_assert(auto m = str(complex_haystack).utf8_uncased_find(complex_needle), m.length != 0);
 
     // Cross-Script Mixed Needles (Regression tests for kernel selection issues)
 
     // Capital Eszett (U+1E9E, E1 BA 9E) - folds to "ss"
     // Single Capital Eszett
-    let_assert(auto m = str("\xE1\xBA\x9E").utf8_case_insensitive_find("ss"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("ss").utf8_case_insensitive_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("\xE1\xBA\x9E").utf8_uncased_find("ss"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("ss").utf8_uncased_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
 
     // Capital Eszett vs lowercase ß (C3 9F)
-    let_assert(auto m = str("\xE1\xBA\x9E").utf8_case_insensitive_find("\xC3\x9F"), m.offset == 0 && m.length == 3);
-    let_assert(auto m = str("\xC3\x9F").utf8_case_insensitive_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
+    let_assert(auto m = str("\xE1\xBA\x9E").utf8_uncased_find("\xC3\x9F"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xC3\x9F").utf8_uncased_find("\xE1\xBA\x9E"), m.offset == 0 && m.length == 2);
 
     // Double Capital Eszett
-    let_assert(auto m = str("\xE1\xBA\x9E\xE1\xBA\x9E").utf8_case_insensitive_find("ssss"),
+    let_assert(auto m = str("\xE1\xBA\x9E\xE1\xBA\x9E").utf8_uncased_find("ssss"),
                m.offset == 0 && m.length == 6);
 
     // Capital Eszett at boundaries
-    let_assert(auto m = str("prefix\xE1\xBA\x9E" "suffix").utf8_case_insensitive_find("xss"),
+    let_assert(auto m = str("prefix\xE1\xBA\x9E" "suffix").utf8_uncased_find("xss"),
                m.offset == 5 && m.length == 4); // 'x'(1) + ẞ(3) = 4
 
     // Capital Eszett + Vietnamese (Western + Vietnamese kernels)
     // ẞ (E1 BA 9E) + ệ (E1 BB 87) - the exact failing pattern from fuzz tests
-    let_assert(auto m = str("test\xE1\xBA\x9E\xE1\xBB\x87" "end").utf8_case_insensitive_find("ss\xE1\xBB\x86"),
+    let_assert(auto m = str("test\xE1\xBA\x9E\xE1\xBB\x87" "end").utf8_uncased_find("ss\xE1\xBB\x86"),
                m.offset == 4 && m.length == 6); // ẞ(3) + ệ(3) searched as ss + Ệ
 
     // Micro Sign + Greek (Western + Greek kernels)
     // µ (C2 B5) surrounded by Greek α (CE B1) and β (CE B2)
-    let_assert(auto m = str("\xCE\xB1\xC2\xB5\xCE\xB2").utf8_case_insensitive_find("\xCE\xB1\xCE\xBC\xCE\xB2"),
+    let_assert(auto m = str("\xCE\xB1\xC2\xB5\xCE\xB2").utf8_uncased_find("\xCE\xB1\xCE\xBC\xCE\xB2"),
                m.offset == 0 && m.length == 6); // αµβ vs αμβ
 
     // Long S (C5 BF) + non-ASCII context
-    let_assert(auto m = str("me\xC5\xBF\xC5\xBF" "age").utf8_case_insensitive_find("MESSAGE"),
+    let_assert(auto m = str("me\xC5\xBF\xC5\xBF" "age").utf8_uncased_find("MESSAGE"),
                m.offset == 0 && m.length == 9); // meſſage (9 bytes)
 
     // One-to-Many Expansions (U+1E96-1E9A range)
     // h with line below (U+1E96, E1 BA 96) -> h + combining line below (CC B1)
-    let_assert(auto m = str("\xE1\xBA\x96").utf8_case_insensitive_find("h\xCC\xB1"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xE1\xBA\x96").utf8_uncased_find("h\xCC\xB1"), m.offset == 0 && m.length == 3);
 
     // t with diaeresis (U+1E97, E1 BA 97) -> t + combining diaeresis (CC 88)
-    let_assert(auto m = str("\xE1\xBA\x97").utf8_case_insensitive_find("t\xCC\x88"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xE1\xBA\x97").utf8_uncased_find("t\xCC\x88"), m.offset == 0 && m.length == 3);
 
     // w with ring above (U+1E98, E1 BA 98) -> w + combining ring above (CC 8A)
-    let_assert(auto m = str("\xE1\xBA\x98").utf8_case_insensitive_find("w\xCC\x8A"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xE1\xBA\x98").utf8_uncased_find("w\xCC\x8A"), m.offset == 0 && m.length == 3);
 
     // y with ring above (U+1E99, E1 BA 99) -> y + combining ring above (CC 8A)
-    let_assert(auto m = str("\xE1\xBA\x99").utf8_case_insensitive_find("y\xCC\x8A"), m.offset == 0 && m.length == 3);
+    let_assert(auto m = str("\xE1\xBA\x99").utf8_uncased_find("y\xCC\x8A"), m.offset == 0 && m.length == 3);
 
     // Kelvin Sign (E2 84 AA) in mixed context
-    let_assert(auto m = str("273 \xE2\x84\xAA test").utf8_case_insensitive_find("273 k"),
+    let_assert(auto m = str("273 \xE2\x84\xAA test").utf8_uncased_find("273 k"),
                m.offset == 0 && m.length == 7); // K is 3 bytes
 
     // Angstrom Sign (E2 84 AB) with accented chars
-    let_assert(auto m = str("10 \xE2\x84\xAB unit").utf8_case_insensitive_find("10 \xC3\xA5"),
+    let_assert(auto m = str("10 \xE2\x84\xAB unit").utf8_uncased_find("10 \xC3\xA5"),
                m.offset == 0 && m.length == 6); // Å (3) vs å (2)
 
     // 64-byte Boundary Stress Tests
@@ -4178,47 +4287,47 @@ void test_utf8_case() {
     // Capital Eszett at position 63 (just at SIMD boundary)
     {
         std::string prefix(63, 'x');
-        let_assert(auto m = str((prefix + "\xE1\xBA\x9E" "end").c_str()).utf8_case_insensitive_find("xss"),
+        let_assert(auto m = str((prefix + "\xE1\xBA\x9E" "end").c_str()).utf8_uncased_find("xss"),
                    m.offset == 62 && m.length == 4); // last 'x' + ẞ(3)
     }
 
     // Vietnamese char at position 62
     {
         std::string prefix(62, 'a');
-        let_assert(auto m = str((prefix + "\xE1\xBB\x87" "b").c_str()).utf8_case_insensitive_find("\xE1\xBB\x86" "B"),
+        let_assert(auto m = str((prefix + "\xE1\xBB\x87" "b").c_str()).utf8_uncased_find("\xE1\xBB\x86" "B"),
                    m.offset == 62 && m.length == 4); // ệ(3) + b(1)
     }
 
     // Micro Sign at position 64 (just past SIMD boundary)
     {
         std::string prefix(64, 'z');
-        let_assert(auto m = str((prefix + "\xC2\xB5" "test").c_str()).utf8_case_insensitive_find("\xCE\xBC"),
+        let_assert(auto m = str((prefix + "\xC2\xB5" "test").c_str()).utf8_uncased_find("\xCE\xBC"),
                    m.offset == 64 && m.length == 2); // µ matches μ
     }
 
     // 'ﬄ' at position 63 (just at SIMD boundary), matching from inside its fold.
     {
         std::string prefix(63, 'x');
-        let_assert(auto m = str((prefix + "\xEF\xAC\x84" "end").c_str()).utf8_case_insensitive_find("fl"),
+        let_assert(auto m = str((prefix + "\xEF\xAC\x84" "end").c_str()).utf8_uncased_find("fl"),
                    m.offset == 63 && m.length == 3); // consume whole ligature
     }
 
     // ASCII + ligature spanning the SIMD boundary: 'P' at 62 and 'ﬄ' at 63.
     {
         std::string prefix(62, 'x');
-        let_assert(auto m = str((prefix + "P\xEF\xAC\x84" "end").c_str()).utf8_case_insensitive_find("pf"),
+        let_assert(auto m = str((prefix + "P\xEF\xAC\x84" "end").c_str()).utf8_uncased_find("pf"),
                    m.offset == 62 && m.length == 4); // "P"(1) + "ﬄ"(3)
     }
 
     // Basic ASCII search
-    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("WORLD"), m.offset == 6 && m.length == 5);
-    let_assert(auto m = str("Hello World").utf8_case_insensitive_find("world"), m.offset == 6 && m.length == 5);
-    let_assert(auto m = str("HELLO").utf8_case_insensitive_find("hello"), m.offset == 0 && m.length == 5);
-    let_assert(auto m = str("Hello").utf8_case_insensitive_find("xyz"), m.offset == str::npos);
-    let_assert(auto m = str("Hello").utf8_case_insensitive_find(""), m.offset == 0 && m.length == 0);
+    let_assert(auto m = str("Hello World").utf8_uncased_find("WORLD"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("Hello World").utf8_uncased_find("world"), m.offset == 6 && m.length == 5);
+    let_assert(auto m = str("HELLO").utf8_uncased_find("hello"), m.offset == 0 && m.length == 5);
+    let_assert(auto m = str("Hello").utf8_uncased_find("xyz"), m.offset == str::npos);
+    let_assert(auto m = str("Hello").utf8_uncased_find(""), m.offset == 0 && m.length == 0);
 
     // Fuzz-Discovered Regressions (Serial vs SIMD mismatches)
-    // These patterns were discovered by test_utf8_ci_find_fuzz() and expose
+    // These patterns were discovered by test_utf8_uncased_find_fuzz() and expose
     // disagreements between serial and SIMD implementations.
 
     // Pattern 0: Ligature tail-match in mixed-case context (historical verify crash).
@@ -4226,11 +4335,11 @@ void test_utf8_case() {
     // Needle:   67 76 C3 B1 2C 70 66
     {
         let_assert(auto m = str("\xC3\x96" "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p")
-                                .utf8_case_insensitive_find("gv\xC3\xB1,pf"),
+                                .utf8_uncased_find("gv\xC3\xB1,pf"),
                    m.offset == 3 && m.length == 9);
         let_assert(
             auto m =
-                str("\xC3\x96" "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p").utf8_case_insensitive_find("pf"),
+                str("\xC3\x96" "EGv\xC3\x91,P\xEF\xAC\x84quickWorld\xEF\xAC\x82p").utf8_uncased_find("pf"),
             m.offset == 8 && m.length == 4);
     }
 
@@ -4244,15 +4353,15 @@ void test_utf8_case() {
     // These trigger kernel=2 (Central Europe) with safe_window issues
     {
         // "st" followed by º - should this match "st" ligature + º?
-        let_assert(auto m = str("test\xEF\xAC\x85\xC2\xBA" "end").utf8_case_insensitive_find("st\xC2\xBA"),
+        let_assert(auto m = str("test\xEF\xAC\x85\xC2\xBA" "end").utf8_uncased_find("st\xC2\xBA"),
                    m.offset == 4 && m.length == 5); // st ligature (3) + º (2)
 
         // "st" followed by ñ
-        let_assert(auto m = str("test\xEF\xAC\x85\xC3\xB1" "end").utf8_case_insensitive_find("st\xC3\xB1"),
+        let_assert(auto m = str("test\xEF\xAC\x85\xC3\xB1" "end").utf8_uncased_find("st\xC3\xB1"),
                    m.offset == 4 && m.length == 5); // st ligature (3) + ñ (2)
 
         // "st" followed by Greek α
-        let_assert(auto m = str("prefix\xEF\xAC\x85\xCE\xB1" "suffix").utf8_case_insensitive_find("st\xCE\xB1"),
+        let_assert(auto m = str("prefix\xEF\xAC\x85\xCE\xB1" "suffix").utf8_uncased_find("st\xCE\xB1"),
                    m.offset == 6 && m.length == 5); // st ligature (3) + α (2)
     }
 
@@ -4261,11 +4370,11 @@ void test_utf8_case() {
     // Needle: 73 73 C3 A5 = "ss" + å
     {
         // "ss" followed by Greek α - should match ß + α
-        let_assert(auto m = str("test\xC3\x9F\xCE\xB1" "end").utf8_case_insensitive_find("ss\xCE\xB1"),
+        let_assert(auto m = str("test\xC3\x9F\xCE\xB1" "end").utf8_uncased_find("ss\xCE\xB1"),
                    m.offset == 4 && m.length == 4); // ß (2) + α (2)
 
         // "ss" followed by å
-        let_assert(auto m = str("prefix\xC3\x9F\xC3\xA5" "suffix").utf8_case_insensitive_find("ss\xC3\xA5"),
+        let_assert(auto m = str("prefix\xC3\x9F\xC3\xA5" "suffix").utf8_uncased_find("ss\xC3\xA5"),
                    m.offset == 6 && m.length == 4); // ß (2) + å (2)
     }
 
@@ -4276,24 +4385,24 @@ void test_utf8_case() {
     // These test one-to-many expansions (U+1E96 range) mixed with other scripts
     {
         // h + combining macron below should match ẖ (U+1E96)
-        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_case_insensitive_find("h\xCC\xB1\xD5\xA5"),
+        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_uncased_find("h\xCC\xB1\xD5\xA5"),
                    m.offset == 0 && m.length == 5); // ẖ (3) + ե (2)
         // Needle starts with the combining mark (mid-expansion of ẖ).
-        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_case_insensitive_find("\xCC\xB1\xD5\xA5"),
+        let_assert(auto m = str("\xE1\xBA\x96\xD5\xA5").utf8_uncased_find("\xCC\xB1\xD5\xA5"),
                    m.offset == 0 && m.length == 5);
 
         // w + combining ring above should match ẘ (U+1E98)
-        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_case_insensitive_find("w\xCC\x8A\xCE\xB2"),
+        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_uncased_find("w\xCC\x8A\xCE\xB2"),
                    m.offset == 0 && m.length == 5); // ẘ (3) + β (2)
         // Needle starts with the combining mark (mid-expansion of ẘ).
-        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_case_insensitive_find("\xCC\x8A\xCE\xB2"),
+        let_assert(auto m = str("\xE1\xBA\x98\xCE\xB2").utf8_uncased_find("\xCC\x8A\xCE\xB2"),
                    m.offset == 0 && m.length == 5);
 
         // j + combining caron should match ǰ (U+01F0)
-        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_case_insensitive_find("j\xCC\x8C\xD5\xA2"),
+        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_uncased_find("j\xCC\x8C\xD5\xA2"),
                    m.offset == 0 && m.length == 4); // ǰ (2) + բ (2)
         // Needle starts with the combining mark (mid-expansion of ǰ).
-        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_case_insensitive_find("\xCC\x8C\xD5\xA2"),
+        let_assert(auto m = str("\xC7\xB0\xD5\xA2").utf8_uncased_find("\xCC\x8C\xD5\xA2"),
                    m.offset == 0 && m.length == 4);
     }
 
@@ -4303,17 +4412,17 @@ void test_utf8_case() {
     // These test n-apostrophe (U+0149) and a-right-half-ring (U+1E9A) expansions
     {
         // 'n (U+0149) expands to modifier apostrophe + n
-        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_case_insensitive_find("\xCA\xBC" "n\xCE\xBC"),
+        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_uncased_find("\xCA\xBC" "n\xCE\xBC"),
                    m.offset == 0 && m.length == 4); // ʼn (2) + μ (2)
         // Needle starts at the second rune of the expansion ("n..."), so it still anchors to 'ŉ'.
-        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_case_insensitive_find("n\xCE\xBC"),
+        let_assert(auto m = str("\xC5\x89\xCE\xBC").utf8_uncased_find("n\xCE\xBC"),
                    m.offset == 0 && m.length == 4);
 
         // a + modifier right half ring should match ẚ (U+1E9A)
-        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_case_insensitive_find("a\xCA\xBE\xD5\xA5"),
+        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_uncased_find("a\xCA\xBE\xD5\xA5"),
                    m.offset == 0 && m.length == 5); // ẚ (3) + ե (2)
         // Needle starts at the second rune of the expansion ("ʾ..."), so it still anchors to 'ẚ'.
-        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_case_insensitive_find("\xCA\xBE\xD5\xA5"),
+        let_assert(auto m = str("\xE1\xBA\x9A\xD5\xA5").utf8_uncased_find("\xCA\xBE\xD5\xA5"),
                    m.offset == 0 && m.length == 5);
     }
 
@@ -4321,7 +4430,7 @@ void test_utf8_case() {
     // Needle: D5 A5 D6 82 CE B2 = Armenian ech+yiwn + Greek β
     {
         // Armenian ech+yiwn characters followed by Greek
-        let_assert(auto m = str("\xD5\xA5\xD6\x82\xCE\xB2").utf8_case_insensitive_find("\xD5\xA5\xD6\x82\xCE\xB2"),
+        let_assert(auto m = str("\xD5\xA5\xD6\x82\xCE\xB2").utf8_uncased_find("\xD5\xA5\xD6\x82\xCE\xB2"),
                    m.offset == 0 && m.length == 6);
     }
 
@@ -4335,7 +4444,7 @@ void test_utf8_case() {
         std::string needle = "\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE"   // barev
                              "ffi"                                        // expanded
                              "\xE1\xBB\x86";                              // Vietnamese Ệ
-        let_assert(auto m = str(haystack).utf8_case_insensitive_find(needle), m.offset == 0 && m.length == 16);
+        let_assert(auto m = str(haystack).utf8_uncased_find(needle), m.offset == 0 && m.length == 16);
     }
 
     // Long needle tests at ring buffer boundary (32 folded runes)
@@ -4343,44 +4452,44 @@ void test_utf8_case() {
     {
         // Exactly 32 ASCII characters (32 folded runes)
         std::string hay32(32, 'a');
-        let_assert(auto m = str(hay32 + "xyz").utf8_case_insensitive_find(hay32), m.offset == 0 && m.length == 32);
+        let_assert(auto m = str(hay32 + "xyz").utf8_uncased_find(hay32), m.offset == 0 && m.length == 32);
 
         // 33 ASCII characters (crosses ring buffer boundary)
         std::string hay33(33, 'a');
-        let_assert(auto m = str(hay33 + "xyz").utf8_case_insensitive_find(hay33), m.offset == 0 && m.length == 33);
+        let_assert(auto m = str(hay33 + "xyz").utf8_uncased_find(hay33), m.offset == 0 && m.length == 33);
 
         // 16 eszett characters → 32 folded runes (ss×16), exactly at boundary
         std::string hay_16_ss(16, '\xC3');
         for (size_t i = 0; i < 16; ++i) hay_16_ss.insert(i * 2 + 1, 1, '\x9F'); // Build "ßßßßßßßßßßßßßßßß"
         std::string needle_32_s(32, 's');
-        let_assert(auto m = str(hay_16_ss + "end").utf8_case_insensitive_find(needle_32_s),
+        let_assert(auto m = str(hay_16_ss + "end").utf8_uncased_find(needle_32_s),
                    m.offset == 0 && m.length == 32);
 
         // 64 ASCII characters (tests double boundary)
         std::string hay64(64, 'b');
-        let_assert(auto m = str(hay64 + "xyz").utf8_case_insensitive_find(hay64), m.offset == 0 && m.length == 64);
+        let_assert(auto m = str(hay64 + "xyz").utf8_uncased_find(hay64), m.offset == 0 && m.length == 64);
     }
 
     // Eszett at SIMD 64-byte chunk boundaries
     {
         // ß at position 62 (ends exactly at 64-byte boundary)
         std::string prefix62(62, 'a');
-        let_assert(auto m = str(prefix62 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+        let_assert(auto m = str(prefix62 + "\xC3\x9F" + "xyz").utf8_uncased_find("ss"),
                    m.offset == 62 && m.length == 2);
 
         // ß straddling 64-byte boundary (starts at 63)
         std::string prefix63(63, 'a');
-        let_assert(auto m = str(prefix63 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+        let_assert(auto m = str(prefix63 + "\xC3\x9F" + "xyz").utf8_uncased_find("ss"),
                    m.offset == 63 && m.length == 2);
 
         // ß exactly at 64-byte boundary
         std::string prefix64(64, 'a');
-        let_assert(auto m = str(prefix64 + "\xC3\x9F" + "xyz").utf8_case_insensitive_find("ss"),
+        let_assert(auto m = str(prefix64 + "\xC3\x9F" + "xyz").utf8_uncased_find("ss"),
                    m.offset == 64 && m.length == 2);
 
         // Word with ß crossing boundary: "straße" starting at position 60
         std::string prefix60(60, 'a');
-        let_assert(auto m = str(prefix60 + "stra\xC3\x9F" "e" + "zzz").utf8_case_insensitive_find("strasse"),
+        let_assert(auto m = str(prefix60 + "stra\xC3\x9F" "e" + "zzz").utf8_uncased_find("strasse"),
                    m.offset == 60 && m.length == 7);
     }
 
@@ -4389,7 +4498,7 @@ void test_utf8_case() {
         // ASCII → Greek transition at SIMD boundary
         std::string ascii60(60, 'x');
         let_assert(
-            auto m = str(ascii60 + "\xCE\xB1\xCE\xB2\xCE\xB3").utf8_case_insensitive_find("\xCE\x91\xCE\x92\xCE\x93"),
+            auto m = str(ascii60 + "\xCE\xB1\xCE\xB2\xCE\xB3").utf8_uncased_find("\xCE\x91\xCE\x92\xCE\x93"),
             m.offset == 60 && m.length == 6); // ΑΒΓ matching αβγ
 
         // Latin-1 → Cyrillic transition
@@ -4408,27 +4517,27 @@ void test_utf8_case() {
     // 'S' → 's', 'ß' → "ss", 'à' → 'à', so "Sßà" → "sssà" (should match!)
     {
         // Simple case: "Sßà" should match "sssà" - match is 5 bytes (53 C3 9F C3 A0)
-        let_assert(auto m = str("brown S\xC3\x9F\xC3\xA0 jumps").utf8_case_insensitive_find("sss\xC3\xA0"),
+        let_assert(auto m = str("brown S\xC3\x9F\xC3\xA0 jumps").utf8_uncased_find("sss\xC3\xA0"),
                    m.offset == 6 && m.length == 5);
 
         // Lowercase: "sßà" should match "sssà" - match is 5 bytes
-        let_assert(auto m = str("brown s\xC3\x9F\xC3\xA0 jumps").utf8_case_insensitive_find("sss\xC3\xA0"),
+        let_assert(auto m = str("brown s\xC3\x9F\xC3\xA0 jumps").utf8_uncased_find("sss\xC3\xA0"),
                    m.offset == 6 && m.length == 5);
 
         // Uppercase ß (U+1E9E) when it exists - "ẞà" should match "ssà"
-        let_assert(auto m = str("brown \xE1\xBA\x9E\xC3\xA0 jumps").utf8_case_insensitive_find("ss\xC3\xA0"),
+        let_assert(auto m = str("brown \xE1\xBA\x9E\xC3\xA0 jumps").utf8_uncased_find("ss\xC3\xA0"),
                    m.offset == 6 && m.length == 5);
 
         // Triple-s with space (seed 1234): "sß " should match "sss "
         // Match starts at byte 7 where 's' is (byte 6 is space before 's')
-        let_assert(auto m = str("\xC7\xB0" "bee3 s\xC3\x9F ee\xC3\xA9 nc").utf8_case_insensitive_find("sss ee\xC3\xA9"),
+        let_assert(auto m = str("\xC7\xB0" "bee3 s\xC3\x9F ee\xC3\xA9 nc").utf8_uncased_find("sss ee\xC3\xA9"),
                    m.offset == 7 && m.length == 8);
 
         // "ss" needle vs "ß" haystack (basic case)
-        let_assert(auto m = str("\xC3\x9F" "abc").utf8_case_insensitive_find("ssabc"), m.offset == 0 && m.length == 5);
+        let_assert(auto m = str("\xC3\x9F" "abc").utf8_uncased_find("ssabc"), m.offset == 0 && m.length == 5);
 
         // "sss" needle vs "sß" haystack
-        let_assert(auto m = str("s\xC3\x9F" "abc").utf8_case_insensitive_find("sssabc"),
+        let_assert(auto m = str("s\xC3\x9F" "abc").utf8_uncased_find("sssabc"),
                    m.offset == 0 && m.length == 6);
     }
 
@@ -4438,44 +4547,44 @@ void test_utf8_case() {
     // Fix: Ensure proper UTF-8 character boundary validation
     {
         // Simple Greek mu search
-        let_assert(auto m = str("hello \xCE\xBC world").utf8_case_insensitive_find("\xCE\xBC"),
+        let_assert(auto m = str("hello \xCE\xBC world").utf8_uncased_find("\xCE\xBC"),
                    m.offset == 6 && m.length == 2);
 
         // Greek mu NOT at position where 0xBC appears as second byte of another char
         // Create haystack with Latin-1 char ending in 0xBC, then Greek mu
         // This ensures we only match at valid UTF-8 boundaries
-        let_assert(auto m = str("test \xC2\xBC thing \xCE\xBC end").utf8_case_insensitive_find("\xCE\xBC"),
+        let_assert(auto m = str("test \xC2\xBC thing \xCE\xBC end").utf8_uncased_find("\xCE\xBC"),
                    m.offset == 14 && m.length == 2); // Only at actual μ, not at ¼
 
         // Multiple Greek chars around mu
-        let_assert(auto m = str("\xCE\xB1\xCE\xBC\xCE\xB2").utf8_case_insensitive_find("\xCE\xBC"),
+        let_assert(auto m = str("\xCE\xB1\xCE\xBC\xCE\xB2").utf8_uncased_find("\xCE\xBC"),
                    m.offset == 2 && m.length == 2);
     }
 
     // Pattern 9: Cyrillic Moscow case folding (seed 9999, 44444, 55555, Kernel 4)
     // Haystack: "се Москва" (uppercase М - D0 9C)
     // Needle: "се москва" (lowercase м - D0 BC)
-    // Should match case-insensitively
+    // Should match uncasedly
     {
         // Simple Moscow: Москва vs москва
         let_assert(auto m = str("\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0")
-                                .utf8_case_insensitive_find("\xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
+                                .utf8_uncased_find("\xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
                    m.offset == 0 && m.length == 12);
 
         // Moscow with Latin prefix
         let_assert(auto m = str("se \xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0")
-                                .utf8_case_insensitive_find("se \xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
+                                .utf8_uncased_find("se \xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0"),
                    m.offset == 0 && m.length == 15);
 
         // All Cyrillic uppercase vs lowercase
         let_assert(auto m = str("\xD0\x90\xD0\x91\xD0\x92")                              // АБВ
-                                .utf8_case_insensitive_find("\xD0\xB0\xD0\xB1\xD0\xB2"), // абв
+                                .utf8_uncased_find("\xD0\xB0\xD0\xB1\xD0\xB2"), // абв
                    m.offset == 0 && m.length == 6);
 
         // Mixed: ПРИВЕТ vs привет
         let_assert(
             auto m = str("\xD0\x9F\xD0\xA0\xD0\x98\xD0\x92\xD0\x95\xD0\xA2")                              // ПРИВЕТ
-                         .utf8_case_insensitive_find("\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82"), // привет
+                         .utf8_uncased_find("\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82"), // привет
             m.offset == 0 && m.length == 12);
     }
 
@@ -4485,27 +4594,27 @@ void test_utf8_case() {
     // ﬁ should case-fold to "fi"
     {
         // Simple: ﬁ vs fi
-        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_case_insensitive_find("find"),
+        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_uncased_find("find"),
                    m.offset == 0 && m.length == 5);
 
         // With uppercase: ﬁ vs FI
-        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_case_insensitive_find("FInd"),
+        let_assert(auto m = str("\xEF\xAC\x81" "nd").utf8_uncased_find("FInd"),
                    m.offset == 0 && m.length == 5);
 
         // ff ligature: ﬀ (EF AC 80) vs ff
-        let_assert(auto m = str("\xEF\xAC\x80" "oo").utf8_case_insensitive_find("ffoo"),
+        let_assert(auto m = str("\xEF\xAC\x80" "oo").utf8_uncased_find("ffoo"),
                    m.offset == 0 && m.length == 5);
 
         // ffi ligature: ﬃ (EF AC 83) vs ffi
-        let_assert(auto m = str("\xEF\xAC\x83" "ce").utf8_case_insensitive_find("ffice"),
+        let_assert(auto m = str("\xEF\xAC\x83" "ce").utf8_uncased_find("ffice"),
                    m.offset == 0 && m.length == 5);
 
         // fl ligature: ﬂ (EF AC 82) vs fl
-        let_assert(auto m = str("\xEF\xAC\x82" "oor").utf8_case_insensitive_find("floor"),
+        let_assert(auto m = str("\xEF\xAC\x82" "oor").utf8_uncased_find("floor"),
                    m.offset == 0 && m.length == 6);
 
         // ffl ligature: ﬄ (EF AC 84) vs ffl
-        let_assert(auto m = str("wa\xEF\xAC\x84" "e").utf8_case_insensitive_find("waffle"),
+        let_assert(auto m = str("wa\xEF\xAC\x84" "e").utf8_uncased_find("waffle"),
                    m.offset == 0 && m.length == 6);
     }
 
@@ -4517,11 +4626,11 @@ void test_utf8_case() {
         // Precomposed ǰ vs decomposed j+caron
         // If normalization is performed, these should match
         // If not, they won't match (current behavior TBD)
-        let_assert(auto m = str("\xC7\xB0" "ump").utf8_case_insensitive_find("j\xCC\x8C" "ump"),
+        let_assert(auto m = str("\xC7\xB0" "ump").utf8_uncased_find("j\xCC\x8C" "ump"),
                    m.offset == 0 && m.length == 5);
 
         // é precomposed (C3 A9) vs e+acute (65 CC 81)
-        let_assert(auto m = str("\xC3\xA9" "lan").utf8_case_insensitive_find("e\xCC\x81" "lan"), m.offset == str::npos);
+        let_assert(auto m = str("\xC3\xA9" "lan").utf8_uncased_find("e\xCC\x81" "lan"), m.offset == str::npos);
     }
 
     // Pattern 12: Mixed script verification (seeds 456, 789, 22222, Kernels 3, 5, 6)
@@ -4529,20 +4638,20 @@ void test_utf8_case() {
     {
         // Greek κόσμ mixed with Latin
         let_assert(
-            auto m = str("brown \xCE\xBA\xCF\x8C\xCF\x83 end").utf8_case_insensitive_find("\xCE\xBA\xCF\x8C\xCF\x83"),
+            auto m = str("brown \xCE\xBA\xCF\x8C\xCF\x83 end").utf8_uncased_find("\xCE\xBA\xCF\x8C\xCF\x83"),
             m.offset == 6 && m.length == 6);
 
         // Greek sigma case: Σ (CE A3) vs σ (CF 83) vs ς (CF 82 - final sigma)
-        let_assert(auto m = str("\xCE\xA3\xCE\xB5").utf8_case_insensitive_find("\xCF\x83\xCE\xB5"),
+        let_assert(auto m = str("\xCE\xA3\xCE\xB5").utf8_uncased_find("\xCF\x83\xCE\xB5"),
                    m.offset == 0 && m.length == 4);
 
         // Armenian + Latin mixed
         let_assert(auto m = str("test \xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE world")
-                                .utf8_case_insensitive_find("\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE"),
+                                .utf8_uncased_find("\xD5\xA2\xD5\xA1\xD6\x80\xD5\xA5\xD5\xBE"),
                    m.offset == 5 && m.length == 10);
 
         // Armenian ligature: և (D6 87 - U+0587) vs ե+ւ (D5 A5 D6 82)
-        let_assert(auto m = str("\xD6\x87" "nd").utf8_case_insensitive_find("\xD5\xA5\xD6\x82" "nd"),
+        let_assert(auto m = str("\xD6\x87" "nd").utf8_uncased_find("\xD5\xA5\xD6\x82" "nd"),
                    m.offset == 0 && m.length == 4);
     }
 }
@@ -4920,7 +5029,7 @@ static sz_size_t sort_sequence_get_length_(void const *handle, sz_sorted_idx_t i
 /**
  *  @brief Demands a SIMD sort backend produce results identical to the serial backend, across many inputs.
  *
- *  Both the byte and case-insensitive arg-sorts are @b stable, so for any input the permutation is unique -
+ *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique -
  *  the SIMD and serial `order` arrays must match exactly across ascending, descending, and top-K modes. The
  *  pgram integer sort is not stable, so only the @b sorted key arrays are compared (equal keys may tie-break
  *  differently between backends), with the permutation checked for validity.
@@ -4929,7 +5038,7 @@ static sz_size_t sort_sequence_get_length_(void const *handle, sz_sorted_idx_t i
  */
 void test_sort_backend_equivalence(                      //
     sz_sequence_argsort_t argsort_simd,                  //
-    sz_sequence_argsort_t argsort_case_insensitive_simd, //
+    sz_sequence_argsort_t argsort_uncased_simd, //
     sz_pgrams_sort_t pgrams_sort_simd) {
 
     using strs_t = std::vector<std::string>;
@@ -4946,7 +5055,7 @@ void test_sort_backend_equivalence(                      //
         for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::scripts::random_string(6 + i % 40, "abc", 3));
         datasets.push_back(varied);
     }
-    { // Deterministic mixed-case / multi-script set so the case-insensitive path sees real folds.
+    { // Deterministic mixed-case / multi-script set so the uncased path sees real folds.
         char const *seed[] = {"Apple",   "apple",  "BANANA", "banana", "Straße",
                               "STRASSE", "Привет", "ПРИВЕТ", "Ab",     "aB"};
         strs_t mixed;
@@ -4975,11 +5084,11 @@ void test_sort_backend_equivalence(                      //
                 for (std::size_t i = 0; i < head; ++i)
                     assert(order_serial[i] == order_simd[i] && "SIMD byte arg-sort disagrees with serial");
 
-                // Case-insensitive arg-sort: also stable, same exact-match requirement.
-                sz_sequence_argsort_utf8_case_insensitive_serial(&sequence, nullptr, order_serial.data(), top, reverse);
-                argsort_case_insensitive_simd(&sequence, nullptr, order_simd.data(), top, reverse);
+                // Uncased arg-sort: also stable, same exact-match requirement.
+                sz_sequence_argsort_utf8_uncased_serial(&sequence, nullptr, order_serial.data(), top, reverse);
+                argsort_uncased_simd(&sequence, nullptr, order_simd.data(), top, reverse);
                 for (std::size_t i = 0; i < head; ++i)
-                    assert(order_serial[i] == order_simd[i] && "SIMD case-insensitive arg-sort disagrees with serial");
+                    assert(order_serial[i] == order_simd[i] && "SIMD uncased arg-sort disagrees with serial");
             }
         }
     }
@@ -5001,23 +5110,23 @@ void test_sort_backend_equivalence(                      //
 /** @brief Runs `test_sort_backend_equivalence` for every SIMD sort backend the build enables. */
 void test_sort_backends() {
 #if SZ_USE_HASWELL
-    test_sort_backend_equivalence(sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_case_insensitive_haswell,
+    test_sort_backend_equivalence(sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_uncased_haswell,
                                   sz_pgrams_sort_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    test_sort_backend_equivalence(sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_case_insensitive_skylake,
+    test_sort_backend_equivalence(sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_uncased_skylake,
                                   sz_pgrams_sort_skylake);
 #endif
 #if SZ_USE_SVE
-    test_sort_backend_equivalence(sz_sequence_argsort_sve, sz_sequence_argsort_utf8_case_insensitive_sve,
+    test_sort_backend_equivalence(sz_sequence_argsort_sve, sz_sequence_argsort_utf8_uncased_sve,
                                   sz_pgrams_sort_sve);
 #endif
 #if SZ_USE_NEON
-    test_sort_backend_equivalence(sz_sequence_argsort_neon, sz_sequence_argsort_utf8_case_insensitive_neon,
+    test_sort_backend_equivalence(sz_sequence_argsort_neon, sz_sequence_argsort_utf8_uncased_neon,
                                   sz_pgrams_sort_neon);
 #endif
 #if SZ_USE_RVV
-    test_sort_backend_equivalence(sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_case_insensitive_rvv,
+    test_sort_backend_equivalence(sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_uncased_rvv,
                                   sz_pgrams_sort_rvv);
 #endif
 }
@@ -5123,7 +5232,7 @@ void test_sorting_algorithms() {
         }
     }
 
-    // Stability, reverse, top-K, and case-insensitive coverage against `std::stable_sort` references.
+    // Stability, reverse, top-K, and uncased coverage against `std::stable_sort` references.
     auto compare_bytes = [](std::string const &a, std::string const &b) -> int {
         std::size_t const min_length = a.size() < b.size() ? a.size() : b.size();
         for (std::size_t i = 0; i < min_length; ++i) {
@@ -5134,7 +5243,7 @@ void test_sorting_algorithms() {
     };
     auto fold_string = [](std::string const &s) -> std::string {
         std::vector<char> destination(s.size() * 3 + 4);
-        std::size_t const folded_length = sz_utf8_case_fold(s.data(), s.size(), destination.data());
+        std::size_t const folded_length = sz_utf8_uncased_fold(s.data(), s.size(), destination.data());
         return std::string(destination.data(), folded_length);
     };
 
@@ -5183,11 +5292,11 @@ void test_sorting_algorithms() {
         }
     }
 
-    // Case-insensitive sort must match folding every string then byte-stable-sorting.
+    // Uncased sort must match folding every string then byte-stable-sorting.
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
-    assert(sz::argsort_utf8_case_insensitive(mixed) == reference_order(folded, false));
-    assert(sz::argsort_utf8_case_insensitive(mixed, 0, true) == reference_order(folded, true));
+    assert(sz::argsort_utf8_uncased(mixed) == reference_order(folded, false));
+    assert(sz::argsort_utf8_uncased(mixed, 0, true) == reference_order(folded, true));
 }
 
 /**
@@ -5366,7 +5475,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_search", test_search);
     failures += run_test("test_utf8", test_utf8);
     failures += run_test("test_utf8_words", test_utf8_words);
-    failures += run_test("test_utf8_case", test_utf8_case);
+    failures += run_test("test_utf8_uncased", test_utf8_uncased);
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.
     std::printf("- test_search_with_misaligned_repetitions...\n");

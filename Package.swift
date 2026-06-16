@@ -31,8 +31,8 @@ let package = Package(
                 "../c/stringzilla/intersect.c",
                 "../c/stringzilla/utf8_norm.c",
                 "../c/stringzilla/utf8_iterate.c",
-                "../c/stringzilla/utf8_case_fold.c",
-                "../c/stringzilla/utf8_case_insensitive.c",
+                "../c/stringzilla/utf8_uncased_fold.c",
+                "../c/stringzilla/utf8_uncased.c",
             ],
             // `include/` is the module header root, so the `module.modulemap` umbrella and the
             // `#include "stringzilla/<...>.h"` chain resolve exactly as in the CMake/Rust/Python builds (`-I include`).

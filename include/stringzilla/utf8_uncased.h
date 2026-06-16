@@ -1,14 +1,14 @@
 /**
- *  @brief Case-insensitive UTF-8 substring search, comparison & case-invariance checks.
- *  @file include/stringzilla/utf8_case_insensitive.h
+ *  @brief Uncased UTF-8 substring search, comparison & case-invariance checks.
+ *  @file include/stringzilla/utf8_uncased.h
  *  @author Ash Vardanian
- *  @sa include/stringzilla/utf8_case_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold.h
  *
  *  Public Core API:
  *
- *  - `sz_utf8_case_insensitive_find` - case-insensitive substring search in UTF-8 strings
- *  - `sz_utf8_case_insensitive_order` - case-insensitive lexicographical comparison of UTF-8 strings
- *  - `sz_utf8_case_invariant` - check if a string contains only case-agnostic (caseless) codepoints
+ *  - `sz_utf8_uncased_find` - uncased substring search in UTF-8 strings
+ *  - `sz_utf8_uncased_order` - uncased lexicographical comparison of UTF-8 strings
+ *  - `sz_utf8_uncased_violation` - pointer to the first cased (foldable) codepoint, or NULL if fully caseless
  *
  *  All comparison and matching uses full Unicode Case Folding (UAX #21 / CaseFolding.txt), including
  *  one-to-many expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)). Folding is
@@ -16,10 +16,10 @@
  *
  *  On fast vectorized paths there may be significant algorithmic differences between ISA versions;
  *  the per-script SIMD kernels (Ice Lake, ...) consume needle metadata produced by the ISA-agnostic
- *  classifier in `utf8_case_insensitive/serial.h`.
+ *  classifier in `utf8_uncased/serial.h`.
  */
-#ifndef STRINGZILLA_UTF8_CASE_INSENSITIVE_H_
-#define STRINGZILLA_UTF8_CASE_INSENSITIVE_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_H_
+#define STRINGZILLA_UTF8_UNCASED_H_
 
 #include "stringzilla/utf8_runes.h"
 
@@ -30,10 +30,10 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Case-insensitive lexicographic comparison of two UTF-8 strings.
+ *  @brief Uncased lexicographic comparison of two UTF-8 strings.
  *
  *  Compares strings using Unicode case folding rules, producing consistent ordering regardless of
- *  letter case. Implements the same full Unicode Case Folding as `sz_utf8_case_fold`, including
+ *  letter case. Implements the same full Unicode Case Folding as `sz_utf8_uncased_fold`, including
  *  all one-to-many expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) and bicameral script mappings.
  *
  *  Unlike simple byte comparison, this function correctly handles multi-byte UTF-8 sequences
@@ -50,14 +50,14 @@ extern "C" {
  *
  *  @example Basic usage:
  *  @code
- *      sz_ordering_t result = sz_utf8_case_insensitive_order("Hello", 5, "HELLO", 5);
+ *      sz_ordering_t result = sz_utf8_uncased_order("Hello", 5, "HELLO", 5);
  *      // result == sz_equal_k
  *
- *      result = sz_utf8_case_insensitive_order("straße", 7, "STRASSE", 7);
+ *      result = sz_utf8_uncased_order("straße", 7, "STRASSE", 7);
  *      // result == sz_equal_k ('ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73))
  *  @endcode
  */
-SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+SZ_DYNAMIC sz_ordering_t sz_utf8_uncased_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                         sz_size_t b_length);
 
 /**
@@ -77,11 +77,11 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *  Case-agnostic scripts include: CJK ideographs, Hangul, digits, punctuation, most symbols,
  *  Hebrew, Arabic, Thai, Hindi (Devanagari), and many other scripts without case distinctions.
  *
- *  @section utf8_case_agnostic_usage Use Case
+ *  @section utf8_uncased_agnostic_usage Use Case
  *
  *  This function enables an important optimization: if both haystack and needle are fully
  *  case-agnostic, then `sz_find()` can be used directly instead of the slower
- *  `sz_utf8_case_insensitive_find()`. This is particularly valuable for:
+ *  `sz_utf8_uncased_find()`. This is particularly valuable for:
  *
  *  - CJK text (Chinese, Japanese, Korean) - always caseless
  *  - Numeric data and punctuation-heavy content
@@ -97,13 +97,13 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *      sz_cptr_t haystack = "价格：¥1234";  // Chinese + punctuation + digits
  *      sz_cptr_t needle = "¥1234";
  *
- *      if (sz_utf8_case_invariant(haystack, haystack_len) &&
- *          sz_utf8_case_invariant(needle, needle_len)) {
- *          // Fast path: use binary search
+ *      if (sz_utf8_uncased_violation(haystack, haystack_len) == SZ_NULL_CHAR &&
+ *          sz_utf8_uncased_violation(needle, needle_len) == SZ_NULL_CHAR) {
+ *          // Fast path: both strings are fully caseless, so use binary search
  *          result = sz_find(haystack, haystack_len, needle, needle_len);
  *      } else {
- *          // Slow path: full case-insensitive search
- *          result = sz_utf8_case_insensitive_find(haystack, haystack_len,
+ *          // Slow path: full uncased search
+ *          result = sz_utf8_uncased_find(haystack, haystack_len,
  *                                                  needle, needle_len, &match_len);
  *      }
  *  @endcode
@@ -112,46 +112,46 @@ SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a
  *        participates in case folding, even if the specific instance wouldn't change.
  *        For example, lowercase 'a' returns false because it's a case-folding target.
  */
-SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length);
+SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_violation(sz_cptr_t str, sz_size_t length);
 
-/** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_serial( //
+/** @copydoc sz_utf8_uncased_order */
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_serial( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_invariant */
-SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_serial(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_uncased_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_serial(sz_cptr_t str, sz_size_t length);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_icelake( //
+/** @copydoc sz_utf8_uncased_order */
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_icelake( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_invariant */
-SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_icelake(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_uncased_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_icelake(sz_cptr_t str, sz_size_t length);
 #endif
 
 #if SZ_USE_HASWELL
-/** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_haswell( //
+/** @copydoc sz_utf8_uncased_order */
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_haswell( //
     sz_cptr_t a, sz_size_t a_length,                            //
     sz_cptr_t b, sz_size_t b_length);
-/** @copydoc sz_utf8_case_invariant */
-SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_haswell(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_uncased_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_haswell(sz_cptr_t str, sz_size_t length);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_utf8_case_insensitive_order */
-SZ_PUBLIC sz_ordering_t sz_utf8_case_insensitive_order_neon( //
+/** @copydoc sz_utf8_uncased_order */
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_neon( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
-/** @copydoc sz_utf8_case_invariant */
-SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length);
+/** @copydoc sz_utf8_uncased_violation */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_neon(sz_cptr_t str, sz_size_t length);
 #endif
 
 #pragma region Declarations
 
 /**
- *  @brief Case-insensitive substring search in UTF-8 strings.
+ *  @brief Uncased substring search in UTF-8 strings.
  *
  *  In applications where the haystack remains largely static and memory/storage is cheap, it is recommended
  *  to pre-process the haystack into a case-folded version using Unicode Case Folding (e.g., via the ICU
@@ -191,9 +191,9 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
  *  Folding is applied during matching without rewriting the entire haystack. Multi-codepoint expansions,
  *  contextual folds, and combining-mark adjustments are handled at comparison time.
  *
- *  @section utf8_case_insensitive_find_algo Algorithmic Considerations
+ *  @section utf8_uncased_find_algo Algorithmic Considerations
  *
- *  Case-insensitive search with full Unicode case folding is fundamentally harder than byte-level search
+ *  Uncased search with full Unicode case folding is fundamentally harder than byte-level search
  *  because one-to-many expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) break core
  *  assumptions of fast string algorithms:
  *
@@ -220,7 +220,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
  *  @see https://arxiv.org/abs/2306.10714
  *       Efficient Parameterized Pattern Matching in Sublinear Space
  *  @see https://github.com/uni-algo/uni-algo
- *       uni-algo - Unicode algorithms implementation with case-insensitive search
+ *       uni-algo - Unicode algorithms implementation with uncased search
  *
  *  @param haystack UTF-8 string to be searched.
  *  @param haystack_length Number of bytes in the haystack buffer.
@@ -229,39 +229,39 @@ SZ_PUBLIC sz_bool_t sz_utf8_case_invariant_neon(sz_cptr_t str, sz_size_t length)
  *  @param matched_length Number of bytes in the matched region.
  *  @return Pointer to the first matching substring from @p haystack, or @c SZ_NULL_CHAR if not found.
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find( //
+SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_find( //
     sz_cptr_t haystack, sz_size_t haystack_length,  //
     sz_cptr_t needle, sz_size_t needle_length,      //
-    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 
-/** @copydoc sz_utf8_case_insensitive_find */
-SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_serial( //
+/** @copydoc sz_utf8_uncased_find */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length,        //
     sz_cptr_t needle, sz_size_t needle_length,            //
-    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_case_insensitive_find */
-SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_icelake( //
+/** @copydoc sz_utf8_uncased_find */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_icelake( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //
     sz_cptr_t needle, sz_size_t needle_length,             //
-    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
 #if SZ_USE_HASWELL
-/** @copydoc sz_utf8_case_insensitive_find */
-SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_haswell( //
+/** @copydoc sz_utf8_uncased_find */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_haswell( //
     sz_cptr_t haystack, sz_size_t haystack_length,         //
     sz_cptr_t needle, sz_size_t needle_length,             //
-    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_utf8_case_insensitive_find */
-SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
+/** @copydoc sz_utf8_uncased_find */
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_neon( //
     sz_cptr_t haystack, sz_size_t haystack_length,      //
     sz_cptr_t needle, sz_size_t needle_length,          //
-    sz_utf8_case_insensitive_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
 #pragma endregion // Core API
@@ -269,74 +269,74 @@ SZ_PUBLIC sz_cptr_t sz_utf8_case_insensitive_find_neon( //
 /*  Backends in serial-first order: every SIMD/ISA header includes `serial.h` for the shared
  *  scaffolding (verify helpers, hash-free finders, Rabin-Karp serial search, the safety classifier
  *  and needle-metadata builder), then layers its own kernels (or delegates back to serial). */
-#include "stringzilla/utf8_case_insensitive/serial.h"
-#include "stringzilla/utf8_case_insensitive/icelake.h"
-#include "stringzilla/utf8_case_insensitive/haswell.h"
-#include "stringzilla/utf8_case_insensitive/neon.h"
-#include "stringzilla/utf8_case_insensitive/v128.h"
-#include "stringzilla/utf8_case_insensitive/rvv.h"
-#include "stringzilla/utf8_case_insensitive/lasx.h"
-#include "stringzilla/utf8_case_insensitive/powervsx.h"
+#include "stringzilla/utf8_uncased/serial.h"
+#include "stringzilla/utf8_uncased/icelake.h"
+#include "stringzilla/utf8_uncased/haswell.h"
+#include "stringzilla/utf8_uncased/neon.h"
+#include "stringzilla/utf8_uncased/v128.h"
+#include "stringzilla/utf8_uncased/rvv.h"
+#include "stringzilla/utf8_uncased/lasx.h"
+#include "stringzilla/utf8_uncased/powervsx.h"
 
-/*  Pick the right implementation for the case-insensitive UTF-8 algorithms.
+/*  Pick the right implementation for the uncased UTF-8 algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_case_insensitive_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                    sz_size_t needle_length,
-                                                   sz_utf8_case_insensitive_needle_metadata_t *needle_metadata,
+                                                   sz_utf8_uncased_needle_metadata_t *needle_metadata,
                                                    sz_size_t *matched_length) {
 #if SZ_USE_V128
-    return sz_utf8_case_insensitive_find_v128(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_v128(haystack, haystack_length, needle, needle_length, needle_metadata,
                                               matched_length);
 #elif SZ_USE_RVV
-    return sz_utf8_case_insensitive_find_rvv(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_rvv(haystack, haystack_length, needle, needle_length, needle_metadata,
                                              matched_length);
 #elif SZ_USE_LASX
-    return sz_utf8_case_insensitive_find_lasx(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_lasx(haystack, haystack_length, needle, needle_length, needle_metadata,
                                               matched_length);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_case_insensitive_find_powervsx(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_powervsx(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                   matched_length);
 #elif SZ_USE_ICELAKE
-    return sz_utf8_case_insensitive_find_icelake(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_icelake(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                  matched_length);
 #elif SZ_USE_HASWELL
-    return sz_utf8_case_insensitive_find_haswell(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_haswell(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                  matched_length);
 #elif SZ_USE_NEON
-    return sz_utf8_case_insensitive_find_neon(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_neon(haystack, haystack_length, needle, needle_length, needle_metadata,
                                               matched_length);
 #else
-    return sz_utf8_case_insensitive_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+    return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
                                                 matched_length);
 #endif
 }
 
-SZ_DYNAMIC sz_ordering_t sz_utf8_case_insensitive_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+SZ_DYNAMIC sz_ordering_t sz_utf8_uncased_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                         sz_size_t b_length) {
-    return sz_utf8_case_insensitive_order_serial(a, a_length, b, b_length);
+    return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 
-SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
+SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_violation(sz_cptr_t str, sz_size_t length) {
 #if SZ_USE_V128
-    return sz_utf8_case_invariant_v128(str, length);
+    return sz_utf8_uncased_violation_v128(str, length);
 #elif SZ_USE_RVV
-    return sz_utf8_case_invariant_rvv(str, length);
+    return sz_utf8_uncased_violation_rvv(str, length);
 #elif SZ_USE_LASX
-    return sz_utf8_case_invariant_lasx(str, length);
+    return sz_utf8_uncased_violation_lasx(str, length);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_case_invariant_powervsx(str, length);
+    return sz_utf8_uncased_violation_powervsx(str, length);
 #elif SZ_USE_ICELAKE
-    return sz_utf8_case_invariant_icelake(str, length);
+    return sz_utf8_uncased_violation_icelake(str, length);
 #elif SZ_USE_HASWELL
-    return sz_utf8_case_invariant_haswell(str, length);
+    return sz_utf8_uncased_violation_haswell(str, length);
 #elif SZ_USE_NEON
-    return sz_utf8_case_invariant_neon(str, length);
+    return sz_utf8_uncased_violation_neon(str, length);
 #else
-    return sz_utf8_case_invariant_serial(str, length);
+    return sz_utf8_uncased_violation_serial(str, length);
 #endif
 }
 
@@ -347,4 +347,4 @@ SZ_DYNAMIC sz_bool_t sz_utf8_case_invariant(sz_cptr_t str, sz_size_t length) {
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_INSENSITIVE_H_
+#endif // STRINGZILLA_UTF8_UNCASED_H_

@@ -113,7 +113,7 @@ static PyTypeObject SplitIteratorType;
 static PyTypeObject Utf8SplitLinesIteratorType;
 static PyTypeObject Utf8SplitWhitespaceIteratorType;
 static PyTypeObject Utf8WordBoundaryIteratorType;
-static PyTypeObject Utf8CaseInsensitiveFindIteratorType;
+static PyTypeObject Utf8UncasedFindIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -287,8 +287,8 @@ typedef struct {
 } Utf8WordBoundaryIterator;
 
 /**
- *  @brief  Iterator that yields all case-insensitive matches of a needle in a haystack.
- *          Uses `sz_utf8_case_insensitive_find` for Unicode-aware case folding.
+ *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
+ *          Uses `sz_utf8_uncased_find` for Unicode-aware case folding.
  */
 typedef struct {
     PyObject ob_base;
@@ -302,12 +302,12 @@ typedef struct {
     sz_string_view_t needle; //< Needle view (bytes and length)
 
     /// @brief  Reusable metadata for repeated searches with the same needle.
-    sz_utf8_case_insensitive_needle_metadata_t metadata;
+    sz_utf8_uncased_needle_metadata_t metadata;
 
     /// @brief  Whether to allow overlapping matches.
     sz_bool_t include_overlapping;
 
-} Utf8CaseInsensitiveFindIterator;
+} Utf8UncasedFindIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -3620,10 +3620,10 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
     }
 }
 
-static char const doc_utf8_case_fold[] =                                                //
+static char const doc_utf8_uncased_fold[] =                                                //
     "Apply Unicode case folding to a UTF-8 string.\n"                                   //
     "\n"                                                                                //
-    "Case folding normalizes text for case-insensitive comparisons,\n"                  //
+    "Case folding normalizes text for uncased comparisons,\n"                  //
     "handling one-to-many expansions (e.g., German sharp S to 'ss').\n"                 //
     "\n"                                                                                //
     "Args:\n"                                                                           //
@@ -3634,19 +3634,19 @@ static char const doc_utf8_case_fold[] =                                        
     "    bytes: The case-folded UTF-8 string.\n"                                        //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_case_fold('HELLO')\n"                                              //
+    "    >>> sz.utf8_uncased_fold('HELLO')\n"                                              //
     "    b'hello'\n"                                                                    //
-    "    >>> sz.utf8_case_fold('Stra\\u00dfe')  # German sharp S\n"                     //
+    "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                     //
     "    b'strasse'";
 
-static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+static PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
     int validate = 0;                       // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_fold() takes exactly %zd positional argument(s)", nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_uncased_fold() takes exactly %zd positional argument(s)", nargs_expected);
         return NULL;
     }
 
@@ -3661,7 +3661,7 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
                 if (validate < 0) return NULL;
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_case_fold() got unexpected keyword argument '%U'", key);
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_fold() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
@@ -3692,7 +3692,7 @@ static PyObject *Str_like_utf8_case_fold(PyObject *self, PyObject *const *args, 
     }
 
     sz_ptr_t destination = (sz_ptr_t)PyBytes_AS_STRING(result_bytes);
-    sz_size_t actual_length = sz_utf8_case_fold(str.start, str.length, destination);
+    sz_size_t actual_length = sz_utf8_uncased_fold(str.start, str.length, destination);
 
     // Resize to actual length if smaller than allocated
     if (actual_length < max_result_length) {
@@ -3920,10 +3920,10 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     return PyLong_FromSize_t(offset);
 }
 
-static char const doc_utf8_case_insensitive_find[] =                                           //
-    "Find substring using Unicode case-insensitive matching.\n"                                //
+static char const doc_utf8_uncased_find[] =                                           //
+    "Find substring using Unicode uncased matching.\n"                                //
     "\n"                                                                                       //
-    "Performs a case-insensitive search using Unicode case folding rules,\n"                   //
+    "Performs a uncased search using Unicode case folding rules,\n"                   //
     "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"                    //
     "\n"                                                                                       //
     "IMPORTANT - Type-dependent behavior:\n"                                                   //
@@ -3941,14 +3941,14 @@ static char const doc_utf8_case_insensitive_find[] =                            
     "    int: Index of the first match, or -1 if not found.\n"                                 //
     "\n"                                                                                       //
     "Example:\n"                                                                               //
-    "    >>> sz.utf8_case_insensitive_find('Hello World', 'WORLD')  # str: codepoint offset\n" //
+    "    >>> sz.utf8_uncased_find('Hello World', 'WORLD')  # str: codepoint offset\n" //
     "    6\n"                                                                                  //
-    "    >>> sz.utf8_case_insensitive_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
+    "    >>> sz.utf8_uncased_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
     "    0\n"                                                                                  //
-    "    >>> sz.utf8_case_insensitive_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
+    "    >>> sz.utf8_uncased_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
     "    0";
 
-static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *const *args,
+static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *args,
                                                      Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
@@ -4008,7 +4008,7 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
             if (validate < 0) return NULL;
         }
         else {
-            PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find() got unexpected keyword argument '%U'", key);
+            PyErr_Format(PyExc_TypeError, "utf8_uncased_find() got unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
@@ -4106,8 +4106,8 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
     }
 
     sz_size_t matched_length = 0;
-    sz_utf8_case_insensitive_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
-    sz_cptr_t result = sz_utf8_case_insensitive_find(haystack.start, haystack.length, needle.start, needle.length,
+    sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
+    sz_cptr_t result = sz_utf8_uncased_find(haystack.start, haystack.length, needle.start, needle.length,
                                                      &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
@@ -4126,8 +4126,8 @@ static PyObject *Str_like_utf8_case_insensitive_find(PyObject *self, PyObject *c
     }
 }
 
-static char const doc_utf8_case_insensitive_order[] =                                   //
-    "Compare two UTF-8 strings case-insensitively.\n"                                   //
+static char const doc_utf8_uncased_order[] =                                   //
+    "Compare two UTF-8 strings uncasedly.\n"                                   //
     "\n"                                                                                //
     "Performs lexicographical comparison using Unicode case folding,\n"                 //
     "correctly handling one-to-many expansions (e.g., 'Straße' equals 'STRASSE').\n"    //
@@ -4141,19 +4141,19 @@ static char const doc_utf8_case_insensitive_order[] =                           
     "    int: Negative if a < b, zero if equal, positive if a > b.\n"                   //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_case_insensitive_order('hello', 'HELLO')\n"                        //
+    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                        //
     "    0\n"                                                                           //
-    "    >>> sz.utf8_case_insensitive_order('apple', 'BANANA')\n"                       //
+    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                       //
     "    -1";
 
-static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *const *args,
+static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args,
                                                       Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
     int validate = 0;                              // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() takes exactly %zd positional argument(s)",
+        PyErr_Format(PyExc_TypeError, "utf8_uncased_order() takes exactly %zd positional argument(s)",
                      nargs_expected);
         return NULL;
     }
@@ -4169,7 +4169,7 @@ static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *
                 if (validate < 0) return NULL;
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_order() got unexpected keyword argument '%U'",
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_order() got unexpected keyword argument '%U'",
                              key);
                 return NULL;
             }
@@ -4201,7 +4201,7 @@ static PyObject *Str_like_utf8_case_insensitive_order(PyObject *self, PyObject *
         }
     }
 
-    sz_ordering_t order = sz_utf8_case_insensitive_order(a.start, a.length, b.start, b.length);
+    sz_ordering_t order = sz_utf8_uncased_order(a.start, a.length, b.start, b.length);
     return PyLong_FromLong((long)order);
 }
 
@@ -5277,10 +5277,10 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_case_insensitive_find_iter[] =                                    //
-    "utf8_case_insensitive_find_iter(haystack, needle, /, include_overlapping=False)\n"      //
+static char const doc_utf8_uncased_find_iter[] =                                    //
+    "utf8_uncased_find_iter(haystack, needle, /, include_overlapping=False)\n"      //
     "\n"                                                                                     //
-    "Iterate over all case-insensitive matches of needle in haystack.\n"                     //
+    "Iterate over all uncased matches of needle in haystack.\n"                     //
     "\n"                                                                                     //
     "This function uses Unicode case folding for proper handling of\n"                       //
     "international text. The matched region length may differ from the\n"                    //
@@ -5295,12 +5295,12 @@ static char const doc_utf8_case_insensitive_find_iter[] =                       
     "    Str: Each matched region as a view into the original haystack.\n"                   //
     "\n"                                                                                     //
     "Examples:\n"                                                                            //
-    "    >>> list(sz.utf8_case_insensitive_find_iter('Hello HELLO hello', 'hello'))\n"       //
+    "    >>> list(sz.utf8_uncased_find_iter('Hello HELLO hello', 'hello'))\n"       //
     "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                              //
-    "    >>> list(sz.utf8_case_insensitive_find_iter('Straße STRASSE', 'strasse'))\n"        //
+    "    >>> list(sz.utf8_uncased_find_iter('Straße STRASSE', 'strasse'))\n"        //
     "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
-static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObject *const *args,
+static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const *args,
                                                           Py_ssize_t positional_args_count, PyObject *kwnames) {
     // Check if called as member or module function
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -5309,7 +5309,7 @@ static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObje
 
     if (positional_args_count < min_args || positional_args_count > max_args) {
         PyErr_Format(PyExc_TypeError,
-                     "utf8_case_insensitive_find_iter() requires %d to %d positional arguments, got %zd", min_args,
+                     "utf8_uncased_find_iter() requires %d to %d positional arguments, got %zd", min_args,
                      max_args, positional_args_count);
         return NULL;
     }
@@ -5328,7 +5328,7 @@ static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObje
                 include_overlapping = PyObject_IsTrue(value);
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_case_insensitive_find_iter() got unexpected keyword argument '%U'",
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() got unexpected keyword argument '%U'",
                              key);
                 return NULL;
             }
@@ -5348,8 +5348,8 @@ static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObje
     // Handle edge case: empty needle yields nothing
     if (needle_view.length == 0) {
         // Return an empty iterator by setting current = end
-        Utf8CaseInsensitiveFindIterator *iter = PyObject_New(Utf8CaseInsensitiveFindIterator,
-                                                             &Utf8CaseInsensitiveFindIteratorType);
+        Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator,
+                                                             &Utf8UncasedFindIteratorType);
         if (!iter) return PyErr_NoMemory();
 
         iter->haystack_obj = haystack_obj;
@@ -5366,8 +5366,8 @@ static PyObject *Str_like_utf8_case_insensitive_find_iter(PyObject *self, PyObje
     }
 
     // Allocate iterator
-    Utf8CaseInsensitiveFindIterator *iter = PyObject_New(Utf8CaseInsensitiveFindIterator,
-                                                         &Utf8CaseInsensitiveFindIteratorType);
+    Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator,
+                                                         &Utf8UncasedFindIteratorType);
     if (!iter) return PyErr_NoMemory();
 
     iter->haystack_obj = haystack_obj;
@@ -5876,15 +5876,15 @@ static PyMethodDef Str_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
-    {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_find_iter},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_order},
+    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_find},
+    {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_find_iter},
+    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -6373,14 +6373,14 @@ static PyTypeObject Utf8WordBoundaryIteratorType = {
 
 #pragma region UTF8 Case Insensitive Find Iterator
 
-static PyObject *Utf8CaseInsensitiveFindIteratorType_next(Utf8CaseInsensitiveFindIterator *self) {
+static PyObject *Utf8UncasedFindIteratorType_next(Utf8UncasedFindIterator *self) {
     // Check if we've reached the end
     sz_size_t remaining = (sz_size_t)(self->haystack_end - self->current);
     if (remaining == 0) return NULL;
 
     // Search for next match
     sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_case_insensitive_find(self->current, remaining, self->needle.start, self->needle.length,
+    sz_cptr_t match = sz_utf8_uncased_find(self->current, remaining, self->needle.start, self->needle.length,
                                                     &self->metadata, &matched_length);
 
     if (!match) return NULL;
@@ -6409,44 +6409,44 @@ static PyObject *Utf8CaseInsensitiveFindIteratorType_next(Utf8CaseInsensitiveFin
     return (PyObject *)result_obj;
 }
 
-static void Utf8CaseInsensitiveFindIteratorType_dealloc(Utf8CaseInsensitiveFindIterator *self) {
+static void Utf8UncasedFindIteratorType_dealloc(Utf8UncasedFindIterator *self) {
     Py_XDECREF(self->haystack_obj);
     Py_XDECREF(self->needle_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8CaseInsensitiveFindIteratorType_iter(PyObject *self) {
+static PyObject *Utf8UncasedFindIteratorType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8CaseInsensitiveFindIterator[] =                       //
-    "Utf8CaseInsensitiveFindIterator(haystack, needle, ...)\n"                  //
+static char const doc_Utf8UncasedFindIterator[] =                       //
+    "Utf8UncasedFindIterator(haystack, needle, ...)\n"                  //
     "\n"                                                                        //
-    "Iterator yielding all case-insensitive matches of needle in haystack.\n"   //
+    "Iterator yielding all uncased matches of needle in haystack.\n"   //
     "Uses Unicode case folding for proper handling of international text.\n"    //
     "\n"                                                                        //
     "Created by:\n"                                                             //
-    "  - Str.utf8_case_insensitive_find_iter()\n"                               //
-    "  - sz.utf8_case_insensitive_find_iter()\n"                                //
+    "  - Str.utf8_uncased_find_iter()\n"                               //
+    "  - sz.utf8_uncased_find_iter()\n"                                //
     "\n"                                                                        //
     "Each iteration yields a Str view of the matched region in the haystack.\n" //
     "The matched length may differ from needle length due to case folding\n"    //
     "expansions (e.g., German 'ß' matches 'SS').\n"                             //
     "\n"                                                                        //
     "Example:\n"                                                                //
-    "  >>> len(list(sz.utf8_case_insensitive_find_iter('aAaA', 'a')))\n"        //
+    "  >>> len(list(sz.utf8_uncased_find_iter('aAaA', 'a')))\n"        //
     "  4";
 
-static PyTypeObject Utf8CaseInsensitiveFindIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8CaseInsensitiveFindIterator",
-    .tp_basicsize = sizeof(Utf8CaseInsensitiveFindIterator),
+static PyTypeObject Utf8UncasedFindIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8UncasedFindIterator",
+    .tp_basicsize = sizeof(Utf8UncasedFindIterator),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8CaseInsensitiveFindIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8UncasedFindIteratorType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8CaseInsensitiveFindIterator,
-    .tp_iter = Utf8CaseInsensitiveFindIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8CaseInsensitiveFindIteratorType_next,
+    .tp_doc = doc_Utf8UncasedFindIterator,
+    .tp_iter = Utf8UncasedFindIteratorType_iter,
+    .tp_iternext = (iternextfunc)Utf8UncasedFindIteratorType_next,
 };
 
 #pragma endregion
@@ -6946,29 +6946,29 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
 /**
  *  @brief Parses the shared keyword-only options of `Strs.sorted` and `Strs.argsort`.
  *
- *  Recognizes `reverse` (bool), `case_insensitive` (bool), and `top` (non-negative int or `None`).
+ *  Recognizes `reverse` (bool), `uncased` (bool), and `top` (non-negative int or `None`).
  *  All three are keyword-only, mirroring the builtin `sorted(..., *, reverse=...)`.
  *
  *  @return 0 on success with the outputs populated; -1 on error with a Python exception set.
  */
 static int Strs_parse_sort_options_(char const *method_name, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple, sz_bool_t *reverse_out, sz_bool_t *case_insensitive_out,
+                                    PyObject *args_names_tuple, sz_bool_t *reverse_out, sz_bool_t *uncased_out,
                                     sz_size_t *top_out) {
-    *reverse_out = sz_false_k, *case_insensitive_out = sz_false_k, *top_out = 0;
+    *reverse_out = sz_false_k, *uncased_out = sz_false_k, *top_out = 0;
 
     if (positional_args_count != 0) {
         PyErr_Format(PyExc_TypeError, "%s() takes no positional arguments", method_name);
         return -1;
     }
 
-    PyObject *reverse_obj = NULL, *case_insensitive_obj = NULL, *top_obj = NULL;
+    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL;
     if (args_names_tuple) {
         Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
         for (Py_ssize_t i = 0; i < args_names_count; ++i) {
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "case_insensitive") == 0) { case_insensitive_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%U'", method_name, key);
@@ -6984,12 +6984,12 @@ static int Strs_parse_sort_options_(char const *method_name, PyObject *const *ar
         }
         *reverse_out = (sz_bool_t)(PyObject_IsTrue(reverse_obj) != 0);
     }
-    if (case_insensitive_obj) {
-        if (!PyBool_Check(case_insensitive_obj)) {
-            PyErr_Format(PyExc_TypeError, "%s(): case_insensitive must be a bool", method_name);
+    if (uncased_obj) {
+        if (!PyBool_Check(uncased_obj)) {
+            PyErr_Format(PyExc_TypeError, "%s(): uncased must be a bool", method_name);
             return -1;
         }
-        *case_insensitive_out = (sz_bool_t)(PyObject_IsTrue(case_insensitive_obj) != 0);
+        *uncased_out = (sz_bool_t)(PyObject_IsTrue(uncased_obj) != 0);
     }
     if (top_obj && top_obj != Py_None) {
         if (!PyLong_Check(top_obj)) {
@@ -7008,15 +7008,15 @@ static int Strs_parse_sort_options_(char const *method_name, PyObject *const *ar
 }
 
 /** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
-static sz_status_t Strs_run_argsort_(sz_bool_t case_insensitive, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
+static sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
                                      sz_size_t top, sz_bool_t reverse) {
-    return case_insensitive ? sz_sequence_argsort_utf8_case_insensitive(sequence, NULL, order, top, reverse)
+    return uncased ? sz_sequence_argsort_utf8_uncased(sequence, NULL, order, top, reverse)
                             : sz_sequence_argsort(sequence, NULL, order, top, reverse);
 }
 
 static char const doc_sorted[] =                                                            //
-    "sorted(*, reverse=False, case_insensitive=False, top=None) -> Strs\n"                  //
-    "Return a new, stably sorted Strs. `case_insensitive` orders by Unicode case-folding; " //
+    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                  //
+    "Return a new, stably sorted Strs. `uncased` orders by Unicode case-folding; " //
     "`top=k` returns only the k smallest (or largest, if reversed) elements.\n"             //
     "\n"                                                                                    //
     "Example:\n"                                                                            //
@@ -7025,9 +7025,9 @@ static char const doc_sorted[] =                                                
 
 static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
-    sz_bool_t reverse, case_insensitive;
+    sz_bool_t reverse, uncased;
     sz_size_t top;
-    if (Strs_parse_sort_options_("sorted", args, positional_args_count, args_names_tuple, &reverse, &case_insensitive,
+    if (Strs_parse_sort_options_("sorted", args, positional_args_count, args_names_tuple, &reverse, &uncased,
                                  &top) != 0)
         return NULL;
 
@@ -7094,14 +7094,14 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         return NULL;
     }
 
-    // Call our sorting algorithm (`reverse` and `case_insensitive` are handled natively).
+    // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
     sz_sequence_t sequence;
     sz_fill(&sequence, sizeof(sequence), 0);
     sequence.count = substrings_count;
     sequence.handle = (void *)self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = Strs_run_argsort_(case_insensitive, &sequence, order, top, reverse);
+    sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse);
     sz_unused_(status);
 
     // With `top` set, only the leading `top` elements are ordered, so the result keeps just those.
@@ -7144,8 +7144,8 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 }
 
 static char const doc_argsort[] =                                                                 //
-    "argsort(*, reverse=False, case_insensitive=False, top=None) -> tuple[int, ...]\n"            //
-    "Return the stable permutation of indices that sorts the Strs. `case_insensitive` orders by " //
+    "argsort(*, reverse=False, uncased=False, top=None) -> tuple[int, ...]\n"            //
+    "Return the stable permutation of indices that sorts the Strs. `uncased` orders by " //
     "Unicode case-folding; `top=k` returns only the k leading indices.\n"                         //
     "\n"                                                                                          //
     "Example:\n"                                                                                  //
@@ -7158,9 +7158,9 @@ static char const doc_argsort[] =                                               
  */
 static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
-    sz_bool_t reverse, case_insensitive;
+    sz_bool_t reverse, uncased;
     sz_size_t top;
-    if (Strs_parse_sort_options_("argsort", args, positional_args_count, args_names_tuple, &reverse, &case_insensitive,
+    if (Strs_parse_sort_options_("argsort", args, positional_args_count, args_names_tuple, &reverse, &uncased,
                                  &top) != 0)
         return NULL;
 
@@ -7171,14 +7171,14 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         return NULL;
     }
 
-    // Call our sorting algorithm (`reverse` and `case_insensitive` are handled natively).
+    // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
     sz_sequence_t sequence;
     sz_fill(&sequence, sizeof(sequence), 0);
     sequence.count = count;
     sequence.handle = self;
     sequence.get_start = Strs_get_start_;
     sequence.get_length = Strs_get_length_;
-    sz_status_t status = Strs_run_argsort_(case_insensitive, &sequence, order, top, reverse);
+    sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse);
     sz_unused_(status);
 
     // With `top` set, only the leading `top` indices are ordered, so we expose just those.
@@ -8603,15 +8603,15 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
     {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
     {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
-    {"utf8_case_fold", (PyCFunction)Str_like_utf8_case_fold, SZ_METHOD_FLAGS, doc_utf8_case_fold},
+    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_case_insensitive_find", (PyCFunction)Str_like_utf8_case_insensitive_find, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_find},
-    {"utf8_case_insensitive_find_iter", (PyCFunction)Str_like_utf8_case_insensitive_find_iter, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_find_iter},
-    {"utf8_case_insensitive_order", (PyCFunction)Str_like_utf8_case_insensitive_order, SZ_METHOD_FLAGS,
-     doc_utf8_case_insensitive_order},
+    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_find},
+    {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_find_iter},
+    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS,
+     doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -8657,7 +8657,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
     if (PyType_Ready(&Utf8WordBoundaryIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8CaseInsensitiveFindIteratorType) < 0) return NULL;
+    if (PyType_Ready(&Utf8UncasedFindIteratorType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 

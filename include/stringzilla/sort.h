@@ -15,7 +15,7 @@
  *  The per-backend `sz_pgrams_sort_serial`/`_skylake`/`_sve` helpers expose that integer-sort core for
  *  direct benchmarking, but it is an internal building block - not a runtime-dispatched public API.
  *
- *  Beyond plain byte-lexicographic ordering, `sz_sequence_argsort_utf8_case_insensitive` sorts UTF-8
+ *  Beyond plain byte-lexicographic ordering, `sz_sequence_argsort_utf8_uncased` sorts UTF-8
  *  strings under Unicode case-folding, progressively folding small chunks of each string on the fly so
  *  callers don't have to materialize a pre-folded copy of the whole collection.
  *
@@ -80,13 +80,13 @@ extern "C" {
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_sequence_argsort_serial, sz_sequence_argsort_skylake, sz_sequence_argsort_sve
- *  @sa sz_sequence_argsort_utf8_case_insensitive
+ *  @sa sz_sequence_argsort_utf8_uncased
  */
 SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                            sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /**
- *  @brief Faster @b stable @b case-insensitive arg-sort for a UTF-8 @b string sequence, using QuickSort.
+ *  @brief Faster @b stable @b uncased arg-sort for a UTF-8 @b string sequence, using QuickSort.
  *         Orders strings under Unicode case-folding, equivalent to folding every string and sorting the
  *         folded bytes lexicographically - but folding only small chunks on the fly, never materializing
  *         a fully pre-folded copy of the collection.
@@ -103,10 +103,10 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
  *
  *  @note This algorithm is @b stable: equal (case-folded-equal) elements keep their input order.
- *  @sa sz_utf8_case_fold, sz_utf8_case_insensitive_order
- *  @sa sz_sequence_argsort_utf8_case_insensitive_serial
+ *  @sa sz_utf8_uncased_fold, sz_utf8_uncased_order
+ *  @sa sz_sequence_argsort_utf8_uncased_serial
  */
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
+SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_uncased( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,  //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -114,8 +114,8 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
 SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_serial( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_serial( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,        //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -142,8 +142,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
 SZ_PUBLIC sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                   sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_haswell( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_haswell( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -159,8 +159,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count
 SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                   sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_skylake( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_skylake( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -176,8 +176,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
 SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_sve( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_sve( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -193,8 +193,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz
 SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_neon( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_neon( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,      //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -210,8 +210,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
 SZ_PUBLIC sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-/** @copydoc sz_sequence_argsort_utf8_case_insensitive */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_rvv( //
+/** @copydoc sz_sequence_argsort_utf8_uncased */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_rvv( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -253,21 +253,21 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_case_insensitive( //
+SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_uncased( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,  //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
-    return sz_sequence_argsort_utf8_case_insensitive_skylake(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_skylake(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_HASWELL
-    return sz_sequence_argsort_utf8_case_insensitive_haswell(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_haswell(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_SVE
-    return sz_sequence_argsort_utf8_case_insensitive_sve(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_sve(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_NEON
-    return sz_sequence_argsort_utf8_case_insensitive_neon(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_neon(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_RVV
-    return sz_sequence_argsort_utf8_case_insensitive_rvv(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_rvv(sequence, alloc, order, top_count, reverse);
 #else
-    return sz_sequence_argsort_utf8_case_insensitive_serial(sequence, alloc, order, top_count, reverse);
+    return sz_sequence_argsort_utf8_uncased_serial(sequence, alloc, order, top_count, reverse);
 #endif
 }
 

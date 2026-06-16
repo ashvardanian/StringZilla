@@ -247,7 +247,7 @@ void bench_sequencing_strings(environment_t const &env) {
 #endif
 }
 
-/** @brief Case-fold every token once so the case-insensitive checksum can validate in folded-byte order
+/** @brief Case-fold every token once so the uncased checksum can validate in folded-byte order
  *         without re-folding on every benchmarked call (which would dominate the measured throughput). */
 std::vector<std::string> fold_tokens(strings_t const &tokens) {
     std::vector<std::string> folded(tokens.size());
@@ -255,15 +255,15 @@ std::vector<std::string> fold_tokens(strings_t const &tokens) {
     for (std::size_t token_index = 0; token_index != tokens.size(); ++token_index) {
         std::string_view const token = tokens[token_index];
         scratch.resize(token.size() * 3 + 4); // worst-case fold expansion (e.g. ß ⇾ ss, ﬀ ⇾ ff)
-        std::size_t const folded_length = sz_utf8_case_fold(token.data(), token.size(), scratch.data());
+        std::size_t const folded_length = sz_utf8_uncased_fold(token.data(), token.size(), scratch.data());
         folded[token_index].assign(scratch.data(), folded_length);
     }
     return folded;
 }
 
-/** @brief Case-insensitive analogue of `is_sorting_permutation`: validates the permutation orders the strings
+/** @brief Uncased analogue of `is_sorting_permutation`: validates the permutation orders the strings
  *         by their folded forms. UTF-8 byte order matches code-point order, so folded-byte `<` is the fold key. */
-bool is_case_insensitive_sorting_permutation(std::vector<std::string> const &folded, permute_t const &permute) {
+bool is_uncased_sorting_permutation(std::vector<std::string> const &folded, permute_t const &permute) {
     return std::is_sorted(permute.begin(), permute.end(),
                           [&](std::size_t i, std::size_t j) { return folded[i] < folded[j]; });
 }
@@ -281,7 +281,7 @@ struct argsort_ci_strings_via_std_t {
                          [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return folded[i] < folded[j]; });
 
         std::size_t ops_performed = input.size() * std::log2(input.size());
-        check_value_t checksum = is_case_insensitive_sorting_permutation(folded, output);
+        check_value_t checksum = is_uncased_sorting_permutation(folded, output);
         std::size_t bytes_passed = accumulate_lengths(input);
         return {bytes_passed, checksum, ops_performed};
     }
@@ -308,7 +308,7 @@ struct argsort_ci_strings_via_sz {
             [&](sz_memory_allocator_t &alloc) { return func_(&array, &alloc, output.data(), 0, sz_false_k); });
 
         std::size_t ops_performed = input.size() * std::log2(input.size());
-        check_value_t checksum = is_case_insensitive_sorting_permutation(folded, output);
+        check_value_t checksum = is_uncased_sorting_permutation(folded, output);
         std::size_t bytes_passed = accumulate_lengths(input);
         return {bytes_passed, checksum, ops_performed};
     }
@@ -318,43 +318,43 @@ struct argsort_ci_strings_via_sz {
  *  @brief Find the array permutation that sorts the input strings in UTF-8 case-folded order.
  *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
  */
-void bench_sequencing_strings_case_insensitive(environment_t const &env) {
+void bench_sequencing_strings_uncased(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
     std::vector<std::string> const folded = fold_tokens(env.tokens);
 
     // First, benchmark the STL-based case-folded reference
     auto base_call = argsort_ci_strings_via_std_t {env.tokens, folded, permute_buffer};
     bench_result_t base =
-        bench_nullary(env, "sequence_argsort_utf8_case_insensitive<std::stable_sort>", base_call).log();
-    auto serial_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_serial> {env.tokens, folded,
+        bench_nullary(env, "sequence_argsort_utf8_uncased<std::stable_sort>", base_call).log();
+    auto serial_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_serial> {env.tokens, folded,
                                                                                                     permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_serial", base_call, serial_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_HASWELL
-    auto haswell_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_haswell> {
+    auto haswell_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_haswell> {
         env.tokens, folded, permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_haswell", base_call, haswell_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_haswell", base_call, haswell_call).log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    auto skylake_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_skylake> {
+    auto skylake_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_skylake> {
         env.tokens, folded, permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_skylake", base_call, skylake_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
-    auto sve_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_sve> {env.tokens, folded,
+    auto sve_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_sve> {env.tokens, folded,
                                                                                               permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_sve", base_call, sve_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_sve", base_call, sve_call).log(base);
 #endif
 #if SZ_USE_NEON
-    auto neon_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_neon> {env.tokens, folded,
+    auto neon_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_neon> {env.tokens, folded,
                                                                                                 permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_neon", base_call, neon_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_neon", base_call, neon_call).log(base);
 #endif
 #if SZ_USE_RVV
-    auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_case_insensitive_rvv> {env.tokens, folded,
+    auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_rvv> {env.tokens, folded,
                                                                                               permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_case_insensitive_rvv", base_call, rvv_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_rvv", base_call, rvv_call).log(base);
 #endif
 }
 
@@ -583,7 +583,7 @@ int main(int argc, char const **argv) {
     std::printf("Starting search benchmarks...\n");
     bench_sequencing_pgrams(env);
     bench_sequencing_strings(env);
-    bench_sequencing_strings_case_insensitive(env);
+    bench_sequencing_strings_uncased(env);
     bench_intersections(env);
 
     std::printf("All benchmarks passed.\n");

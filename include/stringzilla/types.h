@@ -956,8 +956,8 @@ typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
 /** @brief Signature of `sz_utf8_unpack_chunk`. */
 typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
 
-/** @brief Signature of `sz_utf8_case_fold`. */
-typedef sz_size_t (*sz_utf8_case_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
+/** @brief Signature of `sz_utf8_uncased_fold`. */
+typedef sz_size_t (*sz_utf8_uncased_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
 /** @brief Unicode normalization form selector (see `utf8_norm.h`). */
 typedef enum sz_normal_form_t {
@@ -973,18 +973,18 @@ typedef sz_size_t (*sz_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_p
 /** @brief Signature of `sz_utf8_norm_violation`. */
 typedef sz_cptr_t (*sz_utf8_norm_violation_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
 
-/** @brief Forward declaration for case-insensitive needle metadata. */
-struct sz_utf8_case_insensitive_needle_metadata_t;
+/** @brief Forward declaration for uncased needle metadata. */
+struct sz_utf8_uncased_needle_metadata_t;
 
-/** @brief Signature of `sz_utf8_case_insensitive_find`. */
-typedef sz_cptr_t (*sz_utf8_case_insensitive_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
-                                                     struct sz_utf8_case_insensitive_needle_metadata_t *, sz_size_t *);
+/** @brief Signature of `sz_utf8_uncased_find`. */
+typedef sz_cptr_t (*sz_utf8_uncased_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
+                                                     struct sz_utf8_uncased_needle_metadata_t *, sz_size_t *);
 
-/** @brief Signature of `sz_utf8_case_insensitive_order`. */
-typedef sz_ordering_t (*sz_utf8_case_insensitive_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+/** @brief Signature of `sz_utf8_uncased_order`. */
+typedef sz_ordering_t (*sz_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_case_agnostic`. */
-typedef sz_bool_t (*sz_utf8_case_agnostic_t)(sz_cptr_t, sz_size_t);
+/** @brief Signature of `sz_utf8_uncased_agnostic`. */
+typedef sz_cptr_t (*sz_utf8_uncased_violation_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), newlines, whitespace.
  *         Emits parallel (offset, length) arrays for each delimiter/segment plus a resume `bytes_consumed`. */
@@ -1031,7 +1031,7 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
 
-/** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_case_insensitive`. */
+/** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_uncased`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
                                              sz_size_t, sz_bool_t);
 

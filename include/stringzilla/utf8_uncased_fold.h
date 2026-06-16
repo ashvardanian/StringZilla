@@ -1,14 +1,14 @@
 /**
  *  @brief Hardware-accelerated UTF-8 case folding.
- *  @file include/stringzilla/utf8_case_fold.h
+ *  @file include/stringzilla/utf8_uncased_fold.h
  *  @author Ash Vardanian
  *
  *  Includes core APIs:
  *
- *  - `sz_utf8_case_fold` - Unicode case folding for case-insensitive comparisons
+ *  - `sz_utf8_uncased_fold` - Unicode case folding for uncased comparisons
  */
-#ifndef STRINGZILLA_UTF8_CASE_FOLD_H_
-#define STRINGZILLA_UTF8_CASE_FOLD_H_
+#ifndef STRINGZILLA_UTF8_UNCASED_FOLD_H_
+#define STRINGZILLA_UTF8_UNCASED_FOLD_H_
 
 #include "stringzilla/utf8_runes.h"
 
@@ -21,7 +21,7 @@ extern "C" {
 /**
  *  @brief Apply Unicode case folding to a UTF-8 string.
  *
- *  Case folding normalizes text for case-insensitive comparisons by mapping uppercase letters
+ *  Case folding normalizes text for uncased comparisons by mapping uppercase letters
  *  to their lowercase equivalents and handling special expansions defined in Unicode CaseFolding.txt.
  *
  *  @section Buffer Sizing
@@ -47,58 +47,58 @@ extern "C" {
  *      char const *source = "HELLO";
  *      sz_size_t capacity = 5 * 3; // Safe overestimate
  *      char destination[15];
- *      sz_size_t result_length = sz_utf8_case_fold(source, 5, destination);
+ *      sz_size_t result_length = sz_utf8_uncased_fold(source, 5, destination);
  *      // destination now contains "hello", result_length = 5
  *  @endcode
  */
-SZ_DYNAMIC sz_size_t sz_utf8_case_fold(        //
+SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(        //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_serial(  //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial(  //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_icelake( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_HASWELL
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_haswell( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_haswell( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_neon( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_V128
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_v128( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_RVV
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_rvv( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_rvv( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_LASX
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_lasx( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_lasx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_POWERVSX
-/** @copydoc sz_utf8_case_fold */
-SZ_PUBLIC sz_size_t sz_utf8_case_fold_powervsx( //
+/** @copydoc sz_utf8_uncased_fold */
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_powervsx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
@@ -106,14 +106,14 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_powervsx( //
 
 #pragma region Backends
 
-#include "stringzilla/utf8_case_fold/serial.h"
-#include "stringzilla/utf8_case_fold/icelake.h"
-#include "stringzilla/utf8_case_fold/haswell.h"
-#include "stringzilla/utf8_case_fold/neon.h"
-#include "stringzilla/utf8_case_fold/v128.h"
-#include "stringzilla/utf8_case_fold/rvv.h"
-#include "stringzilla/utf8_case_fold/lasx.h"
-#include "stringzilla/utf8_case_fold/powervsx.h"
+#include "stringzilla/utf8_uncased_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/icelake.h"
+#include "stringzilla/utf8_uncased_fold/haswell.h"
+#include "stringzilla/utf8_uncased_fold/neon.h"
+#include "stringzilla/utf8_uncased_fold/v128.h"
+#include "stringzilla/utf8_uncased_fold/rvv.h"
+#include "stringzilla/utf8_uncased_fold/lasx.h"
+#include "stringzilla/utf8_uncased_fold/powervsx.h"
 
 #pragma endregion // Backends
 
@@ -121,23 +121,23 @@ SZ_PUBLIC sz_size_t sz_utf8_case_fold_powervsx( //
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_case_fold_icelake(source, source_length, destination);
+    return sz_utf8_uncased_fold_icelake(source, source_length, destination);
 #elif SZ_USE_HASWELL
-    return sz_utf8_case_fold_haswell(source, source_length, destination);
+    return sz_utf8_uncased_fold_haswell(source, source_length, destination);
 #elif SZ_USE_NEON
-    return sz_utf8_case_fold_neon(source, source_length, destination);
+    return sz_utf8_uncased_fold_neon(source, source_length, destination);
 #elif SZ_USE_V128
-    return sz_utf8_case_fold_v128(source, source_length, destination);
+    return sz_utf8_uncased_fold_v128(source, source_length, destination);
 #elif SZ_USE_RVV
-    return sz_utf8_case_fold_rvv(source, source_length, destination);
+    return sz_utf8_uncased_fold_rvv(source, source_length, destination);
 #elif SZ_USE_LASX
-    return sz_utf8_case_fold_lasx(source, source_length, destination);
+    return sz_utf8_uncased_fold_lasx(source, source_length, destination);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_case_fold_powervsx(source, source_length, destination);
+    return sz_utf8_uncased_fold_powervsx(source, source_length, destination);
 #else
-    return sz_utf8_case_fold_serial(source, source_length, destination);
+    return sz_utf8_uncased_fold_serial(source, source_length, destination);
 #endif
 }
 
@@ -149,4 +149,4 @@ SZ_DYNAMIC sz_size_t sz_utf8_case_fold(sz_cptr_t source, sz_size_t source_length
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CASE_FOLD_H_
+#endif // STRINGZILLA_UTF8_UNCASED_FOLD_H_

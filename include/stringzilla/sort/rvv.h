@@ -9,7 +9,7 @@
  *  equal / greater lanes are packed to the front and stored contiguously with no left-pack table and no
  *  region slack (unlike NEON's `vqtbl2q` compaction). `__riscv_vcpop_m_b64` counts the surviving lanes for
  *  the cursor advance. Compaction preserves lane order, so the partition is @b stable - matching the
- *  stable-by-default contract - and the recursion / stability / reverse / top-K / case-insensitive
+ *  stable-by-default contract - and the recursion / stability / reverse / top-K / uncased
  *  machinery is reused verbatim from `sort/serial.h`.
  *
  *  Vector-length-agnostic: correct at VLEN 128 / 256 / 512 / 1024, because every strip is bounded by
@@ -295,9 +295,9 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_
 }
 
 /**
- *  @brief Case-insensitive twin of `sz_sequence_argsort_rvv_sort_byte_windows_`: the folded code-point export
+ *  @brief Uncased twin of `sz_sequence_argsort_rvv_sort_byte_windows_`: the folded code-point export
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
- *      RVV partition - which is where RVV beats the fully-serial case-insensitive path.
+ *      RVV partition - which is where RVV beats the fully-serial uncased path.
  */
 SZ_PUBLIC void sz_sequence_argsort_rvv_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
@@ -335,7 +335,7 @@ SZ_PUBLIC void sz_sequence_argsort_rvv_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_case_insensitive_rvv( //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_rvv( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,     //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

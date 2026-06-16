@@ -55,22 +55,22 @@ class StringZillaTests: XCTestCase {
         XCTAssertNil(index)
     }
 
-    func testUtf8CaseFoldedBytes() {
-        let folded = "Straße".utf8CaseFoldedBytes()
+    func testUtf8UncasedFoldedBytes() {
+        let folded = "Straße".utf8UncasedFoldedBytes()
         XCTAssertEqual(String(decoding: folded, as: UTF8.self), "strasse")
     }
 
-    func testUtf8CaseInsensitiveFind() {
+    func testUtf8UncasedFind() {
         let haystack =
             "Die Temperaturschwankungen im kosmischen Mikrowellenhintergrund sind ein Maß von etwa 20 µK.\n"
             + "Typografisch sieht man auch: ein Maß von etwa 20 μK."
         let needle = "EIN MASS VON ETWA 20 μK"
 
-        let firstMatchRange = haystack.utf8CaseInsensitiveFind(substring: needle)
+        let firstMatchRange = haystack.utf8UncasedFind(substring: needle)
         XCTAssertNotNil(firstMatchRange)
         XCTAssertEqual(String(haystack[firstMatchRange!]), "ein Maß von etwa 20 µK")
 
-        let compiledNeedle = Utf8CaseInsensitiveNeedle(needle)
+        let compiledNeedle = Utf8UncasedNeedle(needle)
         let remainingHaystack = String(haystack[firstMatchRange!.upperBound...])
         let secondMatchRange = compiledNeedle.findFirst(in: remainingHaystack)
         XCTAssertNotNil(secondMatchRange)
@@ -366,11 +366,11 @@ class StringZillaTests: XCTestCase {
         XCTAssertFalse("String".equals("StringZilla"))
     }
 
-    func testUtf8CaseInsensitiveOrder() {
-        XCTAssertEqual("HELLO".utf8CaseInsensitiveOrder("hello"), .equal)
+    func testUtf8UncasedOrder() {
+        XCTAssertEqual("HELLO".utf8UncasedOrder("hello"), .equal)
         // German sharp-S folds to "ss", so "Straße" and "strasse" compare equal.
-        XCTAssertEqual("Straße".utf8CaseInsensitiveOrder("STRASSE"), .equal)
-        XCTAssertEqual("apple".utf8CaseInsensitiveOrder("BANANA"), .ascending)
+        XCTAssertEqual("Straße".utf8UncasedOrder("STRASSE"), .equal)
+        XCTAssertEqual("apple".utf8UncasedOrder("BANANA"), .ascending)
     }
 
     // MARK: - UTF-8 Normalization Tests
