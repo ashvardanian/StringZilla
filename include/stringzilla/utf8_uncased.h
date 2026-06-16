@@ -46,7 +46,10 @@ extern "C" {
  *  @param b_length Number of bytes in the second string.
  *  @return @c sz_less_k if a < b, @c sz_equal_k if a == b, @c sz_greater_k if a > b.
  *
- *  @warning Both inputs must contain valid UTF-8. Behavior is undefined for invalid input.
+ *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is treated
+ *        as a single literal byte (folded to itself and compared byte-for-byte, never as a Unicode codepoint),
+ *        and processing resyncs at the next byte. All uncased operations - find, order, and violation - share
+ *        this contract, so results on invalid input are well-defined and consistent across backends.
  *
  *  @example Basic usage:
  *  @code
@@ -228,6 +231,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_neon(sz_cptr_t str, sz_size_t leng
  *  @param needle_metadata Optional pre-computed needle metadata for reuse across multiple searches.
  *  @param matched_length Number of bytes in the matched region.
  *  @return Pointer to the first matching substring from @p haystack, or @c SZ_NULL_CHAR if not found.
+ *
+ *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is matched
+ *        byte-for-byte as a single literal byte (never as a Unicode codepoint) and processing resyncs at the next
+ *        byte, so a search over invalid input is well-defined and identical across all backends.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_find( //
     sz_cptr_t haystack, sz_size_t haystack_length,  //

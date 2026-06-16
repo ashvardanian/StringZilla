@@ -9,20 +9,17 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_iterate/tables.h" // generated UAX-29 Word_Break property tables
+#include "stringzilla/utf8_runes.h"          // `sz_rune_parse_unchecked`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- *  @brief Scalar multistep newline scan: classify each codepoint inline and emit every delimiter.
+ *  @brief Scalar newline scan emitting every delimiter into parallel offset/length arrays.
  *
- *  Writes the byte offset and byte length of each newline delimiter into the parallel `match_offsets` /
- *  `match_lengths` arrays; a @c "\r\n" CRLF is one match of length 2 and its trailing LF is never emitted
- *  alone. `base` is added to every emitted offset and to `*bytes_consumed` so a SIMD backend can call this for
- *  its sub-vector tail with absolute coordinates. Non-delimiter bytes advance the cursor by one (byte-for-byte
- *  parity with the historical single-match walk, which keeps results identical on malformed UTF-8). Stops at
- *  `matches_capacity`; `*bytes_consumed` is the resume offset, always a true delimiter boundary.
+ *  A @c "\r\n" CRLF is one match of length 2 (its trailing LF is never emitted alone). `base` is added to every
+ *  emitted offset and to `*bytes_consumed`, the resume offset, which is always a true delimiter boundary.
  */
 SZ_INTERNAL sz_size_t sz_utf8_find_newlines_serial_(             //
     sz_cptr_t text, sz_size_t length, sz_size_t base,            //
@@ -176,8 +173,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     // Process up to runes_capacity codepoints or end of input.
     while (text_cursor < text_end && runes_written < runes_capacity) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse_unchecked(text_cursor, &rune, &rune_length);
+        sz_rune_length_t const rune_length = sz_rune_parse_unchecked(text_cursor, &rune);
         if (text_cursor + rune_length > text_end) break; // Incomplete sequence at buffer boundary
         runes[runes_written++] = rune;
         text_cursor += rune_length;
@@ -190,25 +186,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
 #pragma region UAX-29 Word Boundaries
 
 /**
- *  @brief Get the Unicode TR29 Word_Break property for a codepoint.
- *
- *  Returns one of the 16 Word_Break property values (0-15):
- *  - sz_tr29_word_break_other_k (0): Default - creates word boundary
- *  - sz_tr29_word_break_cr_k (1): Carriage Return
- *  - sz_tr29_word_break_lf_k (2): Line Feed
- *  - sz_tr29_word_break_newline_k (3): Other newlines
- *  - sz_tr29_word_break_extend_k (4): Combining marks
- *  - sz_tr29_word_break_zwj_k (5): Zero Width Joiner
- *  - sz_tr29_word_break_format_k (6): Format characters
- *  - sz_tr29_word_break_regional_ind_k (7): Regional Indicators
- *  - sz_tr29_word_break_aletter_k (8): Alphabetic letters
- *  - sz_tr29_word_break_hebrew_letter_k (9): Hebrew letters
- *  - sz_tr29_word_break_numeric_k (10): Digits
- *  - sz_tr29_word_break_katakana_k (11): Japanese Katakana
- *  - sz_tr29_word_break_extendnumlet_k (12): Underscore/connector
- *  - sz_tr29_word_break_midletter_k (13): Mid-letter punctuation
- *  - sz_tr29_word_break_midnum_k (14): Mid-number punctuation
- *  - sz_tr29_word_break_mid_quotes_k (15): MidNumLet + quotes
+ *  @brief Returns the UAX-29 Word_Break property (0-15) for a codepoint.
  */
 SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     // Fast path 1: ASCII - direct table lookup
@@ -261,14 +239,7 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
 }
 
 /**
- *  @brief Check if a codepoint is a "word character" (has word-forming property).
- *
- *  This is a convenience function that returns true if the codepoint has a
- *  Word_Break property that typically forms words (ALetter, Hebrew_Letter,
- *  Numeric, Katakana, ExtendNumLet, or mid-word punctuation).
- *
- *  @param[in] rune The Unicode codepoint to check.
- *  @return sz_true_k if the codepoint is a word character, sz_false_k otherwise.
+ *  @brief Check if a codepoint is a "word character" (has a word-forming Word_Break property).
  */
 SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     sz_u8_t property = sz_rune_word_break_property(rune);
@@ -277,10 +248,7 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     return (sz_bool_t)(property >= sz_tr29_word_break_aletter_k);
 }
 
-/**
- *  @brief Decode a UTF-8 codepoint starting at the given position.
- *  @return The decoded codepoint, or 0xFFFD on error. Updates position to next codepoint.
- */
+/** @brief Decode the UTF-8 codepoint at `*position`, advancing it; returns 0xFFFD on error. */
 SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_t *position) {
     if (*position >= length) return 0;
     sz_u8_t lead_byte = (sz_u8_t)text[*position];
@@ -353,13 +321,9 @@ SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
 /**
  *  @brief Portable UAX-29 "join" (guaranteed non-boundary) mask for an all-ASCII window.
  *
- *  Given per-lane class-membership masks (bit `i` set => lane `i` has that class), returns a mask whose bit `i`
- *  is set when the boundary before lane `i` is suppressed by a no-break rule. ASCII contains no
- *  Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana, so WB4 and WB15/16 never apply and the look-around
- *  rules reduce to neighbour bit-shifts: `<< 1` reads the previous lane, `>> 1` the next, `<< 2` two back. The
- *  result is exact for lanes whose i-2 and i+1 neighbours are in-window. Every fixed-width SIMD backend reduces
- *  its classified window to these masks and calls this one shared routine, so the rule logic lives in a single
- *  portable, testable place rather than being re-derived per ISA.
+ *  From per-lane class masks, returns a mask whose bit `i` is set when the boundary before lane `i` is
+ *  suppressed by a no-break rule. ASCII never triggers WB4 or WB15/16, so the rules reduce to neighbour shifts;
+ *  the result is exact only for lanes whose i-2 and i+1 neighbours are in-window.
  */
 SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_from_class_masks_(                                        //
     sz_u64_t aletter_mask, sz_u64_t numeric_mask, sz_u64_t extendnumlet_mask, sz_u64_t midletter_mask, //
@@ -628,18 +592,10 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     return sz_true_k;
 }
 
-/*  Plural UAX-29 word segmentation.
- *
- *  A single left-to-right sweep emits every word into two parallel arrays - `word_starts[i]` is the byte
- *  offset of the i-th word and `word_lengths[i]` its byte length - so one call segments the whole input
- *  without the caller looping. The boundary set is exactly the set of positions for which
- *  `sz_utf8_is_word_boundary_serial` is true.
- *
- *  When the output arrays fill before the input is exhausted, `*bytes_consumed` is set to the start of the
- *  first word that did not fit - always a true TR29 boundary - so a caller can resume from `text +
- *  *bytes_consumed` with a fresh buffer and obtain the identical remainder (a boundary resets all WB context,
- *  so resuming with start-of-text semantics at a boundary is exact). Consecutive boundaries are always at
- *  least one codepoint apart, so no zero-length word is ever emitted; `length == 0` emits zero words.
+/*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel
+ *  `word_starts` / `word_lengths` arrays, at exactly the positions where `sz_utf8_is_word_boundary_serial` holds.
+ *  On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
+ *  boundary - so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
  */
 SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_serial( //
     sz_cptr_t text, sz_size_t length,                    //

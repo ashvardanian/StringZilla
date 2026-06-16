@@ -478,11 +478,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
     sz_u8_t const probe_last = needle_metadata->folded_slice[offset_last];
 
     sz_rune_t needle_first_safe_folded_rune = 0;
-    if (alarm) {
-        sz_rune_length_t rune_byte_length;
-        sz_rune_parse_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune,
-                                &rune_byte_length);
-    }
+    if (alarm) sz_rune_parse_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune);
 
     // 32-byte chunks (NEON/Ice Lake granularity): finer than RVV strips so an alarmed chunk only serial-scans
     // ~32 bytes, and the danger retreat `step = valid_starts - 2` keeps cross-chunk patterns visible.

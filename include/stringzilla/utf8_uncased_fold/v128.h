@@ -97,6 +97,45 @@ SZ_INTERNAL v128_t sz_utf8_load_window_v128_(sz_u8_t const *source_ptr, sz_size_
     return available >= 16 ? wasm_v128_load(source_ptr) : sz_load_partial_v128_((sz_cptr_t)source_ptr, available);
 }
 
+/** @brief Lanes set (0xFF) on every malformed lead byte, mirroring `sz_rune_parse` branchlessly.
+ *
+ *  A lead is well-formed iff its declared continuations follow AND it escapes the bad-special set: C0/C1,
+ *  F5..FF (no width bit, auto-excluded), E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0 (surrogate),
+ *  F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF). The continuation-status of the bytes
+ *  at +1/+2/+3 comes from sliding @p is_continuation down (carry 0): at the window boundary the slide reads
+ *  zeros past the last lane, so a multi-byte lead whose continuations spill into the next window reads as
+ *  malformed - coinciding with the incomplete-sequence trim, leaving valid output unchanged. The family
+ *  handlers OR this into their stop mask so overlong, surrogate, truncated, and out-of-range leads are
+ *  treated as foreign and resync one byte at a time, byte-for-byte with the serial reference. */
+SZ_INTERNAL v128_t sz_utf8_malformed_lead_v128_(v128_t source, v128_t next, v128_t is_continuation, v128_t is_lead) {
+    v128_t continuation_plus1 = sz_utf8_slide1down_v128_(is_continuation, 0);
+    v128_t continuation_plus2 = sz_utf8_slide1down_v128_(continuation_plus1, 0);
+    v128_t continuation_plus3 = sz_utf8_slide1down_v128_(continuation_plus2, 0);
+
+    v128_t is_two_byte_lead = sz_utf8_in_range_v128_(source, 0xC2, 0x1E);  // C2..DF
+    v128_t is_three_byte_lead = sz_utf8_in_range_v128_(source, 0xE0, 0x10); // E0..EF
+    v128_t is_four_byte_lead = sz_utf8_in_range_v128_(source, 0xF0, 0x05);  // F0..F4
+
+    v128_t two_byte_complete = wasm_v128_and(is_two_byte_lead, continuation_plus1);
+    v128_t three_byte_complete = wasm_v128_and(is_three_byte_lead, wasm_v128_and(continuation_plus1, continuation_plus2));
+    v128_t four_byte_complete = wasm_v128_and(
+        is_four_byte_lead, wasm_v128_and(continuation_plus1, wasm_v128_and(continuation_plus2, continuation_plus3)));
+
+    v128_t e0_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xE0)),
+                                  wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t ed_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xED)),
+                                  wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t f0_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xF0)),
+                                  wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x90)));
+    v128_t f4_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xF4)),
+                                  wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0x90)));
+    v128_t bad_special = wasm_v128_or(wasm_v128_or(e0_bad, ed_bad), wasm_v128_or(f0_bad, f4_bad));
+
+    v128_t well_formed = wasm_v128_andnot(
+        wasm_v128_or(two_byte_complete, wasm_v128_or(three_byte_complete, four_byte_complete)), bad_special);
+    return wasm_v128_andnot(is_lead, well_formed);
+}
+
 /** @brief Largest prefix of a window that does not split a trailing multi-byte sequence (twin of RVV trim). */
 SZ_INTERNAL sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                     sz_size_t remaining) {
@@ -194,7 +233,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, 
     v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
     v128_t is_family_lead = sz_utf8_in_range_v128_(source, 0xC2, 5);
     v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_family_lead);
-    v128_t stop = wasm_v128_or(is_foreign_lead, is_irregular);
+    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
+    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_irregular), malformed);
 
     int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
     return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
@@ -221,7 +261,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source_pt
     v128_t is_foreign_lead = wasm_v128_andnot(is_lead, wasm_v128_or(is_d0, is_d1));
     // Cyrillic Extended-A (D1 A0+) folds by parity across blocks — leave it to serial.
     v128_t is_extended = wasm_v128_and(is_d1, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
-    v128_t stop = wasm_v128_or(is_foreign_lead, is_extended);
+    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
+    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_extended), malformed);
 
     // Second-byte offset by high nibble, applied only after a D0 lead.
     v128_t offsets_lut = wasm_v128_load(second_byte_offsets);
@@ -261,7 +302,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, 
     v128_t ce_excluded = wasm_v128_and(is_ce, wasm_v128_or(wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x91)),
                                                            wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB0))));
     v128_t cf_excluded = wasm_v128_and(is_cf, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0x8F)));
-    v128_t stop = wasm_v128_or(is_foreign_lead, wasm_v128_or(ce_excluded, cf_excluded));
+    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
+    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, wasm_v128_or(ce_excluded, cf_excluded)), malformed);
 
     // Promoting ranges (second byte A0-A1 or A3-AB), used both for the second-byte -0x20 and the lead +1.
     v128_t in_promote_a0 = sz_utf8_in_range_v128_(source, 0xA0, 0x02);
@@ -305,7 +347,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source_pt
     v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_family);
     v128_t d4_stop = wasm_v128_and(is_d4, wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0xB1)));
     v128_t ligature_stop = wasm_v128_and(is_d6, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x87)));
-    v128_t stop = wasm_v128_or(is_foreign_lead, wasm_v128_or(d4_stop, ligature_stop));
+    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
+    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, wasm_v128_or(d4_stop, ligature_stop)), malformed);
 
     v128_t folded = sz_ascii_fold_v128_(source);
     // Second-byte offsets (disjoint lanes).
@@ -342,7 +385,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_pt
     v128_t is_82_lead = wasm_v128_and(is_e1, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x82)));
     v128_t is_83_lead = wasm_v128_and(is_e1, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x83)));
     v128_t is_foreign_e1 = wasm_v128_andnot(is_e1, wasm_v128_or(is_82_lead, is_83_lead));
-    v128_t stop = wasm_v128_or(is_foreign_lead, is_foreign_e1);
+    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
+    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_foreign_e1), malformed);
 
     // Uppercase keyed by the third byte: E1 82 third >= A0; E1 83 third in 80-85, or 87, or 8D.
     v128_t is_82_upper_lead = wasm_v128_and(is_82_lead, wasm_u8x16_ge(next_next, wasm_i8x16_splat((sz_i8_t)0xA0)));
@@ -417,9 +461,16 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source
         if (!needs_serial && consumed) continue; // a clean vectorized strip (or trailing-incomplete trim)
 
         // One codepoint the vector path can't fold in place: full serial decode / Unicode fold / encode.
+        // `sz_rune_parse` is the well-formedness authority - a malformed lead (the only reason the
+        // vector handlers decline a multi-byte sequence) copies one byte through and resyncs, byte-for-byte
+        // with the serial reference; valid sequences fold exactly as before.
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune, &rune_length);
+        sz_rune_length_t const rune_length =
+            sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
+        if (rune_length == sz_utf8_invalid_k) {
+            *destination_ptr++ = *source_ptr++; // Maximal-subpart resync: copy the offending byte, advance one
+            continue;
+        }
         source_ptr += rune_length;
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);

@@ -3843,11 +3843,11 @@ static char const doc_utf8_norm_violation[] =                                   
     "Returns:\n"                                                                        //
     "    int | None: Byte offset of first violation, or None if already normalized.\n"  //
     "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "    >>> sz.utf8_norm_violation('cafe\\xcc\\x81', 'NFC')  # decomposed e-acute\n"   //
-    "    0\n"                                                                           //
-    "    >>> sz.utf8_norm_violation('caf\\u00e9', 'NFC')  # precomposed, already NFC\n" //
-    "    # None";
+    "Example:\n"                                                                              //
+    "    >>> sz.utf8_norm_violation('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"          //
+    "    3\n"                                                                                  //
+    "    >>> sz.utf8_norm_violation('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
+    "    True";
 
 static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple) {
@@ -7353,8 +7353,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     sz_cptr_t scan_ptr = cstr;
     while (scan_ptr < cstr_end) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(scan_ptr, cstr_end, &rune, &rune_length);
+        sz_rune_length_t rune_length = sz_rune_parse(scan_ptr, cstr_end, &rune);
 
         if (rune_length == 1 && *scan_ptr == '\'') { required_bytes += 2; } // Escaped quote: \'
         else { required_bytes += rune_length; }                             // Normal rune
@@ -7372,8 +7371,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
 
     while (cstr < cstr_end) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse(cstr, cstr_end, &rune, &rune_length);
+        sz_rune_length_t rune_length = sz_rune_parse(cstr, cstr_end, &rune);
 
         if (rune_length == 1 && *cstr == '\'') {
             *(buffer_ptr++) = '\\';

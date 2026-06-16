@@ -40,7 +40,8 @@ extern "C" {
  *
  *  @warning The caller must ensure the destination buffer is large enough. No bounds checking
  *           is performed. Use `source_length * 3` for safety.
- *  @warning The source must contain valid UTF-8. Behavior is undefined for invalid input.
+ *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is copied
+ *        through unchanged (it folds to itself) and folding resyncs at the next byte. Valid UTF-8 folds as usual.
  *
  *  @example Basic usage:
  *  @code

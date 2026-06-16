@@ -630,6 +630,10 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
  *      that diverge early (the prefix is a handful of code-points), and only quadratic for pathologically deep
  *      shared prefixes.
  *
+ *      Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is treated
+ *      as a single literal field equal to its raw byte value (so it sorts by byte value, like any one-byte
+ *      unit) and processing resyncs at the next byte. Valid input folds and sorts byte-identically to before.
+ *
  *  @param folded_skip_count Number of leading folded code-points to skip (recursion depth x fields-per-pgram).
  *  @param reverse Whether to export complemented keys for descending order.
  */
@@ -659,10 +663,26 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_casefold_window_(            
         // never scans the whole string - only as deep as the current window.
         while (produced < fields_per_pgram && raw_position < source_length) {
 
+            // A byte that does not begin a well-formed codepoint is its own 1-byte maximal subpart: it
+            // contributes a single field equal to its raw byte value (always >= 0x80, so unaffected by
+            // case-folding) and we resync at the next byte. This keeps the order total and deterministic
+            // while leaving the all-valid case byte-identical to the old `sz_rune_parse` path.
             sz_rune_t source_rune;
-            sz_rune_length_t source_rune_length;
-            sz_rune_parse(source_str + raw_position, source_str + source_length, &source_rune, &source_rune_length);
-            raw_position += source_rune_length ? (sz_size_t)source_rune_length : 1;
+            sz_rune_length_t const source_rune_length =
+                sz_rune_parse(source_str + raw_position, source_str + source_length, &source_rune);
+            if (source_rune_length == sz_utf8_invalid_k) {
+                ++raw_position;
+                if (skipped < folded_skip_count) {
+                    ++skipped;
+                    continue;
+                }
+                sz_size_t const shift = (fields_per_pgram - 1 - produced) * sz_argsort_casefold_field_bits_;
+                sz_u8_t const literal_byte = (sz_u8_t)source_str[raw_position - 1];
+                key |= (sz_pgram_t)((sz_rune_t)literal_byte + 1) << shift;
+                ++produced;
+                continue;
+            }
+            raw_position += (sz_size_t)source_rune_length;
 
             sz_rune_t folded_runes[3];
             sz_size_t const folded_runes_count = sz_unicode_fold_codepoint_(source_rune, folded_runes);

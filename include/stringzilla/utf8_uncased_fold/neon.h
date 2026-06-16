@@ -145,6 +145,67 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16, uint
 }
 
 /**
+ *  @brief Per-lead well-formedness mirror of `sz_rune_parse`, computed branchlessly so every
+ *      family handler can treat overlong, surrogate, truncated, and out-of-range leads as foreign and
+ *      resync one byte at a time - byte-for-byte with the serial reference. The NEON twin of the
+ *      Haswell `well_formed_lead_mask`: a lead is well-formed iff its declared continuations follow
+ *      (the 2/3/4-byte-lead masks ANDed with the next 1/2/3 bytes all being continuations) AND it is
+ *      not in the bad-special set - C0/C1, F5..FF, E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0
+ *      (surrogate), F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF). C0/C1 and F5..FF
+ *      carry no width bit, so they never enter the width-keyed accept set and need no subtraction.
+ *
+ *      `next_register_u8x16` supplies the bytes following this register's last lanes; at the
+ *      superchunk's final lane it is zero-filled, so a multi-byte lead whose continuations spill past
+ *      the superchunk reads as malformed - coinciding exactly with the existing incomplete-sequence
+ *      trim, so valid output is unchanged.
+ *
+ *  @return Per-byte mask (0xFF) set on every lead byte that does NOT begin a well-formed rune.
+ */
+SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16, uint8x16_t next_register_u8x16) {
+    uint8x16_t const continuation_low_u8x16 = vdupq_n_u8(0x80);
+    uint8x16_t const continuation_span_u8x16 = vdupq_n_u8(0x40);
+
+    uint8x16_t next1_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 1);
+    uint8x16_t next2_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 2);
+    uint8x16_t next3_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 3);
+
+    uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, continuation_low_u8x16), continuation_span_u8x16);
+    uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, continuation_low_u8x16);
+    uint8x16_t is_lead_u8x16 = vbicq_u8(is_non_ascii_u8x16, is_continuation_u8x16);
+    uint8x16_t next1_is_continuation_u8x16 = vcltq_u8(vsubq_u8(next1_u8x16, continuation_low_u8x16),
+                                                      continuation_span_u8x16);
+    uint8x16_t next2_is_continuation_u8x16 = vcltq_u8(vsubq_u8(next2_u8x16, continuation_low_u8x16),
+                                                      continuation_span_u8x16);
+    uint8x16_t next3_is_continuation_u8x16 = vcltq_u8(vsubq_u8(next3_u8x16, continuation_low_u8x16),
+                                                      continuation_span_u8x16);
+
+    // Width leads: C2-DF (2-byte), E0-EF (3-byte), F0-F4 (4-byte). C0/C1 and F5-FF are excluded here
+    // and therefore never reach the accept set - they stay malformed.
+    uint8x16_t is_two_byte_lead_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xC2)), vdupq_n_u8(0x1E));
+    uint8x16_t is_three_byte_lead_u8x16 = vceqq_u8(vandq_u8(source_u8x16, vdupq_n_u8(0xF0)), vdupq_n_u8(0xE0));
+    uint8x16_t is_four_byte_lead_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8(0xF0)), vdupq_n_u8(0x05));
+
+    uint8x16_t two_byte_complete_u8x16 = vandq_u8(is_two_byte_lead_u8x16, next1_is_continuation_u8x16);
+    uint8x16_t three_byte_complete_u8x16 = vandq_u8(is_three_byte_lead_u8x16,
+                                                    vandq_u8(next1_is_continuation_u8x16, next2_is_continuation_u8x16));
+    uint8x16_t four_byte_complete_u8x16 = vandq_u8(
+        is_four_byte_lead_u8x16,
+        vandq_u8(next1_is_continuation_u8x16, vandq_u8(next2_is_continuation_u8x16, next3_is_continuation_u8x16)));
+
+    // Bad-special set keyed by the lead and its second byte, mirroring `sz_rune_parse`
+    uint8x16_t e0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE0)), vcltq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
+    uint8x16_t ed_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xED)), vcgeq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
+    uint8x16_t f0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF0)), vcltq_u8(next1_u8x16, vdupq_n_u8(0x90)));
+    uint8x16_t f4_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF4)), vcgeq_u8(next1_u8x16, vdupq_n_u8(0x90)));
+    uint8x16_t bad_special_u8x16 = vorrq_u8(vorrq_u8(e0_bad_u8x16, ed_bad_u8x16), vorrq_u8(f0_bad_u8x16, f4_bad_u8x16));
+
+    uint8x16_t well_formed_u8x16 = vbicq_u8(
+        vorrq_u8(two_byte_complete_u8x16, vorrq_u8(three_byte_complete_u8x16, four_byte_complete_u8x16)),
+        bad_special_u8x16);
+    return vbicq_u8(is_lead_u8x16, well_formed_u8x16);
+}
+
+/**
  *  @brief Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII.
  *      Folds ASCII A-Z in place and copies everything else, trimming an incomplete trailing sequence.
  *
@@ -280,8 +341,14 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source
         extended_deltas_u8x16 = vandq_u8(extended_deltas_u8x16, is_continuation_u8x16);
         uint8x16_t irregular_extended_u8x16 = vtstq_u8(extended_deltas_u8x16, vdupq_n_u8(0x80));
 
+        // Malformed leads (overlong, surrogate, truncated, out-of-range, C0/C1, F5..FF) are foreign
+        // to this handler: treating them as stops truncates the fold before them so the per-rune
+        // fallback copies one byte and resyncs. For valid text the malformed mask is empty, so the
+        // handler behaves exactly as before.
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(irregular_extended_u8x16, foreign_e1_second_u8x16),
-                                         vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16));
+                                         vorrq_u8(vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16),
+                                                  malformed_lead_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -392,7 +459,9 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t sou
 
         // Cyrillic Extended-A ('Ѡ'+, D1 A0+) folds by parity and stays on the serial path
         uint8x16_t is_extended_u8x16 = vandq_u8(is_d1_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0xA0)));
-        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, is_extended_u8x16);
+        // Malformed leads are foreign to this handler - see the Latin handler for the rationale
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, is_extended_u8x16), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -466,7 +535,10 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source
         uint8x16_t ce_excluded_u8x16 = vandq_u8(is_ce_u8x16, vorrq_u8(vcltq_u8(next_byte_u8x16, vdupq_n_u8(0x91)),
                                                                       vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
         uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
-        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16));
+        // Malformed leads are foreign to this handler - see the Latin handler for the rationale
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16)),
+                                         malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -561,7 +633,10 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t sou
         // D4 with a Cyrillic-Supplement/reserved second byte (≤ B0) and the 'և' ligature (D6 87).
         uint8x16_t is_d4_stop_u8x16 = vandq_u8(is_d4_u8x16, vcltq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
         uint8x16_t is_ligature_stop_u8x16 = vandq_u8(is_d6_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x87)));
-        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16));
+        // Malformed leads are foreign to this handler - see the Latin handler for the rationale
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16)),
+                                         malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -660,7 +735,9 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t sou
         uint8x16_t is_83_lead_u8x16 = vandq_u8(is_e1_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x83)));
         uint8x16_t is_georgian_lead_u8x16 = vorrq_u8(is_82_lead_u8x16, is_83_lead_u8x16);
         uint8x16_t is_foreign_e1_u8x16 = vbicq_u8(is_e1_u8x16, is_georgian_lead_u8x16);
-        uint8x16_t stop_u8x16 = vorrq_u8(is_foreign_lead_u8x16, is_foreign_e1_u8x16);
+        // Malformed leads are foreign to this handler - see the Latin handler for the rationale
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, is_foreign_e1_u8x16), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -756,6 +833,8 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t sour
             stop_u8x16,
             vandq_u8(is_ea_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x99)), vdupq_n_u8(0x07)),
                                            vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xAD)), vdupq_n_u8(0x02)))));
+        // Malformed leads are foreign to this handler - see the Latin handler for the rationale
+        stop_u8x16 = vorrq_u8(stop_u8x16, sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -883,10 +962,17 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source
         // by exactly ONE rune through the serial logic below: byte-for-byte the serial
         // reference output, just slower. Georgian, fullwidth, and supplementary copy handlers
         // are candidates for the ARM-hardware tuning round if profiles justify them.
-
+        //
+        // `sz_rune_parse` is the parse-side authority: a malformed lead - the only reason
+        // the vector handlers decline a multi-byte sequence after the malformed-mask fix - copies
+        // one byte through unchanged and resyncs, byte-for-byte with the serial reference.
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse_unchecked(source, &rune, &rune_length);
+        sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
+        if (rune_length == sz_utf8_invalid_k) {
+            *(sz_u8_t *)target = *(sz_u8_t const *)source; // Maximal-subpart resync: copy one byte, advance one
+            target += 1, source += 1, source_length -= 1;
+            continue;
+        }
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)

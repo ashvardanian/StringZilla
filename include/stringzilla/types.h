@@ -212,6 +212,17 @@
 #endif
 
 /**
+ *  @brief Lets a type legally alias any other, so the SIMD vector unions' differently-typed views of one
+ *         storage (e.g. reading a `sz_u8_t` state buffer back through `sz_u128_vec_t`) are well-defined.
+ *         Without it GCC at `-O3` assumes the views never alias and may reorder them, corrupting results.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_MAY_ALIAS __attribute__((__may_alias__))
+#else
+#define SZ_MAY_ALIAS
+#endif
+
+/**
  *  @brief C99 static array parameter annotation for minimum array size.
  *         In C, expands to `static n` enabling compiler bounds checking.
  *         In C++, expands to nothing as this syntax is not supported.
@@ -357,9 +368,10 @@
 #endif
 #endif
 
-/*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
+/*  SVE2 AES is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it.
+ *  GCC spells the feature macro `__ARM_FEATURE_SVE2AES`; Clang spells it `__ARM_FEATURE_SVE2_AES`. Accept both. */
 #if !defined(SZ_USE_SVE2AES)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2AES)
+#if SZ_IS_64BIT_ARM_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
 #define SZ_USE_SVE2AES (1)
 #else
 #define SZ_USE_SVE2AES (0)
@@ -756,16 +768,16 @@ typedef enum sz_capability_t {
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
-                     sz_cap_icelake_k,                                  ///< Serial code with Fork Union and Ice Lake
+        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
-                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
-                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
-                     sz_cap_rvv_k | sz_cap_rvvcrypto_k | sz_cap_lasx_k | sz_cap_powervsx_k,
+        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
+        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_rvvcrypto_k |
+        sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -978,7 +990,7 @@ struct sz_utf8_uncased_needle_metadata_t;
 
 /** @brief Signature of `sz_utf8_uncased_find`. */
 typedef sz_cptr_t (*sz_utf8_uncased_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
-                                                     struct sz_utf8_uncased_needle_metadata_t *, sz_size_t *);
+                                            struct sz_utf8_uncased_needle_metadata_t *, sz_size_t *);
 
 /** @brief Signature of `sz_utf8_uncased_order`. */
 typedef sz_ordering_t (*sz_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
@@ -988,8 +1000,7 @@ typedef sz_cptr_t (*sz_utf8_uncased_violation_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), newlines, whitespace.
  *         Emits parallel (offset, length) arrays for each delimiter/segment plus a resume `bytes_consumed`. */
-typedef sz_size_t (*sz_utf8_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-                                               sz_size_t *);
+typedef sz_size_t (*sz_utf8_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
@@ -1029,7 +1040,6 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
-
 
 /** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_uncased`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
@@ -1089,7 +1099,7 @@ typedef union sz_u64_vec_t {
  *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
  *         as well as 1x XMM register.
  */
-typedef union sz_u128_vec_t {
+typedef union SZ_MAY_ALIAS sz_u128_vec_t {
 #if SZ_USE_WESTMERE
     __m128i xmm;
     __m128d xmm_pd;
@@ -1132,7 +1142,7 @@ typedef union sz_u128_vec_t {
  *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
  *         as well as 2x XMM registers or 1x YMM register.
  */
-typedef union sz_u256_vec_t {
+typedef union SZ_MAY_ALIAS sz_u256_vec_t {
 #if SZ_USE_HASWELL
     __m256i ymm;
     __m256d ymm_pd;
@@ -1170,7 +1180,7 @@ typedef union sz_u256_vec_t {
  *         It can help view the contents as 8-bit, 16-bit, 32-bit, or 64-bit integers,
  *         as well as 4x XMM registers or 2x YMM registers or 1x ZMM register.
  */
-typedef union sz_u512_vec_t {
+typedef union SZ_MAY_ALIAS sz_u512_vec_t {
 #if SZ_USE_SKYLAKE
     __m512i zmm;
     __m512d zmm_pd;
@@ -1409,6 +1419,17 @@ SZ_INTERNAL sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
     value = ((value & 0x3333333333333333ull) << 2) | ((value >> 2) & 0x3333333333333333ull);
     value = ((value & 0x0F0F0F0F0F0F0F0Full) << 4) | ((value >> 4) & 0x0F0F0F0F0F0F0F0Full);
     return sz_u64_bytes_reverse(value);
+}
+
+/** @brief Bit index of the n-th (0-based) set bit of @p bits; clears the @p n lowest set bits, then `ctz`.
+ *         @p bits must hold more than @p n set bits. One tested home for the per-ISA SIMD "n-th lane" locate. */
+SZ_INTERNAL int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
+    while (n--) bits &= bits - 1;
+    return sz_u64_ctz(bits);
+}
+SZ_INTERNAL int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
+    while (n--) bits &= bits - 1;
+    return sz_u32_ctz(bits);
 }
 
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
@@ -1676,207 +1697,6 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     return *result;
 #endif
 }
-
-#pragma region UTF8
-
-/**
- *  @brief Validates if a UTF-8 string contains only valid UTF-8 sequences.
- *  @param text Pointer to the UTF-8 string to validate.
- *  @param length Length of the string in bytes.
- *  @return sz_true_k if the string contains only valid UTF-8, sz_false_k otherwise.
- */
-SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_u8_t const *end_u8 = text_u8 + length;
-
-    while (text_u8 < end_u8) {
-        sz_u8_t byte1 = *text_u8;
-
-        // 1-byte sequence (0x00-0x7F)
-        if (byte1 <= 0x7F) { text_u8 += 1; }
-
-        // 2-byte sequence (0xC2-0xDF)
-        else if (byte1 >= 0xC2 && byte1 <= 0xDF) {
-            if (text_u8 + 1 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            if ((byte2 & 0xC0) != 0x80) return sz_false_k; // Invalid continuation
-            text_u8 += 2;
-        }
-
-        // 3-byte sequence (0xE0-0xEF)
-        else if (byte1 >= 0xE0 && byte1 <= 0xEF) {
-            if (text_u8 + 2 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong encodings and surrogates
-            if (byte1 == 0xE0 && byte2 < 0xA0) return sz_false_k;  // Overlong
-            if (byte1 == 0xED && byte2 >= 0xA0) return sz_false_k; // Surrogate (U+D800-U+DFFF)
-
-            text_u8 += 3;
-        }
-
-        // 4-byte sequence (0xF0-0xF4)
-        else if (byte1 >= 0xF0 && byte1 <= 0xF4) {
-            if (text_u8 + 3 >= end_u8) return sz_false_k;
-            sz_u8_t byte2 = text_u8[1];
-            sz_u8_t byte3 = text_u8[2];
-            sz_u8_t byte4 = text_u8[3];
-            if ((byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80 || (byte4 & 0xC0) != 0x80) return sz_false_k;
-
-            // Check for overlong and out-of-range
-            if (byte1 == 0xF0 && byte2 < 0x90) return sz_false_k;  // Overlong
-            if (byte1 == 0xF4 && byte2 >= 0x90) return sz_false_k; // > U+10FFFF
-
-            text_u8 += 4;
-        }
-
-        // Invalid lead byte
-        else { return sz_false_k; }
-    }
-
-    return sz_true_k;
-}
-
-/**
- *  @brief Extracts one UTF-8 codepoint from a UTF-8 string into a 32-bit unsigned integer, reading
- *      the full 1-4 byte sequence the lead byte declares with @b no bounds checking.
- *  @param utf8 Pointer to the beginning of a valid UTF-8 encoded string.
- *  @param runes Output parameter to store the extracted UTF-32 codepoint.
- *  @param runes_lengths Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @warning Assumes valid UTF-8 input and that the declared sequence is complete - a truncated
- *      trailing sequence over-reads. Use `sz_rune_parse` for the bounds-checked variant, or
- *      `sz_utf8_valid()` first if validation is needed.
- *  @sa sz_rune_parse
- */
-SZ_INTERNAL void sz_rune_parse_unchecked(sz_cptr_t utf8, sz_rune_t *runes, sz_rune_length_t *runes_lengths) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
-    sz_u8_t lead = *u8s++;
-
-    // Branchless UTF-8 length detection using arithmetic.
-    // The 3 comparisons are independent and can execute in parallel on superscalar CPUs.
-    // CLZ-based approach was also considered but has complications with ASCII handling.
-    sz_rune_length_t length = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
-
-    // Extract rune bits - switch compiles to efficient jump table.
-    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation needed.
-    sz_rune_t rune;
-    switch (length) {
-    // Single-byte rune (0xxxxxxx)
-    case 1: rune = lead; break;
-    // Two-byte rune (110xxxxx 10xxxxxx)
-    case 2: rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
-    // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-    case 3: rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
-    // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-    default: rune = (lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU); break;
-    }
-
-    *runes = rune;
-    *runes_lengths = length;
-}
-
-/**
- *  @brief Extracts one UTF-8 codepoint from a UTF-8 string, never reading at or beyond @p utf8_end.
- *      A complete sequence decodes exactly like `sz_rune_parse_unchecked`; a truncated trailing
- *      sequence - one whose declared length exceeds the bytes left before @p utf8_end - decodes only
- *      the bytes present and reports that clamped length, so the caller advances past the partial
- *      tail instead of over-reading.
- *  @param utf8 Pointer to the next codepoint; the caller guarantees `utf8 < utf8_end`.
- *  @param utf8_end Pointer to one past the last readable byte of the buffer.
- *  @param rune Output parameter to store the extracted UTF-32 codepoint.
- *  @param rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @sa sz_rune_parse_unchecked
- */
-SZ_INTERNAL void sz_rune_parse(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
-    sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u8s);
-    sz_u8_t const lead = *u8s;
-    sz_rune_length_t const declared = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
-
-    // A complete sequence decodes byte-for-byte like the unchecked primitive
-    if ((sz_size_t)declared <= available) {
-        sz_rune_parse_unchecked(utf8, rune, rune_length);
-        return;
-    }
-
-    // Truncated trailing sequence: assemble only the bytes that exist - the lead's payload bits
-    // (the length prefix masked off) followed by every continuation byte still inside the buffer
-    sz_rune_t partial = (sz_rune_t)(lead & (0x7FU >> declared));
-    for (sz_size_t byte_index = 1; byte_index != available; ++byte_index)
-        partial = (partial << 6) | (u8s[byte_index] & 0x3FU);
-    *rune = partial, *rune_length = (sz_rune_length_t)available;
-}
-
-/**
- *  @brief Extracts a UTF-8 codepoint from a string, scanning backwards from the given position.
- *  @param utf8_end Pointer to one past the last byte of the UTF-8 sequence to parse.
- *  @param rune Output parameter to store the extracted UTF-32 codepoint.
- *  @param rune_length Output parameter to store the length of the UTF-8 codepoint in bytes (1-4).
- *  @warning Assumes valid UTF-8 input. Use `sz_utf8_valid()` first if validation is needed.
- *  @note This function does not perform any bounds checking on the input string.
- */
-SZ_INTERNAL void sz_rune_rparse(sz_cptr_t utf8_end, sz_rune_t *rune, sz_rune_length_t *rune_length) {
-    sz_u8_t const *u8s = (sz_u8_t const *)utf8_end;
-
-    // Scan backwards to find the lead byte (not a continuation byte 10xxxxxx)
-    int length = 1;
-    for (--u8s; (*u8s & 0xC0) == 0x80 && length < 4; --u8s, ++length) {}
-
-    // Now u8s points to the lead byte, length is the sequence length
-    sz_rune_parse_unchecked((sz_cptr_t)u8s, rune, rune_length);
-    sz_assert_(*rune_length == (sz_rune_length_t)length && "Inconsistent rune length detected in sz_rune_rparse.");
-}
-
-/**
- *  @brief Encode a UTF-32 codepoint to UTF-8, outputting 1-4 bytes.
- *  @param rune The UTF-32 codepoint to encode.
- *  @param utf8s Output buffer (must have space for at least 4 bytes).
- *  @return Number of bytes written (1-4), or 0 if the codepoint is invalid.
- */
-SZ_INTERNAL sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
-    if (rune <= 0x7F) {
-        utf8s[0] = (sz_u8_t)rune;
-        return sz_utf8_rune_1byte_k;
-    }
-    else if (rune <= 0x7FF) {
-        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
-        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_2bytes_k;
-    }
-    else if (rune <= 0xFFFF) {
-        // Reject surrogate codepoints
-        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k;
-        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
-        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
-        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_3bytes_k;
-    }
-    else if (rune <= 0x10FFFF) {
-        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
-        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
-        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
-        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
-        return sz_utf8_rune_4bytes_k;
-    }
-    return sz_utf8_invalid_k;
-}
-
-/**
- *  @brief Exports a UTF8 string into a UTF32 buffer.
- *  @warning The result is undefined id the UTF8 string is corrupted.
- *  @return The length in the number of codepoints.
- */
-SZ_PUBLIC sz_size_t sz_runes_parse(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
-    sz_cptr_t const end = utf8 + utf8_length;
-    sz_size_t count = 0;
-    sz_rune_length_t rune_length;
-    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse_unchecked(utf8, utf32, &rune_length);
-    return count;
-}
-
-#pragma endregion
 
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {

@@ -54,10 +54,15 @@ SZ_INTERNAL void sz_utf8_uncased_fold_upto_(                           //
         // Check if we hit boundaries
         if (source_ptr >= source_limit || destination_ptr >= destination_limit) break;
 
-        // Multi-byte UTF-8 sequence
+        // Fold only well-formed runes; copy malformed bytes through unchanged, resyncing one byte at a time.
         sz_rune_t source_rune;
-        sz_rune_length_t source_rune_length;
-        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_limit, &source_rune, &source_rune_length);
+        sz_rune_length_t const source_rune_length =
+            sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_limit, &source_rune);
+        if (source_rune_length == sz_utf8_invalid_k) {
+            *destination_ptr++ = *source_ptr++; // destination has room (checked at the loop top)
+            codepoints_read++, codepoints_written++;
+            continue;
+        }
 
         // Perform Unicode folding
         sz_rune_t target_runes[3];
@@ -91,17 +96,17 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t sour
     sz_u8_t const *source_end = source_ptr + source_length;
     sz_u8_t *destination_ptr = (sz_u8_t *)destination;
 
-    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation is needed.
+    // Well-formed runes fold; any byte not starting a well-formed codepoint is copied through (sz_rune_parse).
     while (source_ptr < source_end) {
         // ASCII fast-path: process consecutive ASCII bytes without UTF-8 decode/encode overhead.
         // This handles ~95% of typical text content with minimal branching.
         while (source_ptr < source_end && *source_ptr < 0x80) *destination_ptr++ = sz_ascii_fold_(*source_ptr++);
         if (source_ptr >= source_end) break;
 
-        // Multi-byte UTF-8 sequence: use full decode/fold/encode path
+        // Fold only well-formed runes; copy malformed bytes through unchanged, resyncing one byte at a time.
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune, &rune_length);
+        sz_rune_length_t const rune_length = sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
+        if (rune_length == sz_utf8_invalid_k) { *destination_ptr++ = *source_ptr++; continue; }
         source_ptr += rune_length;
 
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes

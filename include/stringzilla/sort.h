@@ -17,7 +17,9 @@
  *
  *  Beyond plain byte-lexicographic ordering, `sz_sequence_argsort_utf8_uncased` sorts UTF-8
  *  strings under Unicode case-folding, progressively folding small chunks of each string on the fly so
- *  callers don't have to materialize a pre-folded copy of the whole collection.
+ *  callers don't have to materialize a pre-folded copy of the whole collection. Malformed UTF-8 is
+ *  well-defined: a byte that does not begin a well-formed codepoint sorts by its raw byte value as a
+ *  single one-byte unit, keeping the order total and deterministic.
  *
  *  All `sz_sequence_argsort*` entry points are @b stable (equal elements keep their input order), support
  *  descending order via the `reverse` flag, and accept a `top_count` to only fully order the leading
@@ -103,6 +105,9 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
  *
  *  @note This algorithm is @b stable: equal (case-folded-equal) elements keep their input order.
+ *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
+ *        compared and sorted by its raw byte value as a single one-byte unit, and decoding resyncs at the
+ *        next byte. The result stays a total, deterministic order; valid input sorts byte-identically.
  *  @sa sz_utf8_uncased_fold, sz_utf8_uncased_order
  *  @sa sz_sequence_argsort_utf8_uncased_serial
  */

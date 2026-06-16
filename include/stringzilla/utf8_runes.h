@@ -1,5 +1,5 @@
 /**
- *  @brief ISA-agnostic Unicode core for case folding (no SIMD intrinsics).
+ *  @brief ISA-agnostic Unicode rune codec (decode/encode/validate) and case folding (no SIMD intrinsics).
  *  @file include/stringzilla/utf8_runes.h
  *  @author Ash Vardanian
  *  @sa utf8_uncased.h
@@ -58,6 +58,106 @@ typedef struct sz_utf8_uncased_needle_metadata_t {
 
 /**  Helper macro for readable assertions - use for SIMD implementation reference */
 #define sz_is_in_range_(x, low, high) ((x) >= (low) && (x) <= (high))
+
+#pragma region Rune Codec
+
+/** @brief Bounds-checked, validating UTF-8 decode. Returns the codepoint's 1-4 byte length in @p rune, or
+ *         `sz_utf8_invalid_k` (0) when the bytes at @p utf8 do not begin a well-formed, shortest-form,
+ *         non-surrogate, in-range codepoint (a truncated trailing sequence before @p utf8_end included). The
+ *         single authority for "is this a foldable/normalizable rune"; the decode-side mirror of `sz_rune_export`.
+ *         A byte that does not begin a well-formed rune is its own 1-byte maximal subpart - callers copy it
+ *         through unchanged and resync at the next byte. */
+SZ_INTERNAL sz_rune_length_t sz_rune_parse(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune) {
+    sz_u8_t const *u = (sz_u8_t const *)utf8;
+    sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);
+    sz_u8_t const lead = u[0];
+    if (lead < 0x80) { *rune = lead; return sz_utf8_rune_1byte_k; }
+    if (lead < 0xC2) return sz_utf8_invalid_k; // continuation byte, or C0/C1 (overlong 2-byte)
+    if (lead < 0xE0) {                         // C2..DF
+        if (available < 2 || (u[1] & 0xC0) != 0x80) return sz_utf8_invalid_k;
+        *rune = (sz_rune_t)(lead & 0x1F) << 6 | (u[1] & 0x3F);
+        return sz_utf8_rune_2bytes_k;
+    }
+    if (lead < 0xF0) { // E0..EF
+        if (available < 3 || (u[1] & 0xC0) != 0x80 || (u[2] & 0xC0) != 0x80) return sz_utf8_invalid_k;
+        if (lead == 0xE0 && u[1] < 0xA0) return sz_utf8_invalid_k;  // overlong
+        if (lead == 0xED && u[1] >= 0xA0) return sz_utf8_invalid_k; // surrogate (U+D800-U+DFFF)
+        *rune = (sz_rune_t)(lead & 0x0F) << 12 | (sz_rune_t)(u[1] & 0x3F) << 6 | (u[2] & 0x3F);
+        return sz_utf8_rune_3bytes_k;
+    }
+    if (lead <= 0xF4) { // F0..F4
+        if (available < 4 || (u[1] & 0xC0) != 0x80 || (u[2] & 0xC0) != 0x80 || (u[3] & 0xC0) != 0x80)
+            return sz_utf8_invalid_k;
+        if (lead == 0xF0 && u[1] < 0x90) return sz_utf8_invalid_k;  // overlong
+        if (lead == 0xF4 && u[1] >= 0x90) return sz_utf8_invalid_k; // > U+10FFFF
+        *rune = (sz_rune_t)(lead & 0x07) << 18 | (sz_rune_t)(u[1] & 0x3F) << 12 | (sz_rune_t)(u[2] & 0x3F) << 6 |
+                (u[3] & 0x3F);
+        return sz_utf8_rune_4bytes_k;
+    }
+    return sz_utf8_invalid_k; // F5..FF
+}
+
+/** @brief Decode the 1-4 byte sequence the lead byte declares, with NO bounds check and NO validation; returns
+ *         the byte length and stores the codepoint in @p rune.
+ *  @warning Assumes valid, complete UTF-8 (a truncated trailing sequence over-reads). Use `sz_rune_parse` for the
+ *           bounds-checked + validating variant, or `sz_utf8_valid()` first. */
+SZ_INTERNAL sz_rune_length_t sz_rune_parse_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
+    sz_u8_t const *u8s = (sz_u8_t const *)utf8;
+    sz_u8_t lead = *u8s++;
+    sz_rune_length_t length = (sz_rune_length_t)(1 + (lead >= 0xC0U) + (lead >= 0xE0U) + (lead >= 0xF0U));
+    switch (length) {
+    case 1: *rune = lead; break;
+    case 2: *rune = (lead & 0x1FU) << 6 | (u8s[0] & 0x3FU); break;
+    case 3: *rune = (lead & 0x0FU) << 12 | (u8s[0] & 0x3FU) << 6 | (u8s[1] & 0x3FU); break;
+    default:
+        *rune = (sz_rune_t)(lead & 0x07U) << 18 | (u8s[0] & 0x3FU) << 12 | (u8s[1] & 0x3FU) << 6 | (u8s[2] & 0x3FU);
+        break;
+    }
+    return length;
+}
+
+/** @brief Encode a UTF-32 codepoint to UTF-8 (1-4 bytes). @return byte count, or `sz_utf8_invalid_k` if invalid. */
+SZ_INTERNAL sz_rune_length_t sz_rune_export(sz_rune_t rune, sz_u8_t *utf8s) {
+    if (rune <= 0x7F) {
+        utf8s[0] = (sz_u8_t)rune;
+        return sz_utf8_rune_1byte_k;
+    }
+    else if (rune <= 0x7FF) {
+        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
+        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_2bytes_k;
+    }
+    else if (rune <= 0xFFFF) {
+        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_utf8_invalid_k; // reject surrogates
+        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_3bytes_k;
+    }
+    else if (rune <= 0x10FFFF) {
+        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_utf8_rune_4bytes_k;
+    }
+    return sz_utf8_invalid_k;
+}
+
+/** @brief Whether `[text, text+length)` is entirely well-formed UTF-8. */
+SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *end_u8 = text_u8 + length;
+    while (text_u8 < end_u8) {
+        sz_rune_t rune;
+        sz_rune_length_t const consumed = sz_rune_parse((sz_cptr_t)text_u8, (sz_cptr_t)end_u8, &rune);
+        if (consumed == sz_utf8_invalid_k) return sz_false_k;
+        text_u8 += consumed;
+    }
+    return sz_true_k;
+}
+
+#pragma endregion
 
 /**
  *  @brief Fold a Unicode codepoint to its case-folded form (Unicode 17.0).
@@ -830,6 +930,16 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
 SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
 
 /**
+ *  @brief Folded-rune representation of a byte that does not begin a well-formed codepoint.
+ *
+ *  A malformed byte folds to itself and is matched/compared byte-for-byte, never as a Unicode codepoint.
+ *  Tagging it above the valid Unicode range (0x10FFFF) keeps it distinct from every real folded rune, so a
+ *  lone malformed byte 0xFC can only match another malformed 0xFC - never the valid rune U+00FC ('ü'). Two
+ *  equal malformed bytes still produce equal tagged runes, preserving byte-for-byte matching.
+ */
+SZ_INTERNAL sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
+
+/**
  *  @brief Iterator state for streaming through folded UTF-8 runes.
  *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently.
  */
@@ -849,7 +959,12 @@ SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *iterator, sz_
     iterator->pending_idx = 0;
 }
 
-/** @brief Get next folded rune. Returns `sz_false_k` when exhausted. Assumes valid UTF-8 input. */
+/**
+ *  @brief Get next folded rune. Returns `sz_false_k` when exhausted.
+ *  Malformed UTF-8 is handled losslessly: a byte that does not begin a well-formed codepoint is emitted as a
+ *  single literal byte (tagged so it compares byte-for-byte and never collides with a real folded codepoint) and
+ *  the iterator resyncs by one byte, never reading past `end`.
+ */
 SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
     if (it->pending_idx >= it->pending_count) {
@@ -865,10 +980,18 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_r
             return sz_true_k;
         }
 
-        // Multi-byte UTF-8: decode, fold, and buffer
+        // Multi-byte UTF-8: decode (bounds-checked), fold, and buffer. A byte that does not begin a
+        // well-formed codepoint folds to itself (>= 0x80 bytes are unchanged by `sz_ascii_fold_`) and resyncs
+        // by one byte, never over-reading past `end`.
         sz_rune_t rune;
-        sz_rune_length_t rune_length;
-        sz_rune_parse_unchecked(it->ptr, &rune, &rune_length);
+        sz_rune_length_t const rune_length = sz_rune_parse(it->ptr, it->end, &rune);
+        if (rune_length == sz_utf8_invalid_k) {
+            *out_rune = sz_rune_malformed_byte_(lead);
+            it->ptr++;
+            it->pending_count = 0;
+            it->pending_idx = 0;
+            return sz_true_k;
+        }
 
         it->ptr += rune_length;
         // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
@@ -911,7 +1034,9 @@ SZ_INTERNAL void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t
 /**
  *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
  * When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
- * reverse order ('s', then 's').
+ * reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and byte-identically to the forward
+ * iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
+ * the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
  */
 SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t_ *it, sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
@@ -924,24 +1049,42 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
     // Refill: find previous codepoint
     if (it->ptr <= it->start) return sz_false_k;
 
-    // Walk backwards to find start of UTF-8 sequence
-    // Continuation bytes have form 10xxxxxx (0x80-0xBF)
-    it->ptr--;
-    while (it->ptr > it->start && (*(sz_u8_t const *)it->ptr & 0xC0) == 0x80) { it->ptr--; }
+    // Remember one-past-the-end of the sequence we are about to decode, so the strict decode is bounded
+    // and a malformed run resyncs one byte at a time - mirroring the forward iterator byte-for-byte.
+    sz_cptr_t const sequence_end = it->ptr;
 
-    // ASCII fast-path
-    sz_u8_t lead = *(sz_u8_t const *)it->ptr;
-    if (lead < 0x80) {
-        *out_rune = sz_ascii_fold_(lead);
+    // The byte immediately before `sequence_end` is the last byte of whatever codepoint ends here.
+    sz_u8_t const last_byte = *(sz_u8_t const *)(sequence_end - 1);
+
+    // ASCII fast-path: a byte < 0x80 is always its own complete 1-byte codepoint.
+    if (last_byte < 0x80) {
+        it->ptr = sequence_end - 1;
+        *out_rune = sz_ascii_fold_(last_byte);
         it->pending_count = 0;
         it->pending_idx = 0;
         return sz_true_k;
     }
 
-    // Multi-byte UTF-8: decode and fold
+    // Otherwise walk backwards over up to 3 continuation bytes (0x80-0xBF) to locate a candidate lead.
+    // A well-formed multi-byte rune is at most 4 bytes, so stop after considering 4 positions.
+    sz_cptr_t candidate = sequence_end - 1;
+    for (sz_size_t back = 0; back < 3 && candidate > it->start && (*(sz_u8_t const *)candidate & 0xC0) == 0x80;
+         ++back)
+        candidate--;
+
+    // Multi-byte UTF-8: decode (bounded) and fold only if the bytes from the candidate lead form a well-formed
+    // codepoint that ends EXACTLY at `sequence_end`. Otherwise the last byte does not begin/end a valid rune, so
+    // treat it as a literal folded-to-itself byte and resync by one - matching the forward iterator byte-for-byte.
     sz_rune_t rune;
-    sz_rune_length_t rune_length;
-    sz_rune_parse_unchecked(it->ptr, &rune, &rune_length);
+    sz_rune_length_t const rune_length = sz_rune_parse(candidate, sequence_end, &rune);
+    if (rune_length == sz_utf8_invalid_k || candidate + rune_length != sequence_end) {
+        it->ptr = sequence_end - 1;
+        *out_rune = sz_rune_malformed_byte_(last_byte);
+        it->pending_count = 0;
+        it->pending_idx = 0;
+        return sz_true_k;
+    }
+    it->ptr = candidate;
 
     // Store folded runes in pending buffer
     it->pending[0] = 0xFFFFFFFFu;

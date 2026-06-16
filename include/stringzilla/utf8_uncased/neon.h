@@ -281,11 +281,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_find_neon_scripted_( //
 
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune = 0;
-    if (alarm) {
-        sz_rune_length_t rune_byte_length;
-        sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune,
-                                &rune_byte_length);
-    }
+    if (alarm) sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune);
 
     sz_cptr_t haystack_ptr = haystack;
     while (haystack_ptr < haystack_end) {

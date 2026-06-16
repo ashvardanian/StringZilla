@@ -32,13 +32,16 @@ extern "C" {
  *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The
  *  composing forms (NFC, NFKC) never exceed the decomposed length, so the same bound is safe.
  *
- *  @param source UTF-8 string to normalize. Must be valid UTF-8.
+ *  @param source UTF-8 string to normalize.
  *  @param source_length Number of bytes in @p source.
  *  @param form One of `sz_normal_form_nfd_k`, `_nfc_k`, `_nfkd_k`, `_nfkc_k`.
  *  @param destination Buffer to receive the normalized UTF-8 string.
  *  @return Number of bytes written to @p destination.
  *
- *  @warning No bounds checking is performed on @p destination. The source must be valid UTF-8.
+ *  @note Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
+ *        an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
+ *        part in canonical ordering, and processing resyncs at the next byte.
+ *  @warning No bounds checking is performed on @p destination.
  */
 SZ_DYNAMIC sz_size_t sz_utf8_norm(      //
     sz_cptr_t source, sz_size_t length, //
@@ -46,11 +49,13 @@ SZ_DYNAMIC sz_size_t sz_utf8_norm(      //
 
 /**
  *  @brief Locate the first byte that breaks a normalization form.
- *  @param source UTF-8 string to test. Must be valid UTF-8.
+ *  @param source UTF-8 string to test.
  *  @param length Number of bytes in @p source.
  *  @param form One of `sz_normal_form_nfd_k`, `_nfc_k`, `_nfkd_k`, `_nfkc_k`.
  *  @return `SZ_NULL_CHAR` if @p source is already in @p form; otherwise a pointer to the first byte
  *          that begins a codepoint breaking the form (first non-Yes QC or canonical-order violation).
+ *  @note Malformed UTF-8 is treated losslessly: any byte that does not begin a well-formed codepoint is
+ *        an opaque 1-byte barrier that is inert (never a violation), and the scan resyncs at the next byte.
  */
 SZ_DYNAMIC sz_cptr_t sz_utf8_norm_violation( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
