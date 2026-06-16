@@ -57,10 +57,46 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
+/*  x86-`movemask`-equivalent for VSX: gathers the MSB of each of the 16 bytes into bit `i` (lowest-addressed
+ *  byte -> bit 0) via `vec_vbpermq`, identical to `sz_utf8_movemask_powervsx_` below but reachable before its
+ *  first user (`sz_utf8_find_nth_powervsx` and the multistep iterators); distinctly named so both coexist in
+ *  one translation unit. */
+SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
+    __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
+    __vector unsigned long long const gathered = vec_vbpermq(compared, indices);
+#if SZ_IS_BIG_ENDIAN_
+    return (sz_u32_t)(gathered[0] & 0xFFFFull);
+#else
+    return (sz_u32_t)(gathered[1] & 0xFFFFull);
+#endif
+}
+
+/**
+ *  @brief Locate the start byte of the n-th code-point (0-indexed), mirroring `sz_utf8_find_nth_serial`.
+ *         Per tile a code-point-start bitmask `~continuation_mask` is popcounted to skip whole tiles; the
+ *         n-th start's lane comes from `sz_u32_nth_set_bit`. The `< 16` tail defers to the serial reference.
+ */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    //! Extracting the n-th code-point start requires a per-bit population scan; not worth
-    //! vectorizing without a PDEP-equivalent — defer to serial, mirroring the NEON backend.
-    return sz_utf8_find_nth_serial(text, length, n);
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+
+    __vector unsigned char const mask_c0_vec = vec_splats((unsigned char)0xC0);
+    __vector unsigned char const pat_80_vec = vec_splats((unsigned char)0x80);
+
+    while (length >= 16) {
+        __vector unsigned char bytes_vec = vec_xl(0, text_u8);
+        __vector unsigned char headers_vec = vec_and(bytes_vec, mask_c0_vec);
+        __vector unsigned char is_continuation_vec = (__vector unsigned char)vec_cmpeq(headers_vec, pat_80_vec);
+        sz_u32_t start_bits = (~sz_utf8_iterate_movemask_powervsx_(is_continuation_vec)) & 0xFFFFu;
+        sz_size_t const start_count = (sz_size_t)sz_u32_popcount(start_bits);
+
+        if (n >= start_count) {
+            n -= start_count, text_u8 += 16, length -= 16;
+            continue;
+        }
+        return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_bits, n));
+    }
+
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_powervsx( //
@@ -115,46 +151,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_powervsx( //
 
 #pragma region Multistep newline / whitespace iteration
 
-/*  Multistep newline / whitespace iteration (IBM Power VSX / Power9).
- *
- *  Each 16-byte window is classified branchlessly into a `start_bits` bitmask (every delimiter start) plus
- *  disjoint 2-/3-byte start bitmasks, all extracted with the single-instruction `sz_utf8_movemask_powervsx_`
- *  (bit `i` carries the MSB of lane `i`, i.e. byte `position+i`). VSX has no `vpcompressb`, so the peel
- *  left-packs the 16 lanes in eight 2-lane sub-blocks with a `vec_perm` table (a VSX vector holds two `u64`,
- *  so two is the natural compaction width), building the absolute `(position+lane, length)` u64 pairs from
- *  `start_bits` and the disjoint 2-/3-byte masks - no `ctz` index-find and no group/else branch. VSX has no
- *  masked store, so each compacted sub-block is full-stored to a fixed-width stack scratch advancing by its
- *  surviving count, then the low `emit_count` entries are copied to the output (mirroring the NEON peel). We
- *  trust starts in lanes [0,13] and step 14 so any <=3-byte delimiter from a trusted lane is fully loaded;
- *  a 1-byte `t[pos-1] == '\r'` carry suppresses an LF that completes a CRLF straddling the window edge (the
- *  only delimiter whose tail is itself a match). The caller computes the capacity cut like the other backends:
- *  it peels only `emit_count` matches, then resumes past the last emitted match if the buffer filled. */
-
-/*  x86-`movemask`-equivalent for VSX: gathers the MSB of each of the 16 bytes into bit `i` (lowest-addressed
- *  byte -> bit 0) via `vec_vbpermq`, identical to `sz_utf8_movemask_powervsx_` below but reachable before it
- *  for the multistep iterators (and distinctly named so both can coexist in one translation unit). */
-SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
-    __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
-    __vector unsigned long long const gathered = vec_vbpermq(compared, indices);
-#if SZ_IS_BIG_ENDIAN_
-    return (sz_u32_t)(gathered[0] & 0xFFFFull);
-#else
-    return (sz_u32_t)(gathered[1] & 0xFFFFull);
-#endif
-}
-
 /**
- *  @brief  Peel the window's first `emit_count` matches by SIMD left-pack (no `ctz`, no per-match branch).
- *
- *  Walks the 16-lane `start_bits` mask in eight ascending 2-lane sub-blocks. Each sub-block builds the two
- *  candidate `(position+lane, length)` `u64` pairs, gathers the set lanes to the front of a `vector unsigned
- *  long long` with one `vec_perm` (a byte-granular permute driven by `compact2_lut`, the same left-pack idea as
- *  the NEON / Haswell peels), and full-stores both survivors to a fixed-width stack scratch advancing by the
- *  sub-block's surviving count. VSX has no masked store, so the scratch is 18-wide to absorb the trailing
- *  2-lane spill of the last compacted sub-block (at most 14 trusted matches per window); the low `emit_count`
- *  entries are then copied to the caller's output, preserving ascending lane order and the original
- *  `emit_count` truncation byte-for-byte. */
-SZ_INTERNAL void sz_utf8_iterate_peel_window_powervsx_(                        //
+ *  @brief Peel the window's first `emit_count` matches by SIMD left-pack (no `ctz`, no per-match branch).
+ *         Each ascending 2-lane sub-block gathers its set lanes' `(position+lane, length)` `u64` pairs with one
+ *         `vec_perm` and full-stores to an 18-wide scratch (absorbing the last sub-block's 2-lane spill, since
+ *         VSX has no masked store); the low `emit_count` entries copy out in ascending lane order, byte-exact.
+ */
+SZ_INTERNAL void sz_utf8_iterate_peel_powervsx_(                               //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -259,8 +262,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_powervsx(     //
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_powervsx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
-                                                  match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_powervsx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+                                           match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match.
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -350,8 +353,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_powervsx(  //
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_powervsx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
-                                                  match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_powervsx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+                                           match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match.
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -369,31 +372,13 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_powervsx(  //
 #pragma endregion Multistep newline / whitespace iteration
 
 /**
- *  @brief UAX-29 word boundary detection using IBM Power VSX (forward & reverse).
- *
- *  The full UAX-29 segmenter is a stateful walk whose decision at each candidate position depends on the
- *  Word_Break properties of the surrounding runes, including multi-code-point look-around (WB6/WB7 mid-letter,
- *  WB11/WB12 numeric, WB15/WB16 Regional_Indicator parity) and WB4 Extend/Format/ZWJ skipping. We keep those
- *  stateful sub-rules in the serial reference, but accelerate the dominant common case with VSX: long runs of
- *  ASCII letters (`[A-Za-z]`) or ASCII digits (`[0-9]`).
- *
- *  Interior positions of a maximal ASCII-letter run are governed @b unconditionally by WB5 (AHLetter ×
- *  AHLetter ⇒ no break, no look-around needed), and interior positions of an ASCII-digit run by WB8 (Numeric ×
- *  Numeric ⇒ no break). Such positions can never be a boundary, so we skip them at vector speed. The first
- *  position whose byte class differs from its predecessor (or is not letter/digit) is the earliest position
- *  that could be a boundary; from there the serial reference re-tests that exact position. Because we only ever
- *  skip @b proven non-boundaries, the result is byte-for-byte identical to `_serial` (same returned pointer and
- *  `boundary_width`).
- *
- *  Per-byte classification (0 = ASCII letter, 1 = ASCII digit, 2 = other ASCII, 3 = non-ASCII) is computed
- *  in-register with VSX range compares and `vec_sel`. We store the 16-byte class vector and fold it against
- *  the previous byte's class to form a "safe interior" bitmask, then scan that mask with a trailing/leading
- *  zero count to locate the first/last candidate boundary.
+ *  @brief UAX-29 word boundary detection using IBM Power VSX (forward & reverse). Stateful sub-rules stay in
+ *         the serial reference; all-ASCII windows resolve their trusted lanes in-vector and emit the proven
+ *         boundaries, deferring every uncertain position to `_serial` so the output stays byte-exact.
  */
 
-/*  x86-`movemask`-equivalent for VSX: gathers the MSB of each of the 16 bytes into bit `i` (lowest-addressed
- *  byte -> bit 0) via `vec_vbpermq`. Named distinctly from `find/powervsx.h`'s identical helper so both can
- *  coexist in one translation unit. */
+/*  x86-`movemask`-equivalent for VSX gathering each byte's MSB into bit `i` via `vec_vbpermq`; named distinctly
+ *  from `find/powervsx.h`'s identical helper so both coexist in one translation unit. */
 SZ_INTERNAL sz_u64_t sz_utf8_movemask_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
     __vector unsigned long long const gathered = vec_vbpermq(compared, indices);
@@ -485,31 +470,48 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
         }
 
         sz_u32_t boundary = sz_utf8_word_break_boundary_mask_powervsx_(window); // trusted lanes [2,14]
-        for (sz_size_t sub_block = 0; sub_block < 8; ++sub_block) {
+
+        // Compact every trusted boundary directly into `word_starts + words` (one full-vector store per
+        // non-empty 2-lane sub-block), capping at `room` so the masked-store-less 2-lane spill never overshoots
+        // capacity; the final sub-block stages through a 2-element tail when its store would cross `room`.
+        sz_size_t const room = words_capacity - words;
+        sz_size_t filled = 0;
+        for (sz_size_t sub_block = 0; sub_block < 8 && filled < room; ++sub_block) {
             sz_u32_t const submask = (boundary >> (sub_block * 2)) & 0x3u;
             if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
-            sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
             sz_size_t const base = position - 2 + sub_block * 2; // lane k of this sub-block = byte base+k
+            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
             __vector unsigned long long const positions = {(unsigned long long)base, (unsigned long long)(base + 1)};
             __vector unsigned char const permutation = vec_xl(0, compact2_lut[submask]);
             __vector unsigned long long const boundaries = (__vector unsigned long long)vec_perm(
                 (__vector unsigned char)positions, (__vector unsigned char)positions, permutation);
-            __vector unsigned long long const starts = {(unsigned long long)word_start, boundaries[0]};
-            __vector unsigned long long const lengths = vec_sub(boundaries, starts);
-
-            sz_size_t scratch_starts[2], scratch_lengths[2];
-            vec_xst(starts, 0, (unsigned long long *)scratch_starts);
-            vec_xst(lengths, 0, (unsigned long long *)scratch_lengths);
-            for (sz_size_t i = 0; i < stored; ++i)
-                word_starts[words + i] = scratch_starts[i], word_lengths[words + i] = scratch_lengths[i];
-            words += stored;
-            if (stored) word_start = word_starts[words - 1] + word_lengths[words - 1];
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_start;
-                return words;
+            if (filled + 2 <= room) { vec_xst(boundaries, 0, (unsigned long long *)(word_starts + words + filled)); }
+            else { // Final sub-block: a 2-lane store would cross `room`, so emit ≤2 valid lanes via a tail buffer.
+                sz_size_t tail[2];
+                vec_xst(boundaries, 0, (unsigned long long *)tail);
+                sz_size_t const copy = sz_min_of_two(taken, room - filled);
+                for (sz_size_t k = 0; k < copy; ++k) word_starts[words + filled + k] = tail[k];
             }
+            filled += taken;
+        }
+
+        // In-place shifted-difference: boundary `i`'s start is boundary `i-1` (or the open `word_start` for
+        // `i == 0`). Read boundary `i` before overwriting its slot; carry the previous boundary to dodge the
+        // clobbered-slot read.
+        sz_size_t const stored = sz_min_of_two(filled, room);
+        sz_size_t previous_boundary = word_start;
+        for (sz_size_t i = 0; i < stored; ++i) {
+            sz_size_t const boundary_i = word_starts[words + i];
+            word_starts[words + i] = previous_boundary;
+            word_lengths[words + i] = boundary_i - previous_boundary;
+            previous_boundary = boundary_i;
+        }
+        words += stored;
+        if (stored) word_start = previous_boundary;
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_start;
+            return words;
         }
         position += 13; // Resolved [position, position+12]; next unresolved boundary is at position+13.
     }
@@ -577,32 +579,48 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx( //
         }
 
         sz_u32_t boundary = sz_utf8_word_break_boundary_mask_powervsx_(window); // trusted lanes [2,14]
-        for (sz_size_t sub_block = 8; sub_block-- > 0;) {                       // high-to-low for descending emission
+
+        // Compact every trusted boundary directly into `word_starts + words` (one full-vector store per
+        // non-empty 2-lane sub-block, high-to-low), capping at `room` so the masked-store-less 2-lane spill
+        // never overshoots capacity; the final sub-block stages through a 2-element tail when it crosses `room`.
+        sz_size_t const room = words_capacity - words;
+        sz_size_t filled = 0;
+        for (sz_size_t sub_block = 8; sub_block-- > 0 && filled < room;) { // high-to-low for descending emission
             sz_u32_t const submask = (boundary >> (sub_block * 2)) & 0x3u;
             if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
-            sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
             sz_size_t const group_base = base + sub_block * 2; // lane k of this sub-block = byte group_base+k
+            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
             __vector unsigned long long const positions = {(unsigned long long)group_base,
                                                            (unsigned long long)(group_base + 1)};
             __vector unsigned char const permutation = vec_xl(0, compact2_lut_descending[submask]);
             __vector unsigned long long const boundaries = (__vector unsigned long long)vec_perm(
                 (__vector unsigned char)positions, (__vector unsigned char)positions, permutation);
-            __vector unsigned long long const previous = {(unsigned long long)word_end, boundaries[0]};
-            __vector unsigned long long const lengths = vec_sub(previous, boundaries);
-
-            sz_size_t scratch_starts[2], scratch_lengths[2];
-            vec_xst(boundaries, 0, (unsigned long long *)scratch_starts);
-            vec_xst(lengths, 0, (unsigned long long *)scratch_lengths);
-            for (sz_size_t i = 0; i < stored; ++i)
-                word_starts[words + i] = scratch_starts[i], word_lengths[words + i] = scratch_lengths[i];
-            words += stored;
-            if (stored) word_end = word_starts[words - 1];
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
+            if (filled + 2 <= room) { vec_xst(boundaries, 0, (unsigned long long *)(word_starts + words + filled)); }
+            else { // Final sub-block: a 2-lane store would cross `room`, so emit ≤2 valid lanes via a tail buffer.
+                sz_size_t tail[2];
+                vec_xst(boundaries, 0, (unsigned long long *)tail);
+                sz_size_t const copy = sz_min_of_two(taken, room - filled);
+                for (sz_size_t k = 0; k < copy; ++k) word_starts[words + filled + k] = tail[k];
             }
+            filled += taken;
+        }
+
+        // In-place shifted-difference: boundary `i`'s span ends at boundary `i-1` (or the open `word_end` for
+        // `i == 0`). `word_starts[words + i]` already holds boundary `i`; read it before computing the length and
+        // carry the previous boundary so no clobbered slot is re-read.
+        sz_size_t const stored = sz_min_of_two(filled, room);
+        sz_size_t previous_boundary = word_end;
+        for (sz_size_t i = 0; i < stored; ++i) {
+            sz_size_t const boundary_i = word_starts[words + i];
+            word_lengths[words + i] = previous_boundary - boundary_i;
+            previous_boundary = boundary_i;
+        }
+        words += stored;
+        if (stored) word_end = previous_boundary;
+        if (words == words_capacity) {
+            if (bytes_consumed) *bytes_consumed = word_end;
+            return words;
         }
         position = base + 1; // Resolved down to position-12; next unresolved boundary is at position-13.
     }

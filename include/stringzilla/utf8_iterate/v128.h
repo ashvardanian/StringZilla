@@ -16,12 +16,9 @@ extern "C" {
 
 #if SZ_USE_V128
 
-/*  WASM SIMD128 is 16 bytes wide like NEON. We use `wasm_i8x16_bitmask` (a true movemask producing
- *  one bit per byte) instead of NEON's nibble-mask trick, so each set bit maps directly to a byte
- *  offset. To peek at the following bytes within a register we rotate it with `wasm_i8x16_shuffle`,
- *  matching NEON's `vextq_u8(v, v, k)`. The trailing lanes that wrap around are zeroed by `drop`
- *  masks so they cannot create spurious matches. We advance by 14 bytes per window so a 3-byte
- *  sequence straddling the boundary is re-examined. */
+/*  WASM SIMD128 is 16 bytes wide. `wasm_i8x16_bitmask` is a true movemask (one bit per byte) so each set
+ *  bit maps to a byte offset; following bytes are peeked via `wasm_i8x16_shuffle` rotations. We step 14
+ *  bytes per window so a 3-byte sequence straddling the boundary is re-examined. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -35,34 +32,14 @@ SZ_INTERNAL v128_t sz_utf8_rotate2_v128_(v128_t v) {
 
 #pragma region Multistep newline / whitespace iteration
 
-/*  Multistep newline / whitespace iteration (WASM SIMD128).
- *
- *  Each FULL 16-byte tile is classified branchlessly into a `start_bits` byte-bitmask (every delimiter start in
- *  the trusted lanes [0,13]) plus the disjoint 2-/3-byte start bitmasks, all built with `wasm_i8x16_bitmask` (a
- *  true movemask producing one bit per byte, so each set bit maps straight to a byte offset). WASM SIMD128 has
- *  no `vpcompressb` and no masked store, so the peel left-packs with `wasm_i8x16_swizzle` (a single-register
- *  byte table lookup, the WASM analog of `vqtbl1q`): the 16-lane mask is walked in four ascending 4-lane
- *  sub-blocks - a v128 register holds exactly four 32-bit `sz_size_t` lanes, so a 4-lane block fits one swizzle
- *  - and each block compacts its `(position+lane, length)` pairs to the front of a fixed stack scratch with one
- *  permutation drawn from `compact_lut`, then the low `emit_count` entries are copied out. There is no
- *  per-match `ctz` and no data-dependent inner loop. We trust starts in lanes [0,13] and step 14 so any 2-/3-
- *  byte delimiter from a trusted lane is fully loaded; for newlines a 1-byte `t[pos-1] == '\r'` carry
- *  suppresses an LF that completes a CRLF straddling the tile edge (the only delimiter whose tail is itself a
- *  match). The caller computes the capacity cut like the other backends (`window_matches = popcount(start_bits)`,
- *  `emit_count = min(window_matches, matches_capacity - count)`), and on a full buffer resumes mid-tile past the
- *  last emitted match. */
-
 /**
- *  @brief  Peel the tile's first `emit_count` matches with a `wasm_i8x16_swizzle` left-pack, 4 lanes per block.
+ *  @brief  Peel the tile's first @p emit_count matches with a `wasm_i8x16_swizzle` left-pack, 4 lanes per block.
  *
- *  Walks the 16-lane `start_bits` mask in four ascending 4-lane sub-blocks. Each block builds the four candidate
- *  `(position+lane, length)` `sz_size_t` pairs in one v128 apiece, gathers the set lanes to the front of a stack
- *  scratch with one `wasm_i8x16_swizzle` (driven by the 4-bit-mask `compact_lut` left-pack table), then the low
- *  `emit_count` entries are copied to the caller's output - preserving ascending lane order and the original
- *  truncation byte-for-byte, with no per-match `ctz`. The scratch is 16-wide so the trailing 4-lane spill of the
- *  last compacted block always lands inside it (at most 14 trusted matches per tile).
+ *  Walks the 16-lane @p start_bits mask in four ascending 4-lane sub-blocks, gathering each block's set
+ *  `(position+lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle from `compact_lut`,
+ *  then copies the low @p emit_count entries out - ascending lane order, byte-exact, no per-match `ctz`.
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_window_v128_(                            //
+SZ_INTERNAL void sz_utf8_iterate_peel_v128_(                                   //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -170,11 +147,12 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_v128(         //
         if (position != 0 && text_u8[position - 1] == '\r')
             start_bits &= ~((sz_u32_t)wasm_i8x16_bitmask(newline_cmp) & 1u);
 
+        // Count the scalar `start_bits` (already needed by the peel) rather than `wasm_i8x16_popcnt` on a vector.
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_v128_(start_bits, two_byte_bits, three_byte_bits, emit_count, position,
-                                              match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_v128_(start_bits, two_byte_bits, three_byte_bits, emit_count, position,
+                                       match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -260,11 +238,12 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_v128(      //
         sz_u32_t two_byte_bits = (sz_u32_t)wasm_i8x16_bitmask(two_byte_cmp);
         sz_u32_t three_byte_bits = (sz_u32_t)wasm_i8x16_bitmask(three_byte_cmp);
 
+        // Count the scalar `start_bits` (already needed by the peel) rather than `wasm_i8x16_popcnt` on a vector.
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_v128_(start_bits, two_byte_bits, three_byte_bits, emit_count, position,
-                                              match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_v128_(start_bits, two_byte_bits, three_byte_bits, emit_count, position,
+                                       match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -322,19 +301,28 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
+/** @brief  Locate the @p n-th code-point start (a non-continuation byte) via a per-tile count + nth-set-bit. */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    // No `pdep`-style instruction on WASM; the serial scan is already optimal here.
-    return sz_utf8_find_nth_serial(text, length, n);
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    // A continuation byte is exactly a value `< 0xC0` as a signed int8 (see `sz_utf8_count_v128`), so a single
+    // signed compare flags continuation lanes; the code-point starts are the complement.
+    v128_t const continuation_threshold_vec = wasm_i8x16_splat((sz_i8_t)0xC0);
+
+    while (length >= 16) {
+        v128_t const window = wasm_v128_load(text_u8);
+        v128_t const continuation = wasm_i8x16_lt(window, continuation_threshold_vec);
+        sz_u32_t const start_bits = ~(sz_u32_t)wasm_i8x16_bitmask(continuation) & 0xFFFFu;
+        sz_size_t const start_count = (sz_size_t)sz_u32_popcount(start_bits);
+        if (n >= start_count) { n -= start_count, text_u8 += 16, length -= 16; continue; }
+        return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_bits, n));
+    }
+
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
-/*  `sz_utf8_unpack_chunk_v128` decodes UTF-8 into UTF-32 runes. The SIMD-clean case is a pure-ASCII
- *  prefix: every byte `< 0x80` is a single-byte code point whose rune value equals the byte, so 16
- *  bytes widen straight into 16 u32 runes via two zero-extends with NO branchy state machine. We scan
- *  16-byte windows; as soon as a window contains a non-ASCII byte (high bit set in any lane) or we run
- *  out of output capacity, we stop the vector loop and hand the *remaining* bytes to
- *  `sz_utf8_unpack_chunk_serial`, which owns all multi-byte / malformed / boundary-truncation logic.
- *  Because the ASCII fast path emits exactly the runes serial would (byte value, 1 byte advance) and
- *  the tail is the serial routine verbatim, the output is byte/value-identical to the serial reference. */
+/*  Decodes UTF-8 into UTF-32 runes. The pure-ASCII prefix (every byte `< 0x80`) widens 16 bytes straight
+ *  into 16 u32 runes via zero-extends; the first non-ASCII byte or exhausted capacity defers the remainder
+ *  to `sz_utf8_unpack_chunk_serial`, which owns all multi-byte / malformed / truncation logic. */
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
@@ -369,27 +357,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
     return tail_end;
 }
 
-/*  UAX-29 word boundary detection is a stateful machine: a candidate byte offset is a boundary based
- *  on the Word_Break properties of the surrounding code points, with several rules looking back and
- *  forward across multiple runes (WB4 Extend/Format/ZWJ skipping, WB6/WB7 mid-letter, WB11/WB12
- *  numeric, WB15/WB16 Regional-Indicator parity). The dominant cost in real text, however, is scanning
- *  through the *interior* of long ASCII/Latin words and numbers — every byte there is a non-boundary,
- *  yet the serial scanner pays a full property lookup + rule cascade per byte.
- *
- *  We accelerate exactly that case. The word-interior set is exactly the ASCII bytes {A-Z, a-z, 0-9,
- *  '_' = ExtendNumLet}, which `sz_utf8_word_break_nonboundary_mask_v128_` detects directly. For a candidate at byte
- *  offset `i`, if both `byte[i-1]` and `byte[i]` are word-interior, then *every* UAX-29 rule that could
- *  fire (WB5/8/9/10/13a/13b and their context-needing siblings) resolves to "do NOT break" — verified
- *  exhaustively against the serial decision table — because ASCII contains no Extend/Format/ZWJ/RI/
- *  Hebrew/Katakana, so WB4 ignorable-skipping and RI parity never apply between two such bytes. Those
- *  positions are skipped with a single `wasm_i8x16_bitmask`. Any byte that is non-ASCII, or whose pair
- *  is not a guaranteed interior, is handed to `sz_utf8_is_word_boundary_serial` verbatim, so the result
- *  is bit-for-bit identical to the serial reference (the hard, stateful sub-rules stay serial). */
+/*  UAX-29 word-boundary detection is a stateful machine. We accelerate only its dominant cost: scanning
+ *  the all-ASCII interior of long words/numbers, where every UAX-29 rule resolves to "do NOT break" - so an
+ *  all-ASCII window resolves its trusted lanes [2,14] branchlessly. Any non-ASCII window or edge is handed
+ *  to `sz_utf8_is_word_boundary_serial` verbatim, keeping the result bit-for-bit identical to serial. */
 
-/*  Per-class 16-bit lane mask for an all-ASCII window via `wasm_i8x16_bitmask`. Each Word_Break class is a
- *  small set of ASCII byte ranges/singletons (ALetter = A-Z|a-z via the 0x20 fold, Numeric = 0-9,
- *  ExtendNumLet = '_', MidLetter = ':', MidNum = ','|';', MidQuotes = '"'|'\''|'.', plus CR and LF), so no
- *  property table is needed. */
+/*  Per-class 16-bit lane mask for an all-ASCII window via `wasm_i8x16_bitmask`. */
 SZ_INTERNAL sz_u64_t sz_utf8_word_break_class_bitmask_v128_(v128_t equal_vec) {
     return (sz_u64_t)((sz_u32_t)wasm_i8x16_bitmask(equal_vec) & 0xFFFFu);
 }
@@ -420,14 +393,8 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
 
 #pragma region Word boundary left-pack
 
-/**
- *  @brief  Ascending `wasm_i8x16_swizzle` permutation that gathers a 4-bit sub-block's set u32 lanes to the front.
- *
- *  WASM SIMD128 has no `vpcompressb` and no masked store, so each 4-lane sub-block of the boundary mask is
- *  compacted with one byte-table lookup: row `[m]` holds the 16 byte indices that gather the `m`-selected 32-bit
- *  `sz_size_t` lanes (of four, each a 4-byte group) to the front of a register, preserving ascending lane order.
- *  The v128 analog of `sz_utf8_word_compact4_permutation_haswell_`.
- */
+/** @brief  Ascending `wasm_i8x16_swizzle` permutation that gathers a 4-bit sub-block's set u32 lanes to the front,
+ *          preserving low-to-high lane order. The v128 analog of `sz_utf8_word_compact4_permutation_haswell_`. */
 SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_v128_(sz_u32_t submask) {
     static sz_u8_t const compact_lut[16][16] = {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -442,10 +409,8 @@ SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_v128_(sz_u32_t submask) {
     return wasm_v128_load(compact_lut[submask & 0xFu]);
 }
 
-/**
- *  @brief  Descending counterpart of `sz_utf8_word_compact4_permutation_v128_`: gathers a 4-bit sub-block's set
- *          u32 lanes to the front in HIGH-to-LOW lane order, for the reverse word scan.
- */
+/** @brief  Descending counterpart of `sz_utf8_word_compact4_permutation_v128_`: gathers a 4-bit sub-block's set
+ *          u32 lanes to the front in HIGH-to-LOW lane order, for the reverse word scan. */
 SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_descending_v128_(sz_u32_t submask) {
     static sz_u8_t const compact_lut[16][16] = {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -460,13 +425,8 @@ SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_descending_v128_(sz_u32_t s
     return wasm_v128_load(compact_lut[submask & 0xFu]);
 }
 
-/**
- *  @brief  Shift four packed u32 boundary lanes right by one and seat @p carry in the freed lane 0.
- *
- *  Builds `[carry, b0, b1, b2]` from `boundaries = [b0, b1, b2, b3]` with one `wasm_i8x16_shuffle` - lane 0 drawn
- *  from @p carry, lanes 1..3 from the low three lanes of @p boundaries - the v128 analog of Haswell's
- *  `lane_shift_right` permute followed by the `word_start` / `word_end` blend.
- */
+/** @brief  Shift four packed u32 boundary lanes right by one and seat @p carry in the freed lane 0, building
+ *          `[carry, b0, b1, b2]` from `boundaries = [b0, b1, b2, b3]` with one `wasm_i8x16_shuffle`. */
 SZ_INTERNAL v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_t carry) {
     return wasm_i8x16_shuffle(carry, boundaries, 0, 1, 2, 3, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
 }
@@ -513,6 +473,10 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
         }
 
         sz_u32_t boundary = sz_utf8_word_break_boundary_mask_v128_(window); // trusted lanes [2,14]
+        // Each sub-block compacts its set boundaries (at most four) and emits the shifted-difference straight into
+        // `word_starts + words`: `word_start` itself is the carry seeded into lane 0, then re-read from the stored
+        // tail so a capacity cut lands on the last emit. WASM has no masked store, so a 4-lane vector store is used
+        // only when the whole vector fits; otherwise a ≤4-element tail buffer is copied out without overshoot.
         for (sz_size_t sub_block = 0; sub_block < 4; ++sub_block) {
             sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
             if (!submask) continue;
@@ -523,16 +487,21 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
                 (sz_u32_t)(position - 2 + sub_block * 4 + 0), (sz_u32_t)(position - 2 + sub_block * 4 + 1),
                 (sz_u32_t)(position - 2 + sub_block * 4 + 2), (sz_u32_t)(position - 2 + sub_block * 4 + 3));
             v128_t const boundaries = wasm_i8x16_swizzle(positions, sz_utf8_word_compact4_permutation_v128_(submask));
-            v128_t const starts = sz_utf8_word_shift_right_carry_v128_(boundaries,
-                                                                       wasm_u32x4_splat((sz_u32_t)word_start));
+            v128_t const starts = sz_utf8_word_shift_right_carry_v128_(boundaries, wasm_u32x4_splat((sz_u32_t)word_start));
             v128_t const lengths = wasm_i32x4_sub(boundaries, starts);
-            sz_size_t scratch_starts[4], scratch_lengths[4];
-            wasm_v128_store(scratch_starts, starts);
-            wasm_v128_store(scratch_lengths, lengths);
-            for (sz_size_t i = 0; i < stored; ++i)
-                word_starts[words + i] = scratch_starts[i], word_lengths[words + i] = scratch_lengths[i];
+            if (words + 4 <= words_capacity) {
+                wasm_v128_store(word_starts + words, starts);
+                wasm_v128_store(word_lengths + words, lengths);
+            }
+            else {
+                sz_size_t tail_starts[4], tail_lengths[4];
+                wasm_v128_store(tail_starts, starts);
+                wasm_v128_store(tail_lengths, lengths);
+                for (sz_size_t i = 0; i < stored; ++i)
+                    word_starts[words + i] = tail_starts[i], word_lengths[words + i] = tail_lengths[i];
+            }
             words += stored;
-            if (stored) word_start = word_starts[words - 1] + word_lengths[words - 1];
+            if (stored) word_start = word_starts[words - 1] + word_lengths[words - 1]; // last boundary carries on
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
                 return words;
@@ -595,7 +564,11 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
         }
 
         sz_u32_t boundary = sz_utf8_word_break_boundary_mask_v128_(window); // trusted lanes [2,14]
-        for (sz_size_t sub_block = 4; sub_block-- > 0;) {                   // high-to-low for descending emission
+        // Each sub-block (walked high-to-low) compacts its set boundaries descending and emits the shifted-
+        // difference straight into `word_starts + words`: `word_end` itself is the carry seeded into lane 0, then
+        // re-read from the stored tail so a capacity cut lands on the last emit. WASM has no masked store, so a
+        // 4-lane vector store is used only when the whole vector fits; otherwise a ≤4-element tail buffer is copied.
+        for (sz_size_t sub_block = 4; sub_block-- > 0;) { // high-to-low for descending emission
             sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
             if (!submask) continue;
             sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
@@ -606,16 +579,21 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
                 (sz_u32_t)(base + sub_block * 4 + 2), (sz_u32_t)(base + sub_block * 4 + 3));
             v128_t const boundaries = wasm_i8x16_swizzle(positions,
                                                          sz_utf8_word_compact4_permutation_descending_v128_(submask));
-            v128_t const previous = sz_utf8_word_shift_right_carry_v128_(boundaries,
-                                                                         wasm_u32x4_splat((sz_u32_t)word_end));
+            v128_t const previous = sz_utf8_word_shift_right_carry_v128_(boundaries, wasm_u32x4_splat((sz_u32_t)word_end));
             v128_t const lengths = wasm_i32x4_sub(previous, boundaries);
-            sz_size_t scratch_starts[4], scratch_lengths[4];
-            wasm_v128_store(scratch_starts, boundaries);
-            wasm_v128_store(scratch_lengths, lengths);
-            for (sz_size_t i = 0; i < stored; ++i)
-                word_starts[words + i] = scratch_starts[i], word_lengths[words + i] = scratch_lengths[i];
+            if (words + 4 <= words_capacity) {
+                wasm_v128_store(word_starts + words, boundaries);
+                wasm_v128_store(word_lengths + words, lengths);
+            }
+            else {
+                sz_size_t tail_starts[4], tail_lengths[4];
+                wasm_v128_store(tail_starts, boundaries);
+                wasm_v128_store(tail_lengths, lengths);
+                for (sz_size_t i = 0; i < stored; ++i)
+                    word_starts[words + i] = tail_starts[i], word_lengths[words + i] = tail_lengths[i];
+            }
             words += stored;
-            if (stored) word_end = word_starts[words - 1];
+            if (stored) word_end = word_starts[words - 1]; // last boundary carries on
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_end;
                 return words;

@@ -37,30 +37,13 @@ SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
 
 #pragma region Multistep newline and whitespace iteration
 
-/*  Multistep newline / whitespace iteration (NEON / AArch64).
- *
- *  Each FULL 16-byte tile is classified branchlessly into per-length delimiter-start masks (all multi-byte
- *  masks are computed unconditionally - no data-dependent `if(lead)` gate). NEON has no `movemask` and no
- *  masked load, so we only ever scan full tiles (`position + 16 <= length`) and hand the `< 16`-byte remainder
- *  to the scalar multistep helper in `serial.h`. Each per-lane compare vector is narrowed to a 64-bit nibble
- *  bitmask via the shared `vshrn`-based `sz_utf8_vreinterpretq_u8_u4_neon_` helper (bit `4*j+3` marks lane `j`,
- *  so the bit-per-lane stride is 4 and `sz_u64_popcount(start_bits)` already counts whole lanes, one set bit per
- *  match). We trust delimiter starts only in lanes [0,13] and step the cursor by 14 so any <=3-byte delimiter
- *  from a trusted lane is fully loaded. NEON has no `vpcompressb`, so the peel left-packs the 16 lanes in four
- *  4-lane sub-blocks with a `vqtbl2q_u8` table (the same `compact_lut`/`popcount_lut` the NEON string-sort uses),
- *  building the absolute `(position+lane, length)` u64 pairs from a caller-supplied per-lane `length_per_lane`
- *  byte vector (`1 + is_two_byte + 2*is_three_byte`, mirroring Ice Lake) - no `ctz` index-find and no group/else
- *  branch. The caller computes the capacity cut like Ice Lake (`window_matches = popcount(start_bits)`,
- *  `emit_count = min(window_matches, capacity - count)`, mid-window resume past the last emitted match). A
- *  `t[pos-1] == '\r'` carry suppresses the leading LF that completes a CRLF straddling the tile edge (newlines
- *  only). */
+/*  Multistep newline / whitespace iteration (NEON / AArch64): each full 16-byte tile is classified branchlessly
+ *  into per-length delimiter-start masks, narrowed to a nibble bitmask (stride 4, one set bit per match), and the
+ *  trusted lanes [0,13] are SIMD left-packed by the peel; the `< 16`-byte remainder goes to the serial helper. */
 
 /**
- *  @brief Left-packs the @p submask -selected lanes of one 4-lane sub-block (offsets @p offsets_u8x16x2 and
- *         lengths @p lengths_u8x16x2, each four u64 = 32 bytes) to the @p out_offsets / @p out_lengths cursors,
- *         preserving lane order; returns how many lanes were written. Mirrors `sz_sort_neon_compact4_`: both
- *         half-vectors are stored unconditionally (the caller advances by the surviving count, so the unwritten
- *         tail lands in the scratch slack), so the body stays branchless.
+ *  @brief Left-packs the @p submask -selected lanes of one 4-lane sub-block to the @p out_offsets / @p out_lengths
+ *         cursors in lane order via a `vqtbl2q_u8` table; returns how many lanes were written.
  */
 SZ_INTERNAL sz_size_t sz_utf8_iterate_compact4_neon_(                       //
     uint8x16x2_t const offsets_u8x16x2, uint8x16x2_t const lengths_u8x16x2, //
@@ -100,16 +83,10 @@ SZ_INTERNAL sz_size_t sz_utf8_iterate_compact4_neon_(                       //
 }
 
 /**
- *  @brief  Peel the tile's first `emit_count` matches by SIMD left-pack (no `ctz`, no per-match branch).
- *
- *  Walks the 16 lanes in four 4-lane sub-blocks: each derives its dense 4-bit submask from the nibble-stride
- *  `start_bits`, builds the four candidate `(position + lane, length)` u64 pairs (the lengths gathered from
- *  `length_per_lane` with `vqtbl1q_u8`, the offsets from `position + lane`), and `vqtbl2q_u8`-compacts them into a
- *  fixed-width stack scratch with full-width stores. The low `emit_count` entries are then copied to the caller's
- *  output. The scratch is 20-wide so the trailing 4-lane spill of the last compacted sub-block always lands inside
- *  it (at most 14 trusted matches per tile).
+ *  @brief  Peel the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into a
+ *          fixed-width stack scratch, then copy the surviving prefix to the caller (no `ctz`, no per-match branch).
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_tile_neon_(    //
+SZ_INTERNAL void sz_utf8_iterate_peel_neon_(         //
     sz_u64_t start_bits, uint8x16_t length_per_lane, //
     sz_size_t emit_count, sz_size_t position,        //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -216,8 +193,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_neon(         //
         sz_size_t const window_matches = (sz_size_t)sz_u64_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_tile_neon_(start_bits, length_per_lane, emit_count, position, match_offsets + count,
-                                            match_lengths + count);
+            sz_utf8_iterate_peel_neon_(start_bits, length_per_lane, emit_count, position, match_offsets + count,
+                                       match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -310,8 +287,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_neon(      //
         sz_size_t const window_matches = (sz_size_t)sz_u64_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_tile_neon_(start_bits, length_per_lane, emit_count, position, match_offsets + count,
-                                            match_lengths + count);
+            sz_utf8_iterate_peel_neon_(start_bits, length_per_lane, emit_count, position, match_offsets + count,
+                                       match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -353,9 +330,27 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
+/**
+ *  @brief  Locate the start byte of the @p n -th codepoint (0-indexed) in @p text, or `SZ_NULL_CHAR` if
+ *          @p n is past the codepoint count. Byte-exact to `sz_utf8_find_nth_serial`.
+ */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    // TODO: Implement a NEON-accelerated version of sz_utf8_find_nth in absence of PDEP instruction.
-    return sz_utf8_find_nth_serial(text, length, n);
+    uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
+    uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    while (length >= 16) {
+        uint8x16_t window = vld1q_u8(text_u8);
+        uint8x16_t headers = vandq_u8(window, continuation_mask_u8x16);
+        uint8x16_t starts_cmp = vmvnq_u8(vceqq_u8(headers, continuation_pattern_u8x16));
+        sz_u64_t start_bits = sz_utf8_vreinterpretq_u8_u4_neon_(starts_cmp);
+        sz_size_t const start_count = (sz_size_t)sz_u64_popcount(start_bits);
+
+        if (n >= start_count) { n -= start_count, text_u8 += 16, length -= 16; continue; }
+        return (sz_cptr_t)(text_u8 + (sz_u64_nth_set_bit(start_bits, n) >> 2));
+    }
+
+    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #if defined(__clang__)
@@ -364,19 +359,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_s
 #pragma GCC pop_options
 #endif
 
-/*  UAX-29 word boundary detection.
- *
- *  An all-ASCII window is classified to Word_Break property values via a 128-entry table lookup, the full set
- *  of ASCII no-break rules is evaluated branchlessly as neighbour bit-shifts (see
- *  `sz_utf8_word_break_boundary_mask_neon_`), and the resulting boundary positions are emitted directly - no
- *  per-candidate serial oracle. ASCII has no Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana, so the
- *  stateful WB4 and WB15/16 rules never apply inside such a window; non-ASCII windows and the leading/trailing
- *  edges take a single step of the serial reference, keeping the result byte-for-byte identical to `_serial`. */
+/*  UAX-29 word boundary detection: an all-ASCII window is classified to Word_Break property values via a
+ *  128-entry table, the ASCII no-break rules are evaluated branchlessly as neighbour shifts, and boundaries are
+ *  emitted directly; non-ASCII windows and the edges take one serial step, staying byte-exact to `_serial`. */
 
-/*  Classify an all-ASCII 16-byte window into Word_Break property values via the 128-entry table. The property
- *  table is not separable into two nibble bitsets (ALetter spans non-rectangular byte ranges), so this is a
- *  full byte lookup: two `vqtbl4q_u8` cover entries 0..63 and 64..127 (each returns zero for out-of-range
- *  indices), combined with an OR. Valid only when every byte is ASCII (< 0x80). */
+/*  Classify an all-ASCII 16-byte window into Word_Break property values via the 128-entry table: two `vqtbl4q_u8`
+ *  cover entries 0..63 and 64..127 (zero outside range), combined with an OR. Valid only when every byte is < 0x80. */
 SZ_INTERNAL uint8x16_t sz_utf8_word_break_classify_property_neon_(uint8x16_t bytes) {
     uint8x16x4_t low_table = vld1q_u8_x4(sz_utf8_word_break_property_ascii_);         // entries 0..63
     uint8x16x4_t high_table = vld1q_u8_x4(sz_utf8_word_break_property_ascii_ + 64);   // entries 64..127
@@ -385,10 +373,8 @@ SZ_INTERNAL uint8x16_t sz_utf8_word_break_classify_property_neon_(uint8x16_t byt
     return vorrq_u8(from_low, from_high);
 }
 
-/*  Given an all-ASCII 16-byte window, return a nibble-mask (bit 4*j+3 set) of word boundaries at lanes [2,14] -
- *  the lanes whose i-2 and i+1 neighbours are both in-window, so every UAX-29 rule that can apply to ASCII is
- *  resolved without the serial oracle. ASCII contains no Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana,
- *  so WB4 and WB15/16 never apply and WB6/7/11/12 reduce to neighbour lane shifts. */
+/*  Given an all-ASCII 16-byte window, return a nibble-mask (bit 4*j+3 set) of word boundaries at trusted lanes
+ *  [2,14] - the lanes whose i-2 and i+1 neighbours are in-window - resolving every UAX-29 rule applicable to ASCII. */
 SZ_INTERNAL sz_u64_t sz_utf8_word_break_boundary_mask_neon_(uint8x16_t window_bytes) {
     uint8x16_t classes = sz_utf8_word_break_classify_property_neon_(window_bytes);
     uint8x16_t aletter = vceqq_u8(classes, vdupq_n_u8(sz_tr29_word_break_aletter_k));
@@ -438,12 +424,8 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_boundary_mask_neon_(uint8x16_t window_by
 }
 
 /**
- *  @brief  Left-pack the @p submask -selected lanes of one 4-lane sub-block of @p boundaries (four absolute u64
- *          positions held as `low` = lanes 0,1 and `high` = lanes 2,3) to the front in ASCENDING lane order.
- *
- *  Per-file byte-table left-pack mirroring `sz_utf8_iterate_compact4_neon_`: `compact_lut[m]` gathers the
- *  `m`-selected lanes (each an 8-byte u64) to the front via `vqtbl2q_u8`. The returned `uint8x16x2_t` holds the
- *  compacted lanes 0,1 in `val[0]` and lanes 2,3 in `val[1]`.
+ *  @brief  Left-pack the @p submask -selected lanes of one 4-lane sub-block (positions as @p low = lanes 0,1 and
+ *          @p high = lanes 2,3) to the front in ASCENDING lane order via a `vqtbl2q_u8` table.
  */
 SZ_INTERNAL uint8x16x2_t sz_utf8_word_compact4_positions_neon_(uint64x2_t low, uint64x2_t high, sz_u32_t submask) {
     static sz_u8_t const compact_lut[16][32] = {

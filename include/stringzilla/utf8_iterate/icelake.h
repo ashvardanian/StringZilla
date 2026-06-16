@@ -26,12 +26,9 @@ extern "C" {
 
 /*  Multistep newline / whitespace iteration (Ice Lake / AVX-512).
  *
- *  Each 64-byte window is classified branchlessly into a `starts` mask (every delimiter start) plus a
- *  per-lane byte-length vector; one `vpcompressb` (`_mm512_mask_compressstoreu_epi8`) peels the matching
- *  lane indices and a second peels the lengths, then bounded `_mm512_cvtepu8_epi64` widens write absolute
- *  `(offset, length)` pairs with NO per-match branch or bit-peel loop. We trust starts in lanes [0,61] and
- *  step 62 so any 2-/3-byte delimiter is fully loaded; a 1-byte `t[pos-1] == '\r'` carry suppresses an LF
- *  that completes a CRLF straddling the window edge (the only delimiter whose tail is itself a match). */
+ *  Each 64-byte window is classified branchlessly into a `starts` mask plus a per-lane byte-length vector,
+ *  then `vpcompressb` peels the matching lanes and lengths. Starts are trusted in lanes [0,61] (step 62) so
+ *  any 2-/3-byte delimiter is fully loaded; a `t[pos-1] == '\r'` carry suppresses an LF closing an edge CRLF. */
 
 SZ_INTERNAL __m512i sz_utf8_iterate_lane_identity_icelake_(void) {
     return _mm512_set_epi8(                                             //
@@ -42,14 +39,8 @@ SZ_INTERNAL __m512i sz_utf8_iterate_lane_identity_icelake_(void) {
 }
 
 /**
- *  @brief Peel a window's first `emit` (<= 8) matches in-register: `vpcompressb` + one masked widen-store.
- *
- *  `vpcompressb` packs the matching lane indices and their byte lengths into the low bytes of two ZMM registers;
- *  one `vpmovzxbq` of the low 128 bits (`_mm512_castsi512_si128`, no extract) widens the first 8 and a masked
- *  `_mm512_mask_storeu_epi64` writes absolute `(offset, length)` pairs. The caller emits at most 8 per window and
- *  resumes past the last emitted match to re-classify when a dense window held more, so the peel is a single
- *  straight-line wave with no register-shift loop (re-classify is cheaper than the shift scaffolding a wider peel
- *  would need on the rare > 8-per-window case).
+ *  @brief Emit a window's `emit` matches in-register via `vpcompressb` and `ceil(emit/8)` masked widen-stores.
+ *  @note `_mm512_alignr_epi64` shifts the compressed registers down between waves, so `emit` may exceed 8.
  */
 SZ_INTERNAL void sz_utf8_iterate_peel_icelake_(                                  //
     sz_u64_t start_bits, __mmask64 two_byte_starts, __mmask64 three_byte_starts, //
@@ -62,16 +53,21 @@ SZ_INTERNAL void sz_utf8_iterate_peel_icelake_(                                 
     length_per_lane = _mm512_mask_add_epi8(length_per_lane, two_byte_starts, length_per_lane, _mm512_set1_epi8(1));
     length_per_lane = _mm512_mask_add_epi8(length_per_lane, three_byte_starts, length_per_lane, _mm512_set1_epi8(2));
 
-    __m512i const compressed_offsets = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
-    __m512i const compressed_lengths = _mm512_maskz_compress_epi8(compress_mask, length_per_lane);
+    __m512i compressed_offsets = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
+    __m512i compressed_lengths = _mm512_maskz_compress_epi8(compress_mask, length_per_lane);
     __m512i const position_broadcast = _mm512_set1_epi64((long long)position);
-    __mmask8 const store_mask = sz_u8_clamp_mask_until_(emit);
 
-    _mm512_mask_storeu_epi64(
-        (void *)match_offsets, store_mask,
-        _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_offsets)), position_broadcast));
-    _mm512_mask_storeu_epi64((void *)match_lengths, store_mask,
-                             _mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lengths)));
+    __m512i const zero = _mm512_setzero_si512();
+    for (sz_size_t emitted = 0; emitted < emit; emitted += 8) {
+        __mmask8 const store_mask = sz_u8_clamp_mask_until_(emit - emitted);
+        _mm512_mask_storeu_epi64(
+            (void *)(match_offsets + emitted), store_mask,
+            _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_offsets)), position_broadcast));
+        _mm512_mask_storeu_epi64((void *)(match_lengths + emitted), store_mask,
+                                 _mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lengths)));
+        compressed_offsets = _mm512_alignr_epi64(zero, compressed_offsets, 1);
+        compressed_lengths = _mm512_alignr_epi64(zero, compressed_lengths, 1);
+    }
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
@@ -126,7 +122,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
         if (position != 0 && text_u8[position - 1] == '\r') start_bits &= ~(_cvtmask64_u64(newline_mask) & 1ull);
 
         sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
-        sz_size_t const emit = sz_min_of_three(window_matches, matches_capacity - count, 8);
+        sz_size_t const emit = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit)
             sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
                                           match_offsets + count, match_lengths + count);
@@ -135,8 +131,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
             position = match_offsets[count - 1] + match_lengths[count - 1];
             break;
         }
-        if (emit == window_matches) position += valid_lanes >= 64 ? 62 : valid_lanes;
-        else position = match_offsets[count - 1] + match_lengths[count - 1]; // window held > 8: resume + re-classify
+        position += valid_lanes >= 64 ? 62 : valid_lanes;
     }
 
     // If the loop stopped on the LF of an already-emitted CRLF, resume past it (the CR carried the length-2 match).
@@ -213,7 +208,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
         sz_u64_t start_bits = _cvtmask64_u64(starts) & trusted_bits;
 
         sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
-        sz_size_t const emit = sz_min_of_three(window_matches, matches_capacity - count, 8);
+        sz_size_t const emit = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit)
             sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
                                           match_offsets + count, match_lengths + count);
@@ -222,8 +217,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
             position = match_offsets[count - 1] + match_lengths[count - 1];
             break;
         }
-        if (emit == window_matches) position += valid_lanes >= 64 ? 62 : valid_lanes;
-        else position = match_offsets[count - 1] + match_lengths[count - 1]; // window held > 8: resume + re-classify
+        position += valid_lanes >= 64 ? 62 : valid_lanes;
     }
 
     if (bytes_consumed) *bytes_consumed = position;
@@ -231,20 +225,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length) {
-    // UTF-8 character counting strategy:
-    // Count every byte that is NOT a continuation byte (i.e., character start bytes).
-    //
-    // UTF-8 byte patterns:
-    //   ASCII:        0xxxxxxx (0x00-0x7F)  - single byte character
-    //   Start 2-byte: 110xxxxx (0xC0-0xDF)  - first byte of 2-byte sequence
-    //   Start 3-byte: 1110xxxx (0xE0-0xEF)  - first byte of 3-byte sequence
-    //   Start 4-byte: 11110xxx (0xF0-0xF7)  - first byte of 4-byte sequence
-    //   Continuation: 10xxxxxx (0x80-0xBF)  - continuation byte (NOT a character start)
-    //
-    // To detect continuation bytes: (byte & 0xC0) == 0x80
-    //   0xC0 = 11000000  - masks the top 2 bits
-    //   0x80 = 10000000  - pattern for continuation bytes after masking
-
+    // Count every byte that is NOT a continuation byte: `(byte & 0xC0) != 0x80` selects character starts.
     sz_u512_vec_t continuation_mask_vec, continuation_pattern_vec;
     continuation_mask_vec.zmm = _mm512_set1_epi8((char)0xC0);    // 0xC0 = 0b11000000 - mask top 2 bits
     continuation_pattern_vec.zmm = _mm512_set1_epi8((char)0x80); // 0x80 = 0b10000000 - continuation pattern
@@ -306,20 +287,18 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, s
             _mm512_cmpneq_epi8_mask(headers_vec.zmm, continuation_pattern_vec.zmm));
         sz_size_t start_byte_count = _mm_popcnt_u64(start_byte_mask);
 
-        // Check if we've reached the terminal part of our search
-        if (n < start_byte_count) {
-            // PDEP directly gives us the nth set bit position
-            // Example: _pdep_u64(0b10, 0b0001010100) = 0b0000010000
-            sz_u64_t deposited_bits = _pdep_u64((sz_u64_t)1 << n, start_byte_mask);
-            int byte_offset = sz_u64_ctz(deposited_bits);
-            return (sz_cptr_t)(text_u8 + byte_offset);
-        }
-        // Jump to the next block
-        else {
+        // If the Nth start byte is past this window, skip the whole block.
+        if (n >= start_byte_count) {
             n -= start_byte_count;
             text_u8 += 64;
             length -= 64;
+            continue;
         }
+
+        // PDEP isolates the Nth set bit in one step: `_pdep_u64(0b10, 0b0001010100) == 0b0000010000`.
+        sz_u64_t deposited_bits = _pdep_u64((sz_u64_t)1 << n, start_byte_mask);
+        int byte_offset = (int)_tzcnt_u64(deposited_bits);
+        return (sz_cptr_t)(text_u8 + byte_offset);
     }
 
     // Process remaining bytes with serial
@@ -379,13 +358,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     // Find longest prefix containing only ASCII and complete 2-byte sequences - let's call it the "Mixed 12" case
     __mmask64 is_expected_continuation = is_two_byte_start << 1;
     __mmask64 is_valid_mixed12 = is_ascii | is_two_byte_start | (is_continuation & is_expected_continuation);
-    sz_size_t mixed12_prefix_length = sz_u64_ctz(~is_valid_mixed12 | ~load_mask);
+    sz_size_t mixed12_prefix_length = (sz_size_t)_tzcnt_u64(~is_valid_mixed12 | ~load_mask);
     mixed12_prefix_length -= mixed12_prefix_length && ((is_two_byte_start >> (mixed12_prefix_length - 1)) & 1);
 
     if (mixed12_prefix_length >= 2) {
         __mmask64 prefix_mask = sz_u64_mask_until_(mixed12_prefix_length);
         __mmask64 is_char_start = (is_ascii | is_two_byte_start) & prefix_mask;
-        sz_size_t num_runes = (sz_size_t)sz_u64_popcount(is_char_start);
+        sz_size_t num_runes = (sz_size_t)_mm_popcnt_u64(_cvtmask64_u64(is_char_start));
         sz_size_t runes_to_unpack = sz_min_of_three(num_runes, runes_capacity, 16);
 
         // Compress character start positions into sequential indices, then gather bytes
@@ -415,7 +394,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
         _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_unpack), runes_vec.zmm);
 
         // Bytes consumed: one per ASCII, two per 2-byte sequence
-        sz_size_t two_byte_count = (sz_size_t)sz_u64_popcount(is_two_byte_char & sz_u16_mask_until_(runes_to_unpack));
+        sz_size_t two_byte_count =
+            (sz_size_t)_mm_popcnt_u64(_cvtmask16_u32(_kand_mask16(is_two_byte_char, sz_u16_mask_until_(runes_to_unpack))));
         *runes_unpacked = runes_to_unpack;
         return text + runes_to_unpack + two_byte_count;
     }
@@ -450,7 +430,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     sz_u512_vec_t masked_triplets;
     masked_triplets.zmm = _mm512_and_si512(gathered_triplets.zmm, three_byte_mask_vec.zmm);
     __mmask16 three_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_triplets.zmm, three_byte_pattern_vec.zmm);
-    sz_size_t three_byte_prefix_length = sz_u64_ctz(~three_byte_match_mask);
+    sz_size_t three_byte_prefix_length = (sz_size_t)_tzcnt_u64((sz_u64_t)(~three_byte_match_mask));
 
     if (three_byte_prefix_length) {
         // Unpack up to 16 three-byte characters (48 bytes of input).
@@ -482,7 +462,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
     sz_u512_vec_t masked_quads;
     masked_quads.zmm = _mm512_and_si512(text_vec.zmm, four_byte_mask_vec.zmm);
     __mmask16 four_byte_match_mask = _mm512_cmpeq_epi32_mask(masked_quads.zmm, four_byte_pattern_vec.zmm);
-    sz_size_t four_byte_prefix_length = sz_u64_ctz(~four_byte_match_mask);
+    sz_size_t four_byte_prefix_length = (sz_size_t)_tzcnt_u64((sz_u64_t)(~four_byte_match_mask));
 
     if (four_byte_prefix_length) {
         // Unpack up to 16 four-byte characters (64 bytes of input).
@@ -510,32 +490,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
 
 /*  UAX-29 word boundary detection (Ice Lake / AVX-512).
  *
- *  The UAX-29 word-break algorithm is a stateful machine: the decision at a candidate position can
- *  depend on Extend/Format/ZWJ runs to skip (WB4), one-step look-ahead/look-back across ignorables
- *  (WB6/7, WB11/12), and Regional-Indicator parity (WB15/16). A naive full SIMD reimplementation of
- *  all those stateful sub-rules is fragile, so instead we vectorize the *common* and *safe* part:
- *
- *  1. Vectorized property classification. For a 64-byte chunk that is pure ASCII (the dominant case
- *     for English text and source code, where every byte is its own codepoint), we look up each
- *     byte's `sz_tr29_word_break_t` class through a single `_mm512_permutexvar_epi8` over the
- *     128-entry `sz_utf8_word_break_property_ascii_` table (each rune < 0x80 maps directly).
- *
- *  2. Local "definitely-not-a-boundary" mask. From the class vector and its shift-by-one neighbor we
- *     compute, with masked compares, the set of adjacencies that the *unconditional* local rules
- *     (WB5, WB8, WB9, WB10, WB13a, WB13b) join with no possible stateful override. Because those
- *     rules `return sz_false_k` regardless of context, any position whose (prev, cur) pair matches
- *     one of them is provably NOT a boundary and can be skipped in bulk. Every other position is a
- *     *candidate* (a safe superset of the true boundaries).
- *
- *  3. Serial fixup. Each candidate position is confirmed by the serial oracle
- *     `sz_utf8_is_word_boundary_serial`, which owns all the stateful sub-rules (WB3/3a/3b/3c, WB4,
- *     WB6/7, WB7a, WB11/12, WB13, WB15/16). The result is therefore value-identical to serial while
- *     the scan over long ASCII word/number runs is driven by vector compares instead of per-byte
- *     decoding. Non-ASCII chunks fall back to the serial scan for that region.
- *
- *  This keeps `find`/`rfind` byte-for-byte and width-for-width equal to `_serial` for every input,
- *  with the ASCII/Latin common case advanced 64 bytes at a time. The stateful sub-rules listed in
- *  (3) intentionally stay serial — only classification and candidate filtering are vectorized. */
+ *  Only the common, safe part is vectorized: an all-ASCII 64-byte chunk is classified by table lookup, then
+ *  the unconditional local no-break rules mark a superset of the true boundaries. Non-ASCII chunks and edges
+ *  fall back to `sz_utf8_is_word_boundary_serial`, which owns the stateful sub-rules, keeping output identical
+ *  to serial for every input while ASCII runs advance 64 bytes at a time. */
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
 SZ_INTERNAL __m512i sz_utf8_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
@@ -555,12 +513,8 @@ SZ_INTERNAL __mmask64 sz_utf8_word_break_class_mask_(__m512i classes, int v) {
 }
 
 /**
- *  @brief Compute, for an all-ASCII chunk, the per-position "joined" (guaranteed non-boundary) mask.
- *
- *  Bit `i` is set when the boundary before lane `i` is suppressed by a UAX-29 no-break rule. ASCII contains no
- *  Extend/Format/ZWJ/Regional_Indicator/Hebrew/Katakana, so WB4 and WB15/16 never apply and the look-around
- *  rules WB6/7/11/12 reduce to neighbour bit-shifts (`<< 1` = previous lane, `>> 1` = next, `<< 2` = two back).
- *  The result is exact for lanes whose i-2 and i+1 neighbours are in-window, so the caller needs no oracle.
+ *  @brief Per-position "joined" (guaranteed non-boundary) mask for an all-ASCII chunk: bit `i` set when a
+ *         UAX-29 no-break rule suppresses the boundary before lane `i`. Exact for in-window i-2 and i+1 neighbours.
  */
 SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_mask_ascii_(__m512i classes) {
     // ASCII has no Hebrew, so AHLetter == ALetter; reduce each class to a 64-lane bitmask and defer the rule

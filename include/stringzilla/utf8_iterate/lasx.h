@@ -16,13 +16,9 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-/*  UTF-8 → UTF-32 transcoding for one chunk.
- *
- *  The serial reference walks the input one codepoint at a time via `sz_rune_parse`, where each step's byte
- *  width (1..4) depends on the just-decoded leading byte. That data-dependent stride, combined with the
- *  output-capacity bound and the "stop on an incomplete trailing sequence" rule, has no clean value-identical
- *  256-bit LASX form (the same reason the NEON backend delegates). We therefore forward to the serial
- *  reference, keeping the public LASX symbol present and byte-for-byte correct. */
+/** @brief  UTF-8 to UTF-32 transcoding for one chunk; forwards to serial.
+ *  The data-dependent codepoint stride, capacity bound, and incomplete-trailing rule have no clean
+ *  value-identical 256-bit LASX form (same reason the NEON backend delegates). */
 SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_lasx(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
@@ -30,8 +26,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_lasx(  //
     return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
 }
 
-/*  See `compare/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane 16-bit
- *  mask (word 0 = low lane, word 4 = high lane), recombined to match AVX2's `_mm256_movemask_epi8`. */
+/** @brief  Recombine the two per-128-bit-lane 16-bit `__lasx_xvmskltz_b` sign-bit masks into one 32-bit mask,
+ *          matching AVX2's `_mm256_movemask_epi8` (word 0 = low lane, word 4 = high lane). */
 SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
     __m256i collected = __lasx_xvmskltz_b(sign_extended);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 0);
@@ -43,18 +39,10 @@ SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
 
 /*  Multistep newline / whitespace iteration (LoongArch LASX).
  *
- *  Each 32-byte tile is classified branchlessly into a `start_bits` 32-bit bitmask of every delimiter start
- *  plus the disjoint 2-byte / 3-byte start masks, all built from `sz_xvmovemask_b_utf8_lasx_` and bitmask
- *  shifts (the same idiom as the single-match LASX kernels, which dodges the 128-bit-lane vector-shift
- *  hazard entirely — the cross-lane carry lives in the extracted bitmask). LASX has a movemask but no
- *  `vpcompressb`, so the peel left-packs with the same dword-index table the AVX2 backend uses
- *  (`sz_utf8_iterate_peel_window_haswell_` / `sz_sort_haswell_compact4_`): the 32-lane mask is processed in
- *  eight 4-lane sub-blocks, each compacting its `(position+lane, length)` pairs to the front with one
- *  `__lasx_xvperm_w` and a bounded element store — no per-match `ctz`, no data-dependent inner loop. Starts
- *  are trusted in lanes [0,29] and we step 30 so any 2-/3-byte delimiter from a trusted lane is fully loaded;
- *  a 1-byte `t[pos-1] == '\r'` carry suppresses an LF that completes a CRLF straddling the tile edge
- *  (newlines only). The caller computes the capacity cut like Icelake and may resume mid-tile past the last
- *  emitted match. */
+ *  Each 32-byte tile is classified branchlessly into a `start_bits` mask of every delimiter start plus disjoint
+ *  2-byte / 3-byte start masks (built from `sz_xvmovemask_b_utf8_lasx_` and bitmask shifts). The peel left-packs
+ *  with the same dword-index table the AVX2 backend uses, in eight 4-lane sub-blocks. Starts are trusted in lanes
+ *  [0,29] and we step 30; a `t[pos-1] == '\r'` carry suppresses an LF completing a tile-straddling CRLF. */
 
 /** @brief  Store the low `group` (1..4) of four 64-bit lanes of `values_u64x4` to `destination`. */
 SZ_INTERNAL void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size_t group, sz_size_t *destination) {
@@ -66,16 +54,10 @@ SZ_INTERNAL void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size
     }
 }
 
-/**
- *  @brief  Peel the tile's first `emit_count` matches with a `__lasx_xvperm_w` left-pack, 4 lanes per sub-block.
- *
- *  Walks the 32-lane `start_bits` mask in eight ascending 4-lane sub-blocks. Each sub-block builds the four
- *  candidate `(position+lane, length)` `u64` pairs, gathers the set lanes to the front with one
- *  `__lasx_xvperm_w` (driven by the same dword-index left-pack table as `sz_utf8_iterate_peel_window_haswell_`),
- *  and element-stores `min(popcount, remaining)` of them at the advancing cursor — preserving ascending lane
- *  order and the original `emit_count` truncation byte-for-byte, with no per-match `ctz`.
- */
-SZ_INTERNAL void sz_utf8_iterate_peel_window_lasx_(                            //
+/** @brief  Peel the tile's first `emit_count` matches with a `__lasx_xvperm_w` left-pack, 4 lanes per sub-block.
+ *  Each sub-block gathers its set `(position+lane, length)` pairs to the front (same dword-index table as
+ *  `sz_utf8_iterate_peel_haswell_`) and element-stores `min(popcount, remaining)` at the advancing cursor. */
+SZ_INTERNAL void sz_utf8_iterate_peel_lasx_(                            //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -103,8 +85,8 @@ SZ_INTERNAL void sz_utf8_iterate_peel_window_lasx_(                            /
         sz_u32_t const three_byte_sub = (three_byte_starts >> base_lane) & 0xFu;
         sz_u32_t packed_lengths = 0;
         for (sz_size_t lane_in_block = 0; lane_in_block < 4; ++lane_in_block) {
-            sz_u32_t const match_length =
-                1u + ((two_byte_sub >> lane_in_block) & 1u) + 2u * ((three_byte_sub >> lane_in_block) & 1u);
+            sz_u32_t const match_length = 1u + ((two_byte_sub >> lane_in_block) & 1u) +
+                                          2u * ((three_byte_sub >> lane_in_block) & 1u);
             packed_lengths |= match_length << (lane_in_block * 8);
         }
         __m256i const lengths_byte_vec = __lasx_xvinsgr2vr_w(__lasx_xvreplgr2vr_b(0), (int)packed_lengths, 0);
@@ -123,9 +105,9 @@ SZ_INTERNAL void sz_utf8_iterate_peel_window_lasx_(                            /
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(             //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(         //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -145,8 +127,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(             //
         // 1-byte newline indicators & matches.
         sz_u32_t newline_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, newline_vec));
         sz_u32_t carriage_return_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, carriage_return_vec));
-        sz_u32_t one_byte_mask = newline_mask |
-                                 sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, vertical_tab_vec)) |
+        sz_u32_t one_byte_mask = newline_mask | sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, vertical_tab_vec)) |
                                  sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, form_feed_vec)) |
                                  carriage_return_mask;
 
@@ -158,8 +139,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(             //
         sz_u32_t x_a8_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, x_a8_vec));
         sz_u32_t x_a9_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvseq_b(window, x_a9_vec));
 
-        sz_u32_t nel_mask = lead_c2_mask & (x_85_mask >> 1);            // C2 85
-        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);   // E2 80
+        sz_u32_t nel_mask = lead_c2_mask & (x_85_mask >> 1);                       // C2 85
+        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);              // E2 80
         sz_u32_t line_para_mask = lead_e280_mask & ((x_a8_mask | x_a9_mask) >> 2); // E2 80 A8/A9
 
         // CRLF: a CR whose next lane is LF is a single 2-byte match; its trailing LF must not also emit.
@@ -177,7 +158,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(             //
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_lasx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+            sz_utf8_iterate_peel_lasx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
                                               match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match.
@@ -195,9 +176,9 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_lasx(             //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(          //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(      //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -245,13 +226,13 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(          //
         __m256i x_8d_le_cmp = __lasx_xvsle_bu(window, x_8d_vec);
         sz_u32_t x_8d_range_mask = sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(x_80_ge_cmp, x_8d_le_cmp));
 
-        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);                   // E2 80
-        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);        // E1 9A 80
-        sz_u32_t range_e280_mask = lead_e280_mask & (x_8d_range_mask >> 2);             // E2 80 [80-8D]
-        sz_u32_t nnbsp_mask = lead_e280_mask & (x_af_mask >> 2);                        // E2 80 AF
-        sz_u32_t mmsp_mask = lead_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);        // E2 81 9F
-        sz_u32_t line_mask = lead_e280_mask & (x_a8_mask >> 2);                         // E2 80 A8
-        sz_u32_t para_mask = lead_e280_mask & (x_a9_mask >> 2);                         // E2 80 A9
+        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);                      // E2 80
+        sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);          // E1 9A 80
+        sz_u32_t range_e280_mask = lead_e280_mask & (x_8d_range_mask >> 2);                // E2 80 [80-8D]
+        sz_u32_t nnbsp_mask = lead_e280_mask & (x_af_mask >> 2);                           // E2 80 AF
+        sz_u32_t mmsp_mask = lead_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);           // E2 81 9F
+        sz_u32_t line_mask = lead_e280_mask & (x_a8_mask >> 2);                            // E2 80 A8
+        sz_u32_t para_mask = lead_e280_mask & (x_a9_mask >> 2);                            // E2 80 A9
         sz_u32_t ideographic_mask = x_e3_mask & (byte_80_mask >> 1) & (byte_80_mask >> 2); // E3 80 80
         sz_u32_t three_byte_starts = ogham_mask | range_e280_mask | nnbsp_mask | mmsp_mask | line_mask | para_mask |
                                      ideographic_mask;
@@ -261,7 +242,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(          //
         sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_lasx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+            sz_utf8_iterate_peel_lasx_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
                                               match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match.
@@ -277,7 +258,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_lasx(          //
     return count;
 }
 
-#pragma endregion Multistep Newline & Whitespace Iteration
+#pragma endregion Multistep Newline &Whitespace Iteration
 
 SZ_PUBLIC sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
     __m256i continuation_mask_vec = __lasx_xvreplgr2vr_b((char)0xC0);
@@ -323,11 +304,12 @@ SZ_PUBLIC sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
+/** @brief  Same block logic as `sz_utf8_count_lasx`, but locating the Nth start byte. LASX has no `PDEP`, so the
+ *          start-byte bitmask is fed to `sz_u32_nth_set_bit` to land on the Nth set bit. */
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    // Same block logic as `sz_utf8_count_lasx`, but locating the Nth start byte.
-    // LASX has no `PDEP`, so we iterate the start-byte bitmask with `ctz` to land on the Nth set bit.
     __m256i continuation_mask_vec = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_vec = __lasx_xvreplgr2vr_b((char)0x80);
+    __m256i const one_vec = __lasx_xvreplgr2vr_b(1);
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
@@ -335,17 +317,21 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_s
     while (length >= 32) {
         text_vec.lasx = __lasx_xvld(text_u8, 0);
         headers_vec.lasx = __lasx_xvand_v(text_vec.lasx, continuation_mask_vec);
-        sz_u32_t start_byte_mask = ~sz_xvmovemask_b_utf8_lasx_(
-            __lasx_xvseq_b(headers_vec.lasx, continuation_pattern_vec));
-        sz_size_t start_byte_count = (sz_size_t)sz_u32_popcount(start_byte_mask);
+        __m256i is_continuation = __lasx_xvseq_b(headers_vec.lasx, continuation_pattern_vec);
+        sz_u32_t start_byte_mask = ~sz_xvmovemask_b_utf8_lasx_(is_continuation);
 
-        if (n < start_byte_count) {
-            // Drop the lowest `n` set bits, then the next set bit is our target.
-            for (sz_size_t skipped = 0; skipped < n; ++skipped) start_byte_mask &= start_byte_mask - 1;
-            int byte_offset = sz_u32_ctz(start_byte_mask);
-            return (sz_cptr_t)(text_u8 + byte_offset);
+        // Count start bytes in-vector: each start lane carries a 0x01, so `xvpcnt_d` sums one bit per such lane.
+        __m256i is_start = __lasx_xvandn_v(is_continuation, one_vec);
+        __m256i start_byte_counts = __lasx_xvpcnt_d(is_start);
+        sz_size_t start_byte_count =
+            (sz_size_t)(__lasx_xvpickve2gr_du(start_byte_counts, 0) + __lasx_xvpickve2gr_du(start_byte_counts, 1) +
+                        __lasx_xvpickve2gr_du(start_byte_counts, 2) + __lasx_xvpickve2gr_du(start_byte_counts, 3));
+
+        if (n >= start_byte_count) {
+            n -= start_byte_count, text_u8 += 32, length -= 32;
+            continue;
         }
-        else { n -= start_byte_count, text_u8 += 32, length -= 32; }
+        return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_byte_mask, n));
     }
 
     return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
@@ -353,26 +339,12 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_s
 
 /*  UAX-29 word boundary detection (forward & reverse).
  *
- *  The full UAX-29 segmenter is a stateful walk whose decision at each candidate position depends on the
- *  Word_Break properties of the surrounding runes, including multi-codepoint look-around (WB6/WB7 mid-letter,
- *  WB11/WB12 numeric, WB15/WB16 Regional_Indicator parity) and WB4 Extend/Format/ZWJ skipping. We keep those
- *  stateful sub-rules in the serial reference, but accelerate the dominant common case with 256-bit LASX:
- *  long runs of ASCII letters (`[A-Za-z]`) or ASCII digits (`[0-9]`).
- *
- *  Interior positions of a maximal ASCII-letter run are covered @b unconditionally by WB5 (AHLetter ×
- *  AHLetter ⇒ no break, no look-around), and interior positions of an ASCII-digit run by WB8 (Numeric ×
- *  Numeric ⇒ no break). Such positions can never be a boundary, so we skip them; the first position whose byte
- *  class differs from its predecessor (or is non-letter/digit) is the earliest possible boundary, handed off
- *  to the serial reference which re-tests it. Skipping only proven non-boundaries keeps the result
- *  byte-for-byte identical to `_serial` (same returned pointer and `boundary_width`).
- *
- *  Classification uses plain LASX byte compares: class 0 = ASCII letter, 1 = ASCII digit, 2 = other ASCII,
- *  3 = non-ASCII. We then build a per-byte "safe" mask (class == predecessor's class AND class ∈ {0,1}) and
- *  scan it via `sz_xvmovemask_b_utf8_lasx_` for the first/last position that is not safe. */
+ *  The stateful look-around sub-rules stay in the serial reference; LASX accelerates the common case of long
+ *  ASCII-letter or ASCII-digit runs whose interior positions can never be boundaries (WB5 / WB8). Skipping only
+ *  proven non-boundaries keeps the returned pointer and `boundary_width` byte-for-byte identical to `_serial`. */
 
-/*  Per-class 32-bit lane mask helper: `sz_xvmovemask_b_utf8_lasx_` over an all-ASCII byte compare. Each
- *  Word_Break class is a small ASCII byte set (ALetter = A-Z|a-z via the 0x20 fold, Numeric = 0-9,
- *  ExtendNumLet = '_', MidLetter = ':', MidNum = ','|';', MidQuotes = '"'|'\''|'.', plus CR and LF). */
+/** @brief  Per-class 32-bit lane boundary mask over an all-ASCII LASX byte compare. Each Word_Break class is a
+ *          small ASCII byte set (ALetter A-Za-z, Numeric 0-9, ExtendNumLet '_', Mid* punctuation, CR and LF). */
 SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_lasx_(__m256i window) {
     __m256i lowered = __lasx_xvor_v(window, __lasx_xvreplgr2vr_b(0x20)); // fold A-Z onto a-z
     sz_u64_t aletter_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(
@@ -478,10 +450,9 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
             sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
             sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
-            __m256i const positions =
-                __lasx_xvadd_d(__lasx_xvreplgr2vr_d((long long)(position - 2 + sub_block * 4)), lane_ramp_u64x4);
-            __m256i const boundaries =
-                __lasx_xvperm_w(positions, sz_utf8_word_compact4_permutation_lasx_(submask));
+            __m256i const positions = __lasx_xvadd_d(__lasx_xvreplgr2vr_d((long long)(position - 2 + sub_block * 4)),
+                                                     lane_ramp_u64x4);
+            __m256i const boundaries = __lasx_xvperm_w(positions, sz_utf8_word_compact4_permutation_lasx_(submask));
             __m256i const starts = sz_utf8_word_shift_right_insert_lasx_(boundaries, word_start);
             __m256i const lengths = __lasx_xvsub_d(boundaries, starts);
             sz_utf8_iterate_store_group_lasx_(starts, stored, word_starts + words);
@@ -557,10 +528,10 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx( //
             sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
             sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
-            __m256i const positions =
-                __lasx_xvadd_d(__lasx_xvreplgr2vr_d((long long)(base + sub_block * 4)), lane_ramp_u64x4);
-            __m256i const boundaries =
-                __lasx_xvperm_w(positions, sz_utf8_word_compact4_permutation_descending_lasx_(submask));
+            __m256i const positions = __lasx_xvadd_d(__lasx_xvreplgr2vr_d((long long)(base + sub_block * 4)),
+                                                     lane_ramp_u64x4);
+            __m256i const boundaries = __lasx_xvperm_w(positions,
+                                                       sz_utf8_word_compact4_permutation_descending_lasx_(submask));
             __m256i const previous = sz_utf8_word_shift_right_insert_lasx_(boundaries, word_end);
             __m256i const lengths = __lasx_xvsub_d(previous, boundaries);
             sz_utf8_iterate_store_group_lasx_(boundaries, stored, word_starts + words);

@@ -23,11 +23,7 @@ extern "C" {
 #endif
 
 /**
- *  @brief Unsigned byte greater-than-or-equal comparison for AVX2.
- *
- *  AVX2 lacks unsigned comparison intrinsics like `_mm256_cmpge_epu8`.
- *  This uses the identity: a >= b  ⟺  max(a, b) == a
- *  Since `_mm256_max_epu8` treats bytes as unsigned, this gives correct results.
+ *  @brief Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity.
  */
 SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a);
@@ -35,15 +31,9 @@ SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
 
 #pragma region Multistep newline / whitespace iteration
 
-/*  Multistep newline / whitespace iteration (Haswell / AVX2).
- *
- *  Each 32-byte window is classified branchlessly into a `start_bits` mask (every delimiter start) plus the
- *  per-length 2-byte / 3-byte start masks. AVX2 has no `vpcompressb`, so the peel left-packs with the same
- *  `vpermd` table the sorting backend uses (`sz_sort_haswell_compact4_`): the 32-lane mask is processed in
- *  eight 4-lane sub-blocks, each compacting its `(position+lane, length)` pairs to the front with one
- *  `_mm256_permutevar8x32_epi32` and masked-storing the survivors - no per-match `ctz`, no data-dependent inner
- *  loop. We trust starts in lanes [0,29] and step 30 so any 2-/3-byte delimiter is fully loaded; a 1-byte
- *  `t[pos-1] == '\r'` carry suppresses an LF that completes a CRLF straddling the window edge. */
+/*  Multistep newline / whitespace iteration (Haswell / AVX2). Each 32-byte window is classified into a
+ *  `start_bits` mask plus per-length start masks, then the peel left-packs matches with `vpermd`. Starts in
+ *  lanes [0,29] are trusted and the cursor steps 30, so any 2-/3-byte delimiter is fully loaded. */
 
 /** @brief  Mask for `_mm256_maskstore_epi64` selecting the low `count` (0..4) of four 64-bit lanes. */
 SZ_INTERNAL __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
@@ -52,14 +42,9 @@ SZ_INTERNAL __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
 
 /**
  *  @brief  Peel the window's first `emit_count` matches with a `vpermd` left-pack, 4 lanes per sub-block.
- *
- *  Walks the 32-lane `start_bits` mask in eight ascending 4-lane sub-blocks. Each sub-block builds the four
- *  candidate `(position+lane, length)` `u64` pairs, gathers the set lanes to the front with one
- *  `_mm256_permutevar8x32_epi32` (driven by the same left-pack table as `sz_sort_haswell_compact4_`), and
- *  masked-stores `min(popcount, remaining)` of them at the advancing cursor - preserving ascending lane order
- *  and the original `emit_count` truncation byte-for-byte, with no per-match `ctz`.
+ *          Each sub-block gathers its set lanes to the front and masked-stores them at the advancing cursor.
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_window_haswell_(                         //
+SZ_INTERNAL void sz_utf8_iterate_peel_haswell_(                                //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -97,7 +82,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_window_haswell_(                         /
         __m256i const packed_offsets = _mm256_permutevar8x32_epi32(offsets_u64x4, permutation);
         __m256i const packed_lengths = _mm256_permutevar8x32_epi32(lengths_u64x4, permutation);
 
-        sz_size_t const taken = sz_min_of_two((sz_size_t)sz_u32_popcount(submask), emit_count - emitted);
+        sz_size_t const taken = sz_min_of_two((sz_size_t)_mm_popcnt_u32(submask), emit_count - emitted);
         __m256i const store_mask = sz_mm256_store_mask_epi64_(taken);
         _mm256_maskstore_epi64((long long *)(match_offsets + emitted), store_mask, packed_offsets);
         _mm256_maskstore_epi64((long long *)(match_lengths + emitted), store_mask, packed_lengths);
@@ -153,11 +138,11 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_haswell(      //
         // Suppress a leading LF already consumed by a CRLF that straddled the previous window edge.
         if (position != 0 && text_u8[position - 1] == '\r') start_bits &= ~(newline_mask & 1u);
 
-        sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
+        sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u32(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_haswell_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
-                                                 match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_haswell_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+                                          match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -237,11 +222,11 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_haswell(   //
         sz_u32_t starts = one_byte_mask | two_byte_starts | three_byte_starts;
         sz_u32_t start_bits = starts & ((1u << 30) - 1); // trust lanes [0,29]; step 30
 
-        sz_size_t const window_matches = (sz_size_t)sz_u32_popcount(start_bits);
+        sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u32(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
-            sz_utf8_iterate_peel_window_haswell_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
-                                                 match_offsets + count, match_lengths + count);
+            sz_utf8_iterate_peel_haswell_(start_bits, two_byte_starts, three_byte_starts, emit_count, position,
+                                          match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) {
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -311,55 +296,28 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
             _mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
         sz_size_t start_byte_count = _mm_popcnt_u32(start_byte_mask);
 
-        // Check if we've reached the terminal part of our search
-        if (n < start_byte_count) {
-            // PDEP directly gives us the nth set bit position
-            // Example: _pdep_u32(0b10, 0b00010101) = 0b00000100
-            sz_u32_t deposited_bits = _pdep_u32((sz_u32_t)1 << n, start_byte_mask);
-            int byte_offset = sz_u32_ctz(deposited_bits);
-            return (sz_cptr_t)(text_u8 + byte_offset);
-        }
-        // Jump to the next block
-        else {
+        // The Nth start byte is not in this window: advance to the next block.
+        if (n >= start_byte_count) {
             n -= start_byte_count;
             text_u8 += 32;
             length -= 32;
+            continue;
         }
+
+        // `_pdep_u32` isolates the Nth set bit; `_tzcnt_u32` then gives its lane.
+        sz_u32_t deposited_bits = _pdep_u32((sz_u32_t)1 << n, start_byte_mask);
+        int byte_offset = (int)_tzcnt_u32(deposited_bits);
+        return (sz_cptr_t)(text_u8 + byte_offset);
     }
 
     // Process remaining bytes with serial
     return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
 }
 
-/*  UAX-29 word boundary detection (vectorized).
- *
- *  The serial reference walks the text codepoint-by-codepoint and, at each candidate position,
- *  evaluates `sz_utf8_is_word_boundary_serial`. The dominant runtime cost for typical (ASCII / Latin)
- *  text is the per-codepoint Word_Break property classification.
- *
- *  The Haswell backend keeps the same outer walk but accelerates it in two ways while remaining
- *  byte-exact versus the serial reference:
- *
- *   1) Vectorized property classification. A 32-byte window is classified with `_mm256_shuffle_epi8`.
- *      ASCII bytes (<0x80) are mapped to their Word_Break property through an 8-row nibble LUT (one
- *      `_mm256_shuffle_epi8` per high-nibble row, selected by an equality mask). The full ASCII
- *      property table is an 8x16 grid, so a single shuffle is insufficient; eight row-shuffles
- *      reproduce it exactly. Continuation bytes (0x80-0xBF) and non-ASCII lead bytes are tagged with
- *      a sentinel so the scalar fallback handles them. The result is cached into a small stack window
- *      of per-byte properties.
- *
- *   2) Vectorized local boundary decision. For positions whose previous and following effective
- *      properties are both "plain" (Other/CR/LF/Newline/ALetter/Hebrew/Numeric/Katakana/ExtendNumLet)
- *      the boundary is fully determined by the immediate pair via rules WB3/3a/3b/5/8/9/10/13/13a/13b
- *      (encoded in `sz_utf8_word_break_pair_decision_`). These are resolved without any look-around.
- *
- *  Every position that could be governed by a stateful rule -- WB4 (Extend/Format/ZWJ skipping),
- *  WB6/WB7 (MidLetter look-around), WB7a, WB11/WB12 (MidNum look-around), WB15/WB16 (Regional
- *  Indicator parity), the emoji-ZWJ rule WB3c, or any non-ASCII / window-edge position where local
- *  context is insufficient -- defers to `sz_utf8_is_word_boundary_serial`, which re-reads the full
- *  `text`/`length` and is therefore always exact. Sub-rules left to serial: WB3c, WB4, WB6, WB7,
- *  WB7a, WB11, WB12, WB15, WB16 (and all non-BMP / SMP property cases).
- */
+/*  UAX-29 word boundary detection (vectorized). The same outer walk as the serial reference, but all-ASCII
+ *  windows resolve their boundaries with `_mm256_shuffle_epi8` Word_Break classification plus a local pair
+ *  decision. Any stateful rule (WB4/6/7/7a/11/12/15/16/3c), non-ASCII, or window-edge position defers to
+ *  `sz_utf8_is_word_boundary_serial`, keeping the output byte-exact versus serial. */
 
 /* Per-byte Word_Break property of ASCII codepoints, laid out as eight 16-entry rows indexed by the
  * low nibble; row R serves high nibble R (covering bytes 0x00-0x7F). */
@@ -418,9 +376,8 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_class_mask_haswell_(__m256i classes, int
 }
 
 /* 32-bit "joined" (guaranteed non-boundary) mask for an all-ASCII 32-byte window: bit i set => the boundary
- * before lane i is suppressed by a UAX-29 no-break rule. ASCII has no Extend/Format/ZWJ/Regional_Indicator/
- * Hebrew/Katakana, so WB4 and WB15/16 never apply and WB6/7/11/12 reduce to neighbour bit-shifts (`<< 1` =
- * previous lane, `>> 1` = next, `<< 2` = two back). Exact for lanes whose i-2 and i+1 neighbours are in-window. */
+ * before lane i is suppressed by a UAX-29 no-break rule. Exact for lanes whose i-2 and i+1 neighbours are
+ * in-window; the caller restricts the result to its trusted lane window. */
 SZ_INTERNAL sz_u32_t sz_utf8_word_break_join_mask_ascii_haswell_(__m256i classes) {
     // Reduce each class to a 32-lane bitmask and defer the rule logic to the shared portable routine; the
     // caller restricts the result to its trusted lane window, so the wider u64 math is harmless.
@@ -437,7 +394,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_join_mask_ascii_haswell_(__m256i classes
 
 /* Per-file copy of the sorting backend's left-pack table for compacting u64 lanes: row `[m]` holds the 8 dword
  * indices that gather the `m`-selected u64 lanes (of 4, each a dword pair) to the front for
- * `_mm256_permutevar8x32_epi32`. Identical to the table in `sz_utf8_iterate_peel_window_haswell_`. */
+ * `_mm256_permutevar8x32_epi32`. Identical to the table in `sz_utf8_iterate_peel_haswell_`. */
 SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_haswell_(sz_u32_t submask) {
     static sz_u32_t const compact_lut[16][8] = {
         {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
@@ -507,7 +464,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
         for (sz_size_t sub_block = 0; sub_block < 8; ++sub_block) {
             sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
             if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
+            sz_size_t const taken = (sz_size_t)_mm_popcnt_u32(submask);
             sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
             __m256i const positions =
@@ -590,7 +547,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell( //
         for (sz_size_t sub_block = 8; sub_block-- > 0;) { // high-to-low for descending emission
             sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
             if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
+            sz_size_t const taken = (sz_size_t)_mm_popcnt_u32(submask);
             sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
 
             __m256i const positions =
