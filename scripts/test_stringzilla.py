@@ -622,6 +622,35 @@ def test_unit_strs_sequence():
     assert "p4" not in sampled
 
 
+def test_unit_strs_argsort_out():
+    """`argsort(out=...)` writes the permutation into a caller `uint64` buffer and returns it."""
+    import array
+
+    strs = Str("banana\napple\ncherry\nApple\nBANANA").splitlines()
+    n = len(strs)
+
+    # `array('Q')` matches `sz_sorted_idx_t` (unsigned 64-bit); out is filled and returned.
+    buf = array.array("Q", [0] * n)
+    assert strs.argsort(uncased=True, out=buf) is buf
+    assert tuple(buf) == strs.argsort(uncased=True)
+
+    # Top-K writes exactly `top` indices and leaves the rest of a wider buffer untouched.
+    wide = array.array("Q", [12345] * n)
+    strs.argsort(top=2, out=wide)
+    assert tuple(wide[:2]) == strs.argsort(top=2)
+    assert all(x == 12345 for x in wide[2:]), "argsort(out=...) clobbered past `top`"
+
+    # Rejections: wrong itemsize, undersized, read-only, and `sorted()` has no `out=`.
+    with pytest.raises(TypeError):
+        strs.argsort(out=array.array("I", [0] * n))
+    with pytest.raises(ValueError):
+        strs.argsort(out=array.array("Q", [0] * (n - 1)))
+    with pytest.raises((TypeError, BufferError)):
+        strs.argsort(out=bytes(8 * n))
+    with pytest.raises(TypeError):
+        strs.sorted(out=buf)
+
+
 def test_unit_slicing():
     native = "abcdef"
     big = Str(native)
@@ -1278,6 +1307,13 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, see
     for i in range(list_length):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
         assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
+
+    # The buffer-protocol `out=` path must produce the same permutation as the tuple path.
+    if numpy_available:
+        out = np.zeros(list_length, dtype=np.uintp)
+        returned = big_list.argsort(out=out)
+        assert returned is out
+        assert out.tolist() == list(native_order)
 
     native_list.sort()
     big_list = big_list.sorted()

@@ -3692,10 +3692,10 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
     }
 }
 
-static char const doc_utf8_uncased_fold[] =                                                //
+static char const doc_utf8_uncased_fold[] =                                             //
     "Apply Unicode case folding to a UTF-8 string.\n"                                   //
     "\n"                                                                                //
-    "Case folding normalizes text for uncased comparisons,\n"                  //
+    "Case folding normalizes text for uncased comparisons,\n"                           //
     "handling one-to-many expansions (e.g., German sharp S to 'ss').\n"                 //
     "\n"                                                                                //
     "Args:\n"                                                                           //
@@ -3706,13 +3706,13 @@ static char const doc_utf8_uncased_fold[] =                                     
     "    bytes: The case-folded UTF-8 string.\n"                                        //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_fold('HELLO')\n"                                              //
+    "    >>> sz.utf8_uncased_fold('HELLO')\n"                                           //
     "    b'hello'\n"                                                                    //
-    "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                     //
+    "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                  //
     "    b'strasse'";
 
 static PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple) {
+                                            PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
     int validate = 0;                       // Default: no validation
@@ -3900,24 +3900,24 @@ static PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
     return result_bytes;
 }
 
-static char const doc_utf8_norm_violation[] =                                           //
-    "Return the byte offset of the first normalization violation, or None.\n"           //
-    "\n"                                                                                //
-    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"       //
-    "that breaks the given normalization form (first non-Yes Quick-Check result\n"      //
-    "or canonical-ordering violation). Returns None when the string is already\n"       //
-    "fully normalized.\n"                                                               //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                         //
-    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                            //
-    "\n"                                                                                //
-    "Returns:\n"                                                                        //
-    "    int | None: Byte offset of first violation, or None if already normalized.\n"  //
-    "\n"                                                                                //
-    "Example:\n"                                                                              //
-    "    >>> sz.utf8_norm_violation('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"          //
-    "    3\n"                                                                                  //
+static char const doc_utf8_norm_violation[] =                                                   //
+    "Return the byte offset of the first normalization violation, or None.\n"                   //
+    "\n"                                                                                        //
+    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"               //
+    "that breaks the given normalization form (first non-Yes Quick-Check result\n"              //
+    "or canonical-ordering violation). Returns None when the string is already\n"               //
+    "fully normalized.\n"                                                                       //
+    "\n"                                                                                        //
+    "Args:\n"                                                                                   //
+    "    text (Str or str or bytes): The input UTF-8 string.\n"                                 //
+    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                    //
+    "\n"                                                                                        //
+    "Returns:\n"                                                                                //
+    "    int | None: Byte offset of first violation, or None if already normalized.\n"          //
+    "\n"                                                                                        //
+    "Example:\n"                                                                                //
+    "    >>> sz.utf8_norm_violation('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"           //
+    "    3\n"                                                                                   //
     "    >>> sz.utf8_norm_violation('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
     "    True";
 
@@ -3992,36 +3992,36 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     return PyLong_FromSize_t(offset);
 }
 
-static char const doc_utf8_uncased_find[] =                                           //
-    "Find substring using Unicode uncased matching.\n"                                //
-    "\n"                                                                                       //
-    "Performs a uncased search using Unicode case folding rules,\n"                   //
-    "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"                    //
-    "\n"                                                                                       //
-    "IMPORTANT - Type-dependent behavior:\n"                                                   //
-    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"             //
-    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"                       //
-    "\n"                                                                                       //
-    "Args:\n"                                                                                  //
-    "    haystack (Str or str or bytes): The string to search in.\n"                           //
-    "    needle (Str or str or bytes): The substring to find.\n"                               //
-    "    start (int, optional): Starting index (default: 0).\n"                                //
-    "    end (int, optional): Ending index (default: length).\n"                               //
-    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"        //
-    "\n"                                                                                       //
-    "Returns:\n"                                                                               //
-    "    int: Index of the first match, or -1 if not found.\n"                                 //
-    "\n"                                                                                       //
-    "Example:\n"                                                                               //
-    "    >>> sz.utf8_uncased_find('Hello World', 'WORLD')  # str: codepoint offset\n" //
-    "    6\n"                                                                                  //
-    "    >>> sz.utf8_uncased_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
-    "    0\n"                                                                                  //
-    "    >>> sz.utf8_uncased_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
+static char const doc_utf8_uncased_find[] =                                             //
+    "Find substring using Unicode uncased matching.\n"                                  //
+    "\n"                                                                                //
+    "Performs a uncased search using Unicode case folding rules,\n"                     //
+    "correctly handling one-to-many expansions (e.g., 'ß' matches 'SS').\n"             //
+    "\n"                                                                                //
+    "IMPORTANT - Type-dependent behavior:\n"                                            //
+    "  - str input:   start/end are CODEPOINT offsets, returns CODEPOINT offset\n"      //
+    "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"                //
+    "\n"                                                                                //
+    "Args:\n"                                                                           //
+    "    haystack (Str or str or bytes): The string to search in.\n"                    //
+    "    needle (Str or str or bytes): The substring to find.\n"                        //
+    "    start (int, optional): Starting index (default: 0).\n"                         //
+    "    end (int, optional): Ending index (default: length).\n"                        //
+    "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n" //
+    "\n"                                                                                //
+    "Returns:\n"                                                                        //
+    "    int: Index of the first match, or -1 if not found.\n"                          //
+    "\n"                                                                                //
+    "Example:\n"                                                                        //
+    "    >>> sz.utf8_uncased_find('Hello World', 'WORLD')  # str: codepoint offset\n"   //
+    "    6\n"                                                                           //
+    "    >>> sz.utf8_uncased_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"          //
+    "    0\n"                                                                           //
+    "    >>> sz.utf8_uncased_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"   //
     "    0";
 
-static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *args,
-                                                     Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple) {
     int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
     // Argument objects
@@ -4180,7 +4180,7 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
     sz_size_t matched_length = 0;
     sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
     sz_cptr_t result = sz_utf8_uncased_find(haystack.start, haystack.length, needle.start, needle.length,
-                                                     &needle_metadata, &matched_length);
+                                            &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
@@ -4198,8 +4198,8 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
     }
 }
 
-static char const doc_utf8_uncased_order[] =                                   //
-    "Compare two UTF-8 strings uncasedly.\n"                                   //
+static char const doc_utf8_uncased_order[] =                                            //
+    "Compare two UTF-8 strings uncasedly.\n"                                            //
     "\n"                                                                                //
     "Performs lexicographical comparison using Unicode case folding,\n"                 //
     "correctly handling one-to-many expansions (e.g., 'Straße' equals 'STRASSE').\n"    //
@@ -4213,20 +4213,19 @@ static char const doc_utf8_uncased_order[] =                                   /
     "    int: Negative if a < b, zero if equal, positive if a > b.\n"                   //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                        //
+    "    >>> sz.utf8_uncased_order('hello', 'HELLO')\n"                                 //
     "    0\n"                                                                           //
-    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                       //
+    "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                //
     "    -1";
 
-static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args,
-                                                      Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
     int validate = 0;                              // Default: no validation
 
     if (positional_args_count != nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_uncased_order() takes exactly %zd positional argument(s)",
-                     nargs_expected);
+        PyErr_Format(PyExc_TypeError, "utf8_uncased_order() takes exactly %zd positional argument(s)", nargs_expected);
         return NULL;
     }
 
@@ -4241,8 +4240,7 @@ static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *ar
                 if (validate < 0) return NULL;
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_uncased_order() got unexpected keyword argument '%U'",
-                             key);
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_order() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
@@ -4604,8 +4602,8 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
                 // Reallocate spans array if needed
                 if (spans_count >= spans_capacity) {
                     spans_capacity *= 2;
-                    sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity *
-                                                                                         sizeof(sz_string_view_t));
+                    sz_string_view_t *new_spans = (sz_string_view_t *)realloc(
+                        spans, spans_capacity * sizeof(sz_string_view_t));
                     if (!new_spans) {
                         free(spans);
                         Py_XDECREF(result);
@@ -5022,7 +5020,7 @@ static char const doc_rsplit_byteset_iter[] =                                   
     "  text (Str or str or bytes): The string object.\n"                                             //
     "  separators (str): A string containing separator characters.\n"                                //
     "  keepseparator (bool, optional): Include separators in results (default is False).\n"          //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                        //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                       //
     "Returns:\n"                                                                                     //
     "  iterator: An iterator yielding split substrings in reverse.\n"                                //
     "\n"                                                                                             //
@@ -5349,10 +5347,10 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_uncased_find_iter[] =                                    //
-    "utf8_uncased_find_iter(haystack, needle, /, include_overlapping=False)\n"      //
+static char const doc_utf8_uncased_find_iter[] =                                             //
+    "utf8_uncased_find_iter(haystack, needle, /, include_overlapping=False)\n"               //
     "\n"                                                                                     //
-    "Iterate over all uncased matches of needle in haystack.\n"                     //
+    "Iterate over all uncased matches of needle in haystack.\n"                              //
     "\n"                                                                                     //
     "This function uses Unicode case folding for proper handling of\n"                       //
     "international text. The matched region length may differ from the\n"                    //
@@ -5367,22 +5365,21 @@ static char const doc_utf8_uncased_find_iter[] =                                
     "    Str: Each matched region as a view into the original haystack.\n"                   //
     "\n"                                                                                     //
     "Examples:\n"                                                                            //
-    "    >>> list(sz.utf8_uncased_find_iter('Hello HELLO hello', 'hello'))\n"       //
+    "    >>> list(sz.utf8_uncased_find_iter('Hello HELLO hello', 'hello'))\n"                //
     "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                              //
-    "    >>> list(sz.utf8_uncased_find_iter('Straße STRASSE', 'strasse'))\n"        //
+    "    >>> list(sz.utf8_uncased_find_iter('Straße STRASSE', 'strasse'))\n"                 //
     "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
 static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const *args,
-                                                          Py_ssize_t positional_args_count, PyObject *kwnames) {
+                                                 Py_ssize_t positional_args_count, PyObject *kwnames) {
     // Check if called as member or module function
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     int min_args = is_member ? 1 : 2;
     int max_args = is_member ? 2 : 3;
 
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError,
-                     "utf8_uncased_find_iter() requires %d to %d positional arguments, got %zd", min_args,
-                     max_args, positional_args_count);
+        PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() requires %d to %d positional arguments, got %zd",
+                     min_args, max_args, positional_args_count);
         return NULL;
     }
 
@@ -5400,8 +5397,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
                 include_overlapping = PyObject_IsTrue(value);
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() got unexpected keyword argument '%U'",
-                             key);
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
@@ -5420,8 +5416,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
     // Handle edge case: empty needle yields nothing
     if (needle_view.length == 0) {
         // Return an empty iterator by setting current = end
-        Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator,
-                                                             &Utf8UncasedFindIteratorType);
+        Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator, &Utf8UncasedFindIteratorType);
         if (!iter) return PyErr_NoMemory();
 
         iter->haystack_obj = haystack_obj;
@@ -5438,8 +5433,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
     }
 
     // Allocate iterator
-    Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator,
-                                                         &Utf8UncasedFindIteratorType);
+    Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator, &Utf8UncasedFindIteratorType);
     if (!iter) return PyErr_NoMemory();
 
     iter->haystack_obj = haystack_obj;
@@ -5951,12 +5945,10 @@ static PyMethodDef Str_methods[] = {
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_find},
+    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
     {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
      doc_utf8_uncased_find_iter},
-    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_order},
+    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -6453,7 +6445,7 @@ static PyObject *Utf8UncasedFindIteratorType_next(Utf8UncasedFindIterator *self)
     // Search for next match
     sz_size_t matched_length = 0;
     sz_cptr_t match = sz_utf8_uncased_find(self->current, remaining, self->needle.start, self->needle.length,
-                                                    &self->metadata, &matched_length);
+                                           &self->metadata, &matched_length);
 
     if (!match) return NULL;
 
@@ -6492,22 +6484,22 @@ static PyObject *Utf8UncasedFindIteratorType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8UncasedFindIterator[] =                       //
-    "Utf8UncasedFindIterator(haystack, needle, ...)\n"                  //
+static char const doc_Utf8UncasedFindIterator[] =                               //
+    "Utf8UncasedFindIterator(haystack, needle, ...)\n"                          //
     "\n"                                                                        //
-    "Iterator yielding all uncased matches of needle in haystack.\n"   //
+    "Iterator yielding all uncased matches of needle in haystack.\n"            //
     "Uses Unicode case folding for proper handling of international text.\n"    //
     "\n"                                                                        //
     "Created by:\n"                                                             //
-    "  - Str.utf8_uncased_find_iter()\n"                               //
-    "  - sz.utf8_uncased_find_iter()\n"                                //
+    "  - Str.utf8_uncased_find_iter()\n"                                        //
+    "  - sz.utf8_uncased_find_iter()\n"                                         //
     "\n"                                                                        //
     "Each iteration yields a Str view of the matched region in the haystack.\n" //
     "The matched length may differ from needle length due to case folding\n"    //
     "expansions (e.g., German 'ß' matches 'SS').\n"                             //
     "\n"                                                                        //
     "Example:\n"                                                                //
-    "  >>> len(list(sz.utf8_uncased_find_iter('aAaA', 'a')))\n"        //
+    "  >>> len(list(sz.utf8_uncased_find_iter('aAaA', 'a')))\n"                 //
     "  4";
 
 static PyTypeObject Utf8UncasedFindIteratorType = {
@@ -7005,6 +6997,29 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     return result;
 }
 
+/** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
+static sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
+                                     sz_size_t top, sz_bool_t reverse) {
+    return uncased ? sz_sequence_argsort_utf8_uncased(sequence, NULL, order, top, reverse)
+                   : sz_sequence_argsort(sequence, NULL, order, top, reverse);
+}
+
+static char const doc_sorted[] =                                                               //
+    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                              //
+    "\n"                                                                                       //
+    "Return a new, stably sorted Strs; the original is unchanged.\n"                           //
+    "\n"                                                                                       //
+    "Args:\n"                                                                                  //
+    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"               //
+    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"          //
+    "  top (int, optional): Keep only the `top` smallest (or largest, if reversed) elements. " //
+    "Defaults to None (all).\n"                                                                //
+    "Returns:\n"                                                                               //
+    "  Strs: A new, sorted collection.\n"                                                      //
+    "Example:\n"                                                                               //
+    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"                  //
+    "  ['apple', 'banana', 'cherry']";
+
 /**
  *  @brief Sorts the parts of a `Strs` object.
  *
@@ -7015,93 +7030,56 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
  *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
  *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts sorted.
  */
-/**
- *  @brief Parses the shared keyword-only options of `Strs.sorted` and `Strs.argsort`.
- *
- *  Recognizes `reverse` (bool), `uncased` (bool), and `top` (non-negative int or `None`).
- *  All three are keyword-only, mirroring the builtin `sorted(..., *, reverse=...)`.
- *
- *  @return 0 on success with the outputs populated; -1 on error with a Python exception set.
- */
-static int Strs_parse_sort_options_(char const *method_name, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple, sz_bool_t *reverse_out, sz_bool_t *uncased_out,
-                                    sz_size_t *top_out) {
-    *reverse_out = sz_false_k, *uncased_out = sz_false_k, *top_out = 0;
-
+static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    // Parse the keyword-only options: `reverse` (bool), `uncased` (bool), `top` (non-negative int or None).
+    sz_bool_t reverse = sz_false_k, uncased = sz_false_k;
+    sz_size_t top = 0;
     if (positional_args_count != 0) {
-        PyErr_Format(PyExc_TypeError, "%s() takes no positional arguments", method_name);
-        return -1;
+        PyErr_SetString(PyExc_TypeError, "sorted() takes no positional arguments");
+        return NULL;
     }
 
     PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL;
-    if (args_names_tuple) {
-        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
-        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
-            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
-            PyObject *value = args[positional_args_count + i];
-            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
-            else {
-                PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%U'", method_name, key);
-                return -1;
-            }
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+        PyObject *value = args[positional_args_count + i];
+        if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
+        else {
+            PyErr_Format(PyExc_TypeError, "sorted() got an unexpected keyword argument '%U'", key);
+            return NULL;
         }
     }
-
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
-            PyErr_Format(PyExc_TypeError, "%s(): reverse must be a bool", method_name);
-            return -1;
+            PyErr_SetString(PyExc_TypeError, "sorted(): reverse must be a bool");
+            return NULL;
         }
-        *reverse_out = (sz_bool_t)(PyObject_IsTrue(reverse_obj) != 0);
+        reverse = (sz_bool_t)(PyObject_IsTrue(reverse_obj) != 0);
     }
     if (uncased_obj) {
         if (!PyBool_Check(uncased_obj)) {
-            PyErr_Format(PyExc_TypeError, "%s(): uncased must be a bool", method_name);
-            return -1;
+            PyErr_SetString(PyExc_TypeError, "sorted(): uncased must be a bool");
+            return NULL;
         }
-        *uncased_out = (sz_bool_t)(PyObject_IsTrue(uncased_obj) != 0);
+        uncased = (sz_bool_t)(PyObject_IsTrue(uncased_obj) != 0);
     }
     if (top_obj && top_obj != Py_None) {
         if (!PyLong_Check(top_obj)) {
-            PyErr_Format(PyExc_TypeError, "%s(): top must be an int or None", method_name);
-            return -1;
+            PyErr_SetString(PyExc_TypeError, "sorted(): top must be an int or None");
+            return NULL;
         }
         Py_ssize_t top_value = PyLong_AsSsize_t(top_obj);
-        if (top_value == -1 && PyErr_Occurred()) return -1;
+        if (top_value == -1 && PyErr_Occurred()) return NULL;
         if (top_value < 0) {
-            PyErr_Format(PyExc_ValueError, "%s(): top must be non-negative", method_name);
-            return -1;
+            PyErr_SetString(PyExc_ValueError, "sorted(): top must be non-negative");
+            return NULL;
         }
-        *top_out = (sz_size_t)top_value;
+        top = (sz_size_t)top_value;
     }
-    return 0;
-}
-
-/** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
-static sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
-                                     sz_size_t top, sz_bool_t reverse) {
-    return uncased ? sz_sequence_argsort_utf8_uncased(sequence, NULL, order, top, reverse)
-                            : sz_sequence_argsort(sequence, NULL, order, top, reverse);
-}
-
-static char const doc_sorted[] =                                                            //
-    "sorted(*, reverse=False, uncased=False, top=None) -> Strs\n"                  //
-    "Return a new, stably sorted Strs. `uncased` orders by Unicode case-folding; " //
-    "`top=k` returns only the k smallest (or largest, if reversed) elements.\n"             //
-    "\n"                                                                                    //
-    "Example:\n"                                                                            //
-    "  >>> list(map(str, sz.Strs(['banana', 'apple', 'cherry']).sorted()))\n"               //
-    "  ['apple', 'banana', 'cherry']";
-
-static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                             PyObject *args_names_tuple) {
-    sz_bool_t reverse, uncased;
-    sz_size_t top;
-    if (Strs_parse_sort_options_("sorted", args, positional_args_count, args_names_tuple, &reverse, &uncased,
-                                 &top) != 0)
-        return NULL;
 
     // Determine the amount of memory needed
     sz_size_t substrings_count = 0;
@@ -7215,13 +7193,22 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     return (PyObject *)result;
 }
 
-static char const doc_argsort[] =                                                                 //
-    "argsort(*, reverse=False, uncased=False, top=None) -> tuple[int, ...]\n"            //
-    "Return the stable permutation of indices that sorts the Strs. `uncased` orders by " //
-    "Unicode case-folding; `top=k` returns only the k leading indices.\n"                         //
-    "\n"                                                                                          //
-    "Example:\n"                                                                                  //
-    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                    //
+static char const doc_argsort[] =                                                                  //
+    "argsort(*, reverse=False, uncased=False, top=None, out=None) -> tuple[int, ...] | buffer\n"   //
+    "\n"                                                                                           //
+    "Return the stable permutation of indices that sorts the Strs.\n"                              //
+    "\n"                                                                                           //
+    "Args:\n"                                                                                      //
+    "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                   //
+    "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"              //
+    "  top (int, optional): Keep only the `top` leading indices. Defaults to None (all).\n"        //
+    "  out (buffer, optional): Writable, C-contiguous buffer of 64-bit unsigned integers "         //
+    "(e.g. numpy.uintp or array('Q')) to receive the indices with zero allocation. "               //
+    "Defaults to None.\n"                                                                          //
+    "Returns:\n"                                                                                   //
+    "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n" //
+    "Example:\n"                                                                                   //
+    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                     //
     "  (1, 0, 2)";
 
 /**
@@ -7230,15 +7217,93 @@ static char const doc_argsort[] =                                               
  */
 static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
-    sz_bool_t reverse, uncased;
-    sz_size_t top;
-    if (Strs_parse_sort_options_("argsort", args, positional_args_count, args_names_tuple, &reverse, &uncased,
-                                 &top) != 0)
+
+    sz_bool_t reverse = sz_false_k, uncased = sz_false_k;
+    sz_size_t top = 0;
+    PyObject *out_obj = NULL;
+    if (positional_args_count != 0) {
+        PyErr_SetString(PyExc_TypeError, "argsort() takes no positional arguments");
         return NULL;
+    }
+
+    PyObject *reverse_obj = NULL, *uncased_obj = NULL, *top_obj = NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+        PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+        PyObject *value = args[positional_args_count + i];
+        if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "uncased") == 0) { uncased_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "top") == 0) { top_obj = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "out") == 0) { out_obj = value; }
+        else {
+            PyErr_Format(PyExc_TypeError, "argsort() got an unexpected keyword argument '%U'", key);
+            return NULL;
+        }
+    }
+    if (reverse_obj) {
+        if (!PyBool_Check(reverse_obj)) {
+            PyErr_SetString(PyExc_TypeError, "argsort(): reverse must be a bool");
+            return NULL;
+        }
+        reverse = (sz_bool_t)(PyObject_IsTrue(reverse_obj) != 0);
+    }
+    if (uncased_obj) {
+        if (!PyBool_Check(uncased_obj)) {
+            PyErr_SetString(PyExc_TypeError, "argsort(): uncased must be a bool");
+            return NULL;
+        }
+        uncased = (sz_bool_t)(PyObject_IsTrue(uncased_obj) != 0);
+    }
+    if (top_obj && top_obj != Py_None) {
+        if (!PyLong_Check(top_obj)) {
+            PyErr_SetString(PyExc_TypeError, "argsort(): top must be an int or None");
+            return NULL;
+        }
+        Py_ssize_t top_value = PyLong_AsSsize_t(top_obj);
+        if (top_value == -1 && PyErr_Occurred()) return NULL;
+        if (top_value < 0) {
+            PyErr_SetString(PyExc_ValueError, "argsort(): top must be non-negative");
+            return NULL;
+        }
+        top = (sz_size_t)top_value;
+    }
 
     sz_size_t const count = Strs_len(self);
-    sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * count);
+    // With `top` set, only the leading `top` indices are ordered, so we expose just those.
+    sz_size_t const result_count = (top != 0 && top < count) ? top : count;
+
+    // Optionally bind a caller-provided output buffer of `sz_sorted_idx_t` for a zero-allocation path.
+    Py_buffer out_view;
+    sz_bool_t have_out = sz_false_k;
+    if (out_obj && out_obj != Py_None) {
+        // PyBUF_CONTIG = writable + C-contiguous; rejects strided/read-only targets up front.
+        if (PyObject_GetBuffer(out_obj, &out_view, PyBUF_CONTIG) != 0) return NULL;
+        if (out_view.itemsize != (Py_ssize_t)sizeof(sz_sorted_idx_t)) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "out must be a contiguous buffer of %zu-byte unsigned integers (e.g. numpy.uintp or array('Q'))",
+                sizeof(sz_sorted_idx_t));
+            PyBuffer_Release(&out_view);
+            return NULL;
+        }
+        if ((sz_size_t)(out_view.len / out_view.itemsize) < result_count) {
+            PyErr_Format(PyExc_ValueError, "out buffer holds %zd indices, need %zu",
+                         (Py_ssize_t)(out_view.len / out_view.itemsize), result_count);
+            PyBuffer_Release(&out_view);
+            return NULL;
+        }
+        have_out = sz_true_k;
+    }
+
+    // The backend writes a full permutation of `[0, count)` even for top-k, so the `order` buffer must
+    // hold `count` indices. For a full sort the result *is* that permutation, so we can sort straight into
+    // the caller's buffer; for top-k we sort into a scratch allocation and copy out only the leading `top`,
+    // never writing past `result_count` of the caller's buffer.
+    sz_bool_t const sort_into_out = have_out && result_count == count;
+    sz_sorted_idx_t *order = sort_into_out ? (sz_sorted_idx_t *)out_view.buf
+                                           : (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * count);
     if (!order && count) {
+        if (have_out) PyBuffer_Release(&out_view);
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
         return NULL;
     }
@@ -7253,8 +7318,18 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
     sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse);
     sz_unused_(status);
 
-    // With `top` set, only the leading `top` indices are ordered, so we expose just those.
-    sz_size_t const result_count = (top != 0 && top < count) ? top : count;
+    // Caller buffer path: indices are already in (or now copied into) `out`; hand the buffer back.
+    if (have_out) {
+        if (!sort_into_out) {
+            sz_copy((sz_ptr_t)out_view.buf, (sz_cptr_t)order, result_count * sizeof(sz_sorted_idx_t));
+            free(order);
+        }
+        PyBuffer_Release(&out_view);
+        Py_INCREF(out_obj);
+        return out_obj;
+    }
+
+    // No caller buffer: materialize a tuple of Python ints.
     PyObject *tuple = PyTuple_New(result_count);
     if (!tuple) {
         free(order);
@@ -8703,12 +8778,10 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_find},
+    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
     {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
      doc_utf8_uncased_find_iter},
-    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_order},
+    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
